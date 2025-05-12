@@ -568,6 +568,13 @@ under the License.
 
         <!-- for huid clone test -->
         <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hudi</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.hudi</groupId>
             <artifactId>hudi-flink1.18-bundle</artifactId>
             <version>${hudi.version}</version>

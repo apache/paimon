@@ -63,11 +63,10 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *
  * @see org.apache.hudi.source.FileIndex
  */
-public class FileIndex {
+public class HudiFileIndex {
 
     private final Path path;
     private final HoodieMetadataConfig metadataConfig;
-    private final Configuration hadoopConf;
     private final RowType partitionType;
     @Nullable private final PartitionPredicate partitionPredicate;
     private final HoodieEngineContext engineContext;
@@ -77,14 +76,14 @@ public class FileIndex {
 
     private List<String> partitionPaths;
 
-    public FileIndex(
+    public HudiFileIndex(
             String location,
             Map<String, String> conf,
             RowType partitionType,
             @Nullable PartitionPredicate partitionPredicate) {
         this.path = new Path(location);
         this.metadataConfig = metadataConfig(conf);
-        this.hadoopConf =
+        Configuration hadoopConf =
                 HadoopConfigurations.getHadoopConf(
                         org.apache.flink.configuration.Configuration.fromMap(conf));
         this.partitionType = partitionType;

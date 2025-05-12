@@ -19,14 +19,8 @@
 package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryWriter;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hudi.HudiCloneUtils;
-import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
@@ -38,26 +32,17 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hudi.common.model.HoodieRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
-import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /** Utils for cloning Hive table to Paimon table. */
@@ -118,38 +103,15 @@ public class HiveCloneUtils {
         }
 
         Table hiveTable = client.getTable(database, table);
-        List<FieldSchema> fields = getHiveSchema(client, hiveTable, database, table);
-        List<FieldSchema> partitionFields = hiveTable.getPartitionKeys();
-        Map<String, String> hiveTableOptions = hiveTable.getParameters();
-
-        Map<String, String> paimonOptions = new HashMap<>();
-        // for compatible with hive comment system
-        if (hiveTableOptions.get("comment") != null) {
-            paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
-        }
-
-        String format = parseFormat(hiveTable);
-        paimonOptions.put(FILE_FORMAT.key(), format);
-        Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
-        Map<String, String> sdFormatOptions =
-                getIdentifierPrefixOptions(
-                        format, hiveTable.getSd().getSerdeInfo().getParameters());
-        formatOptions.putAll(sdFormatOptions);
-        paimonOptions.putAll(formatOptions);
-
-        String compression = parseCompression(hiveTable, format, formatOptions);
-        if (compression != null) {
-            paimonOptions.put(FILE_COMPRESSION.key(), compression);
-        }
-
+        HiveCloneExtractor extractor = HiveCloneExtractor.getExtractor(hiveTable);
+        List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
+        List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
+        Map<String, String> options = extractor.extractOptions(hiveTable);
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
-                        .comment(hiveTableOptions.get("comment"))
-                        .options(paimonOptions)
-                        .partitionKeys(
-                                partitionFields.stream()
-                                        .map(FieldSchema::getName)
-                                        .collect(Collectors.toList()));
+                        .comment(options.get("comment"))
+                        .options(options)
+                        .partitionKeys(partitionKeys);
 
         fields.forEach(
                 field ->
@@ -159,23 +121,6 @@ public class HiveCloneUtils {
                                 field.getComment()));
 
         return schemaBuilder.build();
-    }
-
-    private static List<FieldSchema> getHiveSchema(
-            IMetaStoreClient client, Table hiveTable, String database, String table)
-            throws Exception {
-        List<FieldSchema> fields = client.getSchema(database, table);
-        if (!HudiCloneUtils.isHoodieTable(hiveTable)) {
-            return fields;
-        }
-
-        Set<String> hudiMetadataFields =
-                Arrays.stream(HoodieRecord.HoodieMetadataField.values())
-                        .map(HoodieRecord.HoodieMetadataField::getFieldName)
-                        .collect(Collectors.toSet());
-        return fields.stream()
-                .filter(f -> !hudiMetadataFields.contains(f.getName()))
-                .collect(Collectors.toList());
     }
 
     public static List<HivePartitionFiles> listFiles(
@@ -188,77 +133,15 @@ public class HiveCloneUtils {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         Table sourceTable =
                 client.getTable(identifier.getDatabaseName(), identifier.getTableName());
-
-        if (HudiCloneUtils.isHoodieTable(sourceTable)) {
-            return HudiCloneUtils.listFiles(
-                    sourceTable, hiveCatalog.fileIO(), partitionRowType, predicate);
-        } else {
-            return listFromPureHiveTable(
-                    client,
-                    identifier,
-                    sourceTable,
-                    hiveCatalog.fileIO(),
-                    partitionRowType,
-                    defaultPartitionName,
-                    predicate);
-        }
-    }
-
-    private static List<HivePartitionFiles> listFromPureHiveTable(
-            IMetaStoreClient client,
-            Identifier identifier,
-            Table sourceTable,
-            FileIO fileIO,
-            RowType partitionRowType,
-            String defaultPartitionName,
-            @Nullable PartitionPredicate predicate)
-            throws Exception {
-        List<Partition> partitions =
-                client.listPartitions(
-                        identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
-        String format = parseFormat(sourceTable);
-
-        if (partitions.isEmpty()) {
-            String location = sourceTable.getSd().getLocation();
-            return Collections.singletonList(
-                    listFiles(fileIO, location, BinaryRow.EMPTY_ROW, format));
-        } else {
-            List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
-            partitionRowType
-                    .getFieldTypes()
-                    .forEach(type -> valueSetters.add(BinaryWriter.createValueSetter(type)));
-            List<HivePartitionFiles> results = new ArrayList<>();
-            for (Partition partition : partitions) {
-                List<String> partitionValues = partition.getValues();
-                String location = partition.getSd().getLocation();
-                BinaryRow partitionRow =
-                        FileMetaUtils.writePartitionValue(
-                                partitionRowType,
-                                partitionValues,
-                                valueSetters,
-                                defaultPartitionName);
-                if (predicate == null || predicate.test(partitionRow)) {
-                    results.add(listFiles(fileIO, location, partitionRow, format));
-                }
-            }
-            return results;
-        }
-    }
-
-    private static HivePartitionFiles listFiles(
-            FileIO fileIO, String location, BinaryRow partition, String format) throws IOException {
-        List<FileStatus> fileStatuses =
-                Arrays.stream(fileIO.listStatus(new Path(location)))
-                        .filter(s -> !s.isDir())
-                        .filter(HIDDEN_PATH_FILTER)
-                        .collect(Collectors.toList());
-        List<Path> paths = new ArrayList<>();
-        List<Long> fileSizes = new ArrayList<>();
-        for (FileStatus fileStatus : fileStatuses) {
-            paths.add(fileStatus.getPath());
-            fileSizes.add(fileStatus.getLen());
-        }
-        return new HivePartitionFiles(partition, paths, fileSizes, format);
+        return HiveCloneExtractor.getExtractor(sourceTable)
+                .extractFiles(
+                        hiveCatalog.getHmsClient(),
+                        sourceTable,
+                        hiveCatalog.fileIO(),
+                        identifier,
+                        partitionRowType,
+                        defaultPartitionName,
+                        predicate);
     }
 
     private static String parseFormat(StorageDescriptor storageDescriptor) {
@@ -287,41 +170,5 @@ public class HiveCloneUtils {
             throw new UnsupportedOperationException("Unknown partition format: " + partition);
         }
         return format;
-    }
-
-    private static String parseCompression(StorageDescriptor storageDescriptor) {
-        Map<String, String> serderParams = storageDescriptor.getSerdeInfo().getParameters();
-        if (serderParams.containsKey("compression")) {
-            return serderParams.get("compression");
-        }
-        return null;
-    }
-
-    private static String parseCompression(
-            Table table, String format, Map<String, String> formatOptions) {
-        String compression = null;
-        if (Objects.equals(format, "avro")) {
-            compression = formatOptions.getOrDefault("avro.codec", parseCompression(table.getSd()));
-        } else if (Objects.equals(format, "parquet")) {
-            compression =
-                    formatOptions.getOrDefault(
-                            "parquet.compression", parseCompression(table.getSd()));
-        } else if (Objects.equals(format, "orc")) {
-            compression =
-                    formatOptions.getOrDefault("orc.compress", parseCompression(table.getSd()));
-        }
-        return compression;
-    }
-
-    public static Map<String, String> getIdentifierPrefixOptions(
-            String formatIdentifier, Map<String, String> options) {
-        Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase() + ".";
-        for (String key : options.keySet()) {
-            if (key.toLowerCase().startsWith(prefix)) {
-                result.put(prefix + key.substring(prefix.length()), options.get(key));
-            }
-        }
-        return result;
     }
 }
