@@ -71,23 +71,27 @@ public class DataFileIndexWriterTest {
 
     boolean bitmapExist = false;
     boolean bsiExist = false;
+    boolean bloomExists = false;
 
     @Test
     public void testCreatingMultipleIndexesOnOneColumn() throws Exception {
 
         String tableName = "test";
-        String columnName = "f0";
+        String col1 = "f0";
+        String col2 = "f1";
         Identifier identifier = Identifier.create(tableName, tableName);
 
         Map<String, String> optionsMap = new HashMap<>();
-        optionsMap.put("file-index.bitmap.columns", columnName);
-        optionsMap.put("file-index.bsi.columns", "f0");
+        optionsMap.put("file-index.bitmap.columns", col1);
+        optionsMap.put("file-index.bsi.columns", col1);
+        optionsMap.put("file-index.bloom-filter.columns", col2);
         optionsMap.put("file-index.read.enabled", "true");
         optionsMap.put("file-index.in-manifest-threshold", "1B");
 
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.options(optionsMap);
-        schemaBuilder.column(columnName, DataTypes.INT());
+        schemaBuilder.column(col1, DataTypes.INT());
+        schemaBuilder.column(col2, DataTypes.INT());
         Schema schema = schemaBuilder.build();
 
         Options catalogOptions = new Options();
@@ -103,16 +107,16 @@ public class DataFileIndexWriterTest {
         IOManager ioManager = new IOManagerImpl("/tmp");
         BatchTableWrite write = writeBuilder.newWrite();
         write.withIOManager(ioManager);
-        write.write(GenericRow.of(1));
-        write.write(GenericRow.of(1));
-        write.write(GenericRow.of(2));
+        write.write(GenericRow.of(1, 1));
+        write.write(GenericRow.of(1, 2));
+        write.write(GenericRow.of(2, 3));
         List<CommitMessage> commitMessages = write.prepareCommit();
         writeBuilder.newCommit().commit(commitMessages);
 
         foreachIndexReader(
                 catalog,
                 tableName,
-                columnName,
+                col1,
                 fileIndexReader -> {
                     String className = fileIndexReader.getClass().getName();
                     if (className.endsWith(".BitmapFileIndex$Reader")) {
@@ -125,12 +129,24 @@ public class DataFileIndexWriterTest {
                     BitmapIndexResult result =
                             (BitmapIndexResult)
                                     fileIndexReader.visitEqual(
-                                            new FieldRef(0, columnName, DataTypes.INT()), 1);
+                                            new FieldRef(0, col1, DataTypes.INT()), 1);
                     assert result.get().equals(RoaringBitmap32.bitmapOf(0, 1));
+                });
+
+        foreachIndexReader(
+                catalog,
+                tableName,
+                col2,
+                fileIndexReader -> {
+                    String className = fileIndexReader.getClass().getName();
+                    if (className.endsWith(".BloomFilterFileIndex$Reader")) {
+                        bloomExists = true;
+                    }
                 });
 
         assert bitmapExist;
         assert bsiExist;
+        assert bloomExists;
     }
 
     protected void foreachIndexReader(
