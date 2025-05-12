@@ -233,6 +233,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return true;
     }
 
+    /** Scan implementation for {@link FallbackReadFileStoreTable}. */
     public static class FallbackReadScan implements DataTableScan {
 
         private final DataTableScan mainScan;
