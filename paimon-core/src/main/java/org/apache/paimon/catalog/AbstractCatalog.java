@@ -547,7 +547,8 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void alterFunction(
             String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
-            throws FunctionNotExistException {
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
         throw new UnsupportedOperationException();
     }
 

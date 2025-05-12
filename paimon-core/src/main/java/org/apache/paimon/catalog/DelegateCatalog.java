@@ -236,7 +236,8 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public void alterFunction(
             String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
-            throws FunctionNotExistException {
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
         wrapped.alterFunction(functionName, changes, ignoreIfNotExists);
     }
 

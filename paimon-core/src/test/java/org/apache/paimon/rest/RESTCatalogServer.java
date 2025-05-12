@@ -825,8 +825,10 @@ public class RESTCatalogServer {
         switch (method) {
             case "DELETE":
                 functionStore.remove(functionName);
+                break;
             case "GET":
-                return functionDetailsHandler(functionName);
+                functionDetailsHandler(functionName);
+                break;
             case "POST":
                 AlterFunctionRequest requestBody =
                         OBJECT_MAPPER.readValue(data, AlterFunctionRequest.class);
@@ -888,10 +890,11 @@ public class RESTCatalogServer {
                                 newComment,
                                 newOptions);
                 functionStore.put(functionName, function);
-                return new MockResponse().setResponseCode(200);
+                break;
             default:
                 return new MockResponse().setResponseCode(404);
         }
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse databasesApiHandler(
