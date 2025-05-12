@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -539,6 +540,13 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public void dropFunction(String functionName, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void alterFunction(
+            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         throw new UnsupportedOperationException();
     }

@@ -34,6 +34,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
@@ -43,6 +45,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
@@ -275,22 +278,8 @@ public class RESTCatalogServer {
                     } else if (functionUri.equals(request.getPath())) {
                         return functionsApiHandler(restAuthParameter.method(), data, parameters);
                     } else if (request.getPath().startsWith(functionUri)) {
-                        String[] resources =
-                                request.getPath()
-                                        .substring((functionUri + "/").length())
-                                        .split("/");
-                        String functionName = RESTUtil.decodeString(resources[0]);
-                        if (restAuthParameter.method().equals("DELETE")) {
-                            if (functionStore.containsKey(functionName)) {
-                                functionStore.remove(functionName);
-                            } else {
-                                throw new Catalog.FunctionNotExistException(functionName);
-                            }
-                        } else if (restAuthParameter.method().equals("GET")) {
-                            if (functionStore.containsKey(functionName)) {
-                                return functionDetailsHandler(functionName);
-                            }
-                        }
+                        return functionApiHandler(
+                                request.getPath(), restAuthParameter.method(), data, parameters);
                     } else if (resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
@@ -535,6 +524,14 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
+                } catch (Catalog.DefinitionAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_DEFINITION,
+                                    e.functionName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
                 } catch (Catalog.ViewNotExistException e) {
                     response =
                             new ErrorResponse(
@@ -554,7 +551,15 @@ public class RESTCatalogServer {
                 } catch (Catalog.FunctionNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_DIALECT,
+                                    ErrorResponse.RESOURCE_TYPE_FUNCTION,
+                                    e.functionName(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.DefinitionNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_DEFINITION,
                                     e.functionName(),
                                     e.getMessage(),
                                     404);
@@ -804,6 +809,86 @@ public class RESTCatalogServer {
                 } else {
                     throw new Catalog.FunctionAlreadyExistException(functionName);
                 }
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private MockResponse functionApiHandler(
+            String path, String method, String data, Map<String, String> parameters)
+            throws Exception {
+        String[] resources = path.substring((functionUri + "/").length()).split("/");
+        String functionName = RESTUtil.decodeString(resources[0]);
+        if (!functionStore.containsKey(functionName)) {
+            throw new Catalog.FunctionNotExistException(functionName);
+        }
+        switch (method) {
+            case "DELETE":
+                functionStore.remove(functionName);
+            case "GET":
+                return functionDetailsHandler(functionName);
+            case "POST":
+                AlterFunctionRequest requestBody =
+                        OBJECT_MAPPER.readValue(data, AlterFunctionRequest.class);
+                Function function = functionStore.get(functionName);
+                HashMap<String, FunctionDefinition> newDefinitions =
+                        new HashMap<>(function.definitions());
+                Map<String, String> newOptions = new HashMap<>(function.options());
+                String newComment = function.comment();
+                for (FunctionChange functionChange : requestBody.changes()) {
+                    if (functionChange instanceof FunctionChange.SetFunctionOption) {
+                        FunctionChange.SetFunctionOption setFunctionOption =
+                                (FunctionChange.SetFunctionOption) functionChange;
+                        newOptions.put(setFunctionOption.key(), setFunctionOption.value());
+                    } else if (functionChange instanceof FunctionChange.RemoveFunctionOption) {
+                        FunctionChange.RemoveFunctionOption removeFunctionOption =
+                                (FunctionChange.RemoveFunctionOption) functionChange;
+                        newOptions.remove(removeFunctionOption.key());
+                    } else if (functionChange instanceof FunctionChange.UpdateFunctionComment) {
+                        FunctionChange.UpdateFunctionComment updateFunctionComment =
+                                (FunctionChange.UpdateFunctionComment) functionChange;
+                        newComment = updateFunctionComment.comment();
+                    } else if (functionChange instanceof FunctionChange.AddDefinition) {
+                        FunctionChange.AddDefinition addDefinition =
+                                (FunctionChange.AddDefinition) functionChange;
+                        if (function.definition(addDefinition.name()) != null) {
+                            throw new Catalog.DefinitionAlreadyExistException(
+                                    functionName, addDefinition.name());
+                        }
+                        newDefinitions.put(addDefinition.name(), addDefinition.definition());
+                    } else if (functionChange instanceof FunctionChange.UpdateDefinition) {
+                        FunctionChange.UpdateDefinition updateDefinition =
+                                (FunctionChange.UpdateDefinition) functionChange;
+                        if (function.definition(updateDefinition.name()) != null) {
+                            newDefinitions.put(
+                                    updateDefinition.name(), updateDefinition.definition());
+                        } else {
+                            throw new Catalog.DefinitionNotExistException(
+                                    functionName, updateDefinition.name());
+                        }
+                    } else if (functionChange instanceof FunctionChange.DropDefinition) {
+                        FunctionChange.DropDefinition dropDefinition =
+                                (FunctionChange.DropDefinition) functionChange;
+                        if (function.definitions().containsKey(dropDefinition.name())) {
+                            newDefinitions.remove(dropDefinition.name());
+                        } else {
+                            throw new Catalog.DefinitionNotExistException(
+                                    functionName, dropDefinition.name());
+                        }
+                    }
+                }
+                function =
+                        new FunctionImpl(
+                                functionName,
+                                function.uuid(),
+                                function.inputParams(),
+                                function.returnParams(),
+                                function.isDeterministic(),
+                                newDefinitions,
+                                newComment,
+                                newOptions);
+                functionStore.put(functionName, function);
+                return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }

@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -230,6 +231,13 @@ public abstract class DelegateCatalog implements Catalog {
     public void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         wrapped.dropFunction(functionName, ignoreIfNotExists);
+    }
+
+    @Override
+    public void alterFunction(
+            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        wrapped.alterFunction(functionName, changes, ignoreIfNotExists);
     }
 
     @Override

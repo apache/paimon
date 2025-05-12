@@ -92,8 +92,8 @@ public class FunctionImpl implements Function {
     }
 
     @Override
-    public FunctionDefinition definition(String dialect) {
-        return definitions.get(dialect);
+    public FunctionDefinition definition(String name) {
+        return definitions.get(name);
     }
 
     @Override

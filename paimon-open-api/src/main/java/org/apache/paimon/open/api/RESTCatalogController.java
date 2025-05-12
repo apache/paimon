@@ -1007,8 +1007,7 @@ public class RESTCatalogController {
     })
     @GetMapping("/v1/{prefix}/functions/{function}")
     public GetFunctionResponse getFunction(
-            @PathVariable String prefix,
-            @PathVariable String function) {
+            @PathVariable String prefix, @PathVariable String function) {
         return new GetFunctionResponse(
                 UUID.randomUUID().toString(),
                 function,
@@ -1044,8 +1043,7 @@ public class RESTCatalogController {
     })
     @PostMapping("/v1/{prefix}/functions")
     public void createFunction(
-            @PathVariable String prefix,
-            @RequestBody CreateFunctionRequest request) {}
+            @PathVariable String prefix, @RequestBody CreateFunctionRequest request) {}
 
     @Operation(
             summary = "Drop function",
@@ -1065,7 +1063,5 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/functions/{function}")
-    public void dropFunction(
-            @PathVariable String prefix,
-            @PathVariable String function) {}
+    public void dropFunction(@PathVariable String prefix, @PathVariable String function) {}
 }

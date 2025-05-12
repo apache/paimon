@@ -28,6 +28,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1337,6 +1339,74 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.FunctionNotExistException.class,
                 () -> catalog.getFunction(function.name()));
+    }
+
+    @Test
+    void testAlterFunction() throws Exception {
+        String functionName = "alter_function_name";
+        Function function = MockRESTMessage.function(functionName);
+        FunctionDefinition definition = FunctionDefinition.sql("x * y + 1");
+        FunctionChange.AddDefinition addDefinition =
+                (FunctionChange.AddDefinition) FunctionChange.addDefinition("flink_1", definition);
+        assertDoesNotThrow(
+                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), true));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false));
+        catalog.createFunction(function.name(), function, true);
+        // set options
+        String key = UUID.randomUUID().toString();
+        String value = UUID.randomUUID().toString();
+        FunctionChange setOption = FunctionChange.setOption(key, value);
+        catalog.alterFunction(functionName, ImmutableList.of(setOption), false);
+        Function catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.options().get(key)).isEqualTo(value);
+
+        // remove options
+        catalog.alterFunction(
+                functionName, ImmutableList.of(FunctionChange.removeOption(key)), false);
+        catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.options().containsKey(key)).isEqualTo(false);
+
+        // update comment
+        String newComment = "new comment";
+        catalog.alterFunction(
+                functionName, ImmutableList.of(FunctionChange.updateComment(newComment)), false);
+        catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.comment()).isEqualTo(newComment);
+        // add definition
+        catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false);
+        catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.definition(addDefinition.name()))
+                .isEqualTo(addDefinition.definition());
+        assertThrows(
+                Catalog.DefinitionAlreadyExistException.class,
+                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false));
+
+        // update definition
+        FunctionChange.UpdateDefinition updateDefinition =
+                (FunctionChange.UpdateDefinition)
+                        FunctionChange.updateDefinition("flink_1", definition);
+        catalog.alterFunction(functionName, ImmutableList.of(updateDefinition), false);
+        catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.definition(updateDefinition.name()))
+                .isEqualTo(updateDefinition.definition());
+        assertThrows(
+                Catalog.DefinitionNotExistException.class,
+                () ->
+                        catalog.alterFunction(
+                                functionName,
+                                ImmutableList.of(
+                                        FunctionChange.updateDefinition("no_exist", definition)),
+                                false));
+
+        // drop dialect
+        FunctionChange.DropDefinition dropDefinition =
+                (FunctionChange.DropDefinition)
+                        FunctionChange.dropDefinition(updateDefinition.name());
+        catalog.alterFunction(functionName, ImmutableList.of(dropDefinition), false);
+        catalogFunction = catalog.getFunction(functionName);
+        assertThat(catalogFunction.definition(updateDefinition.name())).isNull();
     }
 
     @Test

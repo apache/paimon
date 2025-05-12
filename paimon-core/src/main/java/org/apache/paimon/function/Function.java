@@ -38,7 +38,7 @@ public interface Function {
 
     Map<String, FunctionDefinition> definitions();
 
-    FunctionDefinition definition(String dialect);
+    FunctionDefinition definition(String name);
 
     String comment();
 

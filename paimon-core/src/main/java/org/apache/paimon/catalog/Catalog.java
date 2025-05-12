@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -699,6 +700,18 @@ public interface Catalog extends AutoCloseable {
     void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException;
 
+    /**
+     * Alter function.
+     *
+     * @param functionName
+     * @param changes
+     * @param ignoreIfNotExists
+     * @throws FunctionNotExistException
+     */
+    void alterFunction(String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException;
+
     // ==================== Table Auth ==========================
 
     /**
@@ -1171,6 +1184,60 @@ public interface Catalog extends AutoCloseable {
 
         public String functionName() {
             return functionName;
+        }
+    }
+
+    /** Exception for trying to add a definition that already exists. */
+    class DefinitionAlreadyExistException extends Exception {
+
+        private static final String MSG = "Definition %s in function %s already exists.";
+
+        private final String functionName;
+        private final String name;
+
+        public DefinitionAlreadyExistException(String functionName, String name) {
+            this(functionName, name, null);
+        }
+
+        public DefinitionAlreadyExistException(String functionName, String name, Throwable cause) {
+            super(String.format(MSG, name, functionName), cause);
+            this.functionName = functionName;
+            this.name = name;
+        }
+
+        public String functionName() {
+            return functionName;
+        }
+
+        public String name() {
+            return name;
+        }
+    }
+
+    /** Exception for trying to update definition that doesn't exist. */
+    class DefinitionNotExistException extends Exception {
+
+        private static final String MSG = "Definition %s in function %s doesn't exist.";
+
+        private final String functionName;
+        private final String name;
+
+        public DefinitionNotExistException(String functionName, String name) {
+            this(functionName, name, null);
+        }
+
+        public DefinitionNotExistException(String functionName, String name, Throwable cause) {
+            super(String.format(MSG, name, functionName), cause);
+            this.functionName = functionName;
+            this.name = name;
+        }
+
+        public String functionName() {
+            return functionName;
+        }
+
+        public String name() {
+            return name;
         }
     }
 }

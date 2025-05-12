@@ -30,6 +30,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -44,6 +45,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
@@ -897,6 +899,30 @@ public class RESTCatalog implements Catalog {
                 return;
             }
             throw new FunctionNotExistException(functionName, e);
+        }
+    }
+
+    @Override
+    public void alterFunction(
+            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
+        try {
+            client.post(
+                    resourcePaths.function(functionName),
+                    new AlterFunctionRequest(changes),
+                    restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            throw new DefinitionAlreadyExistException(functionName, e.resourceName());
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DEFINITION)) {
+                throw new DefinitionNotExistException(functionName, e.resourceName());
+            }
+            if (!ignoreIfNotExists) {
+                throw new FunctionNotExistException(functionName);
+            }
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
