@@ -21,16 +21,11 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.DefaultValueAssigner;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
@@ -41,13 +36,11 @@ import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -141,7 +134,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableScan newScan() {
         if (wrapped instanceof FallbackReadFileStoreTable) {
-            return new ReadOptimizedTableBatchScan(wrapped.newScan());
+            FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) wrapped;
+            return (new FallbackReadFileStoreTable.FallbackReadScan(
+                            table.wrapped().newScan(), table.fallback().newScan()))
+                    .withLevelFilter(l -> l == coreOptions().numLevels() - 1);
         }
         return new DataTableBatchScan(
                 wrapped.schema(),
@@ -224,85 +220,5 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
-    }
-
-    private class ReadOptimizedTableBatchScan implements DataTableScan {
-
-        private final DataTableScan batchScan;
-
-        private ReadOptimizedTableBatchScan(DataTableScan batchScan) {
-            this.batchScan = batchScan;
-        }
-
-        @Override
-        public InnerTableScan withFilter(Predicate predicate) {
-            if (predicate != null) {
-                batchScan.withFilter(predicate);
-            }
-            getScan(batchScan);
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
-            getScan(batchScan.withMetricsRegistry(metricsRegistry));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withLimit(int limit) {
-            getScan(batchScan.withLimit(limit));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-            getScan(batchScan.withPartitionFilter(partitionSpec));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
-            getScan(batchScan.withPartitionFilter(partitions));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
-            getScan(batchScan.withPartitionsFilter(partitions));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
-            getScan(batchScan.withBucketFilter(bucketFilter));
-            return this;
-        }
-
-        @Override
-        public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
-            throw new UnsupportedOperationException(
-                    "Unsupported level filter for read optimized table");
-        }
-
-        @Override
-        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-            getScan(batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks));
-            return this;
-        }
-
-        @Override
-        public Plan plan() {
-            return getScan(batchScan).plan();
-        }
-
-        @Override
-        public List<PartitionEntry> listPartitionEntries() {
-            return getScan(batchScan).listPartitionEntries();
-        }
-
-        private InnerTableScan getScan(InnerTableScan scan) {
-            return scan.withLevelFilter(l -> l == coreOptions().numLevels() - 1);
-        }
     }
 }

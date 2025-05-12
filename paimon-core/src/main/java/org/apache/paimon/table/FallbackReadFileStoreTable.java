@@ -76,6 +76,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
     }
 
+    public FileStoreTable fallback() {
+        return fallback;
+    }
+
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new FallbackReadFileStoreTable(
@@ -170,7 +174,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     @Override
     public DataTableScan newScan() {
         validateSchema();
-        return new Scan();
+        return new FallbackReadScan(wrapped.newScan(), fallback.newScan());
     }
 
     private void validateSchema() {
@@ -229,46 +233,46 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return true;
     }
 
-    private class Scan implements DataTableScan {
+    public static class FallbackReadScan implements DataTableScan {
 
         private final DataTableScan mainScan;
         private final DataTableScan fallbackScan;
 
-        private Scan() {
-            this.mainScan = wrapped.newScan();
-            this.fallbackScan = fallback.newScan();
+        public FallbackReadScan(DataTableScan mainScan, DataTableScan fallbackScan) {
+            this.mainScan = mainScan;
+            this.fallbackScan = fallbackScan;
         }
 
         @Override
-        public Scan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        public FallbackReadScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
             mainScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             fallbackScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
         }
 
         @Override
-        public Scan withFilter(Predicate predicate) {
+        public FallbackReadScan withFilter(Predicate predicate) {
             mainScan.withFilter(predicate);
             fallbackScan.withFilter(predicate);
             return this;
         }
 
         @Override
-        public Scan withLimit(int limit) {
+        public FallbackReadScan withLimit(int limit) {
             mainScan.withLimit(limit);
             fallbackScan.withLimit(limit);
             return this;
         }
 
         @Override
-        public Scan withPartitionFilter(Map<String, String> partitionSpec) {
+        public FallbackReadScan withPartitionFilter(Map<String, String> partitionSpec) {
             mainScan.withPartitionFilter(partitionSpec);
             fallbackScan.withPartitionFilter(partitionSpec);
             return this;
         }
 
         @Override
-        public Scan withPartitionFilter(List<BinaryRow> partitions) {
+        public FallbackReadScan withPartitionFilter(List<BinaryRow> partitions) {
             mainScan.withPartitionFilter(partitions);
             fallbackScan.withPartitionFilter(partitions);
             return this;
@@ -282,21 +286,21 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public Scan withBucketFilter(Filter<Integer> bucketFilter) {
+        public FallbackReadScan withBucketFilter(Filter<Integer> bucketFilter) {
             mainScan.withBucketFilter(bucketFilter);
             fallbackScan.withBucketFilter(bucketFilter);
             return this;
         }
 
         @Override
-        public Scan withLevelFilter(Filter<Integer> levelFilter) {
+        public FallbackReadScan withLevelFilter(Filter<Integer> levelFilter) {
             mainScan.withLevelFilter(levelFilter);
             fallbackScan.withLevelFilter(levelFilter);
             return this;
         }
 
         @Override
-        public Scan withMetricRegistry(MetricRegistry metricRegistry) {
+        public FallbackReadScan withMetricRegistry(MetricRegistry metricRegistry) {
             mainScan.withMetricRegistry(metricRegistry);
             fallbackScan.withMetricRegistry(metricRegistry);
             return this;
