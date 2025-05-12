@@ -26,7 +26,7 @@ import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -58,9 +58,9 @@ public class IndexBootstrap implements Serializable {
 
     public static final String BUCKET_FIELD = "_BUCKET";
 
-    private final Table table;
+    private final FileStoreTable table;
 
-    public IndexBootstrap(Table table) {
+    public IndexBootstrap(FileStoreTable table) {
         this.table = table;
     }
 
@@ -71,9 +71,11 @@ public class IndexBootstrap implements Serializable {
 
     public RecordReader<InternalRow> bootstrap(int numAssigners, int assignId) throws IOException {
         RowType rowType = table.rowType();
+
         List<String> fieldNames = rowType.getFieldNames();
+        // Use `trimmedPrimaryKeys` to reduce data size since we will add partition at the end.
         int[] keyProjection =
-                table.primaryKeys().stream()
+                table.schema().trimmedPrimaryKeys().stream()
                         .map(fieldNames::indexOf)
                         .mapToInt(Integer::intValue)
                         .toArray();
@@ -136,13 +138,12 @@ public class IndexBootstrap implements Serializable {
     }
 
     public static RowType bootstrapType(TableSchema schema) {
-        List<String> primaryKeys = schema.primaryKeys();
+        List<String> primaryKeys = schema.trimmedPrimaryKeys();
         List<String> partitionKeys = schema.partitionKeys();
         List<DataField> bootstrapFields =
                 new ArrayList<>(
                         schema.projectedLogicalRowType(
                                         Stream.concat(primaryKeys.stream(), partitionKeys.stream())
-                                                .distinct()
                                                 .collect(Collectors.toList()))
                                 .getFields());
         bootstrapFields.add(
