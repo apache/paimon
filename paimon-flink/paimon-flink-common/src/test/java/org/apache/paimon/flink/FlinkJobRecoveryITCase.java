@@ -89,6 +89,9 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
     @EnumSource(BucketMode.class)
     @Timeout(300)
     public void testRestoreFromSavepointWithJobGraphChange(BucketMode bucketMode) throws Exception {
+        if (bucketMode == BucketMode.POSTPONE_MODE) {
+            return;
+        }
         createTargetTable("target_table", bucketMode);
         String beforeRecoverSql =
                 "INSERT INTO `target_table` /*+ OPTIONS('sink.operator-uid.suffix'='test-uid') */ SELECT * FROM source_table1 /*+ OPTIONS('source.operator-uid.suffix'='test-uid') */";

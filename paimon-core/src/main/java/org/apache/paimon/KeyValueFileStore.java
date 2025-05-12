@@ -210,9 +210,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     protected KeyValueFileStoreScan newScan(ScanType scanType) {
+        BucketMode bucketMode = bucketMode();
         BucketSelectConverter bucketSelectConverter =
                 keyFilter -> {
-                    if (bucketMode() != BucketMode.HASH_FIXED) {
+                    if (bucketMode != BucketMode.HASH_FIXED
+                            && bucketMode != BucketMode.POSTPONE_MODE) {
                         return Optional.empty();
                     }
 
