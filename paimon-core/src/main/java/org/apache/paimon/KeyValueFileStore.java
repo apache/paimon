@@ -99,11 +99,15 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public BucketMode bucketMode() {
-        if (options.bucket() == -1) {
-            return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
-        } else {
-            checkArgument(!crossPartitionUpdate);
-            return BucketMode.HASH_FIXED;
+        int bucket = options.bucket();
+        switch (bucket) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
+            default:
+                checkArgument(!crossPartitionUpdate);
+                return BucketMode.HASH_FIXED;
         }
     }
 
