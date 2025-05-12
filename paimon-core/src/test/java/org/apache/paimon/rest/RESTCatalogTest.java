@@ -1345,15 +1345,26 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         null);
 
         catalog.createFunction(function.name(), function, true);
+        assertThrows(
+                Catalog.FunctionAlreadyExistException.class,
+                () -> catalog.createFunction(function.name(), function, false));
 
         assertThat(catalog.listFunctions().contains(function.name())).isTrue();
+
         Function getFunction = catalog.getFunction(function.name());
         assertThat(getFunction.name()).isEqualTo(function.name());
         assertThat(getFunction.definition("flink")).isEqualTo(flinkFunction);
         assertThat(getFunction.definition("spark")).isEqualTo(sparkFunction);
         assertThat(getFunction.definition("trino")).isEqualTo(trinoFunction);
         catalog.dropFunction(function.name(), true);
+
         assertThat(catalog.listFunctions().contains(function.name())).isFalse();
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.dropFunction(function.name(), false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(function.name()));
     }
 
     @Test
