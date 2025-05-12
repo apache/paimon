@@ -18,14 +18,15 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.parquet.column.ColumnDescriptor;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PrimitiveIterator;
 
-/** Parquet reader state for column index. */
-public class ParquetReadState {
-
+/** Helper class to store intermediate state while reading a Parquet column chunk. */
+public final class ParquetReadState {
     /** A special row range used when there is no row indexes (hence all rows must be included). */
     private static final RowRange MAX_ROW_RANGE = new RowRange(Long.MIN_VALUE, Long.MAX_VALUE);
 
@@ -36,17 +37,61 @@ public class ParquetReadState {
      */
     private static final RowRange END_ROW_RANGE = new RowRange(Long.MAX_VALUE, Long.MIN_VALUE);
 
+    /** Iterator over all row ranges, only not-null if column index is present. */
     private final Iterator<RowRange> rowRanges;
 
+    /** The current row range. */
     private RowRange currentRange;
 
-    /** row index for the next read. */
+    /** Maximum repetition level for the Parquet column. */
+    final int maxRepetitionLevel;
+
+    /** Maximum definition level for the Parquet column. */
+    final int maxDefinitionLevel;
+
+    /** Whether this column is required. */
+    final boolean isRequired;
+
+    /**
+     * The current index over all rows within the column chunk. This is used to check if the current
+     * row should be skipped by comparing against the row ranges.
+     */
     long rowId;
 
+    /** The offset in the current batch to put the next value in value vector. */
+    int valueOffset;
+
+    /** The offset in the current batch to put the next value in repetition & definition vector. */
+    int levelOffset;
+
+    /** The remaining number of values to read in the current page. */
     int valuesToReadInPage;
+
+    /** The remaining number of rows to read in the current batch. */
     int rowsToReadInBatch;
 
-    public ParquetReadState(PrimitiveIterator.OfLong rowIndexes) {
+    /* The following fields are only used when reading repeated values. */
+
+    /**
+     * When processing repeated values, whether we've found the beginning of the first list after
+     * the current batch.
+     */
+    boolean lastListCompleted;
+
+    /** When processing repeated types, the number of accumulated definition levels to process. */
+    int numBatchedDefLevels;
+
+    /**
+     * When processing repeated types, whether we should skip the current batch of definition
+     * levels.
+     */
+    boolean shouldSkip;
+
+    ParquetReadState(
+            ColumnDescriptor descriptor, boolean isRequired, PrimitiveIterator.OfLong rowIndexes) {
+        this.maxRepetitionLevel = descriptor.getMaxRepetitionLevel();
+        this.maxDefinitionLevel = descriptor.getMaxDefinitionLevel();
+        this.isRequired = isRequired;
         this.rowRanges = constructRanges(rowIndexes);
         nextRange();
     }
@@ -86,7 +131,13 @@ public class ParquetReadState {
 
     /** Must be called at the beginning of reading a new batch. */
     void resetForNewBatch(int batchSize) {
+        this.valueOffset = 0;
+        this.levelOffset = 0;
         this.rowsToReadInBatch = batchSize;
+        this.lastListCompleted =
+                this.maxRepetitionLevel == 0; // always true for non-repeated column
+        this.numBatchedDefLevels = 0;
+        this.shouldSkip = false;
     }
 
     /** Must be called at the beginning of reading a new page. */
@@ -96,25 +147,17 @@ public class ParquetReadState {
     }
 
     /** Returns the start index of the current row range. */
-    public long currentRangeStart() {
+    long currentRangeStart() {
         return currentRange.start;
     }
 
     /** Returns the end index of the current row range. */
-    public long currentRangeEnd() {
+    long currentRangeEnd() {
         return currentRange.end;
     }
 
-    public boolean isFinished() {
-        return this.currentRange.equals(END_ROW_RANGE);
-    }
-
-    public boolean isMaxRange() {
-        return this.currentRange.equals(MAX_ROW_RANGE);
-    }
-
     /** Advance to the next range. */
-    public void nextRange() {
+    void nextRange() {
         if (rowRanges == null) {
             currentRange = MAX_ROW_RANGE;
         } else if (!rowRanges.hasNext()) {
@@ -124,22 +167,13 @@ public class ParquetReadState {
         }
     }
 
-    /** Helper struct to represent a range of row indexes `[start, end]`. */
-    public static class RowRange {
-        final long start;
-        final long end;
+    private static class RowRange {
+        private final long start;
+        private final long end;
 
-        RowRange(long start, long end) {
+        public RowRange(long start, long end) {
             this.start = start;
             this.end = end;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (!(obj instanceof RowRange)) {
-                return false;
-            }
-            return ((RowRange) obj).start == this.start && ((RowRange) obj).end == this.end;
         }
     }
 }

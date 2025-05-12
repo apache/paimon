@@ -42,7 +42,7 @@ public class WriterBufferMetric {
             Supplier<MemoryPoolFactory> memoryPoolFactorySupplier,
             MetricRegistry metricRegistry,
             String tableName) {
-        metricGroup = metricRegistry.tableMetricGroup(GROUP_NAME, tableName);
+        metricGroup = metricRegistry.createTableMetricGroup(GROUP_NAME, tableName);
         numWriters = new AtomicInteger(0);
         metricGroup.gauge(NUM_WRITERS, numWriters::get);
         metricGroup.gauge(

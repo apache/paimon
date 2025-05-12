@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -37,6 +38,9 @@ import java.util.List;
  */
 @Public
 public interface TableRead {
+
+    /** Set {@link MetricRegistry} to table read. */
+    TableRead withMetricRegistry(MetricRegistry registry);
 
     TableRead executeFilter();
 

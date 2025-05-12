@@ -16,18 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.reader;
+package org.apache.paimon.table.source;
 
-import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import java.util.List;
 
-import java.io.IOException;
+/** Table query auth. */
+public interface TableQueryAuth {
 
-/** Read a batch of records for a column to {@link WritableColumnVector} from parquet data file. */
-public interface ColumnReader<VECTOR extends WritableColumnVector> {
-
-    /**
-     * @param readNumber number to read.
-     * @param vector vector to write.
-     */
-    void readToVector(int readNumber, VECTOR vector) throws IOException;
+    void auth(List<String> select, List<String> filter);
 }

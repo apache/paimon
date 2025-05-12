@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;

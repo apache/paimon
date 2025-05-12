@@ -450,8 +450,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
-            batchScan.withMetricsRegistry(metricsRegistry);
+        public InnerTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
+            batchScan.withMetricRegistry(metricsRegistry);
             return this;
         }
 
@@ -565,8 +565,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public StreamDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
-            streamScan.withMetricsRegistry(metricsRegistry);
+        public StreamDataTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
+            streamScan.withMetricRegistry(metricsRegistry);
             return this;
         }
 

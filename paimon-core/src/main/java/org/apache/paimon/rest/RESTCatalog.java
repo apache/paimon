@@ -46,6 +46,7 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
+import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -598,6 +599,30 @@ public class RESTCatalog implements Catalog {
             }
         } catch (AlreadyExistsException e) {
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (ServiceFailureException e) {
+            throw new IllegalStateException(e.getMessage());
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        }
+    }
+
+    @Override
+    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+            throws TableNotExistException {
+        checkNotSystemTable(identifier, "authTable");
+        try {
+            AuthTableQueryRequest request = new AuthTableQueryRequest(select, filter);
+            client.post(
+                    resourcePaths.authTable(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (ServiceFailureException e) {

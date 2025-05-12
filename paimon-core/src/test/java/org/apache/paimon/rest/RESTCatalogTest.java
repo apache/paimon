@@ -80,14 +80,18 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -769,9 +773,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
         List<Map<String, String>> partitionSpecs =
-                Arrays.asList(
-                        Collections.singletonMap("dt", "20250101"),
-                        Collections.singletonMap("dt", "20250102"));
+                Arrays.asList(singletonMap("dt", "20250101"), singletonMap("dt", "20250102"));
         restCatalog.createBranch(identifier, branchName, null);
 
         BatchWriteBuilder writeBuilder = catalog.getTable(branchIdentifier).newBatchWriteBuilder();
@@ -801,12 +803,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         }
         List<Map<String, String>> partitionSpecs =
                 Arrays.asList(
-                        Collections.singletonMap("dt", "20250101"),
-                        Collections.singletonMap("dt", "20250102"),
-                        Collections.singletonMap("dt", "20240102"),
-                        Collections.singletonMap("dt", "20260101"),
-                        Collections.singletonMap("dt", "20250104"),
-                        Collections.singletonMap("dt", "20250103"));
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20240102"),
+                        singletonMap("dt", "20260101"),
+                        singletonMap("dt", "20250104"),
+                        singletonMap("dt", "20250103"));
         Map[] sortedSpecs =
                 partitionSpecs.stream()
                         .sorted(Comparator.comparing(i -> i.get("dt")))
@@ -848,12 +850,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "partitions_paged_db";
         List<Map<String, String>> partitionSpecs =
                 Arrays.asList(
-                        Collections.singletonMap("dt", "20250101"),
-                        Collections.singletonMap("dt", "20250102"),
-                        Collections.singletonMap("dt", "20240102"),
-                        Collections.singletonMap("dt", "20260101"),
-                        Collections.singletonMap("dt", "20250104"),
-                        Collections.singletonMap("dt", "20250103"));
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20240102"),
+                        singletonMap("dt", "20260101"),
+                        singletonMap("dt", "20250104"),
+                        singletonMap("dt", "20250103"));
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
@@ -1354,6 +1356,31 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(catalog.listFunctions().contains(function.name())).isFalse();
     }
 
+    @Test
+    void testTableAuth() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.INT()),
+                                new DataField(1, "col2", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+        authTableColumns(identifier, singletonList("col2"));
+        Table table = catalog.getTable(identifier);
+
+        assertThatThrownBy(() -> table.newReadBuilder().newScan().plan())
+                .hasMessageContaining("Table test_table_db.auth_table has no permission.");
+
+        // no exception
+        table.newReadBuilder().withProjection(new int[] {1}).newScan().plan();
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
@@ -1428,6 +1455,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
+
+    protected abstract void authTableColumns(Identifier identifier, List<String> columns);
 
     protected abstract void revokeDatabasePermission(String database);
 

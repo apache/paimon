@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -133,10 +132,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                !wrapped.schema().primaryKeys().isEmpty(),
+                wrapped.schema(),
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(wrapped.schema()));
+                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
     }
 
     @Override
@@ -146,12 +145,13 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                     "Unsupported streaming scan for read optimized table");
         }
         return new DataTableStreamScan(
+                wrapped.schema(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
                 changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(wrapped.schema()));
+                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
     }
 
     @Override

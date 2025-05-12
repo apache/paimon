@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -42,20 +43,22 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private Integer pushDownLimit;
 
     public DataTableBatchScan(
-            boolean pkTable,
+            TableSchema schema,
             CoreOptions options,
             SnapshotReader snapshotReader,
-            DefaultValueAssigner defaultValueAssigner) {
-        super(options, snapshotReader);
+            TableQueryAuth queryAuth) {
+        super(schema, options, snapshotReader, queryAuth);
         this.hasNext = true;
-        this.defaultValueAssigner = defaultValueAssigner;
-        if (pkTable && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
+        this.defaultValueAssigner = DefaultValueAssigner.create(schema);
+        if (!schema.primaryKeys().isEmpty()
+                && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
             snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
         }
     }
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
+        super.withFilter(predicate);
         snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
@@ -68,6 +71,8 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public TableScan.Plan plan() {
+        authQuery();
+
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }

@@ -699,6 +699,19 @@ public interface Catalog extends AutoCloseable {
     void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException;
 
+    // ==================== Table Auth ==========================
+
+    /**
+     * Auth table query select and filter.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param select selected fields
+     * @param filter query filters
+     * @throws TableNotExistException if the table does not exist
+     */
+    void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+            throws TableNotExistException;
+
     // ==================== Catalog Information ==========================
 
     /** Catalog options for re-creating this catalog. */

@@ -16,11 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.data.columnar.BooleanColumnVector;
+import org.apache.paimon.data.columnar.BytesColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.DoubleColumnVector;
+import org.apache.paimon.data.columnar.FloatColumnVector;
+import org.apache.paimon.data.columnar.IntColumnVector;
+import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
-import org.apache.paimon.format.parquet.reader.ParquetDictionary;
 import org.apache.paimon.types.DataType;
 
 import org.apache.parquet.CorruptDeltaByteArrays;
@@ -43,11 +49,8 @@ import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
 
+import static org.apache.paimon.types.DataTypeRoot.FLOAT;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BOOLEAN;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /** Decoder to return values from a single column. */
 public class VectorizedColumnReader {
@@ -113,8 +116,28 @@ public class VectorizedColumnReader {
     }
 
     private boolean isLazyDecodingSupported(
-            PrimitiveType.PrimitiveTypeName typeName, DataType paimonType) {
-        return true;
+            PrimitiveType.PrimitiveTypeName typeName, ColumnVector columnVector) {
+        boolean isSupported = false;
+        switch (typeName) {
+            case INT32:
+                isSupported = columnVector instanceof IntColumnVector;
+                break;
+            case INT64:
+                isSupported = columnVector instanceof LongColumnVector;
+                break;
+            case FLOAT:
+                isSupported = columnVector instanceof FloatColumnVector;
+                break;
+            case DOUBLE:
+                isSupported = columnVector instanceof DoubleColumnVector;
+                break;
+            case BOOLEAN:
+                isSupported = columnVector instanceof BooleanColumnVector;
+                break;
+            case BINARY:
+                isSupported = columnVector instanceof BytesColumnVector;
+        }
+        return isSupported;
     }
 
     /** Reads `total` rows from this columnReader into column. */
@@ -181,7 +204,7 @@ public class VectorizedColumnReader {
                 // the values to add microseconds precision.
                 if (column.hasDictionary()
                         || (startRowId == pageFirstRowIndex
-                                && isLazyDecodingSupported(typeName, type))) {
+                                && isLazyDecodingSupported(typeName, column))) {
                     column.setDictionary(new ParquetDictionary(dictionary));
                 } else {
                     updater.decodeDictionaryIds(

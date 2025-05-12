@@ -30,7 +30,7 @@ public class MetricGroupTest {
     @Test
     public void testGroupRegisterMetrics() {
         TestMetricRegistry registry = new TestMetricRegistry();
-        MetricGroup group = registry.tableMetricGroup("commit", "myTable");
+        MetricGroup group = registry.createTableMetricGroup("commit", "myTable");
 
         // these will fail is the registration is propagated
         group.counter("testcounter");
@@ -51,7 +51,7 @@ public class MetricGroupTest {
     public void testTolerateMetricNameCollisions() {
         final String name = "abctestname";
         TestMetricRegistry registry = new TestMetricRegistry();
-        MetricGroup group = registry.tableMetricGroup("commit", "myTable");
+        MetricGroup group = registry.createTableMetricGroup("commit", "myTable");
 
         Counter counter = group.counter(name);
         // return the old one with the metric name collision

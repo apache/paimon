@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapLongVector;
@@ -40,10 +40,6 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /** Test for delta encoding. */
 abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVector> {

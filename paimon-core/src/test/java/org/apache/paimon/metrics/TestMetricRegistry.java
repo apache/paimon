@@ -21,10 +21,10 @@ package org.apache.paimon.metrics;
 import java.util.Map;
 
 /** Implementation of {@link MetricRegistry} for tests. */
-public class TestMetricRegistry extends MetricRegistry {
+public class TestMetricRegistry implements MetricRegistry {
 
     @Override
-    protected MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
+    public MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
         return new MetricGroupImpl(groupName, variables);
     }
 }
