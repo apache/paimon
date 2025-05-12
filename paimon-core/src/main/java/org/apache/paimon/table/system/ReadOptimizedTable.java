@@ -144,10 +144,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
             return new ReadOptimizedTableBatchScan(wrapped.newScan());
         }
         return new DataTableBatchScan(
-                !wrapped.schema().primaryKeys().isEmpty(),
+                wrapped.schema(),
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(wrapped.schema()));
+                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
     }
 
     @Override
@@ -157,12 +157,13 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                     "Unsupported streaming scan for read optimized table");
         }
         return new DataTableStreamScan(
+                wrapped.schema(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
                 changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(wrapped.schema()));
+                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
     }
 
     @Override

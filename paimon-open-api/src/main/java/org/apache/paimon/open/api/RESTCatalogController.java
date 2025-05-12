@@ -22,6 +22,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
+import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -498,6 +499,30 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table,
             @RequestBody RollbackTableRequest request) {}
+
+    @Operation(
+            summary = "Auth table query",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/auth")
+    public void authTableQuery(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody AuthTableQueryRequest request) {}
 
     @Operation(
             summary = "Get table token",

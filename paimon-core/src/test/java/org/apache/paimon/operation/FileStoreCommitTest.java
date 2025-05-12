@@ -872,10 +872,10 @@ public class FileStoreCommitTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void testDVIndexFiles(int dvVersion) throws Exception {
+    @ValueSource(booleans = {true, false})
+    public void testDVIndexFiles(boolean bitmap64) throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.DELETION_VECTOR_VERSION.key(), String.valueOf(dvVersion));
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
 
         // commit 1

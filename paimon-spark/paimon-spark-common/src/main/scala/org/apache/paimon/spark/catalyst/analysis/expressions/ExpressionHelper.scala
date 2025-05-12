@@ -19,8 +19,9 @@
 package org.apache.paimon.spark.catalyst.analysis.expressions
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.SparkV2FilterConverter
+import org.apache.paimon.spark.{SparkFilterConverter, SparkV2FilterConverter}
 import org.apache.paimon.spark.catalyst.Compatibility
+import org.apache.paimon.spark.write.PaimonWriteBuilder
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
@@ -30,6 +31,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, E
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.sources.{AlwaysTrue, And => SourceAnd, EqualNullSafe, EqualTo, Filter => SourceFilter}
 import org.apache.spark.sql.types.{DataType, NullType}
 
 /** An expression helper. */
@@ -69,6 +71,41 @@ trait ExpressionHelper extends ExpressionHelperBase {
 trait ExpressionHelperBase extends PredicateHelper {
 
   import ExpressionHelper._
+
+  /**
+   * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
+   * methods where the `AlwaysTrue` Filter is used.
+   */
+  def isTruncate(filter: SourceFilter): Boolean = {
+    val filters = splitConjunctiveFilters(filter)
+    filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
+  }
+
+  /** See [[ PaimonWriteBuilder#failIfCanNotOverwrite]] */
+  def convertPartitionFilterToMap(
+      filter: SourceFilter,
+      partitionRowType: RowType): Map[String, String] = {
+    // todo: replace it with SparkV2FilterConverter when we drop Spark3.2
+    val converter = new SparkFilterConverter(partitionRowType)
+    splitConjunctiveFilters(filter).map {
+      case EqualNullSafe(attribute, value) =>
+        (attribute, converter.convertString(attribute, value))
+      case EqualTo(attribute, value) =>
+        (attribute, converter.convertString(attribute, value))
+      case _ =>
+        // Should not happen
+        throw new RuntimeException(
+          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
+    }.toMap
+  }
+
+  private def splitConjunctiveFilters(filter: SourceFilter): Seq[SourceFilter] = {
+    filter match {
+      case SourceAnd(filter1, filter2) =>
+        splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
+      case other => other :: Nil
+    }
+  }
 
   def toColumn(expr: Expression): Column = {
     SparkShimLoader.getSparkShim.column(expr)

@@ -22,6 +22,7 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -35,28 +36,29 @@ import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 public class DeletionVectorITCase extends CatalogITCaseBase {
 
     private static Stream<Arguments> parameters1() {
-        // parameters: changelogProducer, dvVersion
+        // parameters: changelogProducer, dvBitmap64
         return Stream.of(
-                Arguments.of("none", 1),
-                Arguments.of("none", 2),
-                Arguments.of("lookup", 1),
-                Arguments.of("lookup", 2));
+                Arguments.of("none", true),
+                Arguments.of("none", false),
+                Arguments.of("lookup", true),
+                Arguments.of("lookup", false));
     }
 
     private static Stream<Arguments> parameters2() {
         // parameters: changelogProducer, dvVersion
-        return Stream.of(Arguments.of("input", 1), Arguments.of("input", 2));
+        return Stream.of(Arguments.of("input", true), Arguments.of("input", false));
     }
 
     @ParameterizedTest
     @MethodSource("parameters2")
-    public void testStreamingReadDVTableWhenChangelogProducerIsInput(String changelogProducer)
-            throws Exception {
+    public void testStreamingReadDVTableWhenChangelogProducerIsInput(
+            String changelogProducer, boolean dvBitmap64) throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
-                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s')",
-                        changelogProducer));
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
 
@@ -97,13 +99,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
-    public void testStreamingReadDVTable(String changelogProducer, int dvVersion) throws Exception {
+    public void testStreamingReadDVTable(String changelogProducer, boolean dvBitmap64)
+            throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vectors.version' = '%s')",
-                        changelogProducer, dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
 
@@ -150,13 +153,13 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
-    public void testBatchReadDVTable(String changelogProducer, int dvVersion) {
+    public void testBatchReadDVTable(String changelogProducer, boolean dvBitmap64) {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vectors.version' = '%s')",
-                        changelogProducer, dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
 
@@ -183,14 +186,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
-    public void testDVTableWithAggregationMergeEngine(String changelogProducer, int dvVersion)
+    public void testDVTableWithAggregationMergeEngine(String changelogProducer, boolean dvBitmap64)
             throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v INT) "
-                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', 'deletion-vectors.version' = '%s', "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', 'deletion-vectors.bitmap64' = '%s', "
                                 + "'merge-engine'='aggregation', 'fields.v.aggregate-function'='sum')",
-                        changelogProducer, dvVersion));
+                        changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, 111111111), (2, 2), (3, 3), (4, 4)");
 
@@ -224,14 +227,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
-    public void testDVTableWithPartialUpdateMergeEngine(String changelogProducer, int dvVersion)
-            throws Exception {
+    public void testDVTableWithPartialUpdateMergeEngine(
+            String changelogProducer, boolean dvBitmap64) throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v1 STRING, v2 STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vectors.version' = '%s', 'merge-engine'='partial-update')",
-                        changelogProducer, dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s', 'merge-engine'='partial-update')",
+                        changelogProducer, dvBitmap64));
 
         sql(
                 "INSERT INTO T VALUES (1, '111111111', '1'), (2, '2', CAST(NULL AS STRING)), (3, '3', '3'), (4, CAST(NULL AS STRING), '4')");
@@ -270,13 +273,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
-    public void testBatchReadDVTableWithSequenceField(String changelogProducer, int dvVersion) {
+    public void testBatchReadDVTableWithSequenceField(
+            String changelogProducer, boolean dvBitmap64) {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'sequence.field' = 'sequence', 'changelog-producer' = '%s', "
-                                + "'deletion-vectors.version' = '%s')",
-                        changelogProducer, dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, 1, '1'), (2, 1, '2')");
         sql("INSERT INTO T VALUES (1, 2, '1_1'), (2, 2, '2_1')");
@@ -287,13 +291,13 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void testReadTagWithDv(int dvVersion) {
+    @ValueSource(booleans = {true, false})
+    public void testReadTagWithDv(boolean dvBitmap64) {
         sql(
                 "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("
                         + "'deletion-vectors.enabled' = 'true', "
-                        + "'deletion-vectors.version' = '"
-                        + dvVersion
+                        + "'deletion-vectors.bitmap64' = '"
+                        + dvBitmap64
                         + "', "
                         + "'snapshot.num-retained.min' = '1', "
                         + "'snapshot.num-retained.max' = '1')");
@@ -304,5 +308,35 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='my_tag') */"))
                 .containsExactlyInAnyOrder(Row.of(1, "1"), Row.of(2, "2"));
+    }
+
+    @Test
+    public void testChangeToDv64() throws Exception {
+        sql(
+                "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'lookup', "
+                        + "'deletion-vectors.bitmap64' = 'false', 'bucket' = '1')");
+
+        sql("INSERT INTO T VALUES (1, '1'), (2, '2'), (3, '3'), (4, '4')");
+        sql("INSERT INTO T VALUES (2, '2_1'), (3, '3_1')");
+        sql("INSERT INTO T VALUES (5, '5'), (6, '6'), (7, '8')");
+
+        // change dv to bitmap64
+        sql("ALTER TABLE T SET('deletion-vectors.bitmap64' = 'true')");
+        sql("INSERT INTO T VALUES (2, '2_2'),(6, '6_1'), (7, '7_1')");
+
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "1"),
+                        Row.of(2, "2_2"),
+                        Row.of(3, "3_1"),
+                        Row.of(4, "4"),
+                        Row.of(5, "5"),
+                        Row.of(6, "6_1"),
+                        Row.of(7, "7_1"));
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='4') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "1"), Row.of(2, "2_1"), Row.of(3, "3_1"), Row.of(4, "4"));
     }
 }

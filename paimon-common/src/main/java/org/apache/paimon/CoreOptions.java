@@ -1510,12 +1510,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(2))
                     .withDescription("The target size of deletion vector index file.");
 
-    public static final ConfigOption<Integer> DELETION_VECTOR_VERSION =
-            key("deletion-vectors.version")
-                    .intType()
-                    .defaultValue(1)
+    public static final ConfigOption<Boolean> DELETION_VECTOR_BITMAP64 =
+            key("deletion-vectors.bitmap64")
+                    .booleanType()
+                    .defaultValue(false)
                     .withDescription(
-                            "The version of deletion vector, currently support v1 and v2, default version is 1.");
+                            "Enable 64 bit bitmap implementation. Note that only 64 bit bitmap implementation is compatible with Iceberg.");
 
     public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
             key("delete.force-produce-changelog")
@@ -1651,6 +1651,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Set a time duration when a partition has no new data after this time duration, "
                                     + "start to report the partition statistics to hms.");
+
+    public static final ConfigOption<Boolean> QUERY_AUTH_ENABLED =
+            key("query-auth.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable query auth to give Catalog the opportunity to perform "
+                                    + "column level and row level permission validation on queries.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
@@ -2036,6 +2044,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public boolean queryAuthEnabled() {
+        return options.get(QUERY_AUTH_ENABLED);
     }
 
     public boolean ignoreDelete() {
@@ -2629,8 +2641,8 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
     }
 
-    public int deletionVectorVersion() {
-        return options.get(DELETION_VECTOR_VERSION);
+    public boolean deletionVectorBitmap64() {
+        return options.get(DELETION_VECTOR_BITMAP64);
     }
 
     public FileIndexOptions indexColumnsOptions() {

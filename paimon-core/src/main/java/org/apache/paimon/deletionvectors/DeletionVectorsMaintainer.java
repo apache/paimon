@@ -41,25 +41,19 @@ public class DeletionVectorsMaintainer {
 
     private final IndexFileHandler indexFileHandler;
     private final Map<String, DeletionVector> deletionVectors;
-    protected final int dvWriteVersion;
+    protected final boolean bitmap64;
     private boolean modified;
 
     private DeletionVectorsMaintainer(
             IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
         this.indexFileHandler = fileHandler;
         this.deletionVectors = deletionVectors;
-        this.dvWriteVersion = indexFileHandler.deletionVectorsIndex().writeVersionID();
+        this.bitmap64 = indexFileHandler.deletionVectorsIndex().bitmap64();
         this.modified = false;
     }
 
     private DeletionVector createNewDeletionVector() {
-        if (dvWriteVersion == BitmapDeletionVector.VERSION) {
-            return new BitmapDeletionVector();
-        } else if (dvWriteVersion == Bitmap64DeletionVector.VERSION) {
-            return new Bitmap64DeletionVector();
-        } else {
-            throw new RuntimeException("Invalid deletion vector version: " + dvWriteVersion);
-        }
+        return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
 
     /**
@@ -151,8 +145,8 @@ public class DeletionVectorsMaintainer {
         return deletionVectors;
     }
 
-    public int dvWriteVersion() {
-        return dvWriteVersion;
+    public boolean bitmap64() {
+        return bitmap64;
     }
 
     public static Factory factory(IndexFileHandler handler) {

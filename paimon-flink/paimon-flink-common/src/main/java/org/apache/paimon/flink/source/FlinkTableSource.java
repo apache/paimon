@@ -32,7 +32,6 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.configuration.Configuration;
@@ -220,7 +219,12 @@ public abstract class FlinkTableSource
     protected void scanSplitsForInference() {
         if (splitStatistics == null) {
             if (table instanceof DataTable) {
-                List<PartitionEntry> partitionEntries = newTableScan().listPartitionEntries();
+                List<PartitionEntry> partitionEntries =
+                        table.newReadBuilder()
+                                .dropStats()
+                                .withFilter(getPredicateWithScanPartitions())
+                                .newScan()
+                                .listPartitionEntries();
                 long totalSize = 0;
                 long rowCount = 0;
                 for (PartitionEntry entry : partitionEntries) {
@@ -231,19 +235,19 @@ public abstract class FlinkTableSource
                 splitStatistics =
                         new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
             } else {
-                List<Split> splits = newTableScan().plan().splits();
+                List<Split> splits =
+                        table.newReadBuilder()
+                                .dropStats()
+                                .withFilter(getPredicateWithScanPartitions())
+                                .withProjection(new int[0])
+                                .newScan()
+                                .plan()
+                                .splits();
                 splitStatistics =
                         new SplitStatistics(
                                 splits.size(), splits.stream().mapToLong(Split::rowCount).sum());
             }
         }
-    }
-
-    private TableScan newTableScan() {
-        return table.newReadBuilder()
-                .dropStats()
-                .withFilter(getPredicateWithScanPartitions())
-                .newScan();
     }
 
     /** Split statistics for inferring row count and parallelism size. */

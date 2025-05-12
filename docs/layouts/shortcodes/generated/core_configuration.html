@@ -297,16 +297,16 @@ under the License.
             <td>The target size of deletion vector index file.</td>
         </tr>
         <tr>
+            <td><h5>deletion-vectors.bitmap64</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable 64 bit bitmap implementation. Note that only 64 bit bitmap implementation is compatible with Iceberg.</td>
+        </tr>
+        <tr>
             <td><h5>deletion-vectors.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
-        </tr>
-        <tr>
-            <td><h5>deletion-vectors.version</h5></td>
-            <td style="word-wrap: break-word;">1</td>
-            <td>Integer</td>
-            <td>The version of deletion vector, currently support v1 and v2, default version is 1.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -772,6 +772,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>query-auth.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable query auth to give Catalog the opportunity to perform column level and row level permission validation on queries.</td>
         </tr>
         <tr>
             <td><h5>read.batch-size</h5></td>

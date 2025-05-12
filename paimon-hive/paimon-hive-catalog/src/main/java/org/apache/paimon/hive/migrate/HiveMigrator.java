@@ -58,8 +58,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
-import static org.apache.paimon.hive.migrate.HiveCloneUtils.HIDDEN_PATH_FILTER;
-import static org.apache.paimon.hive.migrate.HiveCloneUtils.parseFormat;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
@@ -301,7 +301,7 @@ public class HiveMigrator implements Migrator {
 
         for (Partition partition : partitions) {
             List<String> partitionValues = partition.getValues();
-            String format = parseFormat(partition.getSd().getSerdeInfo().toString());
+            String format = parseFormat(partition);
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
                     FileMetaUtils.writePartitionValue(
@@ -323,7 +323,7 @@ public class HiveMigrator implements Migrator {
             Table sourceTable,
             FileStoreTable paimonTable,
             Map<Path, Path> rollback) {
-        String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
+        String format = parseFormat(sourceTable);
         String location = sourceTable.getSd().getLocation();
         Path path = paimonTable.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
         return new MigrateTask(

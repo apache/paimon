@@ -21,7 +21,7 @@ package org.apache.paimon.rest.auth;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 
-import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
+import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 
 /** DLF Token Loader for custom. */
 public class CustomTestDLFTokenLoader implements DLFTokenLoader {
@@ -38,5 +38,10 @@ public class CustomTestDLFTokenLoader implements DLFTokenLoader {
     @Override
     public DLFToken loadToken() {
         return token;
+    }
+
+    @Override
+    public String description() {
+        return "custom";
     }
 }

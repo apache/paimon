@@ -49,10 +49,10 @@ class AppendDeletionFileMaintainerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void test(int dvVersion) throws Exception {
+    @ValueSource(booleans = {true, false})
+    public void test(boolean bitmap64) throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.DELETION_VECTOR_VERSION.key(), String.valueOf(dvVersion));
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
 
         Map<String, List<Integer>> dvs = new HashMap<>();

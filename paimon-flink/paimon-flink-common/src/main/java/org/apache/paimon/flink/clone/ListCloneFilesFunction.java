@@ -23,8 +23,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
-import org.apache.paimon.hive.migrate.HiveCloneUtils;
-import org.apache.paimon.hive.migrate.HivePartitionFiles;
+import org.apache.paimon.hive.clone.HiveCloneUtils;
+import org.apache.paimon.hive.clone.HivePartitionFiles;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -43,7 +43,9 @@ import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -109,15 +111,20 @@ public class ListCloneFilesFunction
         PartitionPredicate predicate =
                 getPartitionPredicate(whereSql, table.schema().logicalPartitionType(), tuple.f0);
 
-        List<HivePartitionFiles> allPartitions =
-                HiveCloneUtils.listFiles(
-                        hiveCatalog,
-                        tuple.f0,
-                        table.schema().logicalPartitionType(),
-                        table.coreOptions().partitionDefaultName(),
-                        predicate);
-        for (HivePartitionFiles partitionFiles : allPartitions) {
-            CloneFileInfo.fromHive(tuple.f1, partitionFiles).forEach(collector::collect);
+        try {
+            List<HivePartitionFiles> allPartitions =
+                    HiveCloneUtils.listFiles(
+                            hiveCatalog,
+                            tuple.f0,
+                            table.schema().logicalPartitionType(),
+                            table.coreOptions().partitionDefaultName(),
+                            predicate);
+            for (HivePartitionFiles partitionFiles : allPartitions) {
+                CloneFileInfo.fromHive(tuple.f1, partitionFiles).forEach(collector::collect);
+            }
+        } catch (Exception e) {
+            throw new Exception(
+                    "Failed to list clone files for table " + tuple.f0.getFullName(), e);
         }
     }
 
@@ -135,6 +142,13 @@ public class ListCloneFilesFunction
                 existedTable.coreOptions().bucket() == -1,
                 "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
                         + existedTable.name());
+
+        // check format
+        checkState(
+                Objects.equals(
+                        sourceSchema.options().get(FILE_FORMAT.key()),
+                        existedTable.coreOptions().formatType()),
+                "source table format is not compatible with existed paimon table format.");
 
         // check partition keys
         List<String> sourcePartitionFields = sourceSchema.partitionKeys();

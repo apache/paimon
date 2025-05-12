@@ -132,7 +132,7 @@ public class LogHybridSourceFactory
                 // register scan metrics
                 if (context.metricGroup() != null) {
                     ((StreamDataTableScan) scan)
-                            .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+                            .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
                 }
                 splits = splitGenerator.createSplits(scan.plan());
                 Long nextSnapshotId = scan.checkpoint();

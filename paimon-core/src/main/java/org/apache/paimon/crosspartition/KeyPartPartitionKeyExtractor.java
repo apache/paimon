@@ -37,14 +37,13 @@ public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<Inter
     private final Projection keyProjection;
 
     public KeyPartPartitionKeyExtractor(TableSchema schema) {
-        List<String> primaryKeys = schema.primaryKeys();
         List<String> partitionKeys = schema.partitionKeys();
         RowType keyPartType =
                 schema.projectedLogicalRowType(
-                        Stream.concat(primaryKeys.stream(), partitionKeys.stream())
+                        Stream.concat(schema.trimmedPrimaryKeys().stream(), partitionKeys.stream())
                                 .collect(Collectors.toList()));
         this.partitionProjection = CodeGenUtils.newProjection(keyPartType, partitionKeys);
-        this.keyProjection = CodeGenUtils.newProjection(keyPartType, primaryKeys);
+        this.keyProjection = CodeGenUtils.newProjection(keyPartType, schema.primaryKeys());
     }
 
     @Override

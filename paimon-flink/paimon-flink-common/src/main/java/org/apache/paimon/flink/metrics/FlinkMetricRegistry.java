@@ -24,7 +24,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import java.util.Map;
 
 /** {@link MetricRegistry} to create {@link FlinkMetricGroup}. */
-public class FlinkMetricRegistry extends MetricRegistry {
+public class FlinkMetricRegistry implements MetricRegistry {
 
     private final org.apache.flink.metrics.MetricGroup group;
 
@@ -33,7 +33,7 @@ public class FlinkMetricRegistry extends MetricRegistry {
     }
 
     @Override
-    protected MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
+    public MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
         return new FlinkMetricGroup(group, groupName, variables);
     }
 }

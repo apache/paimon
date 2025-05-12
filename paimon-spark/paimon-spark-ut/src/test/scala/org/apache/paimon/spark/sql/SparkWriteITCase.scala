@@ -18,9 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.Snapshot
-import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
@@ -36,6 +37,12 @@ class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
   override protected def sparkConf: SparkConf = {
     super.sparkConf.remove("spark.sql.extensions")
     super.sparkConf.set("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+  }
+}
+
+class SparkV2WriteITCase extends SparkWriteITCase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
 }
 
@@ -259,6 +266,43 @@ class SparkWriteITCase extends PaimonSparkTestBase {
         ) :: Nil
       )
 
+    }
+  }
+
+  test("Paimon write: write table with timestamp3 bucket key") {
+    withTable("t") {
+      // create timestamp3 table using table api
+      val schema = Schema.newBuilder
+        .column("id", DataTypes.INT)
+        .column("ts3", DataTypes.TIMESTAMP(3))
+        .option("bucket-key", "ts3")
+        .option("bucket", "1024")
+        .option("file.format", "avro")
+        .build
+      paimonCatalog.createTable(Identifier.create(dbName0, "t"), schema, false)
+
+      // insert using table api
+      val table = loadTable("t")
+      val writeBuilder = table.newBatchWriteBuilder
+      val write = writeBuilder.newWrite
+      write.write(
+        GenericRow.of(
+          1,
+          org.apache.paimon.data.Timestamp
+            .fromSQLTimestamp(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"))))
+      val commit = writeBuilder.newCommit
+      commit.commit(write.prepareCommit())
+      commit.close()
+      write.close()
+
+      // write using spark sql
+      sql("INSERT INTO t VALUES (2, TIMESTAMP '2024-01-01 00:00:00')")
+
+      // check bucket id
+      checkAnswer(
+        sql("SELECT ts3, __paimon_bucket FROM t WHERE id = 1"),
+        sql("SELECT ts3, __paimon_bucket FROM t WHERE id = 2")
+      )
     }
   }
 }

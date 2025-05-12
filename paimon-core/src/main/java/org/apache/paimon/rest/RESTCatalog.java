@@ -33,7 +33,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.rest.auth.AuthSession;
+import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -45,6 +45,7 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
+import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -102,7 +103,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -118,8 +118,7 @@ import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
-import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
-import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
+import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
@@ -132,6 +131,7 @@ public class RESTCatalog implements Catalog {
     public static final String TABLE_NAME_PATTERN = "tableNamePattern";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
+    public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
@@ -139,15 +139,13 @@ public class RESTCatalog implements Catalog {
     private final boolean dataTokenEnabled;
     private final RESTAuthFunction restAuthFunction;
 
-    private volatile ScheduledExecutorService refreshExecutor = null;
-
     public RESTCatalog(CatalogContext context) {
         this(context, true);
     }
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options().get(RESTCatalogOptions.URI));
-        AuthSession catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
+        AuthProvider authProvider = createAuthProvider(context.options());
         Options options = context.options();
         Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {
@@ -165,11 +163,11 @@ public class RESTCatalog implements Catalog {
                                             queryParams,
                                             ConfigResponse.class,
                                             new RESTAuthFunction(
-                                                    Collections.emptyMap(), catalogAuth))
+                                                    Collections.emptyMap(), authProvider))
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.restAuthFunction = new RESTAuthFunction(baseHeaders, catalogAuth);
+        this.restAuthFunction = new RESTAuthFunction(baseHeaders, authProvider);
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
@@ -609,6 +607,30 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+            throws TableNotExistException {
+        checkNotSystemTable(identifier, "authTable");
+        try {
+            AuthTableQueryRequest request = new AuthTableQueryRequest(select, filter);
+            client.post(
+                    resourcePaths.authTable(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (ServiceFailureException e) {
+            throw new IllegalStateException(e.getMessage());
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        }
+    }
+
+    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotBranch(identifier, "dropTable");
@@ -983,14 +1005,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void close() throws Exception {
-        if (refreshExecutor != null) {
-            refreshExecutor.shutdownNow();
-        }
-        if (client != null) {
-            client.close();
-        }
-    }
+    public void close() throws Exception {}
 
     @VisibleForTesting
     Map<String, String> headers(RESTAuthParameter restAuthParameter) {
@@ -1034,18 +1049,6 @@ public class RESTCatalog implements Catalog {
             }
         } while (StringUtils.isNotEmpty(pageToken));
         return results;
-    }
-
-    private ScheduledExecutorService tokenRefreshExecutor() {
-        if (refreshExecutor == null) {
-            synchronized (this) {
-                if (refreshExecutor == null) {
-                    this.refreshExecutor = createScheduledThreadPool(1, "token-refresh-thread");
-                }
-            }
-        }
-
-        return refreshExecutor;
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {

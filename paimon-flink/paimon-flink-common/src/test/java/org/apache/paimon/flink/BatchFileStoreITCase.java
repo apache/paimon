@@ -25,7 +25,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -120,8 +119,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                SnapshotNotExistException.class,
-                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
+                                Exception.class,
+                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThatThrownBy(
                         () ->
@@ -129,8 +128,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                SnapshotNotExistException.class,
-                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
+                                Exception.class,
+                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThat(
                         batchSql(
@@ -590,12 +589,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarAppendWithDv() {
-        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
                 String.format(
                         "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vectors.version' = '%s') ",
-                        dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s') ",
+                        ThreadLocalRandom.current().nextBoolean()));
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
@@ -617,14 +615,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarPKDv() {
-        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
                 String.format(
                         "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
                                 + "'file.format' = 'avro', "
                                 + "'deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vectors.version' = '%s')",
-                        dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        ThreadLocalRandom.current().nextBoolean()));
         sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
         sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
 
@@ -794,5 +791,28 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("INSERT INTO test_table VALUES (1, 1)");
         assertThat(sql("SELECT * FROM `test_table$audit_log`"))
                 .containsExactly(Row.of("+I", 1, 1, 2));
+    }
+
+    @Test
+    public void testBinlogTableWithComputedColumn() {
+        sql("CREATE TABLE test_table (a int, b int, c AS a + b);");
+        String ddl = sql("SHOW CREATE TABLE `test_table$binlog`").get(0).getFieldAs(0);
+        assertThat(ddl).doesNotContain("`c` AS `a` + `b`");
+
+        sql("INSERT INTO test_table VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM `test_table$binlog`"))
+                .containsExactly(Row.of("+I", new Integer[] {1}, new Integer[] {1}));
+    }
+
+    @Test
+    public void testBinlogTableWithProjection() {
+        sql("CREATE TABLE test_table (a int, b string);");
+        sql("INSERT INTO test_table VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM `test_table$binlog`"))
+                .containsExactly(Row.of("+I", new Integer[] {1}, new String[] {"A"}));
+        assertThat(sql("SELECT b FROM `test_table$binlog`"))
+                .containsExactly(Row.of((Object) new String[] {"A"}));
+        assertThat(sql("SELECT rowkind, b FROM `test_table$binlog`"))
+                .containsExactly(Row.of("+I", new String[] {"A"}));
     }
 }

@@ -22,4 +22,6 @@ package org.apache.paimon.rest.auth;
 public interface DLFTokenLoader {
 
     DLFToken loadToken();
+
+    String description();
 }

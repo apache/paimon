@@ -296,9 +296,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public Scan withMetricsRegistry(MetricRegistry metricRegistry) {
-            mainScan.withMetricsRegistry(metricRegistry);
-            fallbackScan.withMetricsRegistry(metricRegistry);
+        public Scan withMetricRegistry(MetricRegistry metricRegistry) {
+            mainScan.withMetricRegistry(metricRegistry);
+            fallbackScan.withMetricRegistry(metricRegistry);
             return this;
         }
 

@@ -43,6 +43,7 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
+import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -126,11 +127,9 @@ public class RESTCatalogServer {
     public static final int DEFAULT_MAX_RESULTS = 100;
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
-    private final String prefix;
     private final String databaseUri;
 
     private final FileSystemCatalog catalog;
-    private final Dispatcher dispatcher;
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
@@ -141,6 +140,7 @@ public class RESTCatalogServer {
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
+    private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -150,7 +150,7 @@ public class RESTCatalogServer {
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
         this.warehouse = warehouse;
         this.configResponse = config;
-        this.prefix =
+        String prefix =
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
@@ -167,7 +167,7 @@ public class RESTCatalogServer {
             throw new UncheckedIOException(e);
         }
         this.catalog = new FileSystemCatalog(fileIO, warehousePath, context.options());
-        this.dispatcher = initDispatcher(authProvider);
+        Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -216,6 +216,10 @@ public class RESTCatalogServer {
         noPermissionTables.add(identifier.getFullName());
     }
 
+    public void addTableColumnAuth(Identifier identifier, List<String> select) {
+        columnAuthHandler.put(identifier.getFullName(), select);
+    }
+
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -247,7 +251,7 @@ public class RESTCatalogServer {
                                     resourcePath, parameters, request.getMethod(), data);
                     String authToken =
                             authProvider
-                                    .header(headers, restAuthParameter)
+                                    .mergeAuthHeader(headers, restAuthParameter)
                                     .get(AUTHORIZATION_HEADER_KEY);
                     if (!authToken.equals(token)) {
                         return new MockResponse().setResponseCode(401);
@@ -301,6 +305,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "snapshot".equals(resources[3]);
+                        boolean isTableAuth =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "auth".equals(resources[3]);
                         boolean isCommitSnapshot =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -369,6 +377,8 @@ public class RESTCatalogServer {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
                             return snapshotHandle(identifier);
+                        } else if (isTableAuth) {
+                            return authTable(identifier, restAuthParameter.data());
                         } else if (isCommitSnapshot) {
                             return commitTableHandle(identifier, restAuthParameter.data());
                         } else if (isRollbackTable) {
@@ -604,6 +614,29 @@ public class RESTCatalogServer {
         return Optional.of(
                 mockResponse(
                         new ErrorResponse(ErrorResponse.RESOURCE_TYPE_TABLE, null, "", 404), 404));
+    }
+
+    private MockResponse authTable(Identifier identifier, String data) throws Exception {
+        AuthTableQueryRequest requestBody =
+                OBJECT_MAPPER.readValue(data, AuthTableQueryRequest.class);
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
+        if (columnAuth != null) {
+            requestBody
+                    .select()
+                    .forEach(
+                            column -> {
+                                if (!columnAuth.contains(column)) {
+                                    throw new Catalog.TableNoPermissionException(identifier);
+                                }
+                            });
+        }
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {

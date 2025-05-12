@@ -229,7 +229,7 @@ public class ManifestsTable implements ReadonlyTable {
 
     private static List<ManifestFileMeta> allManifests(FileStoreTable dataTable) {
         CoreOptions options = dataTable.coreOptions();
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(dataTable);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(dataTable);
         if (snapshot == null) {
             LOG.warn("Check if your snapshot is empty.");
             return Collections.emptyList();

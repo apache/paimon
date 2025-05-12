@@ -19,25 +19,16 @@
 package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.PathFactory;
-import org.apache.paimon.utils.Preconditions;
 
-import java.io.Closeable;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.calculateChecksum;
 
 /** Writer for deletion vector index file. */
 public class DeletionVectorIndexFileWriter {
@@ -46,18 +37,11 @@ public class DeletionVectorIndexFileWriter {
     private final FileIO fileIO;
     private final long targetSizeInBytes;
 
-    private final int writeVersionId;
-
     public DeletionVectorIndexFileWriter(
-            FileIO fileIO,
-            PathFactory pathFactory,
-            MemorySize targetSizePerIndexFile,
-            int versionId) {
+            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
         this.indexPathFactory = pathFactory;
         this.fileIO = fileIO;
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
-
-        this.writeVersionId = versionId;
     }
 
     /**
@@ -78,19 +62,19 @@ public class DeletionVectorIndexFileWriter {
 
     private IndexFileMeta tryWriter(Iterator<Map.Entry<String, DeletionVector>> iterator)
             throws IOException {
-        SingleIndexFileWriter writer = new SingleIndexFileWriter();
+        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
         try {
             while (iterator.hasNext()) {
                 Map.Entry<String, DeletionVector> entry = iterator.next();
                 writer.write(entry.getKey(), entry.getValue());
-                if (writer.writtenSizeInBytes() > targetSizeInBytes) {
+                if (writer.getPos() > targetSizeInBytes) {
                     break;
                 }
             }
         } finally {
             writer.close();
         }
-        return writer.writtenIndexFile();
+        return writer.result();
     }
 
     /**
@@ -101,85 +85,8 @@ public class DeletionVectorIndexFileWriter {
      * <p>TODO: We can consider sending a message to delete the deletion file in the future.
      */
     private List<IndexFileMeta> emptyIndexFile() throws IOException {
-        SingleIndexFileWriter writer = new SingleIndexFileWriter();
+        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
         writer.close();
-        return Collections.singletonList(writer.writtenIndexFile());
-    }
-
-    private class SingleIndexFileWriter implements Closeable {
-
-        private final Path path;
-        private final DataOutputStream dataOutputStream;
-        private final LinkedHashMap<String, DeletionVectorMeta> dvMetas;
-
-        private SingleIndexFileWriter() throws IOException {
-            this.path = indexPathFactory.newPath();
-            this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
-            dataOutputStream.writeByte(writeVersionId);
-            this.dvMetas = new LinkedHashMap<>();
-        }
-
-        private long writtenSizeInBytes() {
-            return dataOutputStream.size();
-        }
-
-        private void write(String key, DeletionVector deletionVector) throws IOException {
-            Preconditions.checkNotNull(dataOutputStream);
-            if (writeVersionId == BitmapDeletionVector.VERSION) {
-                Preconditions.checkArgument(
-                        deletionVector instanceof BitmapDeletionVector,
-                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
-                        writeVersionId,
-                        BitmapDeletionVector.class.getName(),
-                        deletionVector.getClass().getName());
-
-                writeV1(key, deletionVector);
-            } else if (writeVersionId == Bitmap64DeletionVector.VERSION) {
-                Preconditions.checkArgument(
-                        deletionVector instanceof Bitmap64DeletionVector,
-                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
-                        writeVersionId,
-                        Bitmap64DeletionVector.class.getName(),
-                        deletionVector.getClass().getName());
-
-                writeV2(key, deletionVector);
-            }
-        }
-
-        private void writeV1(String key, DeletionVector deletionVector) throws IOException {
-            byte[] data = deletionVector.serializeToBytes();
-            int size = data.length;
-            dvMetas.put(
-                    key,
-                    new DeletionVectorMeta(
-                            key, dataOutputStream.size(), size, deletionVector.getCardinality()));
-            dataOutputStream.writeInt(size);
-            dataOutputStream.write(data);
-            dataOutputStream.writeInt(calculateChecksum(data));
-        }
-
-        private void writeV2(String key, DeletionVector deletionVector) throws IOException {
-            byte[] data = deletionVector.serializeToBytes();
-            int size = data.length;
-            dvMetas.put(
-                    key,
-                    new DeletionVectorMeta(
-                            key, dataOutputStream.size(), size, deletionVector.getCardinality()));
-            dataOutputStream.write(data);
-        }
-
-        public IndexFileMeta writtenIndexFile() {
-            return new IndexFileMeta(
-                    DELETION_VECTORS_INDEX,
-                    path.getName(),
-                    writtenSizeInBytes(),
-                    dvMetas.size(),
-                    dvMetas);
-        }
-
-        @Override
-        public void close() throws IOException {
-            dataOutputStream.close();
-        }
+        return Collections.singletonList(writer.result());
     }
 }
