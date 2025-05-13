@@ -150,7 +150,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         return new DataTableBatchScan(
                 !wrapped.schema().primaryKeys().isEmpty(),
                 wrapped.coreOptions(),
-                newSnapshotReader(),
+                newSnapshotReader(wrapped),
                 DefaultValueAssigner.create(wrapped.schema()));
     }
 
