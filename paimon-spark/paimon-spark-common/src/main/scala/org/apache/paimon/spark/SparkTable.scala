@@ -21,7 +21,10 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.table.{BucketMode, DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
+import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}

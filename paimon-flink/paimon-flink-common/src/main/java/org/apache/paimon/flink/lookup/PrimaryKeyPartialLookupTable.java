@@ -72,9 +72,10 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
         this.executorFactory = executorFactory;
-        if (table.bucketMode() != BucketMode.HASH_FIXED) {
+        BucketMode bucketMode = table.bucketMode();
+        if (bucketMode != BucketMode.HASH_FIXED && bucketMode != BucketMode.POSTPONE_MODE) {
             throw new UnsupportedOperationException(
-                    "Unsupported mode for partial lookup: " + table.bucketMode());
+                    "Unsupported mode for partial lookup: " + bucketMode);
         }
 
         TableSchema schema = table.schema();

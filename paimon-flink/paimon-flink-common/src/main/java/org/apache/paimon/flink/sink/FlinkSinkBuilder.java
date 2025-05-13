@@ -235,12 +235,10 @@ public class FlinkSinkBuilder {
 
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
+            case POSTPONE_MODE:
+                return buildPostponeBucketSink(input);
             case HASH_FIXED:
-                if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-                    return buildPostponeBucketSink(input);
-                } else {
-                    return buildForFixedBucket(input);
-                }
+                return buildForFixedBucket(input);
             case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
             case CROSS_PARTITION:

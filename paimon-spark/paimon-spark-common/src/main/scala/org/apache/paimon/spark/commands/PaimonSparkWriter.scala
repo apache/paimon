@@ -235,8 +235,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           )
         }
 
-      case BUCKET_UNAWARE =>
-        // Topology: input ->
+      case BUCKET_UNAWARE | POSTPONE_MODE =>
         writeWithoutBucket(data)
 
       case HASH_FIXED =>

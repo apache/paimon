@@ -39,6 +39,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketWriteSelector;
+import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -219,6 +220,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case HASH_FIXED:
                 return Optional.of(new FixedBucketWriteSelector(schema()));
             case BUCKET_UNAWARE:
+            case POSTPONE_MODE:
                 return Optional.empty();
             default:
                 throw new UnsupportedOperationException(
@@ -240,6 +242,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 return new DynamicBucketRowKeyExtractor(schema());
             case BUCKET_UNAWARE:
                 return new UnawareBucketRowKeyExtractor(schema());
+            case POSTPONE_MODE:
+                return new PostponeBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
