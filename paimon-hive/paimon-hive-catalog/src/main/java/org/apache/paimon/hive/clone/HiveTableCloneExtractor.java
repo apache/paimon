@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive.migrate;
+package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -24,21 +24,15 @@ import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -50,124 +44,91 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
 
-/** Utils for cloning Hive table to Paimon table. */
-public class HiveCloneUtils {
+/** A {@link HiveCloneExtractor} for hive tables. */
+public class HiveTableCloneExtractor implements HiveCloneExtractor {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HiveCloneUtils.class);
+    public static final HiveTableCloneExtractor INSTANCE = new HiveTableCloneExtractor();
 
-    public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
-            p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
-
-    public static Map<String, String> getDatabaseOptions(
-            HiveCatalog hiveCatalog, String databaseName) throws Exception {
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
-        Database database = client.getDatabase(databaseName);
-        Map<String, String> paimonOptions = new HashMap<>();
-        if (database.getDescription() != null) {
-            paimonOptions.put("comment", database.getDescription());
-        }
-        return paimonOptions;
+    @Override
+    public boolean matches(Table table) {
+        return true;
     }
 
-    public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws Exception {
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
-        List<Identifier> results = new ArrayList<>();
-        for (String database : client.getAllDatabases()) {
-            for (String table : client.getAllTables(database)) {
-                results.add(Identifier.create(database, table));
-            }
-        }
-        return results;
-    }
-
-    public static List<Identifier> listTables(HiveCatalog hiveCatalog, String database)
+    @Override
+    public List<FieldSchema> extractSchema(
+            IMetaStoreClient client, Table hiveTable, String database, String table)
             throws Exception {
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
-        List<Identifier> results = new ArrayList<>();
-        for (String table : client.getAllTables(database)) {
-            results.add(Identifier.create(database, table));
-        }
-        return results;
+        return client.getSchema(database, table);
     }
 
-    public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
-            throws Exception {
-        String database = identifier.getDatabaseName();
-        String table = identifier.getObjectName();
-
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
-        // check primary key
-        PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(database, table);
-        try {
-            if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
-                throw new IllegalArgumentException("Can't migrate primary key table yet.");
-            }
-        } catch (Exception e) {
-            LOG.warn(
-                    "Your Hive version is low which not support get_primary_keys, skip primary key check firstly!");
-        }
-
-        Table hiveTable = client.getTable(database, table);
-        List<FieldSchema> fields = client.getSchema(database, table);
-        List<FieldSchema> partitionFields = hiveTable.getPartitionKeys();
-        Map<String, String> hiveTableOptions = hiveTable.getParameters();
-
-        Map<String, String> paimonOptions = new HashMap<>();
-        // for compatible with hive comment system
-        if (hiveTableOptions.get("comment") != null) {
-            paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
-        }
-
-        String format = parseFormat(hiveTable);
-        paimonOptions.put(FILE_FORMAT.key(), format);
-        Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
-        Map<String, String> sdFormatOptions =
-                getIdentifierPrefixOptions(
-                        format, hiveTable.getSd().getSerdeInfo().getParameters());
-        formatOptions.putAll(sdFormatOptions);
-        paimonOptions.putAll(formatOptions);
-
-        String compression = parseCompression(hiveTable, format, formatOptions);
-        if (compression != null) {
-            paimonOptions.put(FILE_COMPRESSION.key(), compression);
-        }
-
-        Schema.Builder schemaBuilder =
-                Schema.newBuilder()
-                        .comment(hiveTableOptions.get("comment"))
-                        .options(paimonOptions)
-                        .partitionKeys(
-                                partitionFields.stream()
-                                        .map(FieldSchema::getName)
-                                        .collect(Collectors.toList()));
-
-        fields.forEach(
-                field ->
-                        schemaBuilder.column(
-                                field.getName(),
-                                toPaimonType(field.getType()),
-                                field.getComment()));
-
-        return schemaBuilder.build();
-    }
-
-    public static List<HivePartitionFiles> listFiles(
-            HiveCatalog hiveCatalog,
+    @Override
+    public List<HivePartitionFiles> extractFiles(
+            IMetaStoreClient client,
+            Table table,
+            FileIO fileIO,
             Identifier identifier,
             RowType partitionRowType,
             String defaultPartitionName,
             @Nullable PartitionPredicate predicate)
             throws Exception {
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
-        Table sourceTable =
-                client.getTable(identifier.getDatabaseName(), identifier.getTableName());
+        return listFromPureHiveTable(
+                client,
+                identifier,
+                table,
+                fileIO,
+                partitionRowType,
+                defaultPartitionName,
+                predicate);
+    }
+
+    @Override
+    public List<String> extractPartitionKeys(Table table) {
+        return table.getPartitionKeys().stream()
+                .map(FieldSchema::getName)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public Map<String, String> extractOptions(Table table) {
+        Map<String, String> hiveTableOptions = table.getParameters();
+        Map<String, String> paimonOptions = new HashMap<>();
+        String comment = hiveTableOptions.get("comment");
+        if (comment != null) {
+            paimonOptions.put("hive.comment", comment);
+            paimonOptions.put("comment", comment);
+        }
+
+        String format = parseFormat(table);
+        paimonOptions.put(FILE_FORMAT.key(), format);
+        Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
+        Map<String, String> sdFormatOptions =
+                getIdentifierPrefixOptions(format, table.getSd().getSerdeInfo().getParameters());
+        formatOptions.putAll(sdFormatOptions);
+        paimonOptions.putAll(formatOptions);
+
+        String compression = parseCompression(table, format, formatOptions);
+        if (compression != null) {
+            paimonOptions.put(FILE_COMPRESSION.key(), compression);
+        }
+        return paimonOptions;
+    }
+
+    private static List<HivePartitionFiles> listFromPureHiveTable(
+            IMetaStoreClient client,
+            Identifier identifier,
+            Table sourceTable,
+            FileIO fileIO,
+            RowType partitionRowType,
+            String defaultPartitionName,
+            @javax.annotation.Nullable PartitionPredicate predicate)
+            throws Exception {
         List<Partition> partitions =
                 client.listPartitions(
                         identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
@@ -176,7 +137,7 @@ public class HiveCloneUtils {
         if (partitions.isEmpty()) {
             String location = sourceTable.getSd().getLocation();
             return Collections.singletonList(
-                    listFiles(hiveCatalog.fileIO(), location, BinaryRow.EMPTY_ROW, format));
+                    listFiles(fileIO, location, BinaryRow.EMPTY_ROW, format));
         } else {
             List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
             partitionRowType
@@ -193,7 +154,7 @@ public class HiveCloneUtils {
                                 valueSetters,
                                 defaultPartitionName);
                 if (predicate == null || predicate.test(partitionRow)) {
-                    results.add(listFiles(hiveCatalog.fileIO(), location, partitionRow, format));
+                    results.add(listFiles(fileIO, location, partitionRow, format));
                 }
             }
             return results;
@@ -214,34 +175,6 @@ public class HiveCloneUtils {
             fileSizes.add(fileStatus.getLen());
         }
         return new HivePartitionFiles(partition, paths, fileSizes, format);
-    }
-
-    private static String parseFormat(StorageDescriptor storageDescriptor) {
-        String serder = storageDescriptor.getSerdeInfo().toString();
-        if (serder.contains("avro")) {
-            return "avro";
-        } else if (serder.contains("parquet")) {
-            return "parquet";
-        } else if (serder.contains("orc")) {
-            return "orc";
-        }
-        return null;
-    }
-
-    public static String parseFormat(Table table) {
-        String format = parseFormat(table.getSd());
-        if (format == null) {
-            throw new UnsupportedOperationException("Unknown table format:" + table);
-        }
-        return format;
-    }
-
-    public static String parseFormat(Partition partition) {
-        String format = parseFormat(partition.getSd());
-        if (format == null) {
-            throw new UnsupportedOperationException("Unknown partition format: " + partition);
-        }
-        return format;
     }
 
     private static String parseCompression(StorageDescriptor storageDescriptor) {

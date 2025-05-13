@@ -39,15 +39,11 @@ object PaimonWriteRequirement {
     val bucketSpec = table.bucketSpec()
     val bucketTransforms = bucketSpec.getBucketMode match {
       case HASH_FIXED =>
-        if (bucketSpec.getNumBuckets == POSTPONE_BUCKET) {
-          Seq.empty
-        } else {
-          Seq(
-            Expressions.bucket(
-              bucketSpec.getNumBuckets,
-              bucketSpec.getBucketKeys.asScala.map(quote).toArray: _*))
-        }
-      case BUCKET_UNAWARE =>
+        Seq(
+          Expressions.bucket(
+            bucketSpec.getNumBuckets,
+            bucketSpec.getBucketKeys.asScala.map(quote).toArray: _*))
+      case BUCKET_UNAWARE | POSTPONE_MODE =>
         Seq.empty
       case _ =>
         throw new UnsupportedOperationException(

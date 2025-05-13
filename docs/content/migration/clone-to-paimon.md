@@ -33,13 +33,13 @@ Clone supports cloning tables to Paimon tables.
    same partition fields.
 
 Currently, clone supports:
-
 1. Clone Hive tables in Hive Catalog to Paimon Catalog, supports Parquet, ORC, Avro formats, target table will
    be append table.
+2. Clone Hudi tables in Hive Catalog to Paimon Catalog, target table will be append table.
 
 The source table below is currently under development:
-1. Clone Hudi tables in Hive Catalog to Paimon Catalog, target table will be append table.
-2. Clone Paimon tables to Paimon tables, target table can be primary table or append table.
+1. Clone Paimon tables to Paimon tables, target table can be primary table or append table.
+2. Clone Iceberg tables in Hive Catalog to Paimon Catalog, target table will be append table.
 
 ## Clone Hive Table
 
@@ -71,3 +71,9 @@ clone \
 --parallelism 10 \
 --target_catalog_conf warehouse=my_warehouse
 ```
+
+## Clone Hudi Tables
+
+Clone Hudi needs dependency: [hudi-flink1.18-bundle-0.15.0.jar](https://repo1.maven.org/maven2/org/apache/hudi/hudi-flink1.18-bundle/0.15.0/hudi-flink1.18-bundle-0.15.0.jar)
+
+The execution method is the same as the Hive table mentioned above.
