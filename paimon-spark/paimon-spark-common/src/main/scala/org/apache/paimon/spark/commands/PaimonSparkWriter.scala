@@ -25,7 +25,6 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
-import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
@@ -242,7 +241,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         writeWithoutBucket(data)
 
       case HASH_FIXED =>
-        if (table.bucketSpec().getNumBuckets == -2) {
+        if (table.bucketSpec().getNumBuckets == POSTPONE_BUCKET) {
           writeWithoutBucket(data)
         } else if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
           // Topology: input -> shuffle by partition & bucket
