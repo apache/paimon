@@ -796,8 +796,8 @@ public class RESTCatalogServer {
                 if (!functionStore.containsKey(functionName)) {
                     Function function =
                             new FunctionImpl(
-                                    functionName,
                                     UUID.randomUUID().toString(),
+                                    functionName,
                                     requestBody.inputParams(),
                                     requestBody.returnParams(),
                                     requestBody.isDeterministic(),
@@ -822,17 +822,31 @@ public class RESTCatalogServer {
         if (!functionStore.containsKey(functionName)) {
             throw new Catalog.FunctionNotExistException(functionName);
         }
+        Function function = functionStore.get(functionName);
         switch (method) {
             case "DELETE":
                 functionStore.remove(functionName);
                 break;
             case "GET":
-                functionDetailsHandler(functionName);
-                break;
+                GetFunctionResponse response =
+                        new GetFunctionResponse(
+                                function.uuid(),
+                                function.name(),
+                                function.inputParams(),
+                                function.returnParams(),
+                                function.isDeterministic(),
+                                function.definitions(),
+                                function.comment(),
+                                function.options(),
+                                "owner",
+                                1L,
+                                "owner",
+                                1L,
+                                "owner");
+                return mockResponse(response, 200);
             case "POST":
                 AlterFunctionRequest requestBody =
                         OBJECT_MAPPER.readValue(data, AlterFunctionRequest.class);
-                Function function = functionStore.get(functionName);
                 HashMap<String, FunctionDefinition> newDefinitions =
                         new HashMap<>(function.definitions());
                 Map<String, String> newOptions = new HashMap<>(function.options());

@@ -20,10 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -118,10 +120,6 @@ public class MockRESTMessage {
         return new ListTablesResponse(Lists.newArrayList("table"));
     }
 
-    public static ListTablesResponse listTablesEmptyResponse() {
-        return new ListTablesResponse(Lists.newArrayList());
-    }
-
     public static CreateTableRequest createTableRequest(String name) {
         Identifier identifier = Identifier.create(databaseName(), name);
         Map<String, String> options = new HashMap<>();
@@ -146,7 +144,7 @@ public class MockRESTMessage {
     }
 
     public static AlterTableRequest alterTableRequest() {
-        return new AlterTableRequest(getChanges());
+        return new AlterTableRequest(getSchemaChanges());
     }
 
     public static ListPartitionsResponse listPartitionsResponse() {
@@ -156,7 +154,7 @@ public class MockRESTMessage {
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
-    public static List<SchemaChange> getChanges() {
+    public static List<SchemaChange> getSchemaChanges() {
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
         // update comment
@@ -344,6 +342,19 @@ public class MockRESTMessage {
                 definitions,
                 "comment",
                 ImmutableMap.of());
+    }
+
+    public static AlterFunctionRequest alterFunctionRequest() {
+        List<FunctionChange> functionChanges = new ArrayList<>();
+        functionChanges.add(FunctionChange.setOption("key", "value"));
+        functionChanges.add(FunctionChange.removeOption("key"));
+        functionChanges.add(FunctionChange.updateComment("comment"));
+        functionChanges.add(
+                FunctionChange.addDefinition("engine", FunctionDefinition.sql("x * y")));
+        functionChanges.add(
+                FunctionChange.updateDefinition("engine", FunctionDefinition.sql("x * y")));
+        functionChanges.add(FunctionChange.dropDefinition("engine"));
+        return new AlterFunctionRequest(functionChanges);
     }
 
     private static ViewSchema viewSchema() {

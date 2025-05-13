@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -301,5 +302,14 @@ public class RESTObjectMapperTest {
         CreateFunctionRequest parseData =
                 OBJECT_MAPPER.readValue(requestStr, CreateFunctionRequest.class);
         assertEquals(parseData.name(), request.name());
+    }
+
+    @Test
+    public void alterFunctionRequestParseTest() throws JsonProcessingException {
+        AlterFunctionRequest request = MockRESTMessage.alterFunctionRequest();
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        AlterFunctionRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, AlterFunctionRequest.class);
+        assertEquals(parseData.changes().size(), request.changes().size());
     }
 }

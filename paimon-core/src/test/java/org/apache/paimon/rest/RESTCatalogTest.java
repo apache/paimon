@@ -1407,6 +1407,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         catalog.alterFunction(functionName, ImmutableList.of(dropDefinition), false);
         catalogFunction = catalog.getFunction(functionName);
         assertThat(catalogFunction.definition(updateDefinition.name())).isNull();
+
+        assertThrows(
+                Catalog.DefinitionNotExistException.class,
+                () -> catalog.alterFunction(functionName, ImmutableList.of(dropDefinition), false));
     }
 
     @Test
