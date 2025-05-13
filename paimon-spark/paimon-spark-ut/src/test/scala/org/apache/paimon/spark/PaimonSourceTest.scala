@@ -68,6 +68,44 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Source: default scan mode with table api") {
+    withTempDir {
+      checkpointDir =>
+        val TableSnapshotState(_, _, snapshotData, _, _) =
+          prepareTableAndGetLocation(3, hasPk = true, tableName = "test_tbl")
+
+        val query = spark.readStream
+          .format("paimon")
+          .table("test_tbl")
+          .writeStream
+          .format("memory")
+          .option("checkpointLocation", checkpointDir.getCanonicalPath)
+          .queryName("mem_table")
+          .outputMode("append")
+          .start()
+
+        val currentResult = () => spark.sql("SELECT * FROM mem_table")
+        try {
+          query.processAllAvailable()
+          var totalStreamingData = snapshotData
+          // in the default mode without any related configs, only data written in the last time will be read.
+          checkAnswer(currentResult(), totalStreamingData)
+
+          spark.sql("INSERT INTO test_tbl VALUES (40, 'v_40'), (41, 'v_41'), (42, 'v_42')")
+          query.processAllAvailable()
+          totalStreamingData ++= (Row(40, "v_40") :: Row(41, "v_41") :: Row(42, "v_42") :: Nil)
+          checkAnswer(currentResult(), totalStreamingData)
+
+          spark.sql("INSERT INTO test_tbl VALUES (50, 'v_50'), (51, 'v_51'), (52, 'v_52')")
+          query.processAllAvailable()
+          totalStreamingData ++= (Row(50, "v_50") :: Row(51, "v_51") :: Row(52, "v_52") :: Nil)
+          checkAnswer(currentResult(), totalStreamingData)
+        } finally {
+          query.stop()
+        }
+    }
+  }
+
   test("Paimon Source: default and from-snapshot scan mode with scan.snapshot-id") {
     withTempDirs {
       (checkpointDir1, checkpointDir2) =>
