@@ -30,6 +30,7 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackReadScan;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -123,6 +124,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
+        return newSnapshotReader(wrapped);
+    }
+
+    private SnapshotReader newSnapshotReader(FileStoreTable wrapped) {
         if (!wrapped.schema().primaryKeys().isEmpty()) {
             return wrapped.newSnapshotReader()
                     .withLevel(coreOptions().numLevels() - 1)
@@ -136,13 +141,15 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     public DataTableScan newScan() {
         if (wrapped instanceof FallbackReadFileStoreTable) {
             FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) wrapped;
-            return (new FallbackReadFileStoreTable.FallbackReadScan(
-                            table.wrapped().newScan(), table.fallback().newScan()))
-                    .withLevelFilter(l -> l == coreOptions().numLevels() - 1);
+            return new FallbackReadScan(newScan(table.wrapped()), newScan(table.fallback()));
         }
+        return newScan(wrapped);
+    }
+
+    private DataTableScan newScan(FileStoreTable wrapped) {
         return new DataTableBatchScan(
                 !wrapped.schema().primaryKeys().isEmpty(),
-                coreOptions(),
+                wrapped.coreOptions(),
                 newSnapshotReader(),
                 DefaultValueAssigner.create(wrapped.schema()));
     }
