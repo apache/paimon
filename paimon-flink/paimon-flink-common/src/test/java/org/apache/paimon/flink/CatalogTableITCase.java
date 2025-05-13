@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import java.util.concurrent.ExecutionException;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
@@ -1131,7 +1130,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '1') */ VALUES (1, 10, 10), (2, 20, 20)");
         List<Row> result = sql("SELECT k, v, n FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 10, 10), Row.of(2, 20, 20));
-        sql("INSERT INTO T$branch_stream /*+ OPTIONS('write-only' = 'true') */VALUES (1, 10, 11), (3, 30, 30)");
+        sql(
+                "INSERT INTO T$branch_stream /*+ OPTIONS('write-only' = 'true') */VALUES (1, 10, 11), (3, 30, 30)");
         result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
         assertThat(result).containsExactly(Row.of(1, 10, 10), Row.of(2, 20, 20));
         sql(
