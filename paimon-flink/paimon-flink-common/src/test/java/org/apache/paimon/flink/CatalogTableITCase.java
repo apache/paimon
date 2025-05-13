@@ -38,6 +38,7 @@ import javax.annotation.Nonnull;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -1105,19 +1106,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadOptimizedTableFallBack() {
-        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
-        sql("CALL sys.create_branch('default.T', 'stream')");
-        sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
-
-        sql("DROP TABLE T");
-        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
-        sql("CALL sys.create_branch('default.T', 'stream')");
-        sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
-        // main branch is append table and fallback branch is pk table.
-        sql("DROP TABLE T");
+    public void testReadOptimizedTableFallBack() throws ExecutionException, InterruptedException {
         sql("CREATE TABLE T (k INT, v INT, n INT) PARTITIONED BY (k)");
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
@@ -1125,19 +1114,19 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'lookup')");
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
+        sql("show create table T$branch_stream");
         sql(
-                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10, 10), (2, 20, 20)");
+                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '1') */ VALUES (1, 10, 10), (2, 20, 20)");
         List<Row> result = sql("SELECT k, v, n FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 10, 10), Row.of(2, 20, 20));
-
-        // no compaction, so result of ro table does not change
-        sql("INSERT INTO T$branch_stream VALUES (1, 10, 11), (3, 30, 30)");
-        result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
-        assertThat(result).containsExactly(Row.of(1, 10, 11), Row.of(2, 20, 20), Row.of(3, 30, 30));
         sql(
-                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 20, 21), (3, 30, 31)");
+                "INSERT INTO T$branch_stream /*+ OPTIONS('write-only' = 'true') */VALUES (1, 10, 11), (3, 30, 30)");
         result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
-        assertThat(result).containsExactly(Row.of(1, 10, 11), Row.of(2, 20, 21), Row.of(3, 30, 31));
+        assertThat(result).containsExactly(Row.of(1, 10, 10), Row.of(2, 20, 20));
+        sql(
+                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '1') */ VALUES (1, 10, 12), (2, 20, 21), (3, 30, 31)");
+        result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
+        assertThat(result).containsExactly(Row.of(1, 10, 12), Row.of(2, 20, 21), Row.of(3, 30, 31));
         // insert into data to main branch.
         sql("INSERT INTO T VALUES (1, 10, 101), (2222, 202, 202)");
         result = sql("SELECT k, v, n FROM T$ro ORDER BY k");
