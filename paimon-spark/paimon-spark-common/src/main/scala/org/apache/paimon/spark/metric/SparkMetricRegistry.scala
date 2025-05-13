@@ -32,7 +32,7 @@ case class SparkMetricRegistry() extends MetricRegistry {
 
   private val metricGroups = mutable.Map.empty[String, MetricGroup]
 
-  override protected def createMetricGroup(
+  override def createMetricGroup(
       groupName: String,
       variables: util.Map[String, String]): MetricGroup = {
     val metricGroup = new MetricGroupImpl(groupName, variables)

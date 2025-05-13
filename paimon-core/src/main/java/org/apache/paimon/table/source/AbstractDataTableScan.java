@@ -27,6 +27,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -47,6 +50,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -56,12 +60,16 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -70,12 +78,29 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
+    private final TableSchema schema;
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
+    private final TableQueryAuth queryAuth;
 
-    protected AbstractDataTableScan(CoreOptions options, SnapshotReader snapshotReader) {
+    @Nullable private RowType readType;
+    @Nullable private Predicate predicate;
+
+    protected AbstractDataTableScan(
+            TableSchema schema,
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            TableQueryAuth queryAuth) {
+        this.schema = schema;
         this.options = options;
         this.snapshotReader = snapshotReader;
+        this.queryAuth = queryAuth;
+    }
+
+    @Override
+    public InnerTableScan withFilter(Predicate predicate) {
+        this.predicate = predicate;
+        return this;
     }
 
     @Override
@@ -87,6 +112,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public AbstractDataTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        this.readType = readType;
         return this;
     }
 
@@ -114,9 +145,27 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    public AbstractDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+    public AbstractDataTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
         snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
+    }
+
+    protected void authQuery() {
+        if (!options.queryAuthEnabled()) {
+            return;
+        }
+
+        List<String> projection = readType == null ? schema.fieldNames() : readType.getFieldNames();
+        List<String> filter = new ArrayList<>();
+        if (predicate != null) {
+            List<Predicate> predicates = splitAnd(predicate);
+            for (Predicate predicate : predicates) {
+                if (predicate instanceof LeafPredicate) {
+                    filter.add(predicate.toString());
+                }
+            }
+        }
+        queryAuth.auth(projection, filter);
     }
 
     @Override

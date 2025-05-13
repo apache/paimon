@@ -31,7 +31,7 @@ import java.io.IOException;
 import java.util.Optional;
 
 /** A {@link InnerTableRead} for data table. */
-public abstract class AbstractDataTableRead<T> implements InnerTableRead {
+public abstract class AbstractDataTableRead implements InnerTableRead {
 
     private final DefaultValueAssigner defaultValueAssigner;
 

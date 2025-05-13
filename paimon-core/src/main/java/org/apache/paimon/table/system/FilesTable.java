@@ -116,7 +116,8 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(13, "min_sequence_number", new BigIntType(true)),
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
                             new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(16, "file_source", DataTypes.STRING())));
+                            new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
+                            new DataField(17, "file_source", DataTypes.STRING())));
 
     private final FileStoreTable storeTable;
 
@@ -428,6 +429,7 @@ public class FilesTable implements ReadonlyTable {
                         file::minSequenceNumber,
                         file::maxSequenceNumber,
                         file::creationTime,
+                        () -> file.deleteRowCount().orElse(null),
                         () ->
                                 BinaryString.fromString(
                                         file.fileSource().map(FileSource::toString).orElse(null))
