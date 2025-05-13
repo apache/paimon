@@ -57,7 +57,15 @@ public enum BucketMode {
      * Ignoring bucket concept, although all data is written to bucket-0, the parallelism of reads
      * and writes is unrestricted. This mode only works for append-only table.
      */
-    BUCKET_UNAWARE;
+    BUCKET_UNAWARE,
+
+    /**
+     * Configured by 'bucket' = '-2' (postpone bucket) for primary key table. This mode aims to
+     * solve the difficulty to determine a fixed number of buckets and support different buckets for
+     * different partitions. The bucket will be adaptively adjusted to the appropriate value in the
+     * background.
+     */
+    POSTPONE_MODE;
 
     public static final int UNAWARE_BUCKET = 0;
 
