@@ -63,6 +63,9 @@ import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -86,6 +89,8 @@ import java.util.stream.Collectors;
  * Paimon's {@link RawFile}.
  */
 public class IcebergCommitCallback implements CommitCallback, TagCallback {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IcebergCommitCallback.class);
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
@@ -820,11 +825,20 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         try {
             Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
             if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        tagName,
+                        snapshotId);
                 return;
             }
 
             Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
             if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        baseMetadataPath,
+                        tagName,
+                        snapshotId);
                 return;
             }
 
@@ -854,6 +868,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             There is no need to update the catalog after overwrite.
              */
             table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to add tag {} for snapshot {}.",
+                    baseMetadataPath,
+                    tagName,
+                    snapshotId);
 
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create tag " + tagName, e);
@@ -865,11 +884,18 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         try {
             Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
             if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when deleting tag {}. Unable to delete tag.",
+                        tagName);
                 return;
             }
 
             Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
             if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when deleting tag {}. Unable to delete tag.",
+                        baseMetadataPath,
+                        tagName);
                 return;
             }
 
@@ -899,6 +925,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             There is no need to update the catalog after overwrite.
              */
             table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to delete tag {}.",
+                    baseMetadataPath,
+                    tagName);
 
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create tag " + tagName, e);
