@@ -62,7 +62,7 @@ public class CompactionMetrics {
     private Counter compactionsQueuedCounter;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
-        this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+        this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();

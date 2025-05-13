@@ -40,6 +40,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.function.IntFunction;
 
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
@@ -55,6 +57,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
     private final boolean noSequenceField;
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    private final IntFunction<String> level2FileFormat;
 
     public LookupMergeTreeCompactRewriter(
             int maxLevel,
@@ -85,6 +88,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
         this.noSequenceField = options.sequenceField().isEmpty();
+        String fileFormat = options.fileFormatString();
+        Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
+        this.level2FileFormat = level -> fileFormatPerLevel.getOrDefault(level, fileFormat);
     }
 
     @Override
@@ -104,6 +110,11 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
         if (file.level() != 0) {
             return NO_CHANGELOG_NO_REWRITE;
+        }
+
+        // forcing rewriting when upgrading from level 0 to level x with different file formats
+        if (!level2FileFormat.apply(file.level()).equals(level2FileFormat.apply(outputLevel))) {
+            return CHANGELOG_WITH_REWRITE;
         }
 
         // In deletionVector mode, since drop delete is required, when delete row count > 0 rewrite

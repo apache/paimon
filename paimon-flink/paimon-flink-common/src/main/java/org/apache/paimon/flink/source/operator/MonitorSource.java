@@ -224,20 +224,22 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
 
         DataStream<Split> sourceDataStream =
                 bucketMode == BUCKET_UNAWARE
-                        ? shuffleUnwareBucket(singleOutputStreamOperator)
-                        : shuffleNonUnwareBucket(
+                        ? shuffleUnawareBucket(singleOutputStreamOperator)
+                        : shuffleNonUnawareBucket(
                                 singleOutputStreamOperator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
-                name + "-Reader", typeInfo, new ReadOperator(readBuilder, nestedProjectedRowData));
+                name + "-Reader",
+                typeInfo,
+                new ReadOperator(readBuilder::newRead, nestedProjectedRowData));
     }
 
-    private static DataStream<Split> shuffleUnwareBucket(
+    private static DataStream<Split> shuffleUnawareBucket(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator) {
         return singleOutputStreamOperator.rebalance();
     }
 
-    private static DataStream<Split> shuffleNonUnwareBucket(
+    private static DataStream<Split> shuffleNonUnawareBucket(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator,
             boolean shuffleBucketWithPartition) {
         return singleOutputStreamOperator.partitionCustom(

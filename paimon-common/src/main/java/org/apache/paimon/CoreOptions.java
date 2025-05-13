@@ -59,6 +59,7 @@ import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.options.MemorySize.VALUE_256_MB;
@@ -1652,6 +1653,14 @@ public class CoreOptions implements Serializable {
                             "Set a time duration when a partition has no new data after this time duration, "
                                     + "start to report the partition statistics to hms.");
 
+    public static final ConfigOption<Boolean> QUERY_AUTH_ENABLED =
+            key("query-auth.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable query auth to give Catalog the opportunity to perform "
+                                    + "column level and row level permission validation on queries.");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -2036,6 +2045,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public boolean queryAuthEnabled() {
+        return options.get(QUERY_AUTH_ENABLED);
     }
 
     public boolean ignoreDelete() {
@@ -2623,6 +2636,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public boolean batchScanSkipLevel0() {
+        return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
     }
 
     public MemorySize deletionVectorIndexFileTargetSize() {

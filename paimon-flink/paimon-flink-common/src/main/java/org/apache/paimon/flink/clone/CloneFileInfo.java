@@ -21,7 +21,7 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.migrate.HivePartitionFiles;
+import org.apache.paimon.hive.clone.HivePartitionFiles;
 
 import java.io.Serializable;
 import java.util.ArrayList;

@@ -25,6 +25,7 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{BucketMode, DataTable, FileStoreTable, KnownSplitsTable, Table}
+import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
@@ -55,8 +56,8 @@ case class SparkTable(table: Table)
     table match {
       case storeTable: FileStoreTable =>
         storeTable.bucketMode() match {
-          case BucketMode.HASH_FIXED => BucketFunction.supportsTable(storeTable)
-          case BucketMode.BUCKET_UNAWARE => true
+          case HASH_FIXED => BucketFunction.supportsTable(storeTable)
+          case BUCKET_UNAWARE | POSTPONE_MODE => true
           case _ => false
         }
 
