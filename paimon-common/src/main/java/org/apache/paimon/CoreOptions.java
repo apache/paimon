@@ -59,6 +59,7 @@ import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.options.MemorySize.VALUE_256_MB;
@@ -2635,6 +2636,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public boolean batchScanSkipLevel0() {
+        return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
     }
 
     public MemorySize deletionVectorIndexFileTargetSize() {
