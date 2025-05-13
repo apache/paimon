@@ -41,7 +41,7 @@ public class IOManagerImpl implements IOManager {
 
     private final String[] tempDirs;
 
-    private volatile FileChannelManager lazyFileChannelManager;
+    private volatile FileChannelManager lazyChannelManager;
 
     // -------------------------------------------------------------------------
     //               Constructors / Destructors
@@ -58,35 +58,43 @@ public class IOManagerImpl implements IOManager {
     }
 
     private FileChannelManager fileChannelManager() {
-        if (lazyFileChannelManager == null) {
+        if (lazyChannelManager == null) {
             synchronized (this) {
-                if (lazyFileChannelManager == null) {
-                    this.lazyFileChannelManager =
-                            new FileChannelManagerImpl(tempDirs, DIR_NAME_PREFIX);
-                    if (LOG.isInfoEnabled()) {
-                        LOG.info(
-                                "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
-                                FileChannelManager.class.getSimpleName(),
-                                getSpillingDirectoriesPathsString());
-                    }
+                if (lazyChannelManager == null) {
+                    lazyChannelManager = createFileChannelManager();
                 }
             }
         }
 
-        return lazyFileChannelManager;
+        return lazyChannelManager;
     }
 
     /** Removes all temporary files. */
     @Override
     public void close() throws Exception {
-        if (lazyFileChannelManager != null) {
-            lazyFileChannelManager.close();
-            if (LOG.isInfoEnabled()) {
-                LOG.info(
-                        "Closed {} with directories:\n\t{}",
-                        FileChannelManager.class.getSimpleName(),
-                        getSpillingDirectoriesPathsString());
-            }
+        if (lazyChannelManager != null) {
+            closeFileChannelManager(lazyChannelManager);
+        }
+    }
+
+    private FileChannelManager createFileChannelManager() {
+        FileChannelManager channelManager = new FileChannelManagerImpl(tempDirs, DIR_NAME_PREFIX);
+        if (LOG.isInfoEnabled()) {
+            LOG.info(
+                    "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
+                    FileChannelManager.class.getSimpleName(),
+                    getSpillingDirectoriesPathsString());
+        }
+        return channelManager;
+    }
+
+    private void closeFileChannelManager(FileChannelManager fileChannelManager) throws Exception {
+        fileChannelManager.close();
+        if (LOG.isInfoEnabled()) {
+            LOG.info(
+                    "Closed {} with directories:\n\t{}",
+                    FileChannelManager.class.getSimpleName(),
+                    getSpillingDirectoriesPathsString());
         }
     }
 

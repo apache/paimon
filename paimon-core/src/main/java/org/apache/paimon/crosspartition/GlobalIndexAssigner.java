@@ -72,6 +72,7 @@ import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.utils.ListUtils.pickRandomly;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -132,15 +133,9 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         this.extractor = new RowPartitionAllPrimaryKeyExtractor(table.schema());
         this.keyPartExtractor = new KeyPartPartitionKeyExtractor(table.schema());
 
-        for (String tmpDir : ioManager.tempDirs()) {
-            File rocksDBDir = new File(tmpDir, "rocksdb-" + UUID.randomUUID());
-            if (rocksDBDir.mkdirs()) {
-                this.path = rocksDBDir;
-                break;
-            }
-        }
-
-        if (path == null) {
+        String tmpDir = pickRandomly(Arrays.asList(ioManager.tempDirs()));
+        this.path = new File(tmpDir, "rocksdb-" + UUID.randomUUID());
+        if (!this.path.mkdirs()) {
             throw new RuntimeException(
                     "Failed to create RocksDB cache directory in temp dirs: "
                             + Arrays.toString(ioManager.tempDirs()));
