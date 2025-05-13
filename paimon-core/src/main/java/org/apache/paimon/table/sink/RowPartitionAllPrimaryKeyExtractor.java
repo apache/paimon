@@ -16,34 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.crosspartition;
+package org.apache.paimon.table.sink;
 
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.PartitionKeyExtractor;
-import org.apache.paimon.types.RowType;
 
-import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-/** A {@link PartitionKeyExtractor} to {@link InternalRow} with only key and partition fields. */
-public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
+/**
+ * A {@link PartitionKeyExtractor} to {@link InternalRow}, the `trimmedPrimaryKey` would return all
+ * primary keys.
+ */
+public class RowPartitionAllPrimaryKeyExtractor implements PartitionKeyExtractor<InternalRow> {
 
     private final Projection partitionProjection;
-    private final Projection keyProjection;
+    private final Projection primaryKeyProjection;
 
-    public KeyPartPartitionKeyExtractor(TableSchema schema) {
-        List<String> partitionKeys = schema.partitionKeys();
-        RowType keyPartType =
-                schema.projectedLogicalRowType(
-                        Stream.concat(schema.trimmedPrimaryKeys().stream(), partitionKeys.stream())
-                                .collect(Collectors.toList()));
-        this.partitionProjection = CodeGenUtils.newProjection(keyPartType, partitionKeys);
-        this.keyProjection = CodeGenUtils.newProjection(keyPartType, schema.primaryKeys());
+    public RowPartitionAllPrimaryKeyExtractor(TableSchema schema) {
+        partitionProjection =
+                CodeGenUtils.newProjection(
+                        schema.logicalRowType(), schema.projection(schema.partitionKeys()));
+        primaryKeyProjection =
+                CodeGenUtils.newProjection(
+                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
     }
 
     @Override
@@ -53,6 +49,6 @@ public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<Inter
 
     @Override
     public BinaryRow trimmedPrimaryKey(InternalRow record) {
-        return keyProjection.apply(record);
+        return primaryKeyProjection.apply(record);
     }
 }

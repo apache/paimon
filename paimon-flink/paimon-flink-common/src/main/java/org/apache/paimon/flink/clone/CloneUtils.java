@@ -23,7 +23,7 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hive.migrate.HiveCloneUtils;
+import org.apache.paimon.hive.clone.HiveCloneUtils;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.StringUtils;
 
