@@ -68,7 +68,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1','full-compaction.delta-commits'='10')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+                        "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
     }
 
     @Test
@@ -257,7 +257,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
+    public void testReadUnawareBucketTableWithRebalanceShuffle() throws Exception {
         batchSql(
                 "CREATE TABLE append_scalable_table (id INT, data STRING) "
                         + "WITH ('bucket' = '-1', 'consumer-id' = 'test', 'consumer.expiration-time' = '365 d', 'target-file-size' = '1 B', 'source.split.target-size' = '1 B', 'scan.parallelism' = '4')");

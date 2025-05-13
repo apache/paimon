@@ -604,7 +604,7 @@ public class SchemaValidation {
             if (schema.primaryKeys().isEmpty()
                     && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
                 throw new RuntimeException(
-                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+                        "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
