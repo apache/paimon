@@ -1214,8 +1214,6 @@ paths:
                 $ref: '#/components/schemas/ListFunctionsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     post:
