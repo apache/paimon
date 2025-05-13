@@ -23,7 +23,7 @@ import org.apache.paimon.types.DataField;
 import java.util.List;
 import java.util.Map;
 
-/** Interface for function definition. */
+/** Interface for function. */
 public interface Function {
 
     String uuid();

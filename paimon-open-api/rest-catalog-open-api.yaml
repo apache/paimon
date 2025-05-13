@@ -1308,7 +1308,7 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
     delete:
       tags:
-        - view
+        - function
       summary: Drop function
       operationId: dropFunction
       parameters:

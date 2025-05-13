@@ -849,15 +849,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.functionDetails(functionName),
                             GetFunctionResponse.class,
                             restAuthFunction);
-            return new FunctionImpl(
-                    functionName,
-                    response.uuid(),
-                    response.inputParams(),
-                    response.returnParams(),
-                    response.isDeterministic(),
-                    response.definitions(),
-                    response.comment(),
-                    response.options());
+            return new FunctionImpl(response);
         } catch (NoSuchResourceException e) {
             throw new FunctionNotExistException(functionName, e);
         }
@@ -872,14 +864,7 @@ public class RESTCatalog implements Catalog {
         try {
             client.post(
                     resourcePaths.functions(),
-                    new CreateFunctionRequest(
-                            functionName,
-                            function.inputParams(),
-                            function.returnParams(),
-                            function.isDeterministic(),
-                            function.definitions(),
-                            function.comment(),
-                            function.options()),
+                    new CreateFunctionRequest(function),
                     restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (ignoreIfExists) {

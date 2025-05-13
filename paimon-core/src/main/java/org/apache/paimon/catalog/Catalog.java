@@ -672,7 +672,7 @@ public interface Catalog extends AutoCloseable {
     List<String> listFunctions();
 
     /**
-     * Get function by identifier.
+     * Get function by name.
      *
      * @param functionName
      * @throws FunctionNotExistException

@@ -63,87 +63,7 @@ public interface FunctionDefinition {
         return new FunctionDefinition.LambdaFunctionDefinition(definition, language);
     }
 
-    /** Definition of a SQL function. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    final class SQLFunctionDefinition implements FunctionDefinition {
-
-        private static final String FIELD_DEFINITION = "definition";
-
-        private final String definition;
-
-        public SQLFunctionDefinition(@JsonProperty(FIELD_DEFINITION) String definition) {
-            this.definition = definition;
-        }
-
-        @JsonGetter(FIELD_DEFINITION)
-        public String definition() {
-            return definition;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            SQLFunctionDefinition that = (SQLFunctionDefinition) o;
-            return definition.equals(that.definition);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(definition);
-        }
-    }
-
-    /** Lambda function definition. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    final class LambdaFunctionDefinition implements FunctionDefinition {
-
-        private static final String FIELD_DEFINITION = "definition";
-        private static final String FIELD_LANGUAGE = "language";
-
-        private final String definition;
-        private final String language;
-
-        public LambdaFunctionDefinition(
-                @JsonProperty(FIELD_DEFINITION) String definition,
-                @JsonProperty(FIELD_LANGUAGE) String language) {
-            this.definition = definition;
-            this.language = language;
-        }
-
-        @JsonGetter(FIELD_DEFINITION)
-        public String definition() {
-            return definition;
-        }
-
-        @JsonGetter(FIELD_LANGUAGE)
-        public String language() {
-            return language;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            LambdaFunctionDefinition that = (LambdaFunctionDefinition) o;
-            return definition.equals(that.definition) && language.equals(that.language);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(definition, language);
-        }
-    }
-
-    /** FileFunctionDefinition for FunctionDefinition. */
+    /** File function definition. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     final class FileFunctionDefinition implements FunctionDefinition {
 
@@ -227,6 +147,86 @@ public interface FunctionDefinition {
             int result = Objects.hash(fileType, language, className, functionName);
             result = 31 * result + Objects.hashCode(storagePaths);
             return result;
+        }
+    }
+
+    /** SQL function definition. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    final class SQLFunctionDefinition implements FunctionDefinition {
+
+        private static final String FIELD_DEFINITION = "definition";
+
+        private final String definition;
+
+        public SQLFunctionDefinition(@JsonProperty(FIELD_DEFINITION) String definition) {
+            this.definition = definition;
+        }
+
+        @JsonGetter(FIELD_DEFINITION)
+        public String definition() {
+            return definition;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SQLFunctionDefinition that = (SQLFunctionDefinition) o;
+            return Objects.equals(definition, that.definition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(definition);
+        }
+    }
+
+    /** Lambda function definition. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    final class LambdaFunctionDefinition implements FunctionDefinition {
+
+        private static final String FIELD_DEFINITION = "definition";
+        private static final String FIELD_LANGUAGE = "language";
+
+        private final String definition;
+        private final String language;
+
+        public LambdaFunctionDefinition(
+                @JsonProperty(FIELD_DEFINITION) String definition,
+                @JsonProperty(FIELD_LANGUAGE) String language) {
+            this.definition = definition;
+            this.language = language;
+        }
+
+        @JsonGetter(FIELD_DEFINITION)
+        public String definition() {
+            return definition;
+        }
+
+        @JsonGetter(FIELD_LANGUAGE)
+        public String language() {
+            return language;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            LambdaFunctionDefinition that = (LambdaFunctionDefinition) o;
+            return definition.equals(that.definition) && language.equals(that.language);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(definition, language);
         }
     }
 

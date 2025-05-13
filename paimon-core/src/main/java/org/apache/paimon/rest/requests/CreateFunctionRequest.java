@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.rest.RESTRequest;
 import org.apache.paimon.types.DataField;
@@ -79,6 +80,16 @@ public class CreateFunctionRequest implements RESTRequest {
         this.definitions = definitions;
         this.comment = comment;
         this.options = options;
+    }
+
+    public CreateFunctionRequest(Function function) {
+        this.functionName = function.name();
+        this.inputParams = function.inputParams();
+        this.returnParams = function.returnParams();
+        this.deterministic = function.isDeterministic();
+        this.definitions = function.definitions();
+        this.comment = function.comment();
+        this.options = function.options();
     }
 
     @JsonGetter(FIELD_NAME)

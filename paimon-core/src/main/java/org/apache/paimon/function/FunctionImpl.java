@@ -18,6 +18,7 @@
 
 package org.apache.paimon.function;
 
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -28,7 +29,7 @@ public class FunctionImpl implements Function {
 
     private final String uuid;
 
-    private final String functionName;
+    private final String name;
 
     private final List<DataField> inputParams;
 
@@ -52,13 +53,24 @@ public class FunctionImpl implements Function {
             String comment,
             Map<String, String> options) {
         this.uuid = uuid;
-        this.functionName = functionName;
+        this.name = functionName;
         this.inputParams = inputParams;
         this.returnParams = returnParams;
         this.deterministic = deterministic;
         this.definitions = definitions;
         this.comment = comment;
         this.options = options;
+    }
+
+    public FunctionImpl(GetFunctionResponse response) {
+        this.uuid = response.uuid();
+        this.name = response.name();
+        this.inputParams = response.inputParams();
+        this.returnParams = response.returnParams();
+        this.deterministic = response.isDeterministic();
+        this.definitions = response.definitions();
+        this.comment = response.comment();
+        this.options = response.options();
     }
 
     @Override
@@ -68,7 +80,7 @@ public class FunctionImpl implements Function {
 
     @Override
     public String name() {
-        return this.functionName;
+        return this.name;
     }
 
     @Override
