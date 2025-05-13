@@ -1117,6 +1117,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         innerTestReadOptimizedTableAndCheckData("T$branch_stream", true);
         // main branch is append table and fallback branch is pk table.
+        // insert into data to fallback branch.
         sql("DROP TABLE T");
         sql("CREATE TABLE T (k INT, v INT)");
         sql("CALL sys.create_branch('default.T', 'stream')");
@@ -1124,6 +1125,22 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql(
                 "ALTER TABLE T$branch_stream SET ('primary-key' = 'k', 'bucket' = '2','changelog-producer' = 'lookup')");
         innerTestReadOptimizedTableAndCheckData("T$branch_stream", false);
+
+        // insert into data to main branch.
+        sql("DROP TABLE T");
+        sql("CREATE TABLE T (k INT, v INT)");
+        sql("CALL sys.create_branch('default.T', 'stream')");
+        sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
+        sql(
+                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k', 'bucket' = '2','changelog-producer' = 'lookup')");
+
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
+        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result)
+                .containsExactly(Row.of(1, 10), Row.of(1, 11), Row.of(2, 20), Row.of(3, 30));
     }
 
     @Test
