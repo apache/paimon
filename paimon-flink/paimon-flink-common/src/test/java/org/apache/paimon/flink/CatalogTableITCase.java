@@ -1097,11 +1097,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testReadOptimizedTable() {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
-        innerTestReadOptimizedTableAndCheckData("T", true);
+        innerTestReadOptimizedTableAndCheckData("T");
 
         sql("DROP TABLE T");
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
-        innerTestReadOptimizedTableAndCheckData("T", true);
+        innerTestReadOptimizedTableAndCheckData("T");
     }
 
     @Test
@@ -1109,38 +1109,44 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        innerTestReadOptimizedTableAndCheckData("T$branch_stream", true);
+        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
 
         sql("DROP TABLE T");
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        innerTestReadOptimizedTableAndCheckData("T$branch_stream", true);
+        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
         // main branch is append table and fallback branch is pk table.
-        // insert into data to fallback branch.
         sql("DROP TABLE T");
-        sql("CREATE TABLE T (k INT, v INT)");
+        sql("CREATE TABLE T (k INT, v INT, n INT) PARTITIONED BY (k)");
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         sql(
-                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k', 'bucket' = '2','changelog-producer' = 'lookup')");
-        innerTestReadOptimizedTableAndCheckData("T$branch_stream", false);
+                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'lookup')");
+        // full compaction will always be performed at the end of batch jobs, as long as
+        // full-compaction.delta-commits is set, regardless of its value
+        sql(
+                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10, 10), (2, 20, 20)");
+        List<Row> result = sql("SELECT k, v, n FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10, 10), Row.of(2, 20, 20));
 
+        // no compaction, so result of ro table does not change
+        sql("INSERT INTO T$branch_stream VALUES (1, 10, 11), (3, 30, 30)");
+        result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
+        assertThat(result).containsExactly(Row.of(1, 10, 11), Row.of(2, 20, 20), Row.of(3, 30, 30));
+        sql(
+                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 20, 21), (3, 30, 31)");
+        result = sql("SELECT k, v, n FROM T$ro ORDER BY k, v");
+        assertThat(result).containsExactly(Row.of(1, 10, 11), Row.of(2, 20, 21), Row.of(3, 30, 31));
         // insert into data to main branch.
-        sql("DROP TABLE T");
-        sql("CREATE TABLE T (k INT, v INT)");
-        sql("CALL sys.create_branch('default.T', 'stream')");
-        sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        sql(
-                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k', 'bucket' = '2','changelog-producer' = 'lookup')");
-
-        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
-        List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
-        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
-        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
-        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        sql("INSERT INTO T VALUES (1, 10, 101), (2222, 202, 202)");
+        result = sql("SELECT k, v, n FROM T$ro ORDER BY k");
         assertThat(result)
-                .containsExactly(Row.of(1, 10), Row.of(1, 11), Row.of(2, 20), Row.of(3, 30));
+                .containsExactly(
+                        Row.of(1, 10, 101),
+                        Row.of(2, 20, 21),
+                        Row.of(3, 30, 31),
+                        Row.of(2222, 202, 202));
     }
 
     @Test
@@ -1212,8 +1218,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(row.getField(6)).isNotNull();
     }
 
-    private void innerTestReadOptimizedTableAndCheckData(
-            String insertTableName, boolean mainBranchIsPkTable) {
+    private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql(
@@ -1226,11 +1231,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         // no compaction, so result of ro table does not change
         sql(String.format("INSERT INTO %s VALUES (1, 11), (3, 30)", insertTableName));
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
-        if (mainBranchIsPkTable) {
-            assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
-        } else {
-            assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20), Row.of(3, 30));
-        }
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
         sql(
                 String.format(
                         "INSERT INTO %s /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)",
