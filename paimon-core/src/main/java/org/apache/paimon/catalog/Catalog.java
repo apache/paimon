@@ -474,11 +474,9 @@ public interface Catalog extends AutoCloseable {
      * <p>NOTE: System tables will not be listed.
      *
      * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All view summaries will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @param maxResults Optional parameter indicating the maximum number of results to include in
      *     the result. If maxResults is not specified or set to 0, will return the default number of
      *     max results.
