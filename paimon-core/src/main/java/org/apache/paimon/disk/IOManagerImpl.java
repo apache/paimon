@@ -61,7 +61,7 @@ public class IOManagerImpl implements IOManager {
         if (lazyChannelManager == null) {
             synchronized (this) {
                 if (lazyChannelManager == null) {
-                    lazyChannelManager = createFileChannelManager();
+                    lazyChannelManager = new FileChannelManagerImpl(tempDirs, DIR_NAME_PREFIX);
                 }
             }
         }
@@ -73,28 +73,7 @@ public class IOManagerImpl implements IOManager {
     @Override
     public void close() throws Exception {
         if (lazyChannelManager != null) {
-            closeFileChannelManager(lazyChannelManager);
-        }
-    }
-
-    private FileChannelManager createFileChannelManager() {
-        FileChannelManager channelManager = new FileChannelManagerImpl(tempDirs, DIR_NAME_PREFIX);
-        if (LOG.isInfoEnabled()) {
-            LOG.info(
-                    "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
-                    FileChannelManager.class.getSimpleName(),
-                    getSpillingDirectoriesPathsString());
-        }
-        return channelManager;
-    }
-
-    private void closeFileChannelManager(FileChannelManager fileChannelManager) throws Exception {
-        fileChannelManager.close();
-        if (LOG.isInfoEnabled()) {
-            LOG.info(
-                    "Closed {} with directories:\n\t{}",
-                    FileChannelManager.class.getSimpleName(),
-                    getSpillingDirectoriesPathsString());
+            lazyChannelManager.close();
         }
     }
 
