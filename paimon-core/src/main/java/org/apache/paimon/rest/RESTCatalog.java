@@ -30,6 +30,8 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -43,12 +45,14 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
@@ -60,12 +64,14 @@ import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -821,6 +827,88 @@ public class RESTCatalog implements Catalog {
             throws TableNotExistException {
         // The partition statistics of the REST Catalog server are automatically calculated and do
         // not require special reporting.
+    }
+
+    @Override
+    public List<String> listFunctions() {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.functions(),
+                                queryParams,
+                                ListFunctionsResponse.class,
+                                restAuthFunction));
+    }
+
+    @Override
+    public org.apache.paimon.function.Function getFunction(String functionName)
+            throws FunctionNotExistException {
+        try {
+            GetFunctionResponse response =
+                    client.get(
+                            resourcePaths.function(functionName),
+                            GetFunctionResponse.class,
+                            restAuthFunction);
+            return new FunctionImpl(response);
+        } catch (NoSuchResourceException e) {
+            throw new FunctionNotExistException(functionName, e);
+        }
+    }
+
+    @Override
+    public void createFunction(
+            String functionName,
+            org.apache.paimon.function.Function function,
+            boolean ignoreIfExists)
+            throws FunctionAlreadyExistException {
+        try {
+            client.post(
+                    resourcePaths.functions(),
+                    new CreateFunctionRequest(function),
+                    restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new FunctionAlreadyExistException(functionName, e);
+        }
+    }
+
+    @Override
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        try {
+            client.delete(resourcePaths.function(functionName), restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new FunctionNotExistException(functionName, e);
+        }
+    }
+
+    @Override
+    public void alterFunction(
+            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
+        try {
+            client.post(
+                    resourcePaths.function(functionName),
+                    new AlterFunctionRequest(changes),
+                    restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            throw new DefinitionAlreadyExistException(functionName, e.resourceName());
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DEFINITION)) {
+                throw new DefinitionNotExistException(functionName, e.resourceName());
+            }
+            if (!ignoreIfNotExists) {
+                throw new FunctionNotExistException(functionName);
+            }
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
     }
 
     @Override

@@ -32,6 +32,7 @@ import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.format.parquet.writer.ParquetRowDataBuilder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
@@ -53,6 +54,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -190,6 +192,44 @@ public class FileTypeNotMatchReadTypeTest {
         InternalRow row = fileRecordReader.readBatch().next();
         int i = row.getArray(0).getInt(0);
         assertThat(i).isEqualTo(1);
+        file.delete();
+    }
+
+    @Test
+    public void testArray2() throws Exception {
+        String fileName = "test.parquet";
+        String fileWholePath = tempDir + "/" + fileName;
+
+        SimpleGroupWriteSupport simpleGroupWriteSupport = new SimpleGroupWriteSupport();
+        simpleGroupWriteSupport.writeTest(
+                fileWholePath,
+                Arrays.asList(
+                        new SimpleGroupWriteSupport.SimpleGroup(Arrays.asList(1, 21, 242)),
+                        new SimpleGroupWriteSupport.SimpleGroup(Arrays.asList(4, 221, 12))));
+
+        RowType rowType =
+                RowType.of(new DataField(0, "list_of_ints", DataTypes.ARRAY(DataTypes.INT())));
+
+        ParquetReaderFactory parquetReaderFactory =
+                new ParquetReaderFactory(new Options(), rowType, 100, null);
+
+        File file = new File(fileWholePath);
+        FileRecordReader<InternalRow> fileRecordReader =
+                parquetReaderFactory.createReader(
+                        new FormatReaderContext(
+                                LocalFileIO.create(),
+                                new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
+                                file.length()));
+
+        FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
+        InternalRow row = batch.next();
+        assertThat(row.getArray(0).getInt(0)).isEqualTo(1);
+        assertThat(row.getArray(0).getInt(1)).isEqualTo(21);
+        assertThat(row.getArray(0).getInt(2)).isEqualTo(242);
+        row = batch.next();
+        assertThat(row.getArray(0).getInt(0)).isEqualTo(4);
+        assertThat(row.getArray(0).getInt(1)).isEqualTo(221);
+        assertThat(row.getArray(0).getInt(2)).isEqualTo(12);
         file.delete();
     }
 

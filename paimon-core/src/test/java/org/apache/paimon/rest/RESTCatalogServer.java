@@ -33,6 +33,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -41,12 +45,14 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
@@ -57,12 +63,14 @@ import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -128,6 +136,7 @@ public class RESTCatalogServer {
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String databaseUri;
+    private final String functionUri;
 
     private final FileSystemCatalog catalog;
     private final MockWebServer server;
@@ -140,6 +149,7 @@ public class RESTCatalogServer {
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
+    private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
@@ -154,6 +164,7 @@ public class RESTCatalogServer {
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
+        this.functionUri = resourcePaths.functions();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
@@ -264,6 +275,11 @@ public class RESTCatalogServer {
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
+                    } else if (functionUri.equals(request.getPath())) {
+                        return functionsApiHandler(restAuthParameter.method(), data, parameters);
+                    } else if (request.getPath().startsWith(functionUri)) {
+                        return functionApiHandler(
+                                request.getPath(), restAuthParameter.method(), data, parameters);
                     } else if (resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
@@ -500,6 +516,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
+                } catch (Catalog.FunctionAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_COLUMN,
+                                    e.functionName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
+                } catch (Catalog.DefinitionAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_DEFINITION,
+                                    e.functionName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
                 } catch (Catalog.ViewNotExistException e) {
                     response =
                             new ErrorResponse(
@@ -513,6 +545,22 @@ public class RESTCatalogServer {
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_DIALECT,
                                     e.dialect(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.FunctionNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_FUNCTION,
+                                    e.functionName(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.DefinitionNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_DEFINITION,
+                                    e.functionName(),
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
@@ -711,6 +759,158 @@ public class RESTCatalogServer {
         }
     }
 
+    private MockResponse functionDetailsHandler(String functionName) throws Exception {
+        if (functionStore.containsKey(functionName)) {
+            Function function = functionStore.get(functionName);
+            GetFunctionResponse response =
+                    new GetFunctionResponse(
+                            function.uuid(),
+                            function.name(),
+                            function.inputParams(),
+                            function.returnParams(),
+                            function.isDeterministic(),
+                            function.definitions(),
+                            function.comment(),
+                            function.options(),
+                            "owner",
+                            1L,
+                            "owner",
+                            1L,
+                            "owner");
+            return mockResponse(response, 200);
+        } else {
+            throw new Catalog.FunctionNotExistException(functionName);
+        }
+    }
+
+    private MockResponse functionsApiHandler(
+            String method, String data, Map<String, String> parameters) throws Exception {
+        switch (method) {
+            case "GET":
+                List<String> functions = new ArrayList<>(functionStore.keySet());
+                return generateFinalListFunctionsResponse(parameters, functions);
+            case "POST":
+                CreateFunctionRequest requestBody =
+                        OBJECT_MAPPER.readValue(data, CreateFunctionRequest.class);
+                String functionName = requestBody.name();
+                if (!functionStore.containsKey(functionName)) {
+                    Function function =
+                            new FunctionImpl(
+                                    UUID.randomUUID().toString(),
+                                    functionName,
+                                    requestBody.inputParams(),
+                                    requestBody.returnParams(),
+                                    requestBody.isDeterministic(),
+                                    requestBody.definitions(),
+                                    requestBody.comment(),
+                                    requestBody.options());
+                    functionStore.put(functionName, function);
+                    return new MockResponse().setResponseCode(200);
+                } else {
+                    throw new Catalog.FunctionAlreadyExistException(functionName);
+                }
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private MockResponse functionApiHandler(
+            String path, String method, String data, Map<String, String> parameters)
+            throws Exception {
+        String[] resources = path.substring((functionUri + "/").length()).split("/");
+        String functionName = RESTUtil.decodeString(resources[0]);
+        if (!functionStore.containsKey(functionName)) {
+            throw new Catalog.FunctionNotExistException(functionName);
+        }
+        Function function = functionStore.get(functionName);
+        switch (method) {
+            case "DELETE":
+                functionStore.remove(functionName);
+                break;
+            case "GET":
+                GetFunctionResponse response =
+                        new GetFunctionResponse(
+                                function.uuid(),
+                                function.name(),
+                                function.inputParams(),
+                                function.returnParams(),
+                                function.isDeterministic(),
+                                function.definitions(),
+                                function.comment(),
+                                function.options(),
+                                "owner",
+                                1L,
+                                "owner",
+                                1L,
+                                "owner");
+                return mockResponse(response, 200);
+            case "POST":
+                AlterFunctionRequest requestBody =
+                        OBJECT_MAPPER.readValue(data, AlterFunctionRequest.class);
+                HashMap<String, FunctionDefinition> newDefinitions =
+                        new HashMap<>(function.definitions());
+                Map<String, String> newOptions = new HashMap<>(function.options());
+                String newComment = function.comment();
+                for (FunctionChange functionChange : requestBody.changes()) {
+                    if (functionChange instanceof FunctionChange.SetFunctionOption) {
+                        FunctionChange.SetFunctionOption setFunctionOption =
+                                (FunctionChange.SetFunctionOption) functionChange;
+                        newOptions.put(setFunctionOption.key(), setFunctionOption.value());
+                    } else if (functionChange instanceof FunctionChange.RemoveFunctionOption) {
+                        FunctionChange.RemoveFunctionOption removeFunctionOption =
+                                (FunctionChange.RemoveFunctionOption) functionChange;
+                        newOptions.remove(removeFunctionOption.key());
+                    } else if (functionChange instanceof FunctionChange.UpdateFunctionComment) {
+                        FunctionChange.UpdateFunctionComment updateFunctionComment =
+                                (FunctionChange.UpdateFunctionComment) functionChange;
+                        newComment = updateFunctionComment.comment();
+                    } else if (functionChange instanceof FunctionChange.AddDefinition) {
+                        FunctionChange.AddDefinition addDefinition =
+                                (FunctionChange.AddDefinition) functionChange;
+                        if (function.definition(addDefinition.name()) != null) {
+                            throw new Catalog.DefinitionAlreadyExistException(
+                                    functionName, addDefinition.name());
+                        }
+                        newDefinitions.put(addDefinition.name(), addDefinition.definition());
+                    } else if (functionChange instanceof FunctionChange.UpdateDefinition) {
+                        FunctionChange.UpdateDefinition updateDefinition =
+                                (FunctionChange.UpdateDefinition) functionChange;
+                        if (function.definition(updateDefinition.name()) != null) {
+                            newDefinitions.put(
+                                    updateDefinition.name(), updateDefinition.definition());
+                        } else {
+                            throw new Catalog.DefinitionNotExistException(
+                                    functionName, updateDefinition.name());
+                        }
+                    } else if (functionChange instanceof FunctionChange.DropDefinition) {
+                        FunctionChange.DropDefinition dropDefinition =
+                                (FunctionChange.DropDefinition) functionChange;
+                        if (function.definitions().containsKey(dropDefinition.name())) {
+                            newDefinitions.remove(dropDefinition.name());
+                        } else {
+                            throw new Catalog.DefinitionNotExistException(
+                                    functionName, dropDefinition.name());
+                        }
+                    }
+                }
+                function =
+                        new FunctionImpl(
+                                functionName,
+                                function.uuid(),
+                                function.inputParams(),
+                                function.returnParams(),
+                                function.isDeterministic(),
+                                newDefinitions,
+                                newComment,
+                                newOptions);
+                functionStore.put(functionName, function);
+                break;
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+        return new MockResponse().setResponseCode(200);
+    }
+
     private MockResponse databasesApiHandler(
             String method, String data, Map<String, String> parameters) throws Exception {
         switch (method) {
@@ -731,6 +931,36 @@ public class RESTCatalogServer {
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private MockResponse generateFinalListFunctionsResponse(
+            Map<String, String> parameters, List<String> functions) {
+        RESTResponse response;
+        if (!functions.isEmpty()) {
+            int maxResults;
+            try {
+                maxResults = getMaxResults(parameters);
+            } catch (Exception e) {
+                LOG.error(
+                        "parse maxResults {} to int failed",
+                        parameters.getOrDefault(MAX_RESULTS, null));
+                return mockResponse(
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TABLE,
+                                null,
+                                "invalid input queryParameter maxResults"
+                                        + parameters.get(MAX_RESULTS),
+                                400),
+                        400);
+            }
+            String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+            PagedList<String> pagedDbs = buildPagedEntities(functions, maxResults, pageToken);
+            response =
+                    new ListFunctionsResponse(pagedDbs.getElements(), pagedDbs.getNextPageToken());
+        } else {
+            response = new ListFunctionsResponse(new ArrayList<>(), null);
+        }
+        return mockResponse(response, 200);
     }
 
     private MockResponse generateFinalListDatabasesResponse(

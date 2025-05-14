@@ -16,16 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.open.api;
+package org.apache.paimon.function;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.apache.paimon.types.DataField;
 
-/** OpenAPI application. */
-@SpringBootApplication
-public class OpenApiApplication {
+import java.util.List;
+import java.util.Map;
 
-    public static void main(String[] args) {
-        SpringApplication.run(OpenApiApplication.class, args);
-    }
+/** Interface for function. */
+public interface Function {
+
+    String uuid();
+
+    String name();
+
+    List<DataField> inputParams();
+
+    List<DataField> returnParams();
+
+    boolean isDeterministic();
+
+    Map<String, FunctionDefinition> definitions();
+
+    FunctionDefinition definition(String name);
+
+    String comment();
+
+    Map<String, String> options();
 }
