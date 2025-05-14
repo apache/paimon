@@ -32,6 +32,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -42,6 +43,7 @@ import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 import org.slf4j.Logger;
@@ -51,7 +53,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_REPEATED_NAME;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
@@ -177,21 +178,38 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             case MAP:
                 MapType mapType = (MapType) readType;
                 GroupType mapGroup = (GroupType) parquetType;
+                int mapSubFields = mapGroup.getFieldCount();
+                Preconditions.checkArgument(
+                        mapSubFields == 1,
+                        "Parquet map group type should only have one middle level REPEATED field.");
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(mapGroup);
                 return ConversionPatterns.mapType(
                         mapGroup.getRepetition(),
                         mapGroup.getName(),
-                        MAP_REPEATED_NAME,
+                        mapGroup.getType(0).getName(),
                         clipParquetType(mapType.getKeyType(), keyValueType.getLeft()),
                         clipParquetType(mapType.getValueType(), keyValueType.getRight()));
             case ARRAY:
                 ArrayType arrayType = (ArrayType) readType;
                 GroupType arrayGroup = (GroupType) parquetType;
-                return ConversionPatterns.listOfElements(
+                int listSubFields = arrayGroup.getFieldCount();
+                Preconditions.checkArgument(
+                        listSubFields == 1,
+                        "Parquet list group type should only have one middle level REPEATED field.");
+                Type elementType =
+                        clipParquetType(
+                                arrayType.getElementType(), parquetListElementType(arrayGroup));
+                // In case that the name in middle level is not "list".
+                Type groupMiddle =
+                        new GroupType(
+                                Type.Repetition.REPEATED,
+                                arrayGroup.getType(0).getName(),
+                                elementType);
+                return new GroupType(
                         arrayGroup.getRepetition(),
                         arrayGroup.getName(),
-                        clipParquetType(
-                                arrayType.getElementType(), parquetListElementType(arrayGroup)));
+                        OriginalType.LIST,
+                        groupMiddle);
             default:
                 return parquetType;
         }

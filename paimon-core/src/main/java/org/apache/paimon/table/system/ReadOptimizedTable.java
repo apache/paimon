@@ -28,10 +28,13 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackReadScan;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -120,6 +123,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
+        return newSnapshotReader(wrapped);
+    }
+
+    private SnapshotReader newSnapshotReader(FileStoreTable wrapped) {
         if (!wrapped.schema().primaryKeys().isEmpty()) {
             return wrapped.newSnapshotReader()
                     .withLevel(coreOptions().numLevels() - 1)
@@ -130,12 +137,21 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public DataTableBatchScan newScan() {
+    public DataTableScan newScan() {
+        if (wrapped instanceof FallbackReadFileStoreTable) {
+            FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) wrapped;
+            return new FallbackReadScan(newScan(table.wrapped()), newScan(table.fallback()));
+        }
+        return newScan(wrapped);
+    }
+
+    private DataTableScan newScan(FileStoreTable wrapped) {
+        CoreOptions options = wrapped.coreOptions();
         return new DataTableBatchScan(
                 wrapped.schema(),
-                coreOptions(),
-                newSnapshotReader(),
-                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
+                options,
+                newSnapshotReader(wrapped),
+                wrapped.catalogEnvironment().tableQueryAuth(options));
     }
 
     @Override

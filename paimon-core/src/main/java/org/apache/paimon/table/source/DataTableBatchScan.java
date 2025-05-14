@@ -30,8 +30,6 @@ import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
-
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
 
@@ -50,8 +48,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         super(schema, options, snapshotReader, queryAuth);
         this.hasNext = true;
         this.defaultValueAssigner = DefaultValueAssigner.create(schema);
-        if (!schema.primaryKeys().isEmpty()
-                && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
+        if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
         }
     }
