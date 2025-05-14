@@ -1564,13 +1564,6 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreatePartitionsRequest:
-      type: object
-      properties:
-        specs:
-          type: array
-          items:
-            type: object
     DropPartitionsRequest:
       type: object
       properties:
@@ -2336,13 +2329,6 @@ components:
           type: object
           additionalProperties:
             type: string
-    AlterPartitionsRequest:
-      type: object
-      properties:
-        partitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Partition'
     AlterDatabaseResponse:
       type: object
       properties:
