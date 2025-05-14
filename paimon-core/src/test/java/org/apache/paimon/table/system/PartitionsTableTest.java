@@ -19,7 +19,6 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -43,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link PartitionsTable}. */
@@ -73,7 +73,7 @@ public class PartitionsTableTest extends TableTestBase {
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
         Identifier filesTableId =
-                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
+                identifier(tableName + SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
         partitionsTable = (PartitionsTable) catalog.getTable(filesTableId);
 
         // snapshot 1: append

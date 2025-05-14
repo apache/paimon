@@ -19,7 +19,6 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.data.Decimal;
 
 import java.util.Objects;
 
@@ -32,6 +31,8 @@ import java.util.Objects;
 public class DecimalType extends DataType {
 
     private static final long serialVersionUID = 1L;
+
+    public static final int MAX_COMPACT_PRECISION = 18;
 
     public static final int MIN_PRECISION = 1;
 
@@ -89,7 +90,7 @@ public class DecimalType extends DataType {
 
     @Override
     public int defaultSize() {
-        return Decimal.isCompact(precision) ? 8 : 16;
+        return isCompact(precision) ? 8 : 16;
     }
 
     @Override
@@ -125,5 +126,10 @@ public class DecimalType extends DataType {
     @Override
     public <R> R accept(DataTypeVisitor<R> visitor) {
         return visitor.visit(this);
+    }
+
+    /** Returns whether the decimal value is small enough to be stored in a long. */
+    public static boolean isCompact(int precision) {
+        return precision <= MAX_COMPACT_PRECISION;
     }
 }

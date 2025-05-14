@@ -24,7 +24,6 @@ import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
@@ -35,7 +34,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
-import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
@@ -55,7 +53,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -1780,16 +1777,12 @@ public class CoreOptions implements Serializable {
         return normalizeFileFormat(options.get(FILE_FORMAT));
     }
 
-    public FileFormat fileFormat() {
-        return createFileFormat(options, FILE_FORMAT);
-    }
-
     public String fileFormatString() {
         return normalizeFileFormat(options.get(FILE_FORMAT));
     }
 
-    public FileFormat manifestFormat() {
-        return createFileFormat(options, MANIFEST_FORMAT);
+    public String manifestFormatString() {
+        return normalizeFileFormat(options.get(MANIFEST_FORMAT));
     }
 
     public String manifestCompression() {
@@ -1824,11 +1817,6 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
     }
 
-    public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
-        String formatIdentifier = normalizeFileFormat(options.get(formatOption));
-        return FileFormat.fromIdentifier(formatIdentifier, options);
-    }
-
     public String objectLocation() {
         checkArgument(type() == TableType.OBJECT_TABLE, "Only object table has object location!");
         return options.get(OBJECT_LOCATION);
@@ -1859,7 +1847,7 @@ public class CoreOptions implements Serializable {
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 
-    private static String normalizeFileFormat(String fileFormat) {
+    public static String normalizeFileFormat(String fileFormat) {
         return fileFormat.toLowerCase();
     }
 
@@ -2296,13 +2284,7 @@ public class CoreOptions implements Serializable {
     }
 
     public Long scanTimestampMills() {
-        String timestampStr = scanTimestamp();
-        Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
-        if (timestampMillis == null && timestampStr != null) {
-            return DateTimeUtils.parseTimestampData(timestampStr, 3, TimeZone.getDefault())
-                    .getMillisecond();
-        }
-        return timestampMillis;
+        return options.get(SCAN_TIMESTAMP_MILLIS);
     }
 
     public String scanTimestamp() {
@@ -2345,32 +2327,8 @@ public class CoreOptions implements Serializable {
         return Pair.of(split[0], split[1]);
     }
 
-    public Pair<Long, Long> incrementalBetweenTimestamp() {
-        String str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
-        String[] split = str.split(",");
-        if (split.length != 2) {
-            throw new IllegalArgumentException(
-                    "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
-                            + str);
-        }
-
-        try {
-            return Pair.of(Long.parseLong(split[0]), Long.parseLong(split[1]));
-        } catch (NumberFormatException nfe) {
-            try {
-                long startTimestamp =
-                        DateTimeUtils.parseTimestampData(split[0], 3, TimeZone.getDefault())
-                                .getMillisecond();
-                long endTimestamp =
-                        DateTimeUtils.parseTimestampData(split[1], 3, TimeZone.getDefault())
-                                .getMillisecond();
-                return Pair.of(startTimestamp, endTimestamp);
-            } catch (Exception e) {
-                throw new IllegalArgumentException(
-                        "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
-                                + str);
-            }
-        }
+    public String incrementalBetweenTimestamp() {
+        return options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
     }
 
     public IncrementalBetweenScanMode incrementalBetweenScanMode() {
@@ -2636,6 +2594,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public boolean forceLookup() {
+        return options.get(FORCE_LOOKUP);
     }
 
     public boolean batchScanSkipLevel0() {

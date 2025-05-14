@@ -18,24 +18,17 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.memory.MemorySegmentUtils;
-
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.apache.paimon.data.BinaryString.fromBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/**
- * Utils for {@link BinaryString} and utility class to convert objects into strings in vice-versa.
- */
+/** Utils for strings. */
 public class StringUtils {
 
     private static final char[] HEX_CHARS = {
@@ -51,39 +44,6 @@ public class StringUtils {
 
     /** The empty String {@code ""}. */
     public static final String EMPTY = "";
-
-    /**
-     * Concatenates input strings together into a single string. Returns NULL if any argument is
-     * NULL.
-     */
-    public static BinaryString concat(BinaryString... inputs) {
-        return concat(Arrays.asList(inputs));
-    }
-
-    public static BinaryString concat(Iterable<BinaryString> inputs) {
-        // Compute the total length of the result.
-        int totalLength = 0;
-        for (BinaryString input : inputs) {
-            if (input == null) {
-                return null;
-            }
-
-            totalLength += input.getSizeInBytes();
-        }
-
-        // Allocate a new byte array, and copy the inputs one by one into it.
-        final byte[] result = new byte[totalLength];
-        int offset = 0;
-        for (BinaryString input : inputs) {
-            if (input != null) {
-                int len = input.getSizeInBytes();
-                MemorySegmentUtils.copyToBytes(
-                        input.getSegments(), input.getOffset(), result, offset, len);
-                offset += len;
-            }
-        }
-        return fromBytes(result);
-    }
 
     /**
      * Checks if the string is null, empty, or contains only whitespace characters. A whitespace

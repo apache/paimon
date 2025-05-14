@@ -39,8 +39,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /**
  * A {@link Table} for reading binlog of table. The binlog format is as below.
@@ -116,7 +117,13 @@ public class BinlogTable extends AuditLogTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
-            InternalRow.FieldGetter[] fieldGetters = wrappedReadType.fieldGetters();
+            InternalRow.FieldGetter[] fieldGetters =
+                    IntStream.range(0, wrappedReadType.getFieldCount())
+                            .mapToObj(
+                                    i ->
+                                            InternalRow.createFieldGetter(
+                                                    wrappedReadType.getTypeAt(i), i))
+                            .toArray(InternalRow.FieldGetter[]::new);
 
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(

@@ -71,6 +71,7 @@ under the License.
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-open-api</module>
         <module>paimon-hudi</module>
+        <module>paimon-api</module>
     </modules>
 
     <properties>

@@ -30,7 +30,6 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -61,6 +60,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
@@ -108,7 +108,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected List<String> validBranches() {
         List<String> branches = table.branchManager().branches();
-        branches.add(BranchManager.DEFAULT_MAIN_BRANCH);
+        branches.add(DEFAULT_MAIN_BRANCH);
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {

@@ -34,6 +34,12 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-jackson-2</artifactId>
             <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
         </dependency>

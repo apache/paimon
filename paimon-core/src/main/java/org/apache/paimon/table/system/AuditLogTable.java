@@ -78,7 +78,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for reading audit log of table. */
 public class AuditLogTable implements DataTable, ReadonlyTable {

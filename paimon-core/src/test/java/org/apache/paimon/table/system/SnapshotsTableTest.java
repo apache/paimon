@@ -20,7 +20,6 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -49,6 +48,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SnapshotsTable}. */
@@ -79,7 +79,7 @@ public class SnapshotsTableTest extends TableTestBase {
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
         Identifier filesTableId =
-                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + SnapshotsTable.SNAPSHOTS);
+                identifier(tableName + SYSTEM_TABLE_SPLITTER + SnapshotsTable.SNAPSHOTS);
         snapshotsTable = (SnapshotsTable) catalog.getTable(filesTableId);
 
         // snapshot 1: append

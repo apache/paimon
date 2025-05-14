@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -41,7 +40,7 @@ import java.util.Objects;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Identifies an object in a catalog.
+ * Identifies an object.
  *
  * @since 0.4.0
  */
@@ -53,6 +52,10 @@ public class Identifier implements Serializable {
 
     private static final String FIELD_DATABASE_NAME = "database";
     private static final String FIELD_OBJECT_NAME = "object";
+
+    public static final String SYSTEM_TABLE_SPLITTER = "$";
+    public static final String SYSTEM_BRANCH_PREFIX = "branch_";
+    public static final String DEFAULT_MAIN_BRANCH = "main";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -93,12 +96,10 @@ public class Identifier implements Serializable {
 
         StringBuilder builder = new StringBuilder(table);
         if (branch != null && !"main".equalsIgnoreCase(branch)) {
-            builder.append(Catalog.SYSTEM_TABLE_SPLITTER)
-                    .append(Catalog.SYSTEM_BRANCH_PREFIX)
-                    .append(branch);
+            builder.append(SYSTEM_TABLE_SPLITTER).append(SYSTEM_BRANCH_PREFIX).append(branch);
         }
         if (systemTable != null) {
-            builder.append(Catalog.SYSTEM_TABLE_SPLITTER).append(systemTable);
+            builder.append(SYSTEM_TABLE_SPLITTER).append(systemTable);
         }
         this.object = builder.toString();
 
@@ -139,7 +140,7 @@ public class Identifier implements Serializable {
     @JsonIgnore
     public String getBranchNameOrDefault() {
         String branch = getBranchName();
-        return branch == null ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
+        return branch == null ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     @JsonIgnore
@@ -158,15 +159,15 @@ public class Identifier implements Serializable {
             return;
         }
 
-        String[] splits = StringUtils.split(object, Catalog.SYSTEM_TABLE_SPLITTER, -1, true);
+        String[] splits = StringUtils.split(object, SYSTEM_TABLE_SPLITTER, -1, true);
         if (splits.length == 1) {
             table = object;
             branch = null;
             systemTable = null;
         } else if (splits.length == 2) {
             table = splits[0];
-            if (splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX)) {
-                branch = splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length());
+            if (splits[1].startsWith(SYSTEM_BRANCH_PREFIX)) {
+                branch = splits[1].substring(SYSTEM_BRANCH_PREFIX.length());
                 systemTable = null;
             } else {
                 branch = null;
@@ -174,10 +175,10 @@ public class Identifier implements Serializable {
             }
         } else if (splits.length == 3) {
             Preconditions.checkArgument(
-                    splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX),
+                    splits[1].startsWith(SYSTEM_BRANCH_PREFIX),
                     "System table can only contain one '$' separator, but this is: " + object);
             table = splits[0];
-            branch = splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length());
+            branch = splits[1].substring(SYSTEM_BRANCH_PREFIX.length());
             systemTable = splits[2];
         } else {
             throw new IllegalArgumentException("Invalid object name: " + object);

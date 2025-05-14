@@ -19,10 +19,9 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.data.variant.Variant;
 
 /**
- * Data type of {@link Variant}.
+ * Data type of {@code Variant}.
  *
  * @since 1.1.0
  */
