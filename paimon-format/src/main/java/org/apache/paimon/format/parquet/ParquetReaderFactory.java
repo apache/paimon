@@ -196,20 +196,34 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 Preconditions.checkArgument(
                         listSubFields == 1,
                         "Parquet list group type should only have one middle level REPEATED field.");
+                // There are two representations for array type in parquet.
+                // See link:
+                // https://impala.apache.org/docs/build/html/topics/impala_parquet_array_resolution.html.
+                int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
                 Type elementType =
                         clipParquetType(
-                                arrayType.getElementType(), parquetListElementType(arrayGroup));
-                // In case that the name in middle level is not "list".
-                Type groupMiddle =
-                        new GroupType(
-                                Type.Repetition.REPEATED,
-                                arrayGroup.getType(0).getName(),
-                                elementType);
-                return new GroupType(
-                        arrayGroup.getRepetition(),
-                        arrayGroup.getName(),
-                        OriginalType.LIST,
-                        groupMiddle);
+                                arrayType.getElementType(),
+                                parquetListElementType(arrayGroup, level));
+
+                if (level == 3) {
+                    // In case that the name in middle level is not "list".
+                    Type groupMiddle =
+                            new GroupType(
+                                    Type.Repetition.REPEATED,
+                                    arrayGroup.getType(0).getName(),
+                                    elementType);
+                    return new GroupType(
+                            arrayGroup.getRepetition(),
+                            arrayGroup.getName(),
+                            OriginalType.LIST,
+                            groupMiddle);
+                } else {
+                    return new GroupType(
+                            arrayGroup.getRepetition(),
+                            arrayGroup.getName(),
+                            OriginalType.LIST,
+                            elementType);
+                }
             default:
                 return parquetType;
         }
