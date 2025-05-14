@@ -20,8 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.fs.metrics.InputMetrics;
-import org.apache.paimon.fs.metrics.OutputMetrics;
+import org.apache.paimon.fs.metrics.IOMetrics;
 
 import java.io.IOException;
 
@@ -33,16 +32,14 @@ import java.io.IOException;
 public class MetricsFileIO implements FileIO {
 
     protected final FileIO fileIO;
-    protected InputMetrics inputMetrics = null;
-    protected OutputMetrics outputMetrics = null;
+    protected IOMetrics ioMetrics = null;
 
     public MetricsFileIO(FileIO fileIO) {
         this.fileIO = fileIO;
     }
 
-    public MetricsFileIO withMetrics(InputMetrics inputMetrics, OutputMetrics outputMetrics) {
-        this.inputMetrics = inputMetrics;
-        this.outputMetrics = outputMetrics;
+    public MetricsFileIO withMetrics(IOMetrics ioMetrics) {
+        this.ioMetrics = ioMetrics;
         return this;
     }
 
@@ -56,7 +53,7 @@ public class MetricsFileIO implements FileIO {
 
     @VisibleForTesting
     public Boolean isMetricsEnabled() {
-        return inputMetrics != null && outputMetrics != null;
+        return ioMetrics != null;
     }
 
     @Override
@@ -72,13 +69,13 @@ public class MetricsFileIO implements FileIO {
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         SeekableInputStream inputStream = fileIO.newInputStream(path);
-        return new SeekableInputStreamIOWrapper(inputStream, this.inputMetrics);
+        return new SeekableInputStreamIOWrapper(inputStream, this.ioMetrics);
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         PositionOutputStream outputStream = fileIO.newOutputStream(path, overwrite);
-        return new PositionOutputStreamIOWrapper(outputStream, outputMetrics);
+        return new PositionOutputStreamIOWrapper(outputStream, this.ioMetrics);
     }
 
     @Override

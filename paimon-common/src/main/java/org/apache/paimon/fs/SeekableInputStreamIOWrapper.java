@@ -18,17 +18,17 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.fs.metrics.InputMetrics;
+import org.apache.paimon.fs.metrics.IOMetrics;
 
 import java.io.IOException;
 
 /** Wrap a {@link SeekableInputStream}. */
-public class SeekableInputStreamIOWrapper extends SeekableInputStream {
+public class SeekableInputStreamIOWrapper extends SeekableInputStream implements VectoredReadable {
 
     protected final SeekableInputStream in;
-    private InputMetrics metrics;
+    private IOMetrics metrics;
 
-    public SeekableInputStreamIOWrapper(SeekableInputStream in, InputMetrics metrics) {
+    public SeekableInputStreamIOWrapper(SeekableInputStream in, IOMetrics metrics) {
         this.in = in;
         this.metrics = metrics;
     }
@@ -72,5 +72,25 @@ public class SeekableInputStreamIOWrapper extends SeekableInputStream {
     @Override
     public void close() throws IOException {
         in.close();
+    }
+
+    @Override
+    public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+        int bytesRead = 0;
+        try {
+            if (in instanceof VectoredReadable) {
+                bytesRead = ((VectoredReadable) in).pread(position, buffer, offset, length);
+            } else {
+                long originalPos = in.getPos();
+                in.seek(position);
+                bytesRead = in.read(buffer, offset, length);
+                in.seek(originalPos);
+            }
+        } finally {
+            if (metrics != null && bytesRead != -1) {
+                metrics.recordReadEvent(bytesRead);
+            }
+        }
+        return bytesRead;
     }
 }

@@ -66,8 +66,7 @@ public abstract class FlinkSource
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(metricGroup);
         this.readBuilder.withMetricsRegistry(new FlinkMetricRegistry(metricGroup));
-        TableRead tableRead =
-                readBuilder.newRead().withMetricRegistry(new FlinkMetricRegistry(metricGroup));
+        TableRead tableRead = readBuilder.newRead();
         return new FileStoreSourceReader(
                 context,
                 tableRead,

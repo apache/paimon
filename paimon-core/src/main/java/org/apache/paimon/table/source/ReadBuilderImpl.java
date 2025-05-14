@@ -55,6 +55,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private boolean dropStats = false;
 
+    private MetricRegistry metricRegistry = null;
+
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
     }
@@ -66,6 +68,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public void withMetricsRegistry(MetricRegistry metricRegistry) {
+        this.metricRegistry = metricRegistry;
         this.table.withMetricRegistry(metricRegistry);
     }
 
@@ -156,7 +159,11 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public StreamTableScan newStreamScan() {
-        return (StreamTableScan) configureScan(table.newStreamScan());
+        StreamTableScan streamTableScan = (StreamTableScan) configureScan(table.newStreamScan());
+        if (this.metricRegistry != null) {
+            streamTableScan.withMetricRegistry(this.metricRegistry);
+        }
+        return streamTableScan;
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
@@ -191,6 +198,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         InnerTableRead read = table.newRead().withFilter(filter);
         if (readType != null) {
             read.withReadType(readType);
+        }
+        if (this.metricRegistry != null) {
+            read.withMetricRegistry(this.metricRegistry);
         }
         return read;
     }
