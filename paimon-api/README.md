@@ -1,6 +1,6 @@
 ## Paimon API
 
-This mode is for light API, aims to simplify dependencies as much as possible and avoid
+This module is for light API, aims to simplify dependencies as much as possible and avoid
 introducing dependencies such as Hadoop, including:
 
 1. Including types, table, view, function and etc.
