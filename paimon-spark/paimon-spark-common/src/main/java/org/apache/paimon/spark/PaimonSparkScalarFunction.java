@@ -31,6 +31,7 @@ import java.util.List;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
+/** Scalar function for Spark. */
 public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serializable {
     private static final long serialVersionUID = 1L;
     private final String functionName;
