@@ -22,6 +22,7 @@ import org.apache.paimon.types.DataField;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Interface for function. */
 public interface Function {
@@ -30,9 +31,9 @@ public interface Function {
 
     String name();
 
-    List<DataField> inputParams();
+    Optional<List<DataField>> inputParams();
 
-    List<DataField> returnParams();
+    Optional<List<DataField>> returnParams();
 
     boolean isDeterministic();
 

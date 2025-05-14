@@ -21,8 +21,10 @@ package org.apache.paimon.function;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.types.DataField;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Function implementation. */
 public class FunctionImpl implements Function {
@@ -62,6 +64,18 @@ public class FunctionImpl implements Function {
         this.options = options;
     }
 
+    public FunctionImpl(
+            String uuid, String functionName, Map<String, FunctionDefinition> definitions) {
+        this.uuid = uuid;
+        this.name = functionName;
+        this.inputParams = null;
+        this.returnParams = null;
+        this.deterministic = true;
+        this.definitions = definitions;
+        this.comment = null;
+        this.options = new HashMap<>();
+    }
+
     public FunctionImpl(GetFunctionResponse response) {
         this.uuid = response.uuid();
         this.name = response.name();
@@ -84,13 +98,13 @@ public class FunctionImpl implements Function {
     }
 
     @Override
-    public List<DataField> inputParams() {
-        return inputParams;
+    public Optional<List<DataField>> inputParams() {
+        return Optional.ofNullable(inputParams);
     }
 
     @Override
-    public List<DataField> returnParams() {
-        return returnParams;
+    public Optional<List<DataField>> returnParams() {
+        return Optional.ofNullable(returnParams);
     }
 
     @Override

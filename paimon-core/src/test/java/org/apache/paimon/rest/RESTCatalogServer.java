@@ -766,8 +766,8 @@ public class RESTCatalogServer {
                     new GetFunctionResponse(
                             function.uuid(),
                             function.name(),
-                            function.inputParams(),
-                            function.returnParams(),
+                            function.inputParams().orElse(null),
+                            function.returnParams().orElse(null),
                             function.isDeterministic(),
                             function.definitions(),
                             function.comment(),
@@ -832,8 +832,8 @@ public class RESTCatalogServer {
                         new GetFunctionResponse(
                                 function.uuid(),
                                 function.name(),
-                                function.inputParams(),
-                                function.returnParams(),
+                                function.inputParams().orElse(null),
+                                function.returnParams().orElse(null),
                                 function.isDeterministic(),
                                 function.definitions(),
                                 function.comment(),
@@ -897,8 +897,8 @@ public class RESTCatalogServer {
                         new FunctionImpl(
                                 functionName,
                                 function.uuid(),
-                                function.inputParams(),
-                                function.returnParams(),
+                                function.inputParams().orElse(null),
+                                function.returnParams().orElse(null),
                                 function.isDeterministic(),
                                 newDefinitions,
                                 newComment,

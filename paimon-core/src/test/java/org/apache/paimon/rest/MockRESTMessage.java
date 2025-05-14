@@ -290,8 +290,8 @@ public class MockRESTMessage {
         return new GetFunctionResponse(
                 function.uuid(),
                 function.name(),
-                function.inputParams(),
-                function.returnParams(),
+                function.inputParams().orElse(null),
+                function.returnParams().orElse(null),
                 function.isDeterministic(),
                 function.definitions(),
                 function.comment(),
@@ -307,8 +307,8 @@ public class MockRESTMessage {
         Function function = function("function");
         return new CreateFunctionRequest(
                 function.name(),
-                function.inputParams(),
-                function.returnParams(),
+                function.inputParams().orElse(null),
+                function.returnParams().orElse(null),
                 function.isDeterministic(),
                 function.definitions(),
                 function.comment(),

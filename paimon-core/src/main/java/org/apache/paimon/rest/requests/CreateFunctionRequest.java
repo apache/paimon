@@ -84,8 +84,8 @@ public class CreateFunctionRequest implements RESTRequest {
 
     public CreateFunctionRequest(Function function) {
         this.functionName = function.name();
-        this.inputParams = function.inputParams();
-        this.returnParams = function.returnParams();
+        this.inputParams = function.inputParams().orElse(null);
+        this.returnParams = function.returnParams().orElse(null);
         this.deterministic = function.isDeterministic();
         this.definitions = function.definitions();
         this.comment = function.comment();

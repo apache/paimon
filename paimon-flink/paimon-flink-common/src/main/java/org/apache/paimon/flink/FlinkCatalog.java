@@ -29,7 +29,9 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -50,6 +52,7 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -92,6 +95,7 @@ import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
+import org.apache.flink.table.catalog.exceptions.FunctionAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionAlreadyExistsException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
@@ -124,6 +128,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -1507,17 +1512,52 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final void createFunction(
             ObjectPath functionPath, CatalogFunction function, boolean ignoreIfExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException(
-                "Create function is not supported,"
-                        + " maybe you can use 'CREATE TEMPORARY FUNCTION' instead.");
+            throws FunctionAlreadyExistException, CatalogException {
+        FunctionDefinition functionDefinition = createFunctionDefinition(functionPath, function);
+        Map<String, FunctionDefinition> definitions = new HashMap<>();
+        definitions.put(FUNCTION_DEFINITION_NAME, functionDefinition);
+        org.apache.paimon.function.Function paimonFunction =
+                new FunctionImpl(
+                        functionPath.getObjectName(), UUID.randomUUID().toString(), definitions);
+        try {
+            catalog.createFunction(functionPath.getObjectName(), paimonFunction, ignoreIfExists);
+        } catch (Catalog.FunctionAlreadyExistException e) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new FunctionAlreadyExistException(getName(), functionPath);
+        }
     }
 
     @Override
     public final void alterFunction(
             ObjectPath functionPath, CatalogFunction newFunction, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws FunctionNotExistException, CatalogException {
+        try {
+            org.apache.paimon.function.Function function =
+                    catalog.getFunction(functionPath.getObjectName());
+            FunctionDefinition functionDefinition = function.definition(FUNCTION_DEFINITION_NAME);
+            if (functionDefinition != null) {
+                FunctionDefinition newFunctionDefinition =
+                        createFunctionDefinition(functionPath, newFunction);
+                FunctionChange functionChange =
+                        FunctionChange.updateDefinition(
+                                functionPath.getObjectName(), newFunctionDefinition);
+                catalog.alterFunction(
+                        functionPath.getObjectName(),
+                        ImmutableList.of(functionChange),
+                        ignoreIfNotExists);
+            }
+        } catch (Catalog.FunctionNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new FunctionNotExistException(getName(), functionPath);
+        } catch (Catalog.DefinitionAlreadyExistException e) {
+            throw new RuntimeException(e);
+        } catch (Catalog.DefinitionNotExistException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -1662,5 +1702,20 @@ public class FlinkCatalog extends AbstractCatalog {
                 MATERIALIZED_TABLE_REFRESH_STATUS.key(),
                 MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(),
                 MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key());
+    }
+
+    private FunctionDefinition createFunctionDefinition(
+            ObjectPath functionPath, CatalogFunction function) {
+        String fileType = function.getFunctionResources().get(0).getResourceType().name();
+        List<String> storagePaths =
+                function.getFunctionResources().stream()
+                        .map(ResourceUri::getUri)
+                        .collect(Collectors.toList());
+        return FunctionDefinition.file(
+                fileType,
+                storagePaths,
+                function.getFunctionLanguage().name(),
+                function.getClassName(),
+                functionPath.getObjectName());
     }
 }
