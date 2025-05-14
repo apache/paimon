@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.fs.metrics.OutputMetrics;
+import org.apache.paimon.fs.metrics.IOMetrics;
 
 import java.io.IOException;
 
@@ -26,11 +26,11 @@ import java.io.IOException;
 public class PositionOutputStreamIOWrapper extends PositionOutputStream {
 
     protected final PositionOutputStream out;
-    private OutputMetrics metrics;
+    private IOMetrics metrics;
 
-    public PositionOutputStreamIOWrapper(PositionOutputStream out, OutputMetrics outputMetrics) {
+    public PositionOutputStreamIOWrapper(PositionOutputStream out, IOMetrics metrics) {
         this.out = out;
-        this.metrics = outputMetrics;
+        this.metrics = metrics;
     }
 
     @Override

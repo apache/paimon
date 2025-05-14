@@ -24,18 +24,22 @@ import org.apache.paimon.metrics.MetricRegistry;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Collects and monitors input stream metrics. */
-public class InputMetrics {
+public class IOMetrics {
 
-    public static final String GROUP_NAME = "source";
+    public static final String GROUP_NAME = "io";
     private final MetricGroup metricGroup;
 
     public static final String READ_BYTES = "read.bytes";
     public static final String READ_OPERATIONS = "read.operations";
+    public static final String WRITE_BYTES = "write.bytes";
+    public static final String WRITE_OPERATIONS = "write.operations";
 
     private final AtomicLong readBytes = new AtomicLong(0);
     private final AtomicLong readOperations = new AtomicLong(0);
+    private final AtomicLong writeBytes = new AtomicLong(0);
+    private final AtomicLong writeOperations = new AtomicLong(0);
 
-    public InputMetrics(MetricRegistry registry, String tableName) {
+    public IOMetrics(MetricRegistry registry, String tableName) {
         metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         registerMetrics();
     }
@@ -43,6 +47,8 @@ public class InputMetrics {
     private void registerMetrics() {
         metricGroup.gauge(READ_BYTES, this::getReadBytes);
         metricGroup.gauge(READ_OPERATIONS, this::getReadOperations);
+        metricGroup.gauge(WRITE_BYTES, this::getWriteBytes);
+        metricGroup.gauge(WRITE_OPERATIONS, this::getWriteOperations);
     }
 
     public void recordReadEvent(long bytes) {
@@ -56,5 +62,18 @@ public class InputMetrics {
 
     public long getReadOperations() {
         return readOperations.get();
+    }
+
+    public void recordWriteEvent(long bytes) {
+        writeBytes.addAndGet(bytes);
+        writeOperations.incrementAndGet();
+    }
+
+    public long getWriteBytes() {
+        return writeBytes.get();
+    }
+
+    public long getWriteOperations() {
+        return writeOperations.get();
     }
 }
