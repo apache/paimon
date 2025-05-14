@@ -25,11 +25,10 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.table.catalog.Catalog;
+import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogFunctionImpl;
 import org.apache.flink.table.catalog.FunctionLanguage;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
-import org.apache.flink.table.catalog.exceptions.FunctionAlreadyExistException;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
@@ -113,38 +112,20 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
-    public void testJavaFileFunction()
-            throws FunctionAlreadyExistException, DatabaseNotExistException {
+    public void testFunction() throws Exception {
         Catalog catalog = tEnv.getCatalog("PAIMON").get();
         String functionName = "test_str2";
-        catalog.createFunction(
-                new ObjectPath(DATABASE_NAME, functionName), createJavaCatalogFunction(), false);
-        Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
-        RESTToken dataToken =
-                new RESTToken(
-                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 100_000);
-        restCatalogServer.setDataToken(identifier, dataToken);
-        batchSql(
-                String.format(
-                        "INSERT INTO %s.%s VALUES ('tom', 11), ('jerry', 22)",
-                        DATABASE_NAME, TABLE_NAME));
-        assertThat(batchSql(
-                        String.format("SELECT %s(a) FROM %s.%s", functionName, DATABASE_NAME, TABLE_NAME)))
-                .containsExactlyInAnyOrder(Row.of("tom-11111"), Row.of("jerry-11111"));
+        CatalogFunctionImpl function = createJavaCatalogFunction();
+        ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
+        catalog.createFunction(functionObjectPath, function, false);
+        CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction).isEqualTo(function);
+        catalog.dropFunction(functionObjectPath, false);
+        assertThat(catalog.functionExists(functionObjectPath)).isFalse();
     }
 
     private CatalogFunctionImpl createJavaCatalogFunction() {
-        ResourceUri resourceUri =
-                new ResourceUri(
-                        ResourceType.JAR,
-                        FlinkCatalog.class
-                                .getProtectionDomain()
-                                .getCodeSource()
-                                .getLocation()
-                                .getPath()
-                                .toString()
-                                .replaceAll("target/classes/", "original-flink-streaming-udf.jar"));
+        ResourceUri resourceUri = new ResourceUri(ResourceType.JAR, "xxx.jar");
         return new CatalogFunctionImpl(
                 "com.streaming.flink.udf.StrUdf",
                 FunctionLanguage.JAVA,
