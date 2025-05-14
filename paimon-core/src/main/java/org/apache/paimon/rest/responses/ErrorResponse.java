@@ -47,6 +47,10 @@ public class ErrorResponse implements RESTResponse {
 
     public static final String RESOURCE_TYPE_DIALECT = "DIALECT";
 
+    public static final String RESOURCE_TYPE_FUNCTION = "FUNCTION";
+
+    public static final String RESOURCE_TYPE_DEFINITION = "DEFINITION";
+
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_RESOURCE_TYPE = "resourceType";
     private static final String FIELD_RESOURCE_NAME = "resourceName";
