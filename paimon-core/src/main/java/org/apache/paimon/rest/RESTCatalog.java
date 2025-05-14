@@ -846,7 +846,7 @@ public class RESTCatalog implements Catalog {
         try {
             GetFunctionResponse response =
                     client.get(
-                            resourcePaths.functionDetails(functionName),
+                            resourcePaths.function(functionName),
                             GetFunctionResponse.class,
                             restAuthFunction);
             return new FunctionImpl(response);

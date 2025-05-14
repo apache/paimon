@@ -529,7 +529,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Function getFunction(String functionName) throws FunctionNotExistException {
-        throw new UnsupportedOperationException();
+        throw new FunctionNotExistException(functionName);
     }
 
     @Override

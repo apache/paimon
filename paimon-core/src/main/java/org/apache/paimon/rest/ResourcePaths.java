@@ -222,8 +222,4 @@ public class ResourcePaths {
     public String function(String functionName) {
         return SLASH.join(V1, prefix, FUNCTIONS, encodeString(functionName));
     }
-
-    public String functionDetails(String functionName) {
-        return SLASH.join(V1, prefix, FUNCTIONS, encodeString(functionName));
-    }
 }
