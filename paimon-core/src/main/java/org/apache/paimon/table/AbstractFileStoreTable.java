@@ -25,8 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.metrics.InputMetrics;
-import org.apache.paimon.fs.metrics.OutputMetrics;
+import org.apache.paimon.fs.metrics.IOMetrics;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -93,9 +92,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final String WATERMARK_PREFIX = "watermark-";
 
-    protected final MetricsFileIO fileIO;
-    private InputMetrics inputMetrics;
-    private OutputMetrics outputMetrics;
+    protected final FileIO fileIO;
+    @Nullable protected transient MetricsFileIO metricsFileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
@@ -109,7 +107,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        this.fileIO = new MetricsFileIO(fileIO);
+        this.fileIO = fileIO;
+        this.metricsFileIO = new MetricsFileIO(this.fileIO);
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
@@ -123,13 +122,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public AbstractFileStoreTable withMetricRegistry(MetricRegistry registry) {
         if (coreOptions().isMetricsFileIOEnabled()) {
+            if (metricsFileIO == null) {
+                metricsFileIO = new MetricsFileIO(fileIO);
+            }
             String tableName =
                     catalogEnvironment.identifier() != null
                             ? catalogEnvironment.identifier().getTableName()
                             : "unknown";
-            this.inputMetrics = new InputMetrics(registry, tableName);
-            this.outputMetrics = new OutputMetrics(registry, tableName);
-            this.fileIO.withMetrics(inputMetrics, outputMetrics);
+            IOMetrics ioMetrics = new IOMetrics(registry, tableName);
+            this.metricsFileIO.withMetrics(ioMetrics);
         }
         return this;
     }
@@ -419,7 +420,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileIO fileIO() {
-        return fileIO;
+        return metricsFileIO == null ? fileIO : metricsFileIO;
     }
 
     @Override
