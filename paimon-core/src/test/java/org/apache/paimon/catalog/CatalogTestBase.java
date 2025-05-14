@@ -49,6 +49,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -367,6 +368,43 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.listTableDetailsPaged(
                                         "non_existing_db", finalMaxResults, pageToken, null));
+    }
+
+    @Test
+    public void testListTableSummariesPaged() throws Exception {
+        // List table summaries throws UnsupportedOperationException if current catalog does not
+        // supportsListObjectsPaged
+        String databaseName = "table_summaries_paged_db";
+        catalog.createDatabase(databaseName, false);
+        if (!catalog.supportsListObjectsPaged()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(databaseName, null, null, null));
+        }
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        if (!catalog.supportsListObjectsPaged()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(null, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(databaseName, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(null, null, 100, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(databaseName, "abc", null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTableSummariesPaged(databaseName, "abc", null, "table"));
+        }
     }
 
     @Test
@@ -1204,6 +1242,47 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.listViewDetailsPaged(
                                         "non_existing_db", finalMaxResults, pageToken, null));
+    }
+
+    @Test
+    public void testListViewSummariesPaged() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        // List view summaries throws UnsupportedOperationException if current catalog does not
+        // supportsListObjectsPaged
+        String databaseName = "view_summaries_paged_db";
+        catalog.createDatabase(databaseName, false);
+        if (!catalog.supportsListObjectsPaged()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(databaseName, null, null, null));
+        }
+
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        if (!catalog.supportsListObjectsPaged()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(null, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(databaseName, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(null, null, 100, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(databaseName, "abc", null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewSummariesPaged(databaseName, "abc", null, "view"));
+        }
     }
 
     @Test

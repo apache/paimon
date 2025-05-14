@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
@@ -42,6 +43,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.TableSummary;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -55,6 +57,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewSummary;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -62,6 +65,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -74,11 +78,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -532,6 +538,187 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListTableSummariesPaged() throws Exception {
+        // List table summaries returns an empty list when there are no tables in the catalog
+
+        PagedList<TableSummary> pagedTableSummaries =
+                catalog.listTableSummariesPaged(null, null, null, null);
+        assertThat(pagedTableSummaries.getElements()).isEmpty();
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        String databaseName = "table_summaries_paged_db";
+        String databaseName2 = "sample";
+        String databaseNamePattern = "table\\_summaries\\_paged\\_db";
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr", "format_table"};
+        prepareDataForListTableSummariesPaged(databaseName, databaseName2, tableNames);
+
+        String[] expectedTableNames =
+                Arrays.stream(tableNames).map((databaseName + ".")::concat).toArray(String[]::new);
+        String[] fullTableNames = Arrays.copyOf(expectedTableNames, tableNames.length + 1);
+        fullTableNames[tableNames.length] = databaseName2 + ".table1";
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, null, null, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(), tableNames.length, expectedTableNames);
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        assertListTableSummariesPagedWithLoop(databaseNamePattern, expectedTableNames);
+        assertListTableSummariesPagedWithLoop(null, fullTableNames);
+
+        assertListTableSummariesPagedWithTablePattern(
+                databaseName, databaseNamePattern, expectedTableNames);
+    }
+
+    protected void prepareDataForListTableSummariesPaged(
+            String databaseName, String databaseName2, String[] tableNames)
+            throws Catalog.DatabaseAlreadyExistException, Catalog.TableAlreadyExistException,
+                    Catalog.DatabaseNotExistException {
+        catalog.createDatabase(databaseName, false);
+        catalog.createDatabase(databaseName2, false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", TableType.FORMAT_TABLE.toString());
+
+        Schema FORMAT_TABLE_SCHEMA =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        for (String tableName : tableNames) {
+            if (StringUtils.equals(tableName, "format_table")) {
+                catalog.createTable(
+                        Identifier.create(databaseName, tableName), FORMAT_TABLE_SCHEMA, false);
+            } else {
+                catalog.createTable(
+                        Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+            }
+        }
+
+        catalog.createTable(
+                Identifier.create(databaseName2, "table1"), DEFAULT_TABLE_SCHEMA, false);
+    }
+
+    protected void assertListTableSummariesPagedWithLoop(
+            String databaseNamePattern, String[] expectedTableNames) {
+        int maxResults = 2;
+        PagedList<TableSummary> pagedTableSummaries;
+        List<TableSummary> tableSummaries = new ArrayList<>();
+        String pageToken = null;
+        do {
+            pagedTableSummaries =
+                    catalog.listTableSummariesPaged(
+                            databaseNamePattern, null, maxResults, pageToken);
+            pageToken = pagedTableSummaries.getNextPageToken();
+            if (pagedTableSummaries.getElements() != null) {
+                tableSummaries.addAll(pagedTableSummaries.getElements());
+            }
+            if (pageToken == null
+                    || pagedTableSummaries.getElements() == null
+                    || pagedTableSummaries.getElements().isEmpty()) {
+                break;
+            }
+        } while (StringUtils.isNotEmpty(pageToken));
+        assertTableSummaries(tableSummaries, expectedTableNames.length, expectedTableNames);
+        assertNull(pagedTableSummaries.getNextPageToken());
+    }
+
+    protected void assertListTableSummariesPagedWithTablePattern(
+            String databaseName, String databaseNamePattern, String[] expectedTableNames) {
+        int maxResults = 8;
+        PagedList<TableSummary> pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, null, maxResults, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(),
+                Math.min(maxResults, expectedTableNames.length),
+                expectedTableNames);
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "table%", null, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "table1"),
+                buildFullName(databaseName, "table2"),
+                buildFullName(databaseName, "table3"));
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "table_", null, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "table1"),
+                buildFullName(databaseName, "table2"),
+                buildFullName(databaseName, "table3"));
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "table_%", null, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "table1"),
+                buildFullName(databaseName, "table2"),
+                buildFullName(databaseName, "table3"));
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "table%_", null, null);
+        assertTableSummaries(
+                pagedTableSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "table1"),
+                buildFullName(databaseName, "table2"),
+                buildFullName(databaseName, "table3"));
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "table\\_", null, null);
+        assertTrue(pagedTableSummaries.getElements().isEmpty());
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        pagedTableSummaries =
+                catalog.listTableSummariesPaged(databaseNamePattern, "tabl_", null, null);
+        assertTrue(pagedTableSummaries.getElements().isEmpty());
+        assertNull(pagedTableSummaries.getNextPageToken());
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listTableSummariesPaged(databaseNamePattern, "ta%le", null, null));
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listTableSummariesPaged(databaseNamePattern, "ta_le", null, null));
+    }
+
+    protected void assertTableSummaries(
+            List<TableSummary> tableSummaries, int size, String... tableNames) {
+        assertEquals(size, tableSummaries.size());
+        assertThat(tableSummaries.stream().map(TableSummary::fullName).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(tableNames);
+        tableSummaries.forEach(
+                tableSummary -> {
+                    if (StringUtils.contains(tableSummary.fullName(), "format_table")) {
+                        assertEquals(TableType.FORMAT_TABLE, tableSummary.tableType());
+                    } else {
+                        assertEquals(TableType.TABLE, tableSummary.tableType());
+                    }
+                });
+    }
+
+    private String buildFullName(String database, String tableName) {
+        return String.format("%s.%s", database, tableName);
+    }
+
+    @Test
     void testListViews() throws Exception {
         String databaseName = "views_paged_db";
         List<String> views;
@@ -745,6 +932,153 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Assertions.assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi_ew"));
+    }
+
+    @Test
+    public void testListViewSummariesPaged() throws Exception {
+        // List view summaries returns an empty list when there are no views in the catalog
+
+        PagedList<ViewSummary> pagedViewSummaries =
+                catalog.listViewSummariesPaged(null, null, null, null);
+        assertThat(pagedViewSummaries.getElements()).isEmpty();
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        String databaseName = "view_summaries_paged_db";
+        String databaseName2 = "sample";
+        String databaseNamePattern = "view\\_summaries\\_paged\\_db";
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        prepareDataForListViewSummariesPaged(databaseName, databaseName2, viewNames);
+
+        String[] expectedViewNames =
+                Arrays.stream(viewNames).map((databaseName + ".")::concat).toArray(String[]::new);
+        String[] fullTableNames = Arrays.copyOf(expectedViewNames, viewNames.length + 1);
+        fullTableNames[viewNames.length] = databaseName2 + ".view1";
+
+        pagedViewSummaries = catalog.listViewSummariesPaged(databaseNamePattern, null, null, null);
+        assertViewSummaries(pagedViewSummaries.getElements(), viewNames.length, expectedViewNames);
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        assertListViewSummariesPagedWithLoop(databaseNamePattern, expectedViewNames);
+        assertListViewSummariesPagedWithLoop(null, fullTableNames);
+
+        assertListViewSummariesPagedWithTablePattern(
+                databaseName, databaseNamePattern, expectedViewNames);
+    }
+
+    protected void prepareDataForListViewSummariesPaged(
+            String databaseName, String databaseName2, String[] viewNames)
+            throws Catalog.DatabaseAlreadyExistException, Catalog.TableAlreadyExistException,
+                    Catalog.DatabaseNotExistException, Catalog.ViewAlreadyExistException {
+        catalog.createDatabase(databaseName, false);
+        catalog.createDatabase(databaseName2, false);
+
+        View view = buildView(databaseName);
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        catalog.createView(Identifier.create(databaseName2, "view1"), view, false);
+    }
+
+    protected void assertListViewSummariesPagedWithLoop(
+            String databaseNamePattern, String[] expectedTableNames) {
+        int maxResults = 2;
+        PagedList<ViewSummary> pagedViewSummaries;
+        List<ViewSummary> viewSummaries = new ArrayList<>();
+        String pageToken = null;
+        do {
+            pagedViewSummaries =
+                    catalog.listViewSummariesPaged(
+                            databaseNamePattern, null, maxResults, pageToken);
+            pageToken = pagedViewSummaries.getNextPageToken();
+            if (pagedViewSummaries.getElements() != null) {
+                viewSummaries.addAll(pagedViewSummaries.getElements());
+            }
+            if (pageToken == null
+                    || pagedViewSummaries.getElements() == null
+                    || pagedViewSummaries.getElements().isEmpty()) {
+                break;
+            }
+        } while (StringUtils.isNotEmpty(pageToken));
+        assertViewSummaries(viewSummaries, expectedTableNames.length, expectedTableNames);
+        assertNull(pagedViewSummaries.getNextPageToken());
+    }
+
+    protected void assertListViewSummariesPagedWithTablePattern(
+            String databaseName, String databaseNamePattern, String[] expectedTableNames) {
+        int maxResults = 8;
+        PagedList<ViewSummary> pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, null, maxResults, null);
+        assertViewSummaries(
+                pagedViewSummaries.getElements(),
+                Math.min(maxResults, expectedTableNames.length),
+                expectedTableNames);
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "view%", null, null);
+        assertViewSummaries(
+                pagedViewSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "view1"),
+                buildFullName(databaseName, "view2"),
+                buildFullName(databaseName, "view3"));
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "view_", null, null);
+        assertViewSummaries(
+                pagedViewSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "view1"),
+                buildFullName(databaseName, "view2"),
+                buildFullName(databaseName, "view3"));
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "view_%", null, null);
+        assertViewSummaries(
+                pagedViewSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "view1"),
+                buildFullName(databaseName, "view2"),
+                buildFullName(databaseName, "view3"));
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "view%_", null, null);
+        assertViewSummaries(
+                pagedViewSummaries.getElements(),
+                3,
+                buildFullName(databaseName, "view1"),
+                buildFullName(databaseName, "view2"),
+                buildFullName(databaseName, "view3"));
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "view\\_", null, null);
+        assertTrue(pagedViewSummaries.getElements().isEmpty());
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        pagedViewSummaries =
+                catalog.listViewSummariesPaged(databaseNamePattern, "vie_", null, null);
+        assertTrue(pagedViewSummaries.getElements().isEmpty());
+        assertNull(pagedViewSummaries.getNextPageToken());
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listViewSummariesPaged(databaseNamePattern, "vi%ew", null, null));
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listViewSummariesPaged(databaseNamePattern, "vi_ew", null, null));
+    }
+
+    protected void assertViewSummaries(
+            List<ViewSummary> viewSummaries, int size, String... tableNames) {
+        assertEquals(size, viewSummaries.size());
+        assertThat(viewSummaries.stream().map(ViewSummary::fullName).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(tableNames);
     }
 
     @Test

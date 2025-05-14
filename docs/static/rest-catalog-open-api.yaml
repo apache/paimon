@@ -328,6 +328,49 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/table-summaries:
+    get:
+      tags:
+        - table
+      summary: List table summaries
+      operationId: listTableSummaries
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (% and _) for database names.
+          in: path
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (% and _) for table names.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTableSummariesResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
     get:
       tags:
@@ -1052,6 +1095,49 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/view-summaries:
+    get:
+      tags:
+        - table
+      summary: List view summaries
+      operationId: listViewSummaries
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (% and _) for database names.
+          in: path
+          schema:
+            type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (% and _) for view names.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewSummariesResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -2002,6 +2088,14 @@ components:
           format: int64
         updatedBy:
           type: string
+      TableSummary:
+        type: object
+        properties:
+          fullName:
+            type: string
+          name:
+            type: string
+            enum: ["table", "format-table", "materialized-table", "object-table"]
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -2394,6 +2488,15 @@ components:
             $ref: '#/components/schemas/GetTableResponse'
         nextPageToken:
           type: string
+    ListTableSummariesResponse:
+      type: object
+      properties:
+        tableSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableSummary'
+        nextPageToken:
+          type: string
     ConfigResponse:
       type: object
       properties:
@@ -2517,6 +2620,15 @@ components:
           format: int64
         updatedBy:
           type: string
+    ListViewSummariesResponse:
+      type: object
+      properties:
+        viewSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ViewSummary'
+        nextPageToken:
+          type: string
     ViewSchema:
       type: object
       properties:
@@ -2535,6 +2647,11 @@ components:
         options:
           type: object
           additionalProperties:
+            type: string
+      ViewSummary:
+        type: object
+        properties:
+          fullName:
             type: string
     Partition:
       type: object

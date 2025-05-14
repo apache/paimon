@@ -246,6 +246,19 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<Table> searchTablesPaged(
+            @Nullable String databaseNamePattern,
+            @Nullable String tableNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+            PagedList<String> tables =
+                    api.searchTablesPaged(databaseNamePattern, tableNamePattern, maxResults, pageToken);
+            return new PagedList<>(
+                    tables.getElements(),
+                    tables.getNextPageToken());
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
@@ -763,6 +776,19 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
         }
+    }
+
+    @Override
+    public PagedList<Table> searchViewsPaged(
+            @Nullable String databaseNamePattern,
+            @Nullable String viewNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+            PagedList<String> views =
+                    api.searchViewsPaged(databaseNamePattern, viewNamePattern, maxResults, pageToken);
+            return new PagedList<>(
+                    views.getElements(),
+                    views.getNextPageToken());
     }
 
     private ViewImpl toView(String db, GetViewResponse response) {
