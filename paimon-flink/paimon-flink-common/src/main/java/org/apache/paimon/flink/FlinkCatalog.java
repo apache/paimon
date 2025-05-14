@@ -1542,7 +1542,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         createFunctionDefinition(functionPath, newFunction);
                 FunctionChange functionChange =
                         FunctionChange.updateDefinition(
-                                functionPath.getObjectName(), newFunctionDefinition);
+                                FUNCTION_DEFINITION_NAME, newFunctionDefinition);
                 catalog.alterFunction(
                         functionPath.getObjectName(),
                         ImmutableList.of(functionChange),

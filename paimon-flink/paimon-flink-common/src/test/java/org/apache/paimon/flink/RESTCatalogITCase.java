@@ -115,17 +115,23 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     public void testFunction() throws Exception {
         Catalog catalog = tEnv.getCatalog("PAIMON").get();
         String functionName = "test_str2";
-        CatalogFunctionImpl function = createJavaCatalogFunction();
+        CatalogFunctionImpl function = createJavaCatalogFunction("xxxx.jar");
         ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
         catalog.createFunction(functionObjectPath, function, false);
         CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
         assertThat(getFunction).isEqualTo(function);
+
+        function = createJavaCatalogFunction("xxxx-yyyy.jar");
+        catalog.alterFunction(functionObjectPath, function, false);
+        getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction).isEqualTo(function);
+
         catalog.dropFunction(functionObjectPath, false);
         assertThat(catalog.functionExists(functionObjectPath)).isFalse();
     }
 
-    private CatalogFunctionImpl createJavaCatalogFunction() {
-        ResourceUri resourceUri = new ResourceUri(ResourceType.JAR, "xxx.jar");
+    private CatalogFunctionImpl createJavaCatalogFunction(String filePath) {
+        ResourceUri resourceUri = new ResourceUri(ResourceType.JAR, filePath);
         return new CatalogFunctionImpl(
                 "com.streaming.flink.udf.StrUdf",
                 FunctionLanguage.JAVA,
