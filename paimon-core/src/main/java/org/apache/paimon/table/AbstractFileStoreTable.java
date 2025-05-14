@@ -281,7 +281,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 supportStreamingReadOverwrite(),
-                catalogEnvironment.tableQueryAuth(coreOptions()));
+                catalogEnvironment.tableQueryAuth(coreOptions()),
+                !tableSchema.primaryKeys().isEmpty());
     }
 
     protected abstract SplitGenerator splitGenerator();

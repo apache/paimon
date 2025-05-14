@@ -167,7 +167,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                 snapshotManager(),
                 changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
-                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()));
+                wrapped.catalogEnvironment().tableQueryAuth(coreOptions()),
+                !wrapped.schema().primaryKeys().isEmpty());
     }
 
     @Override

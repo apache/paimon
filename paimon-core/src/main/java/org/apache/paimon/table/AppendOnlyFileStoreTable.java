@@ -39,7 +39,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -91,13 +90,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 bucketMode());
     }
 
-    /**
-     * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
-     * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
-     */
     @Override
     public boolean supportStreamingReadOverwrite() {
-        return false;
+        return new CoreOptions(tableSchema.options()).streamingReadAppendOverwrite();
     }
 
     @Override
