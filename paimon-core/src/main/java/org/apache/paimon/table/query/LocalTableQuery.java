@@ -129,6 +129,15 @@ public class LocalTableQuery implements TableQuery {
             int bucket,
             List<DataFileMeta> beforeFiles,
             List<DataFileMeta> dataFiles) {
+        refreshFiles(partition, bucket, beforeFiles, dataFiles, false);
+    }
+
+    public void refreshFiles(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> beforeFiles,
+            List<DataFileMeta> dataFiles,
+            boolean refreshCache) {
         LookupLevels<KeyValue> lookupLevels =
                 tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
         if (lookupLevels == null) {
@@ -136,7 +145,11 @@ public class LocalTableQuery implements TableQuery {
                     beforeFiles.isEmpty(),
                     "The before file should be empty for the initial phase.");
             newLookupLevels(partition, bucket, dataFiles);
+        } else if (refreshCache) {
+            // refresh both file metas and cached local files
+            lookupLevels.refreshFiles(beforeFiles, dataFiles);
         } else {
+            // only refresh file metas
             lookupLevels.getLevels().update(beforeFiles, dataFiles);
         }
     }

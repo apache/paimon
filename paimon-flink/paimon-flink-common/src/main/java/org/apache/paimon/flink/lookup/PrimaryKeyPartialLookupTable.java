@@ -56,7 +56,7 @@ import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
-public class PrimaryKeyPartialLookupTable implements LookupTable {
+public class PrimaryKeyPartialLookupTable extends AsyncRefreshLookupTable {
 
     private final QueryExecutorFactory executorFactory;
     @Nullable private final ProjectedRow keyRearrange;
@@ -71,6 +71,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
+        super(table);
         this.executorFactory = executorFactory;
         BucketMode bucketMode = table.bucketMode();
         if (bucketMode != BucketMode.HASH_FIXED && bucketMode != BucketMode.POSTPONE_MODE) {
@@ -128,8 +129,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public void open() throws Exception {
+        init();
+        doRefresh(false);
+    }
+
+    protected void init() throws Exception {
+        super.init();
         this.queryExecutor = executorFactory.create(specificPartition, cacheRowFilter);
-        refresh();
     }
 
     @Override
@@ -167,8 +173,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
-    public void refresh() {
-        queryExecutor.refresh();
+    public void doRefresh(boolean refreshCache) {
+        queryExecutor.refresh(refreshCache);
     }
 
     @Override
@@ -176,10 +182,18 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         this.cacheRowFilter = filter;
     }
 
+    public Long nextSnapshotId() {
+        return queryExecutor.nextSnapshotId();
+    }
+
     @Override
     public void close() throws IOException {
-        if (queryExecutor != null) {
-            queryExecutor.close();
+        try {
+            super.close();
+        } finally {
+            if (queryExecutor != null) {
+                queryExecutor.close();
+            }
         }
     }
 
@@ -221,7 +235,9 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
-        void refresh();
+        void refresh(boolean refreshCache);
+
+        Long nextSnapshotId();
     }
 
     static class LocalQueryExecutor implements QueryExecutor {
@@ -279,7 +295,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         @Override
-        public void refresh() {
+        public void refresh(boolean refreshCache) {
             while (true) {
                 List<Split> splits = scan.plan().splits();
                 log(splits);
@@ -289,19 +305,23 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 }
 
                 for (Split split : splits) {
-                    refreshSplit((DataSplit) split);
+                    refreshSplit((DataSplit) split, refreshCache);
                 }
             }
         }
 
         @VisibleForTesting
         void refreshSplit(DataSplit split) {
+            refreshSplit(split, false);
+        }
+
+        void refreshSplit(DataSplit split, boolean refreshCache) {
             BinaryRow partition = split.partition();
             int bucket = split.bucket();
             List<DataFileMeta> before = split.beforeFiles();
             List<DataFileMeta> after = split.dataFiles();
 
-            tableQuery.refreshFiles(partition, bucket, before, after);
+            tableQuery.refreshFiles(partition, bucket, before, after, refreshCache);
             Integer totalBuckets = split.totalBuckets();
             if (totalBuckets == null) {
                 // Just for compatibility with older versions
@@ -311,6 +331,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 totalBuckets = defaultNumBuckets;
             }
             numBuckets.put(partition, totalBuckets);
+        }
+
+        @Override
+        public Long nextSnapshotId() {
+            return scan.checkpoint();
         }
 
         @Override
@@ -360,7 +385,12 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         @Override
-        public void refresh() {}
+        public void refresh(boolean refreshCache) {}
+
+        @Override
+        public Long nextSnapshotId() {
+            return null;
+        }
 
         @Override
         public void close() throws IOException {
