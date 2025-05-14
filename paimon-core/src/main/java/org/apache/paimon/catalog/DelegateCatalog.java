@@ -67,8 +67,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
-        return wrapped.listDatabasesPaged(maxResults, pageToken);
+    public PagedList<String> listDatabasesPaged(
+            Integer maxResults, String pageToken, String databaseNamePattern) {
+        return wrapped.listDatabasesPaged(maxResults, pageToken, databaseNamePattern);
     }
 
     @Override

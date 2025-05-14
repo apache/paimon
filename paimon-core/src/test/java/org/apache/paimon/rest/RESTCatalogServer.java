@@ -925,7 +925,17 @@ public class RESTCatalogServer {
             String method, String data, Map<String, String> parameters) throws Exception {
         switch (method) {
             case "GET":
-                List<String> databases = new ArrayList<>(databaseStore.keySet());
+                String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+                List<String> databases =
+                        new ArrayList<>(databaseStore.keySet())
+                                .stream()
+                                        .filter(
+                                                databaseName ->
+                                                        Objects.isNull(databaseNamePattern)
+                                                                || matchNamePattern(
+                                                                        databaseName,
+                                                                        databaseNamePattern))
+                                        .collect(Collectors.toList());
                 return generateFinalListDatabasesResponse(parameters, databases);
             case "POST":
                 CreateDatabaseRequest requestBody =

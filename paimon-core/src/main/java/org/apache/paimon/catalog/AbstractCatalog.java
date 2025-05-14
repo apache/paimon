@@ -142,7 +142,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
+    public PagedList<String> listDatabasesPaged(
+            Integer maxResults, String pageToken, String databaseNamePattern) {
+        CatalogUtils.validateNamePattern(this, databaseNamePattern);
         return new PagedList<>(listDatabases(), null);
     }
 

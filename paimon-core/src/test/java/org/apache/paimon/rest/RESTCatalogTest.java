@@ -129,18 +129,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testListDatabasesPaged() throws Catalog.DatabaseAlreadyExistException {
         // List databases paged returns an empty list when there are no databases in the catalog
-        PagedList<String> pagedDatabases = catalog.listDatabasesPaged(null, null);
+        PagedList<String> pagedDatabases = catalog.listDatabasesPaged(null, null, null);
         assertThat(pagedDatabases.getElements()).isEmpty();
         assertNull(pagedDatabases.getNextPageToken());
 
-        String[] dbNames = {"ghj", "db1", "db2", "db3", "ert"};
+        String[] dbNames = {"ghj", "db1", "db2", "db3", "ert", "db_name"};
         for (String dbName : dbNames) {
             catalog.createDatabase(dbName, true);
         }
 
         // when maxResults is null or 0, the page length is set to a server configured value
         String[] sortedDbNames = Arrays.stream(dbNames).sorted().toArray(String[]::new);
-        pagedDatabases = catalog.listDatabasesPaged(null, null);
+        pagedDatabases = catalog.listDatabasesPaged(null, null, null);
         List<String> dbs = pagedDatabases.getElements();
         assertThat(dbs).containsExactly(sortedDbNames);
         assertNull(pagedDatabases.getNextPageToken());
@@ -149,36 +149,64 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // server configured value
         // when pageToken is null, will list tables from the beginning
         int maxResults = 2;
-        pagedDatabases = catalog.listDatabasesPaged(maxResults, null);
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, null);
         dbs = pagedDatabases.getElements();
         assertEquals(maxResults, dbs.size());
         assertThat(dbs).containsExactly("db1", "db2");
         assertEquals("db2", pagedDatabases.getNextPageToken());
 
         // when pageToken is not null, will list tables from the pageToken (exclusive)
-        pagedDatabases = catalog.listDatabasesPaged(maxResults, pagedDatabases.getNextPageToken());
+        pagedDatabases =
+                catalog.listDatabasesPaged(maxResults, pagedDatabases.getNextPageToken(), null);
         dbs = pagedDatabases.getElements();
         assertEquals(maxResults, dbs.size());
-        assertThat(dbs).containsExactly("db3", "ert");
-        assertEquals("ert", pagedDatabases.getNextPageToken());
+        assertThat(dbs).containsExactly("db3", "db_name");
 
-        pagedDatabases = catalog.listDatabasesPaged(maxResults, pagedDatabases.getNextPageToken());
+        pagedDatabases =
+                catalog.listDatabasesPaged(maxResults, pagedDatabases.getNextPageToken(), null);
         dbs = pagedDatabases.getElements();
-        assertEquals(1, dbs.size());
-        assertThat(dbs).containsExactly("ghj");
+        assertEquals(2, dbs.size());
+        assertThat(dbs).containsExactly("ert", "ghj");
+
+        pagedDatabases =
+                catalog.listDatabasesPaged(maxResults, pagedDatabases.getNextPageToken(), null);
+        dbs = pagedDatabases.getElements();
+        assertTrue(dbs.isEmpty());
         assertNull(pagedDatabases.getNextPageToken());
 
         maxResults = 8;
-        pagedDatabases = catalog.listDatabasesPaged(maxResults, null);
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, null);
         dbs = pagedDatabases.getElements();
         String[] expectedTableNames = Arrays.stream(dbNames).sorted().toArray(String[]::new);
         assertThat(dbs).containsExactly(expectedTableNames);
         assertNull(pagedDatabases.getNextPageToken());
 
-        pagedDatabases = catalog.listDatabasesPaged(maxResults, "ddd");
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, "ddd", null);
         dbs = pagedDatabases.getElements();
         assertEquals(2, dbs.size());
         assertThat(dbs).containsExactly("ert", "ghj");
+        assertNull(pagedDatabases.getNextPageToken());
+
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, "db%");
+        dbs = pagedDatabases.getElements();
+        assertEquals(4, dbs.size());
+        assertThat(dbs).containsExactly("db1", "db2", "db3", "db_name");
+        assertNull(pagedDatabases.getNextPageToken());
+
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, "db");
+        dbs = pagedDatabases.getElements();
+        assertTrue(dbs.isEmpty());
+        assertNull(pagedDatabases.getNextPageToken());
+
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, "db_");
+        dbs = pagedDatabases.getElements();
+        assertTrue(dbs.isEmpty());
+        assertNull(pagedDatabases.getNextPageToken());
+
+        pagedDatabases = catalog.listDatabasesPaged(maxResults, null, "db_%");
+        dbs = pagedDatabases.getElements();
+        assertEquals(1, dbs.size());
+        assertThat(dbs).containsExactly("db_name");
         assertNull(pagedDatabases.getNextPageToken());
     }
 
