@@ -79,7 +79,7 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
 
     private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
-        int numCommitted = committer.filterAndCommit(committables);
+        int numCommitted = committer.filterAndCommitFromState(committables);
         if (numCommitted > 0) {
             throw new RuntimeException(
                     "This exception is intentionally thrown "
