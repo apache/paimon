@@ -1518,7 +1518,7 @@ public class FlinkCatalog extends AbstractCatalog {
         definitions.put(FUNCTION_DEFINITION_NAME, functionDefinition);
         org.apache.paimon.function.Function paimonFunction =
                 new FunctionImpl(
-                        functionPath.getObjectName(), UUID.randomUUID().toString(), definitions);
+                        UUID.randomUUID().toString(), functionPath.getObjectName(), definitions);
         try {
             catalog.createFunction(functionPath.getObjectName(), paimonFunction, ignoreIfExists);
         } catch (Catalog.FunctionAlreadyExistException e) {
