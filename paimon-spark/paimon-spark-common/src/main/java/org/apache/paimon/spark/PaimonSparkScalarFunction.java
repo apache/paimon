@@ -27,7 +27,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Scalar function for Spark. */
@@ -75,8 +74,8 @@ public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serial
             for (int i = 0; i < inputTypes().length; i++) {
                 if (inputTypes()[i] == StringType) {
                     parameters.add(input.getString(i));
-                } else if (inputTypes()[i] == IntegerType) {
-                    parameters.add(input.getInt(i));
+                } else {
+                    parameters.add(input.get(i, inputTypes()[i]));
                 }
             }
             return this.compiledMethod.invoke(
