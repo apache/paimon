@@ -33,7 +33,12 @@ import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.SparkSession;
@@ -60,6 +65,7 @@ import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -72,7 +78,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -85,6 +90,16 @@ import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
+import static org.apache.spark.sql.types.DataTypes.BinaryType;
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
+import static org.apache.spark.sql.types.DataTypes.ByteType;
+import static org.apache.spark.sql.types.DataTypes.DoubleType;
+import static org.apache.spark.sql.types.DataTypes.FloatType;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
+import static org.apache.spark.sql.types.DataTypes.LongType;
+import static org.apache.spark.sql.types.DataTypes.ShortType;
+import static org.apache.spark.sql.types.DataTypes.StringType;
+import static org.apache.spark.sql.types.DataTypes.createArrayType;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, SupportView {
@@ -575,10 +590,20 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                                 instanceof FunctionDefinition.LambdaFunctionDefinition) {
                     FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
                             (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
-                    return new LambdaScalarFunction(
-                            ident.name(),
-                            getInputType(func.inputParams()),
-                            lambdaFunctionDefinition.definition());
+                    if (func.returnParams().isPresent()) {
+                        List<DataField> dataFields = func.returnParams().get();
+                        if (dataFields.size() == 1) {
+                            DataField dataField = dataFields.get(0);
+                            return new LambdaScalarFunction(
+                                    ident.name(),
+                                    paimonType2SparkType(dataField.type()),
+                                    paimonType2JavaType(dataField.type()),
+                                    lambdaFunctionDefinition.definition());
+                        } else {
+                            throw new UnsupportedOperationException(
+                                    "outParams size > 1 is not supported");
+                        }
+                    }
                 }
             } catch (Catalog.FunctionNotExistException e) {
                 throw new NoSuchFunctionException(ident);
@@ -588,9 +613,93 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         throw new NoSuchFunctionException(ident);
     }
 
-    // fixme: support all paimon data type
-    private String getInputType(Optional<List<DataField>> inputParams) {
-        return "String";
+    public static org.apache.spark.sql.types.DataType paimonType2SparkType(
+            org.apache.paimon.types.DataType type) {
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return StringType;
+            case BOOLEAN:
+                return BooleanType;
+            case BINARY:
+            case VARBINARY:
+                return BinaryType;
+            case TINYINT:
+                return ByteType;
+            case SMALLINT:
+                return ShortType;
+            case INTEGER:
+                return IntegerType;
+            case BIGINT:
+                return LongType;
+            case FLOAT:
+                return FloatType;
+            case DOUBLE:
+                return DoubleType;
+            case ARRAY:
+                return createArrayType(paimonType2SparkType(((ArrayType) type).getElementType()));
+            case MAP:
+            case MULTISET:
+                DataType keyType;
+                DataType valueType;
+                if (type instanceof MapType) {
+                    keyType = ((MapType) type).getKeyType();
+                    valueType = ((MapType) type).getValueType();
+                } else if (type instanceof MultisetType) {
+                    keyType = ((MultisetType) type).getElementType();
+                    valueType = new IntType();
+                } else {
+                    throw new UnsupportedOperationException("Unsupported type: " + type);
+                }
+                return DataTypes.createMapType(
+                        paimonType2SparkType(keyType), paimonType2SparkType(valueType));
+            default:
+                throw new UnsupportedOperationException("Unsupported type: " + type);
+        }
+    }
+
+    public static String paimonType2JavaType(org.apache.paimon.types.DataType type) {
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return "java.lang.String";
+            case BOOLEAN:
+                return "java.lang.Boolean";
+            case BINARY:
+            case VARBINARY:
+                return "byte[]";
+            case TINYINT:
+                return "java.lang.Byte";
+            case SMALLINT:
+                return "java.lang.Short";
+            case INTEGER:
+                return "java.lang.Integer";
+            case BIGINT:
+                return "java.lang.Long";
+            case FLOAT:
+                return "java.lang.Float";
+            case DOUBLE:
+                return "java.lang.Double";
+            case ARRAY:
+                return paimonType2JavaType(((ArrayType) type).getElementType()) + "[]";
+            case MAP:
+            case MULTISET:
+                DataType keyType;
+                DataType valueType;
+                if (type instanceof MapType) {
+                    keyType = ((MapType) type).getKeyType();
+                    valueType = ((MapType) type).getValueType();
+                } else if (type instanceof MultisetType) {
+                    keyType = ((MultisetType) type).getElementType();
+                    valueType = new IntType();
+                } else {
+                    throw new UnsupportedOperationException("Unsupported type: " + type);
+                }
+                return String.format(
+                        "MAP<%s,%s>", paimonType2JavaType(keyType), paimonType2JavaType(valueType));
+            default:
+                throw new UnsupportedOperationException("Unsupported type: " + type);
+        }
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {

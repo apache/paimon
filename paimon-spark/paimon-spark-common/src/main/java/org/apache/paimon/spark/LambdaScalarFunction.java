@@ -33,13 +33,16 @@ public class LambdaScalarFunction implements UnboundFunction, Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private String resultType;
+    private DataType outputType;
+    private String javaType;
     private String functionName;
     private String lambdaExpression;
 
-    public LambdaScalarFunction(String functionName, String resultType, String lambdaExpression) {
+    public LambdaScalarFunction(
+            String functionName, DataType outputType, String javaType, String lambdaExpression) {
         try {
-            this.resultType = resultType;
+            this.outputType = outputType;
+            this.javaType = javaType;
             this.functionName = functionName;
             this.lambdaExpression = lambdaExpression;
         } catch (Exception e) {
@@ -55,7 +58,7 @@ public class LambdaScalarFunction implements UnboundFunction, Serializable {
                 inputTypes.add(field.dataType());
             }
             return new PaimonSparkScalarFunction(
-                    functionName, inputTypes, resultType, this.lambdaExpression);
+                    functionName, inputTypes, outputType, javaType, this.lambdaExpression);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

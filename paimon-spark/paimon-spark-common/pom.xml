@@ -60,6 +60,12 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-bundle</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-catalyst_2.12</artifactId>
+            <version>3.5.5</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>
