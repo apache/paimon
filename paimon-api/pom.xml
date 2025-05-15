@@ -31,15 +31,47 @@ under the License.
     <name>Paimon : API</name>
 
     <dependencies>
+        <!-- Paimon Shade dependencies -->
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-jackson-2</artifactId>
             <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-guava-30</artifactId>
+            <version>${paimon.shade.guava.version}-${paimon.shade.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-caffeine-2</artifactId>
+            <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
+        </dependency>
+
+        <!-- REST Catalog dependencies -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>${okhttp.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -53,15 +85,45 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
+                                    <!-- Paimon Shade -->
                                     <include>org.apache.paimon:paimon-shade-jackson-2</include>
+                                    <include>org.apache.paimon:paimon-shade-guava-30</include>
+                                    <include>org.apache.paimon:paimon-shade-caffeine-2</include>
+
+                                    <!-- okhttp3 -->
+                                    <include>com.squareup.okhttp3:okhttp</include>
+                                    <include>com.squareup.okio:okio-jvm</include>
+                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
                                 </includes>
                             </artifactSet>
+                            <relocations>
+                                <relocation>
+                                    <pattern>okhttp3</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>kotlin</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>okio</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
+                                </relocation>
+                            </relocations>
                             <filters>
                                 <!-- Another copy of the Apache license, which we don't need. -->
                                 <filter>
                                     <artifact>*</artifact>
                                     <excludes>
                                         <exclude>META-INF/LICENSE.txt</exclude>
+                                    </excludes>
+                                </filter>
+
+                                <!-- Exclude okhttp NOTICE. -->
+                                <filter>
+                                    <artifact>*</artifact>
+                                    <excludes>
+                                        <exclude>okhttp3/internal/publicsuffix/NOTICE</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.FileReadUtils;
 
 import java.io.File;
 
@@ -48,7 +48,7 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
         Exception lastException = null;
         while (retry <= 5) {
             try {
-                String tokenStr = FileIOUtils.readFileUtf8(new File(tokenFilePath));
+                String tokenStr = FileReadUtils.readFileUtf8(new File(tokenFilePath));
                 return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
             } catch (Exception e) {
                 lastException = e;
