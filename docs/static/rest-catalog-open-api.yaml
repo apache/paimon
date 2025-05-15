@@ -1104,6 +1104,7 @@ paths:
         - table
       summary: List view summaries
       operationId: listViewSummaries
+      description: List view summaries which matches the given database name pattern and view name pattern both.
       parameters:
         - name: prefix
           in: path
@@ -1111,12 +1112,12 @@ paths:
           schema:
             type: string
         - name: databaseNamePattern
-          description: A sql LIKE pattern (% and _) for database names.
+          description: A sql LIKE pattern (% and _) for database names. All databases will be returned if not set or empty.
           in: path
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names.
+          description: A sql LIKE pattern (% and _) for view names. All views will be returned if not set or empty.
           in: query
           schema:
             type: string
@@ -2654,6 +2655,7 @@ components:
         type: object
         properties:
           fullName:
+            description: The full name of the view, including the database name and view name. The format is `database.view`.
             type: string
     Partition:
       type: object
