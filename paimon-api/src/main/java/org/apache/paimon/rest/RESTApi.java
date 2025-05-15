@@ -98,7 +98,6 @@ import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider
 @Public
 public class RESTApi {
 
-    public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
     public static final String HEADER_PREFIX = "header.";
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
@@ -128,8 +127,7 @@ public class RESTApi {
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
-                            ? ImmutableMap.of(
-                                    QUERY_PARAMETER_WAREHOUSE_KEY, RESTUtil.encodeString(warehouse))
+                            ? ImmutableMap.of(WAREHOUSE.key(), RESTUtil.encodeString(warehouse))
                             : ImmutableMap.of();
             baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
             options =

@@ -38,7 +38,6 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -120,10 +119,10 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
-import static org.apache.paimon.rest.RESTApi.QUERY_PARAMETER_WAREHOUSE_KEY;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 
@@ -167,7 +166,7 @@ public class RESTCatalogServer {
         this.functionUri = resourcePaths.functions();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
-        conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
+        conf.setString(WAREHOUSE.key(), dataPath);
         CatalogContext context = CatalogContext.create(conf);
         Path warehousePath = new Path(dataPath);
         FileIO fileIO;
@@ -269,7 +268,7 @@ public class RESTCatalogServer {
                     }
                     if (request.getPath().startsWith(resourcePaths.config())
                             && request.getRequestUrl()
-                                    .queryParameter(QUERY_PARAMETER_WAREHOUSE_KEY)
+                                    .queryParameter(WAREHOUSE.key())
                                     .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())
