@@ -34,9 +34,7 @@ public class ResourcePaths {
     protected static final String BRANCHES = "branches";
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
-    protected static final String TABLE_SUMMARIES = "table-summaries";
     protected static final String VIEW_DETAILS = "view-details";
-    protected static final String VIEW_SUMMARIES = "view-summaries";
     protected static final String ROLLBACK = "rollback";
     protected static final String FUNCTIONS = "functions";
 
@@ -72,8 +70,8 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLE_DETAILS);
     }
 
-    public String tableSummaries() {
-        return SLASH.join(V1, prefix, TABLE_SUMMARIES);
+    public String tables() {
+        return SLASH.join(V1, prefix, TABLES);
     }
 
     public String table(String databaseName, String objectName) {
@@ -212,8 +210,8 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
     }
 
-    public String viewSummaries() {
-        return SLASH.join(V1, prefix, VIEW_SUMMARIES);
+    public String views() {
+        return SLASH.join(V1, prefix, VIEWS);
     }
 
     public String view(String databaseName, String viewName) {

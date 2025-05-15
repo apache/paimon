@@ -779,7 +779,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<Table> searchViewsPaged(
+    public PagedList<String> searchViewsPaged(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,

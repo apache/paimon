@@ -371,7 +371,7 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testListTableSummariesPaged() throws Exception {
+    public void testSearchTablesPaged() throws Exception {
         // List table summaries throws UnsupportedOperationException if current catalog does not
         // supportsListObjectsPaged
         String databaseName = "table_summaries_paged_db";
@@ -379,7 +379,7 @@ public abstract class CatalogTestBase {
         if (!catalog.supportsListObjectsPaged()) {
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(databaseName, null, null, null));
+                    () -> catalog.searchTablesPaged(databaseName, (String) null, null, null));
         }
 
         String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
@@ -391,19 +391,19 @@ public abstract class CatalogTestBase {
         if (!catalog.supportsListObjectsPaged()) {
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(null, null, null, null));
+                    () -> catalog.searchTablesPaged(null, (String) null, null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(databaseName, null, null, null));
+                    () -> catalog.searchTablesPaged(databaseName, (String) null, null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(null, null, 100, null));
+                    () -> catalog.searchTablesPaged(null, null, 100, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(databaseName, "abc", null, null));
+                    () -> catalog.searchTablesPaged(databaseName, "abc", null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listTableSummariesPaged(databaseName, "abc", null, "table"));
+                    () -> catalog.searchTablesPaged(databaseName, "abc", null, "table"));
         }
     }
 
@@ -1257,7 +1257,7 @@ public abstract class CatalogTestBase {
         if (!catalog.supportsListObjectsPaged()) {
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(databaseName, null, null, null));
+                    () -> catalog.searchViewsPaged(databaseName, null, null, null));
         }
 
         View view = buildView(databaseName);
@@ -1269,19 +1269,19 @@ public abstract class CatalogTestBase {
         if (!catalog.supportsListObjectsPaged()) {
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(null, null, null, null));
+                    () -> catalog.searchViewsPaged(null, null, null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(databaseName, null, null, null));
+                    () -> catalog.searchViewsPaged(databaseName, null, null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(null, null, 100, null));
+                    () -> catalog.searchViewsPaged(null, null, 100, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(databaseName, "abc", null, null));
+                    () -> catalog.searchViewsPaged(databaseName, "abc", null, null));
             Assertions.assertThrows(
                     UnsupportedOperationException.class,
-                    () -> catalog.listViewSummariesPaged(databaseName, "abc", null, "view"));
+                    () -> catalog.searchViewsPaged(databaseName, "abc", null, "view"));
         }
     }
 

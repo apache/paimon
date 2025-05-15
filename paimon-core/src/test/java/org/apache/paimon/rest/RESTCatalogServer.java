@@ -72,10 +72,8 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
-import org.apache.paimon.rest.responses.ListTableSummariesResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
-import org.apache.paimon.rest.responses.ListViewSummariesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -85,14 +83,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.TableSummary;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
-import org.apache.paimon.view.ViewSummary;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -289,12 +285,10 @@ public class RESTCatalogServer {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
-                    } else if (StringUtils.startsWith(
-                            request.getPath(), resourcePaths.tableSummaries())) {
-                        return tableSummariesHandle(parameters);
-                    } else if (StringUtils.startsWith(
-                            request.getPath(), resourcePaths.viewSummaries())) {
-                        return viewSummariesHandle(parameters);
+                    } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
+                        return tablesHandle(parameters);
+                    } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
+                        return fullViewsHandle(parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -1234,10 +1228,10 @@ public class RESTCatalogServer {
         return tableDetails;
     }
 
-    private MockResponse tableSummariesHandle(Map<String, String> parameters) {
+    private MockResponse tablesHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<TableSummary> tableSummaries = listTableSummaries(parameters);
-        if (!tableSummaries.isEmpty()) {
+        List<String> tables = listFullTables(parameters);
+        if (!tables.isEmpty()) {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
@@ -1245,22 +1239,20 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<TableSummary> pagedTableSummaries =
-                    buildPagedEntities(tableSummaries, maxResults, pageToken);
+            PagedList<String> pagedTables = buildPagedEntities(tables, maxResults, pageToken);
             response =
-                    new ListTableSummariesResponse(
-                            pagedTableSummaries.getElements(),
-                            pagedTableSummaries.getNextPageToken());
+                    new ListTablesResponse(
+                            pagedTables.getElements(), pagedTables.getNextPageToken());
         } else {
-            response = new ListTableSummariesResponse(Collections.emptyList(), null);
+            response = new ListTablesResponse(Collections.emptyList(), null);
         }
         return mockResponse(response, 200);
     }
 
-    private List<TableSummary> listTableSummaries(Map<String, String> parameters) {
+    private List<String> listFullTables(Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
-        List<TableSummary> tableSummaries = new ArrayList<>();
+        List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if ((Objects.isNull(databaseNamePattern))
@@ -1268,13 +1260,10 @@ public class RESTCatalogServer {
                             && (Objects.isNull(tableNamePattern)
                                     || matchNamePattern(
                                             identifier.getTableName(), tableNamePattern))) {
-                CoreOptions coreOptions = CoreOptions.fromMap(entry.getValue().schema().options());
-                TableSummary tableSummary =
-                        new TableSummary(identifier.getFullName(), coreOptions.type());
-                tableSummaries.add(tableSummary);
+                tables.add(identifier.getFullName());
             }
         }
-        return tableSummaries;
+        return tables;
     }
 
     private boolean isFormatTable(Schema schema) {
@@ -1620,10 +1609,10 @@ public class RESTCatalogServer {
                 .collect(Collectors.toList());
     }
 
-    private MockResponse viewSummariesHandle(Map<String, String> parameters) {
+    private MockResponse fullViewsHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<ViewSummary> viewSummaries = listViewSummaries(parameters);
-        if (!viewSummaries.isEmpty()) {
+        List<String> fullViews = listFullViews(parameters);
+        if (!fullViews.isEmpty()) {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
@@ -1631,22 +1620,19 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<ViewSummary> pagedViewSummaries =
-                    buildPagedEntities(viewSummaries, maxResults, pageToken);
+            PagedList<String> pagedViews = buildPagedEntities(fullViews, maxResults, pageToken);
             response =
-                    new ListViewSummariesResponse(
-                            pagedViewSummaries.getElements(),
-                            pagedViewSummaries.getNextPageToken());
+                    new ListViewsResponse(pagedViews.getElements(), pagedViews.getNextPageToken());
         } else {
-            response = new ListViewSummariesResponse(Collections.emptyList(), null);
+            response = new ListViewsResponse(Collections.emptyList(), null);
         }
         return mockResponse(response, 200);
     }
 
-    private List<ViewSummary> listViewSummaries(Map<String, String> parameters) {
+    private List<String> listFullViews(Map<String, String> parameters) {
         String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
-        List<ViewSummary> viewSummaries = new ArrayList<>();
+        List<String> fullViews = new ArrayList<>();
         for (Map.Entry<String, View> entry : viewStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if ((Objects.isNull(databaseNamePattern))
@@ -1654,11 +1640,10 @@ public class RESTCatalogServer {
                             && (Objects.isNull(viewNamePattern)
                                     || matchNamePattern(
                                             identifier.getTableName(), viewNamePattern))) {
-                ViewSummary viewSummary = new ViewSummary(identifier.getFullName());
-                viewSummaries.add(viewSummary);
+                fullViews.add(identifier.getFullName());
             }
         }
-        return viewSummaries;
+        return fullViews;
     }
 
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
@@ -2047,11 +2032,6 @@ public class RESTCatalogServer {
             return ((GetViewResponse) entity).getName();
         } else if (entity instanceof Partition) {
             return ((Partition) entity).spec().toString().replace("{", "").replace("}", "");
-        } else if (entity instanceof TableSummary) {
-            return tableMetadataStore.get(((TableSummary) entity).fullName()).uuid();
-        } else if (entity instanceof ViewSummary) {
-            // should be uid too
-            return ((ViewSummary) entity).fullName();
         } else {
             return entity.toString();
         }
