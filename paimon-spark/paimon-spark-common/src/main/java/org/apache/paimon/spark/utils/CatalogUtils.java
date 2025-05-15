@@ -18,11 +18,30 @@
 
 package org.apache.paimon.spark.utils;
 
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.types.DataTypes;
 
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.spark.sql.types.DataTypes.BinaryType;
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
+import static org.apache.spark.sql.types.DataTypes.ByteType;
+import static org.apache.spark.sql.types.DataTypes.DoubleType;
+import static org.apache.spark.sql.types.DataTypes.FloatType;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
+import static org.apache.spark.sql.types.DataTypes.LongType;
+import static org.apache.spark.sql.types.DataTypes.ShortType;
+import static org.apache.spark.sql.types.DataTypes.StringType;
+import static org.apache.spark.sql.types.DataTypes.TimestampType;
+import static org.apache.spark.sql.types.DataTypes.createArrayType;
 
 /** Utils of catalog. */
 public class CatalogUtils {
@@ -50,6 +69,107 @@ public class CatalogUtils {
             return Identifier.of(Arrays.copyOfRange(namespace, 1, namespace.length), ident.name());
         } else {
             return ident;
+        }
+    }
+
+    public static org.apache.spark.sql.types.DataType paimonType2SparkType(
+            org.apache.paimon.types.DataType type) {
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return StringType;
+            case BOOLEAN:
+                return BooleanType;
+            case BINARY:
+            case VARBINARY:
+                return BinaryType;
+            case TINYINT:
+                return ByteType;
+            case SMALLINT:
+                return ShortType;
+            case INTEGER:
+                return IntegerType;
+            case BIGINT:
+                return LongType;
+            case FLOAT:
+                return FloatType;
+            case DOUBLE:
+                return DoubleType;
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                return DataTypes.createDecimalType(
+                        decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return TimestampType;
+            case ARRAY:
+                return createArrayType(paimonType2SparkType(((ArrayType) type).getElementType()));
+            case MAP:
+            case MULTISET:
+                DataType keyType;
+                DataType valueType;
+                if (type instanceof MapType) {
+                    keyType = ((MapType) type).getKeyType();
+                    valueType = ((MapType) type).getValueType();
+                } else if (type instanceof MultisetType) {
+                    keyType = ((MultisetType) type).getElementType();
+                    valueType = new IntType();
+                } else {
+                    throw new UnsupportedOperationException("Unsupported type: " + type);
+                }
+                return DataTypes.createMapType(
+                        paimonType2SparkType(keyType), paimonType2SparkType(valueType));
+            default:
+                throw new UnsupportedOperationException("Unsupported type: " + type);
+        }
+    }
+
+    public static String paimonType2JavaType(org.apache.paimon.types.DataType type) {
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return "java.lang.String";
+            case BOOLEAN:
+                return "java.lang.Boolean";
+            case BINARY:
+            case VARBINARY:
+                return "byte[]";
+            case TINYINT:
+                return "java.lang.Byte";
+            case SMALLINT:
+                return "java.lang.Short";
+            case INTEGER:
+                return "java.lang.Integer";
+            case BIGINT:
+                return "java.lang.Long";
+            case FLOAT:
+                return "java.lang.Float";
+            case DOUBLE:
+                return "java.lang.Double";
+            case DECIMAL:
+                return "java.math.BigDecimal";
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return "java.time.Instant";
+            case ARRAY:
+                return paimonType2JavaType(((ArrayType) type).getElementType()) + "[]";
+            case MAP:
+            case MULTISET:
+                DataType keyType;
+                DataType valueType;
+                if (type instanceof MapType) {
+                    keyType = ((MapType) type).getKeyType();
+                    valueType = ((MapType) type).getValueType();
+                } else if (type instanceof MultisetType) {
+                    keyType = ((MultisetType) type).getElementType();
+                    valueType = new IntType();
+                } else {
+                    throw new UnsupportedOperationException("Unsupported type: " + type);
+                }
+                return String.format(
+                        "MAP<%s,%s>", paimonType2JavaType(keyType), paimonType2JavaType(valueType));
+            default:
+                throw new UnsupportedOperationException("Unsupported type: " + type);
         }
     }
 }
