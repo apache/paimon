@@ -94,20 +94,6 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-
-        <!-- other runtime dependencies -->
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-guava-30</artifactId>
-            <version>${paimon.shade.guava.version}-${paimon.shade.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-caffeine-2</artifactId>
-            <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -125,10 +111,6 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <!-- Paimon-shade -->
-                                    <include>org.apache.paimon:paimon-shade-guava-30</include>
-                                    <include>org.apache.paimon:paimon-shade-caffeine-2</include>
-
                                     <!-- Paimon -->
                                     <include>org.apache.paimon:paimon-api</include>
                                     <include>org.apache.paimon:paimon-common</include>

@@ -32,13 +32,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.paimon.rest.RESTCatalog.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DLFAuthProvider implements AuthProvider {
 
     private static final Logger LOG = LoggerFactory.getLogger(DLFAuthProvider.class);
+
+    public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final String DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5";

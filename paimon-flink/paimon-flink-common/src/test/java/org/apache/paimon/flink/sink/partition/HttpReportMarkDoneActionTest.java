@@ -24,7 +24,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction.HttpReportMarkDoneRequest;
-import org.apache.paimon.partition.actions.HttpReportMarkDoneException;
 import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -49,7 +48,6 @@ import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_PARAMS;
-import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_TIMEOUT;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 import static org.apache.paimon.utils.InternalRowUtilsTest.ROW_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -130,13 +128,11 @@ public class HttpReportMarkDoneActionTest {
         // empty response.
         server.enqueueResponse("", 200);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
-                .isInstanceOf(HttpReportMarkDoneException.class)
                 .hasMessageContaining("ResponseBody is null or empty.");
 
         // 400.
         server.enqueueResponse(successResponse, 400);
         Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
-                .isInstanceOf(HttpReportMarkDoneException.class)
                 .hasMessageContaining("Response is not successful");
     }
 
@@ -157,7 +153,6 @@ public class HttpReportMarkDoneActionTest {
     public static CoreOptions createCoreOptions() {
         HashMap<String, String> httpOptions = new HashMap<>();
         httpOptions.put(PARTITION_MARK_DONE_ACTION_URL.key(), server.getBaseUrl());
-        httpOptions.put(PARTITION_MARK_DONE_ACTION_TIMEOUT.key(), "2 s");
         if (params != null) {
             httpOptions.put(PARTITION_MARK_DONE_ACTION_PARAMS.key(), params);
         }

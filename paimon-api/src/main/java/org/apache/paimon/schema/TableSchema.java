@@ -19,8 +19,6 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -29,10 +27,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.Serializable;
-import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -339,24 +334,6 @@ public class TableSchema implements Serializable {
 
     public static TableSchema fromJson(String json) {
         return JsonSerdeUtil.fromJson(json, TableSchema.class);
-    }
-
-    public static TableSchema fromPath(FileIO fileIO, Path path) {
-        try {
-            return tryFromPath(fileIO, path);
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e.getMessage(), e);
-        }
-    }
-
-    public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
-        try {
-            return fromJson(fileIO.readFileUtf8(path));
-        } catch (FileNotFoundException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 
     public static TableSchema create(long schemaId, Schema schema) {

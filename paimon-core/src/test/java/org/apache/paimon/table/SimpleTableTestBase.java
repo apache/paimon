@@ -1094,7 +1094,7 @@ public abstract class SimpleTableTestBase {
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
-                Snapshot.fromPath(
+                SnapshotManager.fromPath(
                         table.fileIO(),
                         tagManager.copyWithBranch("test-branch").tagPath("test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
@@ -1103,14 +1103,14 @@ public abstract class SimpleTableTestBase {
         SnapshotManager snapshotManager =
                 newSnapshotManager(table.fileIO(), table.location(), "test-branch");
         Snapshot branchSnapshot =
-                Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
+                SnapshotManager.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
                 new SchemaManager(table.fileIO(), table.location(), "test-branch");
         TableSchema branchSchema =
-                TableSchema.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
+                SchemaManager.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1267,16 +1267,17 @@ public abstract class SimpleTableTestBase {
         // verify snapshot in branch1 and main branch is same
         SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
         Snapshot branchSnapshot =
-                Snapshot.fromPath(
+                SnapshotManager.fromPath(
                         table.fileIO(),
                         snapshotManager.copyWithBranch(BRANCH_NAME).snapshotPath(2));
-        Snapshot snapshot = Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
+        Snapshot snapshot =
+                SnapshotManager.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         TableSchema branchSchema =
-                TableSchema.fromPath(
+                SchemaManager.fromPath(
                         table.fileIO(), schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();

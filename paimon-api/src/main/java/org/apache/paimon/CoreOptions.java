@@ -1297,13 +1297,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.");
 
-    public static final ConfigOption<Duration> PARTITION_MARK_DONE_ACTION_TIMEOUT =
-            key("partition.mark-done-action.http.timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(5))
-                    .withDescription(
-                            "Http client connection timeout, this can only be used by http-report partition mark done action.");
-
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_PARAMS =
             key("partition.mark-done-action.http.params")
                     .stringType()
@@ -2425,10 +2418,6 @@ public class CoreOptions implements Serializable {
 
     public String httpReportMarkDoneActionUrl() {
         return options.get(PARTITION_MARK_DONE_ACTION_URL);
-    }
-
-    public Duration httpReportMarkDoneActionTimeout() {
-        return options.get(PARTITION_MARK_DONE_ACTION_TIMEOUT);
     }
 
     public String httpReportMarkDoneActionParams() {
