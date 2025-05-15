@@ -167,38 +167,10 @@ public class CatalogUtils {
                     throw new UnsupportedOperationException("Unsupported type: " + type);
                 }
                 return String.format(
-                        "MAP<%s,%s>", paimonType2JavaType(keyType), paimonType2JavaType(valueType));
+                        "java.util.Map<%s,%s>",
+                        paimonType2JavaType(keyType), paimonType2JavaType(valueType));
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
     }
-
-    //    public static Object getDataFromRow(InternalRow input, int position,
-    // org.apache.spark.sql.types.DataType type) {
-    //        if (type == StringType) {
-    //            return input.getString(position);
-    //        } else if (type == BooleanType) {
-    //            return input.getBoolean(position);
-    //        } else if (type == BinaryType) {
-    //            return input.getBinary(position);
-    //        } else if (type == ByteType) {
-    //            return input.getByte(position);
-    //        } else if (type == ShortType) {
-    //            return input.getShort(position);
-    //        } else if (type == IntegerType) {
-    //            return input.getInt(position);
-    //        } else if (type == LongType){
-    //            return input.getLong(position);
-    //        } else if (type == FloatType){
-    //            return input.getFloat(position);
-    //        } else if (type == DoubleType){
-    //            return input.getDouble(position);
-    //        } else if (type instanceof org.apache.spark.sql.types.DecimalType){
-    //            org.apache.spark.sql.types.DecimalType decimalType =
-    // (org.apache.spark.sql.types.DecimalType) type;
-    //            return input.getDecimal(position, decimalType.precision(), decimalType.scale());
-    //        } else if (type == TimestampType) {
-    //            return input.get(position, type);
-    //        }
-    //    }
 }

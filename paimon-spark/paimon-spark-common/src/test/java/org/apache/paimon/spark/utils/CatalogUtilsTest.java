@@ -19,24 +19,40 @@
 package org.apache.paimon.spark.utils;
 
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.VarCharType;
 
+import org.apache.spark.sql.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.spark.sql.types.DataTypes.createArrayType;
+import static org.apache.spark.sql.types.DataTypes.createMapType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CatalogUtils}. */
 public class CatalogUtilsTest {
     @Test
     void paimonType2SparkType() {
+        assertThat(CatalogUtils.paimonType2SparkType(new DecimalType(2, 1)))
+                .isEqualTo(DataTypes.createDecimalType(2, 1));
         assertThat(CatalogUtils.paimonType2SparkType(new ArrayType(new IntType())))
                 .isEqualTo(createArrayType(org.apache.spark.sql.types.DataTypes.IntegerType));
+        assertThat(CatalogUtils.paimonType2SparkType(new MapType(new IntType(), new VarCharType())))
+                .isEqualTo(
+                        createMapType(
+                                org.apache.spark.sql.types.DataTypes.IntegerType,
+                                DataTypes.StringType));
     }
 
     @Test
     void paimonType2JavaType() {
+        assertThat(CatalogUtils.paimonType2JavaType(new DecimalType(2, 1)))
+                .isEqualTo("java.math.BigDecimal");
         assertThat(CatalogUtils.paimonType2JavaType(new ArrayType(new IntType())))
                 .isEqualTo("java.lang.Integer[]");
+        assertThat(CatalogUtils.paimonType2JavaType(new MapType(new IntType(), new VarCharType())))
+                .isEqualTo("java.util.Map<java.lang.Integer,java.lang.String>");
     }
 }
