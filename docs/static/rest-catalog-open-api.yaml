@@ -334,6 +334,7 @@ paths:
         - table
       summary: List table summaries
       operationId: listTableSummaries
+      description: List table summaries which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
           in: path
@@ -341,12 +342,12 @@ paths:
           schema:
             type: string
         - name: databaseNamePattern
-          description: A sql LIKE pattern (% and _) for database names.
+          description: A sql LIKE pattern (% and _) for database names. All databases will be returned if not set or empty.
           in: path
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names.
+          description: A sql LIKE pattern (% and _) for table names. All tables will be returned if not set or empty.
           in: query
           schema:
             type: string
@@ -2092,6 +2093,7 @@ components:
         type: object
         properties:
           fullName:
+            description: The full name of the table, including the database name and table name. The format is `database.table`.
             type: string
           name:
             type: string

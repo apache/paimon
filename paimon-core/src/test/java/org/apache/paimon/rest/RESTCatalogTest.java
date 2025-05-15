@@ -879,7 +879,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertPagedViewDetails(pagedViewDetails, view, 4, "view1", "view2", "view3", "view_name");
         assertNull(pagedViewDetails.getNextPageToken());
 
-        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "vie_");
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view_");
         Assertions.assertTrue(pagedViewDetails.getElements().isEmpty());
         assertNull(pagedViewDetails.getNextPageToken());
 
