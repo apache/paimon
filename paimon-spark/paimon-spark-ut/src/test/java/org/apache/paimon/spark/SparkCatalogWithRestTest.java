@@ -19,6 +19,9 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
@@ -27,6 +30,8 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -38,6 +43,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,6 +58,7 @@ public class SparkCatalogWithRestTest {
     private String warehouse;
     @TempDir java.nio.file.Path tempFile;
     private String initToken = "init_token";
+    private SparkSession spark;
 
     @BeforeEach
     public void before() throws IOException {
@@ -68,16 +76,7 @@ public class SparkCatalogWithRestTest {
         restCatalogServer = new RESTCatalogServer(dataPath, authProvider, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
-    }
-
-    @AfterEach()
-    public void after() throws Exception {
-        restCatalogServer.shutdown();
-    }
-
-    @Test
-    public void testTable() {
-        SparkSession spark =
+        spark =
                 SparkSession.builder()
                         .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.paimon.metastore", "rest")
@@ -92,7 +91,16 @@ public class SparkCatalogWithRestTest {
                                 "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
+    }
 
+    @AfterEach()
+    public void after() throws Exception {
+        restCatalogServer.shutdown();
+        spark.close();
+    }
+
+    @Test
+    public void testTable() {
         spark.sql("CREATE DATABASE paimon.db2");
         spark.sql("USE paimon.db2");
         spark.sql(
@@ -105,44 +113,41 @@ public class SparkCatalogWithRestTest {
                 .containsExactlyInAnyOrder("t1");
         spark.sql("DROP TABLE t1");
         assertThat(spark.sql("SHOW TABLES").collectAsList().size() == 0);
-        spark.close();
     }
 
     @Test
-    public void testFunction() {
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.paimon.metastore", "rest")
-                        .config("spark.sql.catalog.paimon.uri", serverUrl)
-                        .config("spark.sql.catalog.paimon.token", initToken)
-                        .config("spark.sql.catalog.paimon.warehouse", warehouse)
-                        .config(
-                                "spark.sql.catalog.paimon.token.provider",
-                                AuthProviderEnum.BEAR.identifier())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]")
-                        .getOrCreate();
-
+    public void testFunction() throws Catalog.FunctionAlreadyExistException {
         spark.sql("CREATE DATABASE paimon.db2");
         spark.sql("USE paimon.db2");
         CatalogManager catalogManager = spark.sessionState().catalogManager();
         WithPaimonCatalog withPaimonCatalog = (WithPaimonCatalog) catalogManager.currentCatalog();
         Catalog paimonCatalog = withPaimonCatalog.paimonCatalog();
-        //        paimonCatalog.createFunction("test", new UDF("test", "paimon.db2.test"), false);
-        spark.sql("select paimon.db2.test('haha', 5555)")
-                .collectAsList()
-                .forEach(System.out::println);
-        spark.close();
+        List<DataField> inputParams = new ArrayList<>();
+        inputParams.add(new DataField(0, "x", DataTypes.STRING()));
+        inputParams.add(new DataField(1, "y", DataTypes.INT()));
+        List<DataField> returnParams = new ArrayList<>();
+        returnParams.add(new DataField(0, "z", DataTypes.STRING()));
+        String functionName = "test";
+        FunctionDefinition definition =
+                FunctionDefinition.lambda(
+                        "(String x, Integer y) -> { String z = \"hello\"; return z + x + y; }",
+                        "JAVA");
+        Function function =
+                new FunctionImpl(
+                        UUID.randomUUID().toString(),
+                        functionName,
+                        inputParams,
+                        returnParams,
+                        false,
+                        ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
+                        null,
+                        null);
+        paimonCatalog.createFunction(functionName, function, false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s('haha', 5555)", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[hellohaha5555]");
     }
-
-    //    private Function createJavaLambdaCatalogFunction(String filePath) {
-    //        Function function = new FunctionImpl();
-    //        return new CatalogFunctionImpl(
-    //                "com.streaming.flink.udf.StrUdf",
-    //                FunctionLanguage.JAVA,
-    //                ImmutableList.of(resourceUri));
-    //    }
 }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.catalog;
 
-import org.apache.paimon.spark.LambdaScalarFunction;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -56,10 +55,6 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
             if (func != null) {
                 return func;
             }
-            return new LambdaScalarFunction(
-                    ident.name(),
-                    "String",
-                    "(String x, Integer y) -> { String z = \"hello\"; return z + x + y; }");
         }
 
         throw new NoSuchFunctionException(ident);

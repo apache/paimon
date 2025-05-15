@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -31,10 +33,12 @@ import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
@@ -42,6 +46,7 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
@@ -67,6 +72,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -86,6 +92,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
+    protected static final String FUNCTION_DEFINITION_NAME = "spark";
 
     protected Catalog catalog = null;
 
@@ -548,6 +555,42 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
+    }
+
+    @Override
+    public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
+        return catalog.listFunctions().stream()
+                .map(name -> Identifier.of(namespace, name))
+                .toArray(Identifier[]::new);
+    }
+
+    @Override
+    public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
+        if (isFunctionNamespace(ident.namespace())) {
+            try {
+                Function func = catalog.getFunction(ident.name());
+                FunctionDefinition functionDefinition = func.definition(FUNCTION_DEFINITION_NAME);
+                if (functionDefinition != null
+                        && functionDefinition
+                                instanceof FunctionDefinition.LambdaFunctionDefinition) {
+                    FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
+                            (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
+                    return new LambdaScalarFunction(
+                            ident.name(),
+                            getInputType(func.inputParams()),
+                            lambdaFunctionDefinition.definition());
+                }
+            } catch (Catalog.FunctionNotExistException e) {
+                throw new NoSuchFunctionException(ident);
+            }
+        }
+
+        throw new NoSuchFunctionException(ident);
+    }
+
+    // fixme: support all paimon data type
+    private String getInputType(Optional<List<DataField>> inputParams) {
+        return "String";
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {
