@@ -100,7 +100,7 @@ public class JavaLambdaStringToMethodConverter {
             method.append(body);
         }
         if (!body.endsWith("}")) {
-            method.append("{");
+            method.append("}");
         }
         return method.toString();
     }

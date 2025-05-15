@@ -20,6 +20,7 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
@@ -33,6 +34,7 @@ import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
@@ -117,7 +119,7 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
-    public void testFunction() throws Catalog.FunctionAlreadyExistException {
+    public void testFunction() throws Exception {
         spark.sql("CREATE DATABASE paimon.db2");
         spark.sql("USE paimon.db2");
         CatalogManager catalogManager = spark.sessionState().catalogManager();
@@ -150,6 +152,23 @@ public class SparkCatalogWithRestTest {
                                 .get(0)
                                 .toString())
                 .isEqualTo("[hellohaha5555]");
+        definition = FunctionDefinition.lambda("(String x, Integer y) ->  x + y", "JAVA");
+        paimonCatalog.alterFunction(
+                functionName,
+                ImmutableList.of(
+                        FunctionChange.updateDefinition(
+                                SparkCatalog.FUNCTION_DEFINITION_NAME, definition)),
+                false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s('haha', 5555)", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[haha5555]");
+        cleanFunction(functionName);
+    }
+
+    private void cleanFunction(String functionName) {
         String functionFilePath =
                 SparkCatalogWithRestTest.class
                         .getProtectionDomain()
