@@ -102,7 +102,7 @@ public class TagBatchCreation {
 
             while (tagCount > tagNumRetainedMax) {
                 for (List<String> tagNames : tagManager.tags().values()) {
-                    if (tagCount - tagNames.size() >= tagNumRetainedMax) {
+                    if (tagCount - tagNames.size() > tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
                                 tagNames, tagDeletion, snapshotManager);
                         tagCount = tagCount - tagNames.size();
