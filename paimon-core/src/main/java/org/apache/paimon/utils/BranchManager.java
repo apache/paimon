@@ -24,13 +24,13 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
 public interface BranchManager {
 
     String BRANCH_PREFIX = "branch-";
-    String DEFAULT_MAIN_BRANCH = "main";
 
     void createBranch(String branchName);
 

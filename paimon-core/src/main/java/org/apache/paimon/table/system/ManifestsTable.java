@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -60,7 +61,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class ManifestsTable implements ReadonlyTable {
@@ -238,7 +239,7 @@ public class ManifestsTable implements ReadonlyTable {
         ManifestList manifestList =
                 new ManifestList.Factory(
                                 dataTable.fileIO(),
-                                options.manifestFormat(),
+                                FileFormat.manifestFormat(options),
                                 options.manifestCompression(),
                                 fileStorePathFactory,
                                 null)

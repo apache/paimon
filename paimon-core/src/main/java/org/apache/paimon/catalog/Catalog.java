@@ -738,10 +738,8 @@ public interface Catalog extends AutoCloseable {
 
     // ======================= Constants ===============================
 
-    // constants for system table and database
-    String SYSTEM_TABLE_SPLITTER = "$";
+    // constants for sys database
     String SYSTEM_DATABASE_NAME = "sys";
-    String SYSTEM_BRANCH_PREFIX = "branch_";
 
     // constants for table and database
     String COMMENT_PROP = "comment";

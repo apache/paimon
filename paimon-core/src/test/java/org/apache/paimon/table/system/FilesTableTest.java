@@ -19,7 +19,6 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -54,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,8 +89,7 @@ public class FilesTableTest extends TableTestBase {
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         scan = table.store().newScan();
 
-        Identifier filesTableId =
-                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
+        Identifier filesTableId = identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
         filesTable = (FilesTable) catalog.getTable(filesTableId);
         snapshotManager = newSnapshotManager(fileIO, tablePath);
 

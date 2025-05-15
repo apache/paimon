@@ -110,6 +110,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
@@ -449,7 +450,7 @@ public abstract class SimpleTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (fileFormat(table.coreOptions()).getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }

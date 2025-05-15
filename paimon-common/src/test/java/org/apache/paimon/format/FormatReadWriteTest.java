@@ -52,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -353,7 +354,10 @@ public abstract class FormatReadWriteTest {
 
     private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
         RowType rowType = rowTypeForFullTypesTest();
-        InternalRow.FieldGetter[] fieldGetters = rowType.fieldGetters();
+        InternalRow.FieldGetter[] fieldGetters =
+                IntStream.range(0, rowType.getFieldCount())
+                        .mapToObj(i -> InternalRow.createFieldGetter(rowType.getTypeAt(i), i))
+                        .toArray(InternalRow.FieldGetter[]::new);
         for (int i = 0; i < fieldGetters.length; i++) {
             String name = rowType.getFieldNames().get(i);
             Object actualField = fieldGetters[i].getFieldOrNull(actual);

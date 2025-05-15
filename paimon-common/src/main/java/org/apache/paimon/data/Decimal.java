@@ -29,6 +29,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 
+import static org.apache.paimon.types.DecimalType.MAX_COMPACT_PRECISION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -43,11 +44,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public final class Decimal implements Comparable<Decimal>, Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    // member fields and static fields are package-visible,
-    // in order to be accessible for DecimalUtils
-
-    static final int MAX_COMPACT_PRECISION = 18;
 
     /** Maximum number of decimal digits a Long can represent. (1e18 < Long.MaxValue < 1e19) */
     static final int MAX_LONG_DIGITS = 18;
