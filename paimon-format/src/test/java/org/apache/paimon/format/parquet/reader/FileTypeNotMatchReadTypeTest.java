@@ -62,7 +62,6 @@ import java.util.Random;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_KEY_NAME;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_VALUE_NAME;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetTypes;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test field type not match correctly with read type. */

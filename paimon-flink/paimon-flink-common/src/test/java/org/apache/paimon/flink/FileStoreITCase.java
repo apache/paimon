@@ -33,7 +33,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BlockingIterator;
-import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -85,6 +84,7 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -139,7 +139,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @BeforeAll
     public static void before() {
-        branch = BranchManager.DEFAULT_MAIN_BRANCH;
+        branch = DEFAULT_MAIN_BRANCH;
     }
 
     @Parameters(name = "isBatch-{0}")

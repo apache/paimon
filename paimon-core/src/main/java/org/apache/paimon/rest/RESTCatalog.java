@@ -31,7 +31,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.FunctionChange;
-import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -849,7 +848,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.function(functionName),
                             GetFunctionResponse.class,
                             restAuthFunction);
-            return new FunctionImpl(response);
+            return response.toFunction();
         } catch (NoSuchResourceException e) {
             throw new FunctionNotExistException(functionName, e);
         }

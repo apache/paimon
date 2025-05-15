@@ -21,7 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.BinaryStringUtils;
 
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {
@@ -46,6 +46,7 @@ public class FieldListaggAgg extends FieldAggregator {
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
-        return StringUtils.concat(mergeFieldSD, BinaryString.fromString(delimiter), inFieldSD);
+        return BinaryStringUtils.concat(
+                mergeFieldSD, BinaryString.fromString(delimiter), inFieldSD);
     }
 }

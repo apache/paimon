@@ -58,6 +58,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
+import static org.apache.paimon.format.FileFormat.fileFormat;
+
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
         implements BundleFileStoreWriter {
@@ -92,7 +94,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;
-        this.fileFormat = options.fileFormat();
+        this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 
         this.statsCollectors =

@@ -69,7 +69,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing tags of table. */
 public class TagsTable implements ReadonlyTable {

@@ -18,8 +18,6 @@
 
 package org.apache.paimon.annotation;
 
-import org.apache.paimon.options.ConfigOption;
-
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -35,7 +33,7 @@ public final class Documentation {
         String value();
     }
 
-    /** Annotation used on {@link ConfigOption} fields to exclude it from schema change. */
+    /** Annotation used on {@code ConfigOption} fields to exclude it from schema change. */
     @Target(ElementType.FIELD)
     @Retention(RetentionPolicy.RUNTIME)
     public @interface Immutable {}

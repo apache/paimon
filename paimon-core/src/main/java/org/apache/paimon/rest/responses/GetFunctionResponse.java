@@ -18,7 +18,9 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -132,5 +134,17 @@ public class GetFunctionResponse extends AuditRESTResponse {
     @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> options() {
         return options;
+    }
+
+    public Function toFunction() {
+        return new FunctionImpl(
+                uuid,
+                functionName,
+                inputParams,
+                returnParams,
+                deterministic,
+                definitions,
+                comment,
+                options);
     }
 }

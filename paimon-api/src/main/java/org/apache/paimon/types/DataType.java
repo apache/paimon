@@ -29,10 +29,6 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Set;
 
-/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 /**
  * Describes the data type in the paimon ecosystem.
  *

@@ -49,7 +49,6 @@ import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
 
-import static org.apache.paimon.types.DataTypeRoot.FLOAT;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BOOLEAN;
 
 /** Decoder to return values from a single column. */

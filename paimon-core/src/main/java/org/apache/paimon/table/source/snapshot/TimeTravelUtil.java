@@ -36,9 +36,17 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
+import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
+import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
 
@@ -50,10 +58,11 @@ public class TimeTravelUtil {
     private static final String WATERMARK_PREFIX = "watermark-";
 
     private static final String[] SCAN_KEYS = {
-        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-        CoreOptions.SCAN_TAG_NAME.key(),
-        CoreOptions.SCAN_WATERMARK.key(),
-        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
+        SCAN_SNAPSHOT_ID.key(),
+        SCAN_TAG_NAME.key(),
+        SCAN_WATERMARK.key(),
+        SCAN_TIMESTAMP.key(),
+        SCAN_TIMESTAMP_MILLIS.key()
     };
 
     public static Snapshot tryTravelOrLatest(FileStoreTable table) {
@@ -83,31 +92,38 @@ public class TimeTravelUtil {
         checkArgument(
                 scanHandleKey.size() == 1,
                 String.format(
-                        "Only one of the following parameters may be set : [%s, %s, %s, %s]",
-                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                        CoreOptions.SCAN_TAG_NAME.key(),
-                        CoreOptions.SCAN_WATERMARK.key(),
-                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
+                        "Only one of the following parameters may be set : %s",
+                        Arrays.toString(SCAN_KEYS)));
 
         String key = scanHandleKey.get(0);
         CoreOptions coreOptions = new CoreOptions(options);
         Snapshot snapshot;
-        if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
+        if (key.equals(SCAN_SNAPSHOT_ID.key())) {
             snapshot =
                     new StaticFromSnapshotStartingScanner(
                                     snapshotManager, coreOptions.scanSnapshotId())
                             .getSnapshot();
-        } else if (key.equals(CoreOptions.SCAN_WATERMARK.key())) {
+        } else if (key.equals(SCAN_WATERMARK.key())) {
             snapshot =
                     new StaticFromWatermarkStartingScanner(
                                     snapshotManager, coreOptions.scanWatermark())
                             .getSnapshot();
-        } else if (key.equals(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())) {
+        } else if (key.equals(SCAN_TIMESTAMP.key())) {
+            snapshot =
+                    new StaticFromTimestampStartingScanner(
+                                    snapshotManager,
+                                    parseTimestampData(
+                                                    coreOptions.scanTimestamp(),
+                                                    3,
+                                                    TimeZone.getDefault())
+                                            .getMillisecond())
+                            .getSnapshot();
+        } else if (key.equals(SCAN_TIMESTAMP_MILLIS.key())) {
             snapshot =
                     new StaticFromTimestampStartingScanner(
                                     snapshotManager, coreOptions.scanTimestampMills())
                             .getSnapshot();
-        } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
+        } else if (key.equals(SCAN_TAG_NAME.key())) {
             snapshot =
                     new StaticFromTagStartingScanner(snapshotManager, coreOptions.scanTagName())
                             .getSnapshot();
@@ -124,12 +140,12 @@ public class TimeTravelUtil {
         }
 
         if (tagManager.tagExists(version)) {
-            options.set(CoreOptions.SCAN_TAG_NAME, version);
+            options.set(SCAN_TAG_NAME, version);
         } else if (version.startsWith(WATERMARK_PREFIX)) {
             long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
-            options.set(CoreOptions.SCAN_WATERMARK, watermark);
+            options.set(SCAN_WATERMARK, watermark);
         } else if (version.chars().allMatch(Character::isDigit)) {
-            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
+            options.set(SCAN_SNAPSHOT_ID.key(), version);
         } else {
             throw new RuntimeException("Cannot find a time travel version for " + version);
         }
@@ -279,5 +295,15 @@ public class TimeTravelUtil {
         public long endSnapshotId() {
             return endSnapshotId;
         }
+    }
+
+    @Nullable
+    public static Long scanTimestampMills(Options options) {
+        String timestampStr = options.get(SCAN_TIMESTAMP);
+        Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
+        if (timestampMillis == null && timestampStr != null) {
+            return parseTimestampData(timestampStr, 3, TimeZone.getDefault()).getMillisecond();
+        }
+        return timestampMillis;
     }
 }

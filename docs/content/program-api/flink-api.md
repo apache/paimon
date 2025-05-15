@@ -217,7 +217,7 @@ public class WriteCdcToTable {
         Identifier identifier = Identifier.create("my_db", "T");
         Options catalogOptions = new Options();
         catalogOptions.set("warehouse", "/path/to/warehouse");
-        CatalogLoader catalogLoader = 
+        CatalogLoader catalogLoader =
                 () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         Table table = catalogLoader.load().getTable(identifier);
 

@@ -175,16 +175,16 @@ public class ReadTable {
         Table table = GetTable.getTable();
 
         PredicateBuilder builder =
-            new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
+                new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
         Predicate notNull = builder.isNotNull(0);
         Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
 
-        int[] projection = new int[] {0, 1};
+        int[] projection = new int[]{0, 1};
 
         ReadBuilder readBuilder =
-            table.newReadBuilder()
-                .withProjection(projection)
-                .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
+                table.newReadBuilder()
+                        .withProjection(projection)
+                        .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
         // 2. Plan splits in 'Coordinator' (or named 'Driver')
         List<Split> splits = readBuilder.newScan().plan().splits();
@@ -283,16 +283,16 @@ public class StreamReadTable {
         Table table = GetTable.getTable();
 
         PredicateBuilder builder =
-            new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
+                new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
         Predicate notNull = builder.isNotNull(0);
         Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
 
-        int[] projection = new int[] {0, 1};
+        int[] projection = new int[]{0, 1};
 
         ReadBuilder readBuilder =
-            table.newReadBuilder()
-                .withProjection(projection)
-                .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
+                table.newReadBuilder()
+                        .withProjection(projection)
+                        .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
         // 2. Plan splits in 'Coordinator' (or named 'Driver')
         StreamTableScan scan = readBuilder.newStreamScan();
