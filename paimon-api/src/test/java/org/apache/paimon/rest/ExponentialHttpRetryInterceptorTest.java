@@ -21,7 +21,6 @@ package org.apache.paimon.rest;
 import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
-import org.apache.hc.core5.http.HttpHeaders;
 import org.junit.jupiter.api.Test;
 
 import javax.net.ssl.SSLException;
@@ -144,7 +143,7 @@ class ExponentialHttpRetryInterceptorTest {
                 .message("message")
                 .protocol(Protocol.HTTP_1_1)
                 .request(new Request.Builder().url("http://localhost").build())
-                .addHeader(HttpHeaders.RETRY_AFTER, retryAfter)
+                .addHeader("Retry-After", retryAfter)
                 .build();
     }
 }

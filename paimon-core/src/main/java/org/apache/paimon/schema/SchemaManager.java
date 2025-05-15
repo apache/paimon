@@ -57,6 +57,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -784,7 +785,7 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        return TableSchema.fromPath(fileIO, toSchemaPath(id));
+        return fromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -912,5 +913,23 @@ public class SchemaManager implements Serializable {
         database = database.substring(0, index);
 
         return new Identifier(database, paths[paths.length - 1], branchName, null);
+    }
+
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return TableSchema.fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

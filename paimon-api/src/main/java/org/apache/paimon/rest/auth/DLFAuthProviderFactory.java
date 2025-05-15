@@ -24,8 +24,6 @@ import org.apache.paimon.rest.RESTCatalogOptions;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.URI;
-
 /** Factory for {@link DLFAuthProvider}. */
 public class DLFAuthProviderFactory implements AuthProviderFactory {
 
@@ -38,7 +36,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
     public AuthProvider create(Options options) {
         String region =
                 options.getOptional(RESTCatalogOptions.DLF_REGION)
-                        .orElseGet(() -> parseRegionFromUri(options.get(URI)));
+                        .orElseGet(() -> parseRegionFromUri(options.get(RESTCatalogOptions.URI)));
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_LOADER).isPresent()) {
             DLFTokenLoader dlfTokenLoader =
                     DLFTokenLoaderFactory.createDLFTokenLoader(
