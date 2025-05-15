@@ -328,13 +328,13 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/table-summaries:
+  /v1/{prefix}/tables:
     get:
       tags:
         - table
-      summary: List table summaries
-      operationId: listTableSummaries
-      description: List table summaries which matches the given database name pattern and table name pattern both.
+      summary: Search tables
+      operationId: search tables
+      description: search tables which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
           in: path
@@ -367,7 +367,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListTableSummariesResponse'
+                $ref: '#/components/schemas/ListTablesResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -1102,9 +1102,9 @@ paths:
     get:
       tags:
         - table
-      summary: List view summaries
-      operationId: listViewSummaries
-      description: List view summaries which matches the given database name pattern and view name pattern both.
+      summary: Search views
+      operationId: searchViews
+      description: Search views which matches the given database name pattern and view name pattern both.
       parameters:
         - name: prefix
           in: path
@@ -1137,7 +1137,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListViewSummariesResponse'
+                $ref: '#/components/schemas/ListViewsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -2480,6 +2480,7 @@ components:
           type: array
           items:
             type: string
+            description: table name of full table name of the table. full table name format is like "db.table"
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2489,15 +2490,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetTableResponse'
-        nextPageToken:
-          type: string
-    ListTableSummariesResponse:
-      type: object
-      properties:
-        tableSummaries:
-          type: array
-          items:
-            $ref: '#/components/schemas/TableSummary'
         nextPageToken:
           type: string
     ConfigResponse:
@@ -2566,6 +2558,7 @@ components:
           type: array
           items:
             type: string
+            description: view name of full view name of the view. full view name format is like "db.view"
         nextPageToken:
           type: string
     ListViewDetailsResponse:
@@ -2622,15 +2615,6 @@ components:
         updatedAt:
           format: int64
         updatedBy:
-          type: string
-    ListViewSummariesResponse:
-      type: object
-      properties:
-        viewSummaries:
-          type: array
-          items:
-            $ref: '#/components/schemas/ViewSummary'
-        nextPageToken:
           type: string
     ViewSchema:
       type: object
