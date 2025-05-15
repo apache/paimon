@@ -20,6 +20,7 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.ExponentialHttpRetryInterceptor;
+import org.apache.paimon.rest.RESTApi;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -37,7 +38,6 @@ import java.util.Arrays;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** DLF Token Loader for ECS Metadata Service. */
 public class DLFECSTokenLoader implements DLFTokenLoader {
@@ -86,7 +86,7 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
     private static DLFToken getToken(String url) {
         try {
             String token = getResponseBody(url);
-            return OBJECT_MAPPER.readValue(token, DLFToken.class);
+            return RESTApi.fromJson(token, DLFToken.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } catch (Exception e) {

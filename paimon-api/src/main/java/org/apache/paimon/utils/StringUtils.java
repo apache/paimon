@@ -299,6 +299,10 @@ public class StringUtils {
         return cs == null || cs.length() == 0;
     }
 
+    public static boolean isNotEmpty(CharSequence cs) {
+        return !isEmpty(cs);
+    }
+
     public static String randomNumericString(int len) {
         StringBuilder builder = new StringBuilder();
         ThreadLocalRandom rnd = ThreadLocalRandom.current();

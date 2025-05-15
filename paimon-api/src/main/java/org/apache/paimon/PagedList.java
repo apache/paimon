@@ -28,6 +28,7 @@ import java.util.List;
  * @since 1.1.0
  */
 public class PagedList<T> {
+
     private final List<T> elements;
 
     @Nullable private final String nextPageToken;
