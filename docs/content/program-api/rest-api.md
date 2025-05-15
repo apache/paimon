@@ -55,6 +55,7 @@ import java.util.List;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 
@@ -64,13 +65,22 @@ public class RESTApiExample {
         Options options = new Options();
         options.set(URI, "<catalog server url>");
         options.set(WAREHOUSE, "my_instance_name");
-        options.set(TOKEN_PROVIDER, "dlf");
-        options.set(DLF_ACCESS_KEY_ID, "<access-key-id>");
-        options.set(DLF_ACCESS_KEY_SECRET, "<access-key-secret>");
+        setBearToken(options); // or setDlfToken
 
         RESTApi api = new RESTApi(options);
         List<String> tables = api.listTables("my_database");
         System.out.println(tables);
+    }
+
+    private static void setBearToken(Options options) {
+        options.set(TOKEN_PROVIDER, "bear");
+        options.set(TOKEN, "<token>");
+    }
+
+    private static void setDlfToken(Options options) {
+        options.set(TOKEN_PROVIDER, "dlf");
+        options.set(DLF_ACCESS_KEY_ID, "<access-key-id>");
+        options.set(DLF_ACCESS_KEY_SECRET, "<access-key-secret>");
     }
 }
 ```
