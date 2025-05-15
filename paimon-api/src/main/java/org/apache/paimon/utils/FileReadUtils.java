@@ -27,7 +27,7 @@ import java.nio.file.Files;
 import java.util.Arrays;
 
 /** Utils for local filesystem. */
-public class LocalFileUtils {
+public class FileReadUtils {
 
     /**
      * The maximum size of array to allocate for reading. See {@code MAX_BUFFER_SIZE} in {@link

@@ -28,7 +28,7 @@ import java.nio.file.Paths;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link LocalFileUtils}. */
+/** Test for {@link FileReadUtils}. */
 public class LocalFileUtilsTest {
 
     @TempDir private java.nio.file.Path temporaryFolder;
@@ -36,8 +36,7 @@ public class LocalFileUtilsTest {
     @Test
     void testGetTargetPathNotContainsSymbolicPath() throws IOException {
         java.nio.file.Path testPath = Paths.get("parent", "child");
-        java.nio.file.Path targetPath =
-                LocalFileUtils.getTargetPathIfContainsSymbolicPath(testPath);
+        java.nio.file.Path targetPath = FileReadUtils.getTargetPathIfContainsSymbolicPath(testPath);
         assertThat(targetPath).isEqualTo(testPath);
     }
 
@@ -50,7 +49,7 @@ public class LocalFileUtilsTest {
         Files.createSymbolicLink(symlink, linkedDir.toPath());
 
         java.nio.file.Path targetPath =
-                LocalFileUtils.getTargetPathIfContainsSymbolicPath(
+                FileReadUtils.getTargetPathIfContainsSymbolicPath(
                         symlink.resolve("one").resolve("two"));
         assertThat(targetPath).isEqualTo(dirInLinked);
     }
@@ -72,7 +71,7 @@ public class LocalFileUtilsTest {
         Files.createSymbolicLink(symlink3, symlink2);
 
         java.nio.file.Path targetPath =
-                LocalFileUtils.getTargetPathIfContainsSymbolicPath(
+                FileReadUtils.getTargetPathIfContainsSymbolicPath(
                         // path contains multiple symlink : xxx/symlink1/symlink3/one
                         symlink3.resolve("one"));
         assertThat(targetPath).isEqualTo(dirInLinked2);
