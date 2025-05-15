@@ -215,22 +215,22 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseNotExistException;
 
     /**
-     * Gets an array of summaries for tables for a schema and catalog within the metastore
+     * Gets an array of tables for a schema and catalog within the metastore
      *
      * <p>NOTE: System tables will not be listed.
      *
      * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
-     * @param tableNamePattern A sql LIKE pattern (%) for table names. All table summaries will be
-     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
      * @param maxResults Optional parameter indicating the maximum number of results to include in
      *     the result. If maxResults is not specified or set to 0, will return the default number of
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @return a list of the table summaries with provided page size under this databaseNamePattern
-     *     & tableNamePattern and next page token, or throw UnsupportedOperationException if does
-     *     not {@link #supportsListObjectsPaged()}.
+     * @return a list of the tables with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token, or throw UnsupportedOperationException if does not
+     *     {@link #supportsListObjectsPaged()}.
      */
     default PagedList<String> searchTablesPaged(
             @Nullable String databaseNamePattern,
@@ -238,7 +238,7 @@ public interface Catalog extends AutoCloseable {
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         throw new UnsupportedOperationException(
-                "Current Catalog does not support listTableSummariesPaged");
+                "Current Catalog does not support searchTablesPaged");
     }
 
     /**
@@ -478,21 +478,21 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Gets an array of summaries for views for a schema and catalog within the metastore
+     * Gets an array of views for a schema and catalog within the metastore
      *
      * <p>NOTE: System tables will not be listed.
      *
      * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
-     * @param viewNamePattern A sql LIKE pattern (%) for view names. All view summaries will be
-     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
      * @param maxResults Optional parameter indicating the maximum number of results to include in
      *     the result. If maxResults is not specified or set to 0, will return the default number of
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @return a list of the table summaries with provided page size under this databaseNamePattern
-     *     & tableNamePattern and next page token, or throw UnsupportedOperationException does not
+     * @return a list of the views with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token, or throw UnsupportedOperationException does not
      *     {@link #supportsListObjectsPaged()}.
      */
     default PagedList<String> searchViewsPaged(
@@ -501,7 +501,7 @@ public interface Catalog extends AutoCloseable {
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         throw new UnsupportedOperationException(
-                "Current Catalog does not support listViewSummariesPaged");
+                "Current Catalog does not support searchViewsPaged");
     }
 
     /**
