@@ -37,14 +37,22 @@ public class JavaLambdaStringToMethodConverter {
     private static final Pattern LAMBDA_PATTERN =
             Pattern.compile("\\s*\\(([^)]*)\\)\\s*->\\s*(.+)\\s*");
 
+    public static String getClassName(String functionName) {
+        return "PaimonLambdaFunction" + functionName;
+    }
+
+    public static String getSourceFileName(String functionName) {
+        return String.format("%s.java", getClassName(functionName));
+    }
+
     public static Method compileAndLoadMethod(
             String functionName, String lambdaExpression, String returnType) throws Exception {
-        String className = "GeneratedLambda" + functionName;
+        String className = getClassName(functionName);
         String fullMethod = parseLambdaWithType(returnType, lambdaExpression, "apply");
 
         String javaCode = "public class " + className + " { " + fullMethod + " }";
 
-        File sourceFile = new File(className + ".java");
+        File sourceFile = new File(getSourceFileName(functionName));
         try (FileWriter writer = new FileWriter(sourceFile)) {
             writer.write(javaCode);
         }

@@ -42,6 +42,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -149,5 +150,17 @@ public class SparkCatalogWithRestTest {
                                 .get(0)
                                 .toString())
                 .isEqualTo("[hellohaha5555]");
+        String functionFilePath =
+                SparkCatalogWithRestTest.class
+                        .getProtectionDomain()
+                        .getCodeSource()
+                        .getLocation()
+                        .getPath()
+                        .toString()
+                        .replaceAll(
+                                "target/test-classes/",
+                                JavaLambdaStringToMethodConverter.getSourceFileName(functionName));
+        File file = new File(functionFilePath);
+        file.delete();
     }
 }
