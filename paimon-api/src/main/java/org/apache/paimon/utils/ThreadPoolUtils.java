@@ -44,6 +44,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
+
 /** Utils for thread pool. */
 public class ThreadPoolUtils {
 
@@ -71,15 +73,14 @@ public class ThreadPoolUtils {
                         1,
                         TimeUnit.MINUTES,
                         workQueue,
-                        ThreadUtils.newDaemonThreadFactory(namePrefix));
+                        newDaemonThreadFactory(namePrefix));
         executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 
     public static ScheduledExecutorService createScheduledThreadPool(
             int threadNum, String namePrefix) {
-        return new ScheduledThreadPoolExecutor(
-                threadNum, ThreadUtils.newDaemonThreadFactory(namePrefix));
+        return new ScheduledThreadPoolExecutor(threadNum, newDaemonThreadFactory(namePrefix));
     }
 
     /** This method aims to parallel process tasks with memory control and sequentially. */
