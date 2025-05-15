@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.types.DataType;
-import org.apache.spark.unsafe.types.UTF8String;
 
 import java.io.Serializable;
 import java.lang.reflect.Method;
@@ -61,7 +60,7 @@ public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serial
 
     @Override
     public DataType resultType() {
-        return StringType;
+        return resultType;
     }
 
     @Override
@@ -80,10 +79,8 @@ public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serial
                     parameters.add(input.getInt(i));
                 }
             }
-            return UTF8String.fromString(
-                    (String)
-                            this.compiledMethod.invoke(
-                                    null, parameters.toArray(new Object[parameters.size()])));
+            return this.compiledMethod.invoke(
+                    null, parameters.toArray(new Object[parameters.size()]));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
