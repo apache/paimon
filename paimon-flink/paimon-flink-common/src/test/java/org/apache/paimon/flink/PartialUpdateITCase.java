@@ -623,7 +623,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDeleteWithoutSequenceGroup() {
+    public void testRemoveRecordOnDeleteWithoutSequenceGroup() throws Exception {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
@@ -645,6 +645,19 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // batch read
         assertThat(sql("SELECT * FROM remove_record_on_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+
+        // delete record with changelog stream
+        String id =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(Row.ofKind(RowKind.DELETE, 1, "A", null)));
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE delete_source1 (pk INT, a STRING, b STRING) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id));
+        sEnv.executeSql("INSERT INTO remove_record_on_delete SELECT * FROM delete_source1").await();
+        assertThat(sql("SELECT * FROM remove_record_on_delete")).isEmpty();
     }
 
     @Test
@@ -680,8 +693,26 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group"))
                 .containsExactlyInAnyOrder(Row.of(1, "apple", 2, null, 2));
 
-        // delete record
-        sql("DELETE FROM remove_record_on_delete_sequence_group WHERE pk = 1");
+        // delete record with seq_a
+        String id2 =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(
+                                Row.ofKind(RowKind.DELETE, 1, "apple", 2, null, null)));
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE delete_source2 (pk INT, a STRING, seq_a INT, b STRING, seq_b INT) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id2));
+        sEnv.executeSql(
+                        "INSERT INTO remove_record_on_delete_sequence_group SELECT * FROM delete_source2")
+                .await();
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group")).isEmpty();
+
+        // batch delete record
+        sql(
+                "INSERT INTO remove_record_on_delete_sequence_group VALUES (2, 'flink', 2, 'paimon', 1)");
+        sql("DELETE FROM remove_record_on_delete_sequence_group WHERE pk = 2");
         assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group")).isEmpty();
     }
 
