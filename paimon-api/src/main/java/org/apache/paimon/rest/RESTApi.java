@@ -756,7 +756,7 @@ public class RESTApi {
     /**
      * List functions for database.
      *
-     * @param databaseName
+     * @param databaseName database name
      * @return a list of function name
      */
     public List<String> listFunctions(String databaseName) {
@@ -1091,16 +1091,11 @@ public class RESTApi {
         return results;
     }
 
-    private Map<String, String> buildPagedQueryParams(
-            @Nullable Integer maxResults, @Nullable String pageToken) {
-        return buildPagedQueryParams(maxResults, pageToken, null);
-    }
-
     @SafeVarargs
     private final Map<String, String> buildPagedQueryParams(
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Pair<String, String>... namePatternPairs) {
+            Pair<String, String>... namePatternPairs) {
         Map<String, String> queryParams = Maps.newHashMap();
         if (Objects.nonNull(maxResults) && maxResults > 0) {
             queryParams.put(MAX_RESULTS, maxResults.toString());
@@ -1108,14 +1103,12 @@ public class RESTApi {
         if (Objects.nonNull(pageToken)) {
             queryParams.put(PAGE_TOKEN, pageToken);
         }
-        if (Objects.nonNull(namePatternPairs)) {
-            for (Pair<String, String> namePatternPair : namePatternPairs) {
-                String namePatternKey = namePatternPair.getKey();
-                String namePatternValue = namePatternPair.getValue();
-                if (StringUtils.isNotEmpty(namePatternKey)
-                        && StringUtils.isNotEmpty(namePatternValue)) {
-                    queryParams.put(namePatternKey, namePatternValue);
-                }
+        for (Pair<String, String> namePatternPair : namePatternPairs) {
+            String namePatternKey = namePatternPair.getKey();
+            String namePatternValue = namePatternPair.getValue();
+            if (StringUtils.isNotEmpty(namePatternKey)
+                    && StringUtils.isNotEmpty(namePatternValue)) {
+                queryParams.put(namePatternKey, namePatternValue);
             }
         }
         return queryParams;
