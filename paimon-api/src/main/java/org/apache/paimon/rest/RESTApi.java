@@ -212,7 +212,7 @@ public class RESTApi {
     /**
      * List databases.
      *
-     * <p>Gets an array of schemas for a catalog. There is no guarantee of a specific ordering of
+     * <p>Gets an array of databases for a catalog. There is no guarantee of a specific ordering of
      * the elements in the array.
      *
      * @param maxResults Optional parameter indicating the maximum number of results to include in
