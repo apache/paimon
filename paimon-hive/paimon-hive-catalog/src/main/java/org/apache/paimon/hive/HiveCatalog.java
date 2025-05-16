@@ -1173,17 +1173,24 @@ public class HiveCatalog extends AbstractCatalog {
         if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
             return;
         }
+
+        Set<String> removedOptions =
+                changes.stream()
+                        .filter(c -> c instanceof SchemaChange.RemoveOption)
+                        .map(c -> ((SchemaChange.RemoveOption) c).key())
+                        .collect(Collectors.toSet());
         try {
-            alterTableToHms(table, identifier, schema);
+            alterTableToHms(table, identifier, schema, removedOptions);
         } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
             throw new RuntimeException(te);
         }
     }
 
-    private void alterTableToHms(Table table, Identifier identifier, TableSchema newSchema)
+    private void alterTableToHms(
+            Table table, Identifier identifier, TableSchema newSchema, Set<String> removedOptions)
             throws TException, InterruptedException {
-        updateHmsTablePars(table, newSchema);
+        updateHmsTablePars(table, newSchema, removedOptions);
         Path location = getTableLocation(identifier, table);
         // file format is null, because only data table support alter table.
         updateHmsTable(table, identifier, newSchema, null, location);
@@ -1268,7 +1275,7 @@ public class HiveCatalog extends AbstractCatalog {
                         identifier.getFullName());
                 if (!newTable.getSd().getCols().equals(table.getSd().getCols())
                         || !newTable.getParameters().equals(table.getParameters())) {
-                    alterTableToHms(table, identifier, tableSchema);
+                    alterTableToHms(table, identifier, tableSchema, Collections.emptySet());
                 }
             } catch (TableNotExistException e) {
                 // hive table does not exist.
@@ -1540,7 +1547,7 @@ public class HiveCatalog extends AbstractCatalog {
         locationHelper.specifyTableLocation(table, location.toString());
     }
 
-    private void updateHmsTablePars(Table table, TableSchema schema) {
+    private void updateHmsTablePars(Table table, TableSchema schema, Set<String> removedOptions) {
         if (syncAllProperties()) {
             table.getParameters().putAll(schema.options());
             table.getParameters().putAll(convertToPropertiesTableKey(schema));
@@ -1548,6 +1555,7 @@ public class HiveCatalog extends AbstractCatalog {
             table.getParameters()
                     .putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
         }
+        removedOptions.forEach(table.getParameters()::remove);
     }
 
     private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
