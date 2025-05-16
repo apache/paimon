@@ -24,6 +24,10 @@ import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 
+/**
+ * {@link ChannelComputer} for writing {@link InternalRow}s into postpone bucket tables. Records
+ * with same primary keys are distributed to the same subtask.
+ */
 public class PostponeBucketChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
