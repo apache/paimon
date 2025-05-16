@@ -525,7 +525,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param view identifier of the view to alter
      * @param viewChanges - changes of view
-     * @param ignoreIfNotExists
+     * @param ignoreIfNotExists Flag to specify behavior when the view does not exist
      * @throws ViewNotExistException if the view does not exist
      * @throws DialectAlreadyExistException if the dialect already exists
      * @throws DialectNotExistException if the dialect not exists
@@ -767,9 +767,9 @@ public interface Catalog extends AutoCloseable {
     /**
      * Drop function.
      *
-     * @param identifier
-     * @param ignoreIfNotExists
-     * @throws FunctionNotExistException
+     * @param identifier path of the function to be created
+     * @param ignoreIfNotExists Flag to specify behavior when the function does not exist
+     * @throws FunctionNotExistException if the function doesn't exist
      */
     void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
             throws FunctionNotExistException;
@@ -777,10 +777,10 @@ public interface Catalog extends AutoCloseable {
     /**
      * Alter function.
      *
-     * @param identifier
-     * @param changes
-     * @param ignoreIfNotExists
-     * @throws FunctionNotExistException
+     * @param identifier path of the function to be created
+     * @param changes the function changes
+     * @param ignoreIfNotExists Flag to specify behavior when the function does not exist
+     * @throws FunctionNotExistException if the function doesn't exist
      */
     void alterFunction(
             Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
