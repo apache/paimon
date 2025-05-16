@@ -403,11 +403,11 @@ public class RESTApi {
     /**
      * List table for a catalog.
      *
-     * <p>Gets an array of table for a catalog. There is no guarantee of a specific
-     * ordering of the elements in the array.
+     * <p>Gets an array of table for a catalog. There is no guarantee of a specific ordering of the
+     * elements in the array.
      *
-     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be returned
-     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
      *     if not set or empty. Currently, only prefix matching is supported.
      * @param maxResults Optional parameter indicating the maximum number of results to include in
@@ -415,7 +415,6 @@ public class RESTApi {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-
      * @return {@link PagedList}: elements and nextPageToken.
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
@@ -932,19 +931,18 @@ public class RESTApi {
     /**
      * List views for a catalog.
      *
-     * <p>Gets an array of views for a catalog. There is no guarantee of a specific
-     * ordering of the elements in the array.
+     * <p>Gets an array of views for a catalog. There is no guarantee of a specific ordering of the
+     * elements in the array.
      *
-     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be returned
-     *     if not set or empty. Currently, only prefix matching is supported.
-     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned
-     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
      * @param maxResults Optional parameter indicating the maximum number of results to include in
      *     the result. If maxResults is not specified or set to 0, will return the default number of
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-
      * @return {@link PagedList}: elements and nextPageToken.
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
