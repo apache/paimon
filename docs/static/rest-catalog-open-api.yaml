@@ -1184,7 +1184,7 @@ paths:
           $ref: '#/components/responses/ViewAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/functions:
+  /v1/{prefix}/databases/{database}/functions:
     get:
       tags:
         - function
@@ -1192,6 +1192,11 @@ paths:
       operationId: listFunctions
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1227,6 +1232,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -1244,7 +1254,7 @@ paths:
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
 
-  /v1/{prefix}/functions/{function}:
+  /v1/{prefix}/databases/{database}/functions/{function}:
     get:
       tags:
         - function
@@ -1252,6 +1262,11 @@ paths:
       operationId: getFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1285,6 +1300,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
         - name: function
           in: path
           required: true
@@ -1311,6 +1331,11 @@ paths:
       operationId: dropFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -2483,8 +2508,6 @@ components:
     GetFunctionResponse:
       type: object
       properties:
-        uuid:
-          type: string
         name:
           type: string
         inputParams:
