@@ -38,10 +38,12 @@ public class PagedList<T> {
         this.nextPageToken = nextPageToken;
     }
 
+    /** An array of element objects. */
     public List<T> getElements() {
         return this.elements;
     }
 
+    /** Page token to retrieve the next page of results. Absent if there are no more pages. */
     @Nullable
     public String getNextPageToken() {
         return this.nextPageToken;
