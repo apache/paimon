@@ -332,9 +332,9 @@ paths:
     get:
       tags:
         - table
-      summary: Search tables
-      operationId: search tables
-      description: search tables which matches the given database name pattern and table name pattern both.
+      summary: List tables globally
+      operationId: List tables globally
+      description: list tables paged globally which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
           in: path
@@ -1102,9 +1102,9 @@ paths:
     get:
       tags:
         - table
-      summary: Search views
-      operationId: searchViews
-      description: Search views which matches the given database name pattern and view name pattern both.
+      summary: List views globally
+      operationId: listViewsGlobally
+      description: List views globally which matches the given database name pattern and view name pattern both.
       parameters:
         - name: prefix
           in: path

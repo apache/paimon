@@ -542,38 +542,38 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testSearchTablesPaged() throws Exception {
-        // Search table returns an empty list when there are no tables in the catalog
+    public void testListTablesPagedGlobally() throws Exception {
+        // List table paged globally returns an empty list when there are no tables in the catalog
 
-        PagedList<String> pagedTables = catalog.searchTablesPaged(null, null, null, null);
+        PagedList<String> pagedTables = catalog.listTablesPagedGlobally(null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
-        String databaseName = "search_tables_paged_db";
+        String databaseName = "list_tables_paged_globally db";
         String databaseName2 = "sample";
-        String databaseNamePattern = "search_tables_paged%";
+        String databaseNamePattern = "list_tables_paged_globally%";
         String[] tableNames = {
             "table1", "table2", "table3", "abd", "def", "opr", "format_table", "table_name"
         };
-        prepareDataForSearchTablesPaged(databaseName, databaseName2, tableNames);
+        prepareDataForListTablesPagedGlobally(databaseName, databaseName2, tableNames);
 
         String[] expectedTableNames =
                 Arrays.stream(tableNames).map((databaseName + ".")::concat).toArray(String[]::new);
         String[] fullTableNames = Arrays.copyOf(expectedTableNames, tableNames.length + 1);
         fullTableNames[tableNames.length] = databaseName2 + ".table1";
 
-        pagedTables = catalog.searchTablesPaged(databaseNamePattern, null, null, null);
+        pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, null, null, null);
         assertThat(pagedTables.getElements()).containsExactlyInAnyOrder(expectedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
-        assertSearchTablesPagedWithLoop(databaseNamePattern, expectedTableNames);
-        assertSearchTablesPagedWithLoop(null, fullTableNames);
+        assertListTablesPagedGloballyWithLoop(databaseNamePattern, expectedTableNames);
+        assertListTablesPagedGloballyWithLoop(null, fullTableNames);
 
-        assertSearchTablesPagedWithTablePattern(
+        assertListTablesPagedGloballyWithTablePattern(
                 databaseName, databaseNamePattern, expectedTableNames);
     }
 
-    protected void prepareDataForSearchTablesPaged(
+    protected void prepareDataForListTablesPagedGlobally(
             String databaseName, String databaseName2, String[] tableNames)
             throws Catalog.DatabaseAlreadyExistException, Catalog.TableAlreadyExistException,
                     Catalog.DatabaseNotExistException {
@@ -608,7 +608,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Identifier.create(databaseName2, "table1"), DEFAULT_TABLE_SCHEMA, false);
     }
 
-    protected void assertSearchTablesPagedWithLoop(
+    protected void assertListTablesPagedGloballyWithLoop(
             String databaseNamePattern, String[] expectedTableNames) {
         int maxResults = 2;
         PagedList<String> pagedTables;
@@ -616,7 +616,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String pageToken = null;
         do {
             pagedTables =
-                    catalog.searchTablesPaged(databaseNamePattern, null, maxResults, pageToken);
+                    catalog.listTablesPagedGlobally(
+                            databaseNamePattern, null, maxResults, pageToken);
             pageToken = pagedTables.getNextPageToken();
             if (pagedTables.getElements() != null) {
                 tables.addAll(pagedTables.getElements());
@@ -632,17 +633,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedTables.getNextPageToken());
     }
 
-    protected void assertSearchTablesPagedWithTablePattern(
+    protected void assertListTablesPagedGloballyWithTablePattern(
             String databaseName, String databaseNamePattern, String[] expectedTableNames) {
         int maxResults = 9;
         PagedList<String> pagedTables =
-                catalog.searchTablesPaged(databaseNamePattern, null, maxResults, null);
+                catalog.listTablesPagedGlobally(databaseNamePattern, null, maxResults, null);
         assertEquals(
                 Math.min(maxResults, expectedTableNames.length), pagedTables.getElements().size());
         assertThat(pagedTables.getElements()).containsExactlyInAnyOrder(expectedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.searchTablesPaged(databaseNamePattern, "table%", null, null);
+        pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "table%", null, null);
         assertEquals(4, pagedTables.getElements().size());
         assertThat(pagedTables.getElements())
                 .containsExactlyInAnyOrder(
@@ -652,27 +653,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         buildFullName(databaseName, "table_name"));
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.searchTablesPaged(databaseNamePattern, "table_", null, null);
+        pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "table_", null, null);
         assertTrue(pagedTables.getElements().isEmpty());
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.searchTablesPaged(databaseNamePattern, "table_%", null, null);
+        pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "table_%", null, null);
         assertEquals(1, pagedTables.getElements().size());
         assertThat(pagedTables.getElements())
                 .containsExactlyInAnyOrder(buildFullName(databaseName, "table_name"));
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.searchTablesPaged(databaseNamePattern, "tabl_", null, null);
+        pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "tabl_", null, null);
         assertTrue(pagedTables.getElements().isEmpty());
         assertNull(pagedTables.getNextPageToken());
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.searchTablesPaged(databaseNamePattern, "ta%le", null, null));
+                () -> catalog.listTablesPagedGlobally(databaseNamePattern, "ta%le", null, null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.searchTablesPaged(databaseNamePattern, "%tale", null, null));
+                () -> catalog.listTablesPagedGlobally(databaseNamePattern, "%tale", null, null));
     }
 
     private String buildFullName(String database, String tableName) {
@@ -872,36 +873,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testSearchViewsPaged() throws Exception {
-        // search views returns an empty list when there are no views in the catalog
+    public void testListViewsPagedGlobally() throws Exception {
+        // list views paged globally returns an empty list when there are no views in the catalog
 
-        PagedList<String> pagedViews = catalog.searchViewsPaged(null, null, null, null);
+        PagedList<String> pagedViews = catalog.listViewsPagedGlobally(null, null, null, null);
         assertThat(pagedViews.getElements()).isEmpty();
         assertNull(pagedViews.getNextPageToken());
 
-        String databaseName = "search_views_paged_db";
+        String databaseName = "list_views_paged_globally_db";
         String databaseName2 = "sample";
-        String databaseNamePattern = "search_views_paged%";
+        String databaseNamePattern = "list_views_paged_globally%";
         String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr", "view_name"};
-        prepareDataForSearchViewsPaged(databaseName, databaseName2, viewNames);
+        prepareDataForListViewsPagedGlobally(databaseName, databaseName2, viewNames);
 
         String[] expectedViewNames =
                 Arrays.stream(viewNames).map((databaseName + ".")::concat).toArray(String[]::new);
         String[] fullTableNames = Arrays.copyOf(expectedViewNames, viewNames.length + 1);
         fullTableNames[viewNames.length] = databaseName2 + ".view1";
 
-        pagedViews = catalog.searchViewsPaged(databaseNamePattern, null, null, null);
+        pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, null, null, null);
         assertEquals(expectedViewNames.length, pagedViews.getElements().size());
         assertThat(pagedViews.getElements()).containsExactlyInAnyOrder(expectedViewNames);
         assertNull(pagedViews.getNextPageToken());
 
-        assertSearchViewsPagedWithLoop(databaseNamePattern, expectedViewNames);
-        assertSearchViewsPagedWithLoop(null, fullTableNames);
+        assertListViewsPagedGloballyWithLoop(databaseNamePattern, expectedViewNames);
+        assertListViewsPagedGloballyWithLoop(null, fullTableNames);
 
-        assertSearchViewsPagedWithViewPattern(databaseName, databaseNamePattern, expectedViewNames);
+        assertListViewsPagedGloballyWithViewPattern(
+                databaseName, databaseNamePattern, expectedViewNames);
     }
 
-    protected void prepareDataForSearchViewsPaged(
+    protected void prepareDataForListViewsPagedGlobally(
             String databaseName, String databaseName2, String[] viewNames)
             throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException,
                     Catalog.ViewAlreadyExistException {
@@ -916,14 +918,16 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         catalog.createView(Identifier.create(databaseName2, "view1"), view, false);
     }
 
-    protected void assertSearchViewsPagedWithLoop(
+    protected void assertListViewsPagedGloballyWithLoop(
             String databaseNamePattern, String[] expectedViewNames) {
         int maxResults = 2;
         PagedList<String> pagedViews;
         List<String> views = new ArrayList<>();
         String pageToken = null;
         do {
-            pagedViews = catalog.searchViewsPaged(databaseNamePattern, null, maxResults, pageToken);
+            pagedViews =
+                    catalog.listViewsPagedGlobally(
+                            databaseNamePattern, null, maxResults, pageToken);
             pageToken = pagedViews.getNextPageToken();
             if (pagedViews.getElements() != null) {
                 views.addAll(pagedViews.getElements());
@@ -939,17 +943,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViews.getNextPageToken());
     }
 
-    protected void assertSearchViewsPagedWithViewPattern(
+    protected void assertListViewsPagedGloballyWithViewPattern(
             String databaseName, String databaseNamePattern, String[] expectedViewNames) {
         int maxResults = 8;
         PagedList<String> pagedViews =
-                catalog.searchViewsPaged(databaseNamePattern, null, maxResults, null);
+                catalog.listViewsPagedGlobally(databaseNamePattern, null, maxResults, null);
         assertEquals(
                 Math.min(maxResults, expectedViewNames.length), pagedViews.getElements().size());
         assertThat(pagedViews.getElements()).containsExactlyInAnyOrder(expectedViewNames);
         assertNull(pagedViews.getNextPageToken());
 
-        pagedViews = catalog.searchViewsPaged(databaseNamePattern, "view%", null, null);
+        pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, "view%", null, null);
         assertEquals(4, pagedViews.getElements().size());
         assertThat(pagedViews.getElements())
                 .containsExactlyInAnyOrder(
@@ -959,11 +963,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         buildFullName(databaseName, "view_name"));
         assertNull(pagedViews.getNextPageToken());
 
-        pagedViews = catalog.searchViewsPaged(databaseNamePattern, "view_", null, null);
+        pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, "view_", null, null);
         assertTrue(pagedViews.getElements().isEmpty());
         assertNull(pagedViews.getNextPageToken());
 
-        pagedViews = catalog.searchViewsPaged(databaseNamePattern, "view_%", null, null);
+        pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, "view_%", null, null);
         assertEquals(1, pagedViews.getElements().size());
         assertThat(pagedViews.getElements())
                 .containsExactlyInAnyOrder(buildFullName(databaseName, "view_name"));
@@ -971,11 +975,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.searchViewsPaged(databaseNamePattern, "vi%ew", null, null));
+                () -> catalog.listViewsPagedGlobally(databaseNamePattern, "vi%ew", null, null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.searchViewsPaged(databaseNamePattern, "%view", null, null));
+                () -> catalog.listViewsPagedGlobally(databaseNamePattern, "%view", null, null));
     }
 
     @Test

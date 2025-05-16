@@ -72,7 +72,8 @@ public interface Catalog extends AutoCloseable {
      * @return a list of the names of databases with provided page size in this catalog and next
      *     page token, or a list of the names of all databases if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
-     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
+     * @throws UnsupportedOperationException if and does not {@link #supportsListByPattern()} when
+     *     databaseNamePattern is not null
      */
     PagedList<String> listDatabasesPaged(
             @Nullable Integer maxResults,
@@ -229,16 +230,17 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @return a list of the tables with provided page size under this databaseNamePattern &
-     *     tableNamePattern and next page token, or throw UnsupportedOperationException if does not
-     *     {@link #supportsListObjectsPaged()}.
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}.
      */
-    default PagedList<String> searchTablesPaged(
+    default PagedList<String> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         throw new UnsupportedOperationException(
-                "Current Catalog does not support searchTablesPaged");
+                "Current Catalog does not support listTablesPagedGlobally");
     }
 
     /**
@@ -492,16 +494,17 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @return a list of the views with provided page size under this databaseNamePattern &
-     *     tableNamePattern and next page token, or throw UnsupportedOperationException does not
-     *     {@link #supportsListObjectsPaged()}.
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}}.
      */
-    default PagedList<String> searchViewsPaged(
+    default PagedList<String> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         throw new UnsupportedOperationException(
-                "Current Catalog does not support searchViewsPaged");
+                "Current Catalog does not support listViewsPagedGlobally");
     }
 
     /**

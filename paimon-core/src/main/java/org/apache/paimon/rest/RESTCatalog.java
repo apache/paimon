@@ -248,13 +248,14 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> searchTablesPaged(
+    public PagedList<String> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         PagedList<String> tables =
-                api.searchTablesPaged(databaseNamePattern, tableNamePattern, maxResults, pageToken);
+                api.listTablesPagedGlobally(
+                        databaseNamePattern, tableNamePattern, maxResults, pageToken);
         return new PagedList<>(tables.getElements(), tables.getNextPageToken());
     }
 
@@ -779,13 +780,14 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> searchViewsPaged(
+    public PagedList<String> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
         PagedList<String> views =
-                api.searchViewsPaged(databaseNamePattern, viewNamePattern, maxResults, pageToken);
+                api.listViewsPagedGlobally(
+                        databaseNamePattern, viewNamePattern, maxResults, pageToken);
         return new PagedList<>(views.getElements(), views.getNextPageToken());
     }
 
