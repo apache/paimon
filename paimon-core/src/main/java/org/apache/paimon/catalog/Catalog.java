@@ -215,7 +215,7 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseNotExistException;
 
     /**
-     * Gets an array of tables for a schema and catalog within the metastore
+     * Gets an array of tables for a database and catalog within the metastore
      *
      * <p>NOTE: System tables will not be listed.
      *
@@ -478,7 +478,7 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Gets an array of views for a schema and catalog within the metastore
+     * Gets an array of views for a database and catalog within the metastore
      *
      * <p>NOTE: System tables will not be listed.
      *

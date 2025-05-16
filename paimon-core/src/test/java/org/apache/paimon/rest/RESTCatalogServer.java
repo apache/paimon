@@ -288,7 +288,7 @@ public class RESTCatalogServer {
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
-                        return fullViewsHandle(parameters);
+                        return viewsHandle(parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -1230,7 +1230,7 @@ public class RESTCatalogServer {
 
     private MockResponse tablesHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<String> tables = listFullTables(parameters);
+        List<String> tables = listTables(parameters);
         if (!tables.isEmpty()) {
             int maxResults;
             try {
@@ -1249,7 +1249,7 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private List<String> listFullTables(Map<String, String> parameters) {
+    private List<String> listTables(Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
         List<String> tables = new ArrayList<>();
@@ -1609,10 +1609,10 @@ public class RESTCatalogServer {
                 .collect(Collectors.toList());
     }
 
-    private MockResponse fullViewsHandle(Map<String, String> parameters) {
+    private MockResponse viewsHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<String> fullViews = listFullViews(parameters);
-        if (!fullViews.isEmpty()) {
+        List<String> views = listViews(parameters);
+        if (!views.isEmpty()) {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
@@ -1620,7 +1620,7 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<String> pagedViews = buildPagedEntities(fullViews, maxResults, pageToken);
+            PagedList<String> pagedViews = buildPagedEntities(views, maxResults, pageToken);
             response =
                     new ListViewsResponse(pagedViews.getElements(), pagedViews.getNextPageToken());
         } else {
@@ -1629,7 +1629,7 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private List<String> listFullViews(Map<String, String> parameters) {
+    private List<String> listViews(Map<String, String> parameters) {
         String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
         List<String> fullViews = new ArrayList<>();

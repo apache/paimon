@@ -233,7 +233,7 @@ paths:
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names.
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -311,7 +311,7 @@ paths:
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names.
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -342,12 +342,12 @@ paths:
           schema:
             type: string
         - name: databaseNamePattern
-          description: A sql LIKE pattern (% and _) for database names. All databases will be returned if not set or empty.
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
           in: path
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names. All tables will be returned if not set or empty.
+          description: A sql LIKE pattern (%) for table names. All tables will be returned if not set or empty. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -760,7 +760,7 @@ paths:
           schema:
             type: string
         - name: partitionNamePattern
-          description: A sql LIKE pattern (% and _) for partition names.
+          description: A sql LIKE pattern (%) for partition names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -1003,7 +1003,7 @@ paths:
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names.
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -1081,7 +1081,7 @@ paths:
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names.
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -1112,12 +1112,12 @@ paths:
           schema:
             type: string
         - name: databaseNamePattern
-          description: A sql LIKE pattern (% and _) for database names. All databases will be returned if not set or empty.
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
           in: path
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names. All views will be returned if not set or empty.
+          description: A sql LIKE pattern (%) for view names. All views will be returned if not set or empty. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -2090,15 +2090,6 @@ components:
           format: int64
         updatedBy:
           type: string
-      TableSummary:
-        type: object
-        properties:
-          fullName:
-            description: The full name of the table, including the database name and table name. The format is `database.table`.
-            type: string
-          name:
-            type: string
-            enum: ["table", "format-table", "materialized-table", "object-table"]
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -2480,7 +2471,7 @@ components:
           type: array
           items:
             type: string
-            description: table name of full table name of the table. full table name format is like "db.table"
+            description: table name or full table name of the table. full table name format is like "db.table"
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2558,7 +2549,7 @@ components:
           type: array
           items:
             type: string
-            description: view name of full view name of the view. full view name format is like "db.view"
+            description: view name or full view name of the view. full view name format is like "db.view"
         nextPageToken:
           type: string
     ListViewDetailsResponse:
@@ -2634,12 +2625,6 @@ components:
         options:
           type: object
           additionalProperties:
-            type: string
-      ViewSummary:
-        type: object
-        properties:
-          fullName:
-            description: The full name of the view, including the database name and view name. The format is `database.view`.
             type: string
     Partition:
       type: object
