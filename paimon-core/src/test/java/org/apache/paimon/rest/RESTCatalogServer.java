@@ -832,7 +832,10 @@ public class RESTCatalogServer {
                         RESTApi.fromJson(data, AlterFunctionRequest.class);
                 HashMap<String, FunctionDefinition> newDefinitions =
                         new HashMap<>(function.definitions());
-                Map<String, String> newOptions = new HashMap<>(function.options());
+                Map<String, String> newOptions = new HashMap<>();
+                if (function.options() != null) {
+                    newOptions.putAll(function.options());
+                }
                 String newComment = function.comment();
                 for (FunctionChange functionChange : requestBody.changes()) {
                     if (functionChange instanceof FunctionChange.SetFunctionOption) {

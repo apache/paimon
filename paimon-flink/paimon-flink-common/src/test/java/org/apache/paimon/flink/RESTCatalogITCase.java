@@ -21,8 +21,16 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTToken;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.apache.flink.table.catalog.Catalog;
+import org.apache.flink.table.catalog.CatalogFunction;
+import org.apache.flink.table.catalog.CatalogFunctionImpl;
+import org.apache.flink.table.catalog.FunctionLanguage;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.resource.ResourceType;
+import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -101,5 +109,32 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         DATABASE_NAME, TABLE_NAME));
         assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
+    @Test
+    public void testFunction() throws Exception {
+        Catalog catalog = tEnv.getCatalog("PAIMON").get();
+        String functionName = "test_str2";
+        CatalogFunctionImpl function = createJavaCatalogFunction("xxxx.jar");
+        ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
+        catalog.createFunction(functionObjectPath, function, false);
+        CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction).isEqualTo(function);
+
+        function = createJavaCatalogFunction("xxxx-yyyy.jar");
+        catalog.alterFunction(functionObjectPath, function, false);
+        getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction).isEqualTo(function);
+
+        catalog.dropFunction(functionObjectPath, false);
+        assertThat(catalog.functionExists(functionObjectPath)).isFalse();
+    }
+
+    private CatalogFunctionImpl createJavaCatalogFunction(String filePath) {
+        ResourceUri resourceUri = new ResourceUri(ResourceType.JAR, filePath);
+        return new CatalogFunctionImpl(
+                "com.streaming.flink.udf.StrUdf",
+                FunctionLanguage.JAVA,
+                ImmutableList.of(resourceUri));
     }
 }

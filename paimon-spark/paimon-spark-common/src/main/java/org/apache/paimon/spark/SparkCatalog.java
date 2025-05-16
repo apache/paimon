@@ -23,18 +23,23 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
+import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
@@ -42,6 +47,7 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
@@ -86,6 +92,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
+    protected static final String FUNCTION_DEFINITION_NAME = "spark";
 
     protected Catalog catalog = null;
 
@@ -548,6 +555,52 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
+    }
+
+    @Override
+    public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
+        String databaseName = getDatabaseNameFromNamespace(namespace);
+        try {
+            return catalog.listFunctions(databaseName).stream()
+                    .map(name -> Identifier.of(namespace, name))
+                    .toArray(Identifier[]::new);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
+        }
+    }
+
+    @Override
+    public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
+        if (isFunctionNamespace(ident.namespace())) {
+            try {
+                Function func = catalog.getFunction(toIdentifier(ident));
+                FunctionDefinition functionDefinition = func.definition(FUNCTION_DEFINITION_NAME);
+                if (functionDefinition != null
+                        && functionDefinition
+                                instanceof FunctionDefinition.LambdaFunctionDefinition) {
+                    FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
+                            (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
+                    if (func.returnParams().isPresent()) {
+                        List<DataField> dataFields = func.returnParams().get();
+                        if (dataFields.size() == 1) {
+                            DataField dataField = dataFields.get(0);
+                            return new LambdaScalarFunction(
+                                    ident.name(),
+                                    CatalogUtils.paimonType2SparkType(dataField.type()),
+                                    CatalogUtils.paimonType2JavaType(dataField.type()),
+                                    lambdaFunctionDefinition.definition());
+                        } else {
+                            throw new UnsupportedOperationException(
+                                    "outParams size > 1 is not supported");
+                        }
+                    }
+                }
+            } catch (Catalog.FunctionNotExistException e) {
+                throw new NoSuchFunctionException(ident);
+            }
+        }
+
+        throw new NoSuchFunctionException(ident);
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {
