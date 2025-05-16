@@ -702,7 +702,7 @@ public class RESTApi {
         return response.branches();
     }
 
-    /** TODO */
+    /** TODO. */
     public List<String> listFunctions() {
         return listDataFromPageApi(
                 queryParams ->
@@ -713,24 +713,24 @@ public class RESTApi {
                                 restAuthFunction));
     }
 
-    /** TODO */
+    /** TODO. */
     public GetFunctionResponse getFunction(String functionName) {
         return client.get(
                 resourcePaths.function(functionName), GetFunctionResponse.class, restAuthFunction);
     }
 
-    /** TODO */
+    /** TODO. */
     public void createFunction(org.apache.paimon.function.Function function) {
         client.post(
                 resourcePaths.functions(), new CreateFunctionRequest(function), restAuthFunction);
     }
 
-    /** TODO */
+    /** TODO. */
     public void dropFunction(String functionName) {
         client.delete(resourcePaths.function(functionName), restAuthFunction);
     }
 
-    /** TODO */
+    /** TODO. */
     public void alterFunction(String functionName, List<FunctionChange> changes) {
         client.post(
                 resourcePaths.function(functionName),
