@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.utils.CatalogUtils;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.types.DataType;
@@ -26,8 +28,6 @@ import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-
-import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Scalar function for Spark. */
 public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serializable {
@@ -72,15 +72,13 @@ public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serial
             }
             List<Object> parameters = new ArrayList<>();
             for (int i = 0; i < inputTypes().length; i++) {
-                if (inputTypes()[i] == StringType) {
-                    parameters.add(input.getString(i));
-                } else {
-                    parameters.add(input.get(i, inputTypes()[i]));
-                }
+                Object obj = CatalogUtils.convert(inputTypes()[i], input.get(i, inputTypes()[i]));
+                parameters.add(obj);
             }
             return this.compiledMethod.invoke(
                     null, parameters.toArray(new Object[parameters.size()]));
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
     }

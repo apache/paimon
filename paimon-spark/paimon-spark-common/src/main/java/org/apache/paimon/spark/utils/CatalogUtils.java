@@ -25,10 +25,20 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 
+import org.apache.spark.sql.catalyst.util.GenericArrayData;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.types.BooleanType;
+import org.apache.spark.sql.types.ByteType;
 import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.IntegerType;
+import org.apache.spark.sql.types.LongType;
+import org.apache.spark.sql.types.ShortType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.BinaryType;
@@ -172,5 +182,43 @@ public class CatalogUtils {
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
+    }
+
+    public static Object convert(org.apache.spark.sql.types.DataType sparkType, Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (sparkType == StringType) {
+            return (String) value;
+        } else if (sparkType == IntegerType) {
+            return (Integer) value;
+        } else if (sparkType instanceof org.apache.spark.sql.types.ArrayType) {
+            org.apache.spark.sql.types.ArrayType arrayType =
+                    (org.apache.spark.sql.types.ArrayType) sparkType;
+            List<Object> list = new ArrayList<>();
+            if (value instanceof GenericArrayData) {
+                GenericArrayData genericArray = (GenericArrayData) value;
+                Object[] array = genericArray.array();
+                for (Object elem : array) {
+                    list.add(convert(arrayType.elementType(), elem));
+                }
+                return list;
+            } else {
+                throw new IllegalArgumentException("Unexpected array type: " + value.getClass());
+            }
+        } else if (sparkType instanceof org.apache.spark.sql.types.MapType) {
+            org.apache.spark.sql.types.MapType mapType =
+                    (org.apache.spark.sql.types.MapType) sparkType;
+            Map<Object, Object> sparkMap = (Map<Object, Object>) value;
+            Map<Object, Object> javaMap = new HashMap<>();
+            for (Map.Entry<Object, Object> entry : sparkMap.entrySet()) {
+                Object key = convert(mapType.keyType(), entry.getKey());
+                Object val = convert(mapType.valueType(), entry.getValue());
+                javaMap.put(key, val);
+            }
+            return javaMap;
+        }
+
+        throw new IllegalArgumentException("Unsupported Spark data type: " + sparkType);
     }
 }
