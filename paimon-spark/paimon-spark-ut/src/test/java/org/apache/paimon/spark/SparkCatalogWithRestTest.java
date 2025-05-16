@@ -120,6 +120,7 @@ public class SparkCatalogWithRestTest {
 
     @Test
     public void testFunction() throws Exception {
+        //fixme: add array and map test
         spark.sql("CREATE DATABASE paimon.db2");
         spark.sql("USE paimon.db2");
         CatalogManager catalogManager = spark.sessionState().catalogManager();
