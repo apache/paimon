@@ -612,8 +612,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<String> listFunctions(String databaseName) {
-        return api.listFunctions(databaseName);
+    public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
+        try {
+            return api.listFunctions(databaseName);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName, e);
+        }
     }
 
     @Override
@@ -632,9 +636,11 @@ public class RESTCatalog implements Catalog {
             Identifier identifier,
             org.apache.paimon.function.Function function,
             boolean ignoreIfExists)
-            throws FunctionAlreadyExistException {
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
         try {
             api.createFunction(identifier, function);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
         } catch (AlreadyExistsException e) {
             if (ignoreIfExists) {
                 return;

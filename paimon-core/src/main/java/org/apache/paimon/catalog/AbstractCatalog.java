@@ -534,7 +534,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
-            throws FunctionAlreadyExistException {
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
         throw new UnsupportedOperationException();
     }
 

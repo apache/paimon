@@ -212,7 +212,7 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public List<String> listFunctions(String databaseName) {
+    public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
         return wrapped.listFunctions(databaseName);
     }
 
@@ -223,7 +223,7 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
-            throws FunctionAlreadyExistException {
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
         wrapped.createFunction(identifier, function, ignoreIfExists);
     }
 

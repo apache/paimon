@@ -1219,6 +1219,8 @@ paths:
                 $ref: '#/components/schemas/ListFunctionsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     post:
@@ -1249,6 +1251,8 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "409":
           $ref: '#/components/responses/FunctionAlreadyExistErrorResponse'
         "500":
@@ -1286,7 +1290,7 @@ paths:
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     post:

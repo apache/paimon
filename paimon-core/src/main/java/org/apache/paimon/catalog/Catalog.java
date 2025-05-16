@@ -668,27 +668,38 @@ public interface Catalog extends AutoCloseable {
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
 
-    /** List all functions in catalog. */
-    List<String> listFunctions(String databaseName);
+    /**
+     * Get the names of all functions in this catalog.
+     *
+     * @return a list of the names of all functions
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    List<String> listFunctions(String databaseName) throws DatabaseNotExistException;
 
     /**
      * Get function by name.
      *
-     * @param identifier
-     * @throws FunctionNotExistException
+     * @param identifier Path of the function to get
+     * @return The requested function
+     * @throws FunctionNotExistException if the function does not exist
      */
     Function getFunction(Identifier identifier) throws FunctionNotExistException;
 
     /**
-     * Create function.
+     * Create a new function.
      *
-     * @param identifier
-     * @param function
-     * @param ignoreIfExists
-     * @throws FunctionAlreadyExistException
+     * <p>NOTE: System functions can not be created.
+     *
+     * @param identifier path of the function to be created
+     * @param function the function definition
+     * @param ignoreIfExists flag to specify behavior when a function already exists at the given
+     *     path: if set to false, it throws a FunctionAlreadyExistException, if set to true, do
+     *     nothing.
+     * @throws FunctionAlreadyExistException if function already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
     void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
-            throws FunctionAlreadyExistException;
+            throws FunctionAlreadyExistException, DatabaseNotExistException;
 
     /**
      * Drop function.
