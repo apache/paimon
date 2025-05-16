@@ -62,16 +62,17 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.utils.ListUtils.pickRandomly;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -132,14 +133,16 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         this.extractor = new RowPartitionAllPrimaryKeyExtractor(table.schema());
         this.keyPartExtractor = new KeyPartPartitionKeyExtractor(table.schema());
 
+        String tmpDir = pickRandomly(Arrays.asList(ioManager.tempDirs()));
+        this.path = new File(tmpDir, "rocksdb-" + UUID.randomUUID());
+        if (!this.path.mkdirs()) {
+            throw new RuntimeException(
+                    "Failed to create RocksDB cache directory in temp dirs: "
+                            + Arrays.toString(ioManager.tempDirs()));
+        }
+
         // state
         Options options = coreOptions.toConfiguration();
-        String rocksDBDir =
-                ioManager
-                        .tempDirs()[
-                        ThreadLocalRandom.current().nextInt(ioManager.tempDirs().length)];
-        this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
-
         Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
         // we should avoid too small memory
         long blockCache = Math.max(offHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());

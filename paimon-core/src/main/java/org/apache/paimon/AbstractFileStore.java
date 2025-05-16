@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
@@ -199,7 +200,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 fileIO,
                 schemaManager,
                 partitionType,
-                options.manifestFormat(),
+                FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
@@ -214,7 +215,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected ManifestList.Factory manifestListFactory(boolean forWrite) {
         return new ManifestList.Factory(
                 fileIO,
-                options.manifestFormat(),
+                FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
                 forWrite ? writeManifestCache : readManifestCache);
@@ -224,7 +225,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public IndexManifestFile.Factory indexManifestFileFactory() {
         return new IndexManifestFile.Factory(
                 fileIO,
-                options.manifestFormat(),
+                FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
                 readManifestCache);

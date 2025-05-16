@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
@@ -117,19 +118,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.partitionLoader = DynamicPartitionLoader.of(table);
 
         // join keys are based on projection fields
+        RowType rowType = table.rowType();
         this.joinKeys =
                 Arrays.stream(joinKeyIndex)
-                        .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
+                        .mapToObj(i -> rowType.getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
 
         this.projectFields =
                 Arrays.stream(projection)
-                        .mapToObj(i -> table.rowType().getFieldNames().get(i))
+                        .mapToObj(i -> rowType.getFieldNames().get(i))
                         .collect(Collectors.toList());
 
         this.projectFieldsGetters =
                 Arrays.stream(projection)
-                        .mapToObj(i -> table.rowType().fieldGetters()[i])
+                        .mapToObj(i -> InternalRow.createFieldGetter(rowType.getTypeAt(i), i))
                         .collect(Collectors.toList());
 
         // add primary keys

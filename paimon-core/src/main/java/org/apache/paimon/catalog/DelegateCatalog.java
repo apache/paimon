@@ -20,6 +20,8 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -207,6 +209,36 @@ public abstract class DelegateCatalog implements Catalog {
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         wrapped.alterPartitions(identifier, partitions);
+    }
+
+    @Override
+    public List<String> listFunctions() {
+        return wrapped.listFunctions();
+    }
+
+    @Override
+    public Function getFunction(String functionName) throws FunctionNotExistException {
+        return wrapped.getFunction(functionName);
+    }
+
+    @Override
+    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException {
+        wrapped.createFunction(functionName, function, ignoreIfExists);
+    }
+
+    @Override
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        wrapped.dropFunction(functionName, ignoreIfNotExists);
+    }
+
+    @Override
+    public void alterFunction(
+            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
+        wrapped.alterFunction(functionName, changes, ignoreIfNotExists);
     }
 
     @Override

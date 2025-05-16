@@ -124,7 +124,7 @@ public class SnapshotManager implements Serializable {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
         if (snapshot == null) {
-            snapshot = Snapshot.fromPath(fileIO, path);
+            snapshot = fromPath(fileIO, path);
             if (cache != null) {
                 cache.put(path, snapshot);
             }
@@ -136,7 +136,7 @@ public class SnapshotManager implements Serializable {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
         if (snapshot == null) {
-            snapshot = Snapshot.tryFromPath(fileIO, path);
+            snapshot = tryFromPath(fileIO, path);
             if (cache != null) {
                 cache.put(path, snapshot);
             }
@@ -541,7 +541,7 @@ public class SnapshotManager implements Serializable {
                 path -> {
                     try {
                         // do not pollution cache
-                        snapshots.add(Snapshot.tryFromPath(fileIO, path));
+                        snapshots.add(tryFromPath(fileIO, path));
                     } catch (FileNotFoundException ignored) {
                     }
                 },
@@ -723,5 +723,31 @@ public class SnapshotManager implements Serializable {
 
     public void commitEarliestHint(long snapshotId) throws IOException {
         HintFileUtils.commitEarliestHint(fileIO, snapshotId, snapshotDirectory());
+    }
+
+    public static Snapshot fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            String errorMessage =
+                    String.format(
+                            "Snapshot file %s does not exist. "
+                                    + "It might have been expired by other jobs operating on this table. "
+                                    + "In this case, you can avoid concurrent modification issues by configuring "
+                                    + "write-only = true and use a dedicated compaction job, or configuring "
+                                    + "different expiration thresholds for different jobs.",
+                            path);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return Snapshot.fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new RuntimeException("Fails to read snapshot from path " + path, e);
+        }
     }
 }

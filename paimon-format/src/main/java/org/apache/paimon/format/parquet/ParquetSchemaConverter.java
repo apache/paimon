@@ -373,9 +373,11 @@ public class ParquetSchemaConverter {
         } else {
             GroupType groupType = parquetType.asGroupType();
             if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
+                int level = groupType.getType(0) instanceof GroupType ? 3 : 2;
                 paimonDataType =
                         new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType)).type());
+                                convertToPaimonField(parquetListElementType(groupType, level))
+                                        .type());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -400,10 +402,19 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType) {
-        // List type should only have one middle group type, which is repeated, and one element
-        // type, which is optional.
-        return listType.getType(0).asGroupType().getType(0);
+    public static Type parquetListElementType(GroupType listType, int level) {
+        if (level == 3) {
+            // Level 3 representation of list type.
+            // List type should only have one middle group type, which is repeated, and one element
+            // type, which is optional.
+            return listType.getType(0).asGroupType().getType(0);
+        } else if (level == 2) {
+            // Level 2 representation of list type
+            return listType.getType(0);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Parquet list type only have two level representation and three level representation.");
+        }
     }
 
     public static Pair<Type, Type> parquetMapKeyValueType(GroupType mapType) {
