@@ -135,7 +135,6 @@ public class RESTCatalogServer {
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String databaseUri;
-    private final String functionUri;
 
     private final FileSystemCatalog catalog;
     private final MockWebServer server;
@@ -163,7 +162,6 @@ public class RESTCatalogServer {
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
-        this.functionUri = resourcePaths.functions();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(WAREHOUSE.key(), dataPath);
@@ -274,11 +272,6 @@ public class RESTCatalogServer {
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
-                    } else if (functionUri.equals(request.getPath())) {
-                        return functionsApiHandler(restAuthParameter.method(), data, parameters);
-                    } else if (request.getPath().startsWith(functionUri)) {
-                        return functionApiHandler(
-                                request.getPath(), restAuthParameter.method(), data, parameters);
                     } else if (resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
@@ -295,6 +288,10 @@ public class RESTCatalogServer {
                         if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
+                        boolean isFunctions =
+                                resources.length == 2 && resources[1].startsWith("functions");
+                        boolean isFunction =
+                                resources.length == 3 && resources[1].startsWith("functions");
                         boolean isViews = resources.length == 2 && resources[1].startsWith("views");
                         boolean isViewsDetails =
                                 resources.length == 2 && resources[1].startsWith("view-details");
@@ -429,6 +426,12 @@ public class RESTCatalogServer {
                                     parameters);
                         } else if (isTableDetails) {
                             return tableDetailsHandle(parameters, databaseName);
+                        } else if (isFunctions) {
+                            return functionsApiHandler(
+                                    databaseName, restAuthParameter.method(), data, parameters);
+                        } else if (isFunction) {
+                            return functionApiHandler(
+                                    identifier, restAuthParameter.method(), data, parameters);
                         } else if (isViews) {
                             return viewsHandle(
                                     restAuthParameter.method(),
@@ -518,8 +521,8 @@ public class RESTCatalogServer {
                 } catch (Catalog.FunctionAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_COLUMN,
-                                    e.functionName(),
+                                    ErrorResponse.RESOURCE_TYPE_DEFINITION,
+                                    e.identifier().getObjectName(),
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
@@ -527,7 +530,7 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_DEFINITION,
-                                    e.functionName(),
+                                    e.name(),
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
@@ -551,7 +554,7 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_FUNCTION,
-                                    e.functionName(),
+                                    e.identifier().getObjectName(),
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
@@ -559,7 +562,7 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_DEFINITION,
-                                    e.functionName(),
+                                    e.name(),
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
@@ -757,32 +760,9 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse functionDetailsHandler(String functionName) throws Exception {
-        if (functionStore.containsKey(functionName)) {
-            Function function = functionStore.get(functionName);
-            GetFunctionResponse response =
-                    new GetFunctionResponse(
-                            function.uuid(),
-                            function.name(),
-                            function.inputParams(),
-                            function.returnParams(),
-                            function.isDeterministic(),
-                            function.definitions(),
-                            function.comment(),
-                            function.options(),
-                            "owner",
-                            1L,
-                            "owner",
-                            1L,
-                            "owner");
-            return mockResponse(response, 200);
-        } else {
-            throw new Catalog.FunctionNotExistException(functionName);
-        }
-    }
-
     private MockResponse functionsApiHandler(
-            String method, String data, Map<String, String> parameters) throws Exception {
+            String databaseName, String method, String data, Map<String, String> parameters)
+            throws Exception {
         switch (method) {
             case "GET":
                 List<String> functions = new ArrayList<>(functionStore.keySet());
@@ -794,8 +774,7 @@ public class RESTCatalogServer {
                 if (!functionStore.containsKey(functionName)) {
                     Function function =
                             new FunctionImpl(
-                                    UUID.randomUUID().toString(),
-                                    functionName,
+                                    Identifier.create(databaseName, functionName),
                                     requestBody.inputParams(),
                                     requestBody.returnParams(),
                                     requestBody.isDeterministic(),
@@ -805,7 +784,8 @@ public class RESTCatalogServer {
                     functionStore.put(functionName, function);
                     return new MockResponse().setResponseCode(200);
                 } else {
-                    throw new Catalog.FunctionAlreadyExistException(functionName);
+                    throw new Catalog.FunctionAlreadyExistException(
+                            Identifier.create(databaseName, functionName));
                 }
             default:
                 return new MockResponse().setResponseCode(404);
@@ -813,12 +793,11 @@ public class RESTCatalogServer {
     }
 
     private MockResponse functionApiHandler(
-            String path, String method, String data, Map<String, String> parameters)
+            Identifier identifier, String method, String data, Map<String, String> parameters)
             throws Exception {
-        String[] resources = path.substring((functionUri + "/").length()).split("/");
-        String functionName = RESTUtil.decodeString(resources[0]);
+        String functionName = identifier.getObjectName();
         if (!functionStore.containsKey(functionName)) {
-            throw new Catalog.FunctionNotExistException(functionName);
+            throw new Catalog.FunctionNotExistException(identifier);
         }
         Function function = functionStore.get(functionName);
         switch (method) {
@@ -828,10 +807,10 @@ public class RESTCatalogServer {
             case "GET":
                 GetFunctionResponse response =
                         new GetFunctionResponse(
-                                function.uuid(),
+                                UUID.randomUUID().toString(),
                                 function.name(),
-                                function.inputParams(),
-                                function.returnParams(),
+                                function.inputParams().orElse(null),
+                                function.returnParams().orElse(null),
                                 function.isDeterministic(),
                                 function.definitions(),
                                 function.comment(),
@@ -867,7 +846,7 @@ public class RESTCatalogServer {
                                 (FunctionChange.AddDefinition) functionChange;
                         if (function.definition(addDefinition.name()) != null) {
                             throw new Catalog.DefinitionAlreadyExistException(
-                                    functionName, addDefinition.name());
+                                    identifier, addDefinition.name());
                         }
                         newDefinitions.put(addDefinition.name(), addDefinition.definition());
                     } else if (functionChange instanceof FunctionChange.UpdateDefinition) {
@@ -878,7 +857,7 @@ public class RESTCatalogServer {
                                     updateDefinition.name(), updateDefinition.definition());
                         } else {
                             throw new Catalog.DefinitionNotExistException(
-                                    functionName, updateDefinition.name());
+                                    identifier, updateDefinition.name());
                         }
                     } else if (functionChange instanceof FunctionChange.DropDefinition) {
                         FunctionChange.DropDefinition dropDefinition =
@@ -887,16 +866,15 @@ public class RESTCatalogServer {
                             newDefinitions.remove(dropDefinition.name());
                         } else {
                             throw new Catalog.DefinitionNotExistException(
-                                    functionName, dropDefinition.name());
+                                    identifier, dropDefinition.name());
                         }
                     }
                 }
                 function =
                         new FunctionImpl(
-                                functionName,
-                                function.uuid(),
-                                function.inputParams(),
-                                function.returnParams(),
+                                Identifier.create(null, functionName),
+                                function.inputParams().orElse(null),
+                                function.returnParams().orElse(null),
                                 function.isDeterministic(),
                                 newDefinitions,
                                 newComment,

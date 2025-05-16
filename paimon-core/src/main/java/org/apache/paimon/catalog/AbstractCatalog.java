@@ -523,30 +523,30 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException {}
 
     @Override
-    public List<String> listFunctions() {
+    public List<String> listFunctions(String databaseName) {
         return Collections.emptyList();
     }
 
     @Override
-    public Function getFunction(String functionName) throws FunctionNotExistException {
-        throw new FunctionNotExistException(functionName);
+    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
+        throw new FunctionNotExistException(identifier);
     }
 
     @Override
-    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
+    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         throw new UnsupportedOperationException();
     }
 
     @Override
     public void alterFunction(
-            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
         throw new UnsupportedOperationException();

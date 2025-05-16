@@ -18,17 +18,17 @@
 
 package org.apache.paimon.function;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Function implementation. */
 public class FunctionImpl implements Function {
 
-    private final String uuid;
-
-    private final String name;
+    private final Identifier identifier;
 
     private final List<DataField> inputParams;
 
@@ -43,16 +43,14 @@ public class FunctionImpl implements Function {
     private final Map<String, String> options;
 
     public FunctionImpl(
-            String uuid,
-            String functionName,
+            Identifier identifier,
             List<DataField> inputParams,
             List<DataField> returnParams,
             boolean deterministic,
             Map<String, FunctionDefinition> definitions,
             String comment,
             Map<String, String> options) {
-        this.uuid = uuid;
-        this.name = functionName;
+        this.identifier = identifier;
         this.inputParams = inputParams;
         this.returnParams = returnParams;
         this.deterministic = deterministic;
@@ -62,23 +60,23 @@ public class FunctionImpl implements Function {
     }
 
     @Override
-    public String uuid() {
-        return this.uuid;
-    }
-
-    @Override
     public String name() {
-        return this.name;
+        return identifier.getObjectName();
     }
 
     @Override
-    public List<DataField> inputParams() {
-        return inputParams;
+    public String fullName() {
+        return identifier.getFullName();
     }
 
     @Override
-    public List<DataField> returnParams() {
-        return returnParams;
+    public Optional<List<DataField>> inputParams() {
+        return Optional.ofNullable(inputParams);
+    }
+
+    @Override
+    public Optional<List<DataField>> returnParams() {
+        return Optional.ofNullable(returnParams);
     }
 
     @Override

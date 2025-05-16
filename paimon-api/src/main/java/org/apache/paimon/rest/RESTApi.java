@@ -396,33 +396,40 @@ public class RESTApi {
         return response.branches();
     }
 
-    public List<String> listFunctions() {
+    public List<String> listFunctions(String databaseName) {
         return listDataFromPageApi(
                 queryParams ->
                         client.get(
-                                resourcePaths.functions(),
+                                resourcePaths.functions(databaseName),
                                 queryParams,
                                 ListFunctionsResponse.class,
                                 restAuthFunction));
     }
 
-    public GetFunctionResponse getFunction(String functionName) {
+    public GetFunctionResponse getFunction(Identifier identifier) {
         return client.get(
-                resourcePaths.function(functionName), GetFunctionResponse.class, restAuthFunction);
+                resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetFunctionResponse.class,
+                restAuthFunction);
     }
 
-    public void createFunction(String functionName, org.apache.paimon.function.Function function) {
+    public void createFunction(
+            Identifier identifier, org.apache.paimon.function.Function function) {
         client.post(
-                resourcePaths.functions(), new CreateFunctionRequest(function), restAuthFunction);
+                resourcePaths.functions(identifier.getDatabaseName()),
+                new CreateFunctionRequest(function),
+                restAuthFunction);
     }
 
-    public void dropFunction(String functionName) {
-        client.delete(resourcePaths.function(functionName), restAuthFunction);
+    public void dropFunction(Identifier identifier) {
+        client.delete(
+                resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
     }
 
-    public void alterFunction(String functionName, List<FunctionChange> changes) {
+    public void alterFunction(Identifier identifier, List<FunctionChange> changes) {
         client.post(
-                resourcePaths.function(functionName),
+                resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 new AlterFunctionRequest(changes),
                 restAuthFunction);
     }
