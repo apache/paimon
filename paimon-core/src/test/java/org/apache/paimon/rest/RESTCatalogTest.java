@@ -86,7 +86,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
-import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1217,11 +1217,16 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         int maxResults = 2;
         AtomicInteger fetchTimes = new AtomicInteger(0);
         List<Integer> fetchData =
-                restCatalog.listDataFromPageApi(
-                        queryParams -> {
-                            return generateTestPagedResponse(
-                                    queryParams, testData, maxResults, fetchTimes, true);
-                        });
+                restCatalog
+                        .api()
+                        .listDataFromPageApi(
+                                queryParams ->
+                                        generateTestPagedResponse(
+                                                queryParams,
+                                                testData,
+                                                maxResults,
+                                                fetchTimes,
+                                                true));
         assertEquals(fetchTimes.get(), 4);
         assertThat(fetchData).containsSequence(testData);
     }
@@ -1232,11 +1237,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         int maxResults = 2;
         AtomicInteger fetchTimes = new AtomicInteger(0);
         List<Integer> fetchData =
-                restCatalog.listDataFromPageApi(
-                        queryParams -> {
-                            return generateTestPagedResponse(
-                                    queryParams, testData, maxResults, fetchTimes, false);
-                        });
+                restCatalog
+                        .api()
+                        .listDataFromPageApi(
+                                queryParams -> {
+                                    return generateTestPagedResponse(
+                                            queryParams, testData, maxResults, fetchTimes, false);
+                                });
 
         assertEquals(fetchTimes.get(), testData.size() / maxResults + 1);
         assertThat(fetchData).containsSequence(testData);
@@ -1567,7 +1574,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String expiration = now.format(TOKEN_DATE_FORMATTER);
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
-        String tokenStr = RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(token);
+        String tokenStr = RESTApi.toJson(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
     }
 }

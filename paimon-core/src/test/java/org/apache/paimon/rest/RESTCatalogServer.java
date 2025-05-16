@@ -38,7 +38,6 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -120,12 +119,12 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.rest.RESTCatalog.MAX_RESULTS;
-import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
-import static org.apache.paimon.rest.RESTCatalog.PARTITION_NAME_PATTERN;
-import static org.apache.paimon.rest.RESTCatalog.TABLE_NAME_PATTERN;
-import static org.apache.paimon.rest.RESTCatalog.VIEW_NAME_PATTERN;
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
+import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -167,7 +166,7 @@ public class RESTCatalogServer {
         this.functionUri = resourcePaths.functions();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
-        conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
+        conf.setString(WAREHOUSE.key(), dataPath);
         CatalogContext context = CatalogContext.create(conf);
         Path warehousePath = new Path(dataPath);
         FileIO fileIO;
@@ -269,7 +268,7 @@ public class RESTCatalogServer {
                     }
                     if (request.getPath().startsWith(resourcePaths.config())
                             && request.getRequestUrl()
-                                    .queryParameter(RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY)
+                                    .queryParameter(WAREHOUSE.key())
                                     .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())
@@ -376,7 +375,7 @@ public class RESTCatalogServer {
                         }
                         if (isMarkDonePartitions) {
                             MarkDonePartitionsRequest markDonePartitionsRequest =
-                                    OBJECT_MAPPER.readValue(data, MarkDonePartitionsRequest.class);
+                                    RESTApi.fromJson(data, MarkDonePartitionsRequest.class);
                             catalog.markDonePartitions(
                                     identifier, markDonePartitionsRequest.getPartitionSpecs());
                             return new MockResponse().setResponseCode(200);
@@ -399,7 +398,7 @@ public class RESTCatalogServer {
                             return commitTableHandle(identifier, restAuthParameter.data());
                         } else if (isRollbackTable) {
                             RollbackTableRequest requestBody =
-                                    OBJECT_MAPPER.readValue(data, RollbackTableRequest.class);
+                                    RESTApi.fromJson(data, RollbackTableRequest.class);
                             if (noPermissionTables.contains(identifier.getFullName())) {
                                 throw new Catalog.TableNoPermissionException(identifier);
                             }
@@ -625,7 +624,7 @@ public class RESTCatalogServer {
                 new GetTableTokenResponse(dataToken.token(), dataToken.expireAtMillis());
         return new MockResponse()
                 .setResponseCode(200)
-                .setBody(OBJECT_MAPPER.writeValueAsString(getTableTokenResponse));
+                .setBody(RESTApi.toJson(getTableTokenResponse));
     }
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
@@ -645,7 +644,7 @@ public class RESTCatalogServer {
                 new GetTableSnapshotResponse(snapshotOptional.get());
         return new MockResponse()
                 .setResponseCode(200)
-                .setBody(OBJECT_MAPPER.writeValueAsString(getTableSnapshotResponse));
+                .setBody(RESTApi.toJson(getTableSnapshotResponse));
     }
 
     private Optional<MockResponse> checkTablePartitioned(Identifier identifier) {
@@ -665,8 +664,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse authTable(Identifier identifier, String data) throws Exception {
-        AuthTableQueryRequest requestBody =
-                OBJECT_MAPPER.readValue(data, AuthTableQueryRequest.class);
+        AuthTableQueryRequest requestBody = RESTApi.fromJson(data, AuthTableQueryRequest.class);
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
         }
@@ -688,7 +686,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
-        CommitTableRequest requestBody = OBJECT_MAPPER.readValue(data, CommitTableRequest.class);
+        CommitTableRequest requestBody = RESTApi.fromJson(data, CommitTableRequest.class);
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
         }
@@ -791,7 +789,7 @@ public class RESTCatalogServer {
                 return generateFinalListFunctionsResponse(parameters, functions);
             case "POST":
                 CreateFunctionRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, CreateFunctionRequest.class);
+                        RESTApi.fromJson(data, CreateFunctionRequest.class);
                 String functionName = requestBody.name();
                 if (!functionStore.containsKey(functionName)) {
                     Function function =
@@ -846,7 +844,7 @@ public class RESTCatalogServer {
                 return mockResponse(response, 200);
             case "POST":
                 AlterFunctionRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, AlterFunctionRequest.class);
+                        RESTApi.fromJson(data, AlterFunctionRequest.class);
                 HashMap<String, FunctionDefinition> newDefinitions =
                         new HashMap<>(function.definitions());
                 Map<String, String> newOptions = new HashMap<>(function.options());
@@ -919,7 +917,7 @@ public class RESTCatalogServer {
                 return generateFinalListDatabasesResponse(parameters, databases);
             case "POST":
                 CreateDatabaseRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, CreateDatabaseRequest.class);
+                        RESTApi.fromJson(data, CreateDatabaseRequest.class);
                 String databaseName = requestBody.getName();
                 if (noPermissionDatabases.contains(databaseName)) {
                     throw new Catalog.DatabaseNoPermissionException(databaseName);
@@ -1055,7 +1053,7 @@ public class RESTCatalogServer {
                     return new MockResponse().setResponseCode(200);
                 case "POST":
                     AlterDatabaseRequest requestBody =
-                            OBJECT_MAPPER.readValue(data, AlterDatabaseRequest.class);
+                            RESTApi.fromJson(data, AlterDatabaseRequest.class);
                     List<PropertyChange> changes = new ArrayList<>();
                     for (String property : requestBody.getRemovals()) {
                         changes.add(PropertyChange.removeProperty(property));
@@ -1105,7 +1103,7 @@ public class RESTCatalogServer {
                     return generateFinalListTablesResponse(parameters, tables);
                 case "POST":
                     CreateTableRequest requestBody =
-                            OBJECT_MAPPER.readValue(data, CreateTableRequest.class);
+                            RESTApi.fromJson(data, CreateTableRequest.class);
                     Identifier identifier = requestBody.getIdentifier();
                     Schema schema = requestBody.getSchema();
                     TableMetadata tableMetadata;
@@ -1282,8 +1280,7 @@ public class RESTCatalogServer {
                                 "updated");
                 return mockResponse(response, 200);
             case "POST":
-                AlterTableRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, AlterTableRequest.class);
+                AlterTableRequest requestBody = RESTApi.fromJson(data, AlterTableRequest.class);
                 alterTableImpl(identifier, requestBody.getChanges());
                 return new MockResponse().setResponseCode(200);
             case "DELETE":
@@ -1302,7 +1299,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse renameTableHandle(String data) throws Exception {
-        RenameTableRequest requestBody = OBJECT_MAPPER.readValue(data, RenameTableRequest.class);
+        RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
         Identifier toTable = requestBody.getDestination();
         if (noPermissionTables.contains(fromTable.getFullName())) {
@@ -1388,7 +1385,7 @@ public class RESTCatalogServer {
                                 tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
                     } else {
                         CreateBranchRequest requestBody =
-                                OBJECT_MAPPER.readValue(data, CreateBranchRequest.class);
+                                RESTApi.fromJson(data, CreateBranchRequest.class);
                         branch = requestBody.branch();
                         if (requestBody.fromTag() == null) {
                             branchManager.createBranch(requestBody.branch());
@@ -1478,8 +1475,7 @@ public class RESTCatalogServer {
                 List<String> views = listViews(databaseName, parameters);
                 return generateFinalListViewsResponse(parameters, views);
             case "POST":
-                CreateViewRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, CreateViewRequest.class);
+                CreateViewRequest requestBody = RESTApi.fromJson(data, CreateViewRequest.class);
                 Identifier identifier = requestBody.getIdentifier();
                 ViewSchema schema = requestBody.getSchema();
                 ViewImpl view =
@@ -1653,7 +1649,7 @@ public class RESTCatalogServer {
                 case "POST":
                     if (viewStore.containsKey(identifier.getFullName())) {
                         AlterViewRequest request =
-                                OBJECT_MAPPER.readValue(requestData, AlterViewRequest.class);
+                                RESTApi.fromJson(requestData, AlterViewRequest.class);
                         ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
                         HashMap<String, String> newDialects = new HashMap<>(view.dialects());
                         Map<String, String> newOptions = new HashMap<>(view.options());
@@ -1723,7 +1719,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse renameViewHandle(String data) throws Exception {
-        RenameTableRequest requestBody = OBJECT_MAPPER.readValue(data, RenameTableRequest.class);
+        RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromView = requestBody.getSource();
         Identifier toView = requestBody.getDestination();
         if (!viewStore.containsKey(fromView.getFullName())) {
@@ -1911,7 +1907,7 @@ public class RESTCatalogServer {
         try {
             return new MockResponse()
                     .setResponseCode(httpCode)
-                    .setBody(OBJECT_MAPPER.writeValueAsString(response))
+                    .setBody(RESTApi.toJson(response))
                     .addHeader("Content-Type", "application/json");
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.utils.FileReadUtils;
 
 import java.io.File;
-
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** DLF Token Loader for local file. */
 public class DLFLocalFileTokenLoader implements DLFTokenLoader {
@@ -49,7 +48,7 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
         while (retry <= 5) {
             try {
                 String tokenStr = FileReadUtils.readFileUtf8(new File(tokenFilePath));
-                return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
+                return RESTApi.fromJson(tokenStr, DLFToken.class);
             } catch (Exception e) {
                 lastException = e;
             }
