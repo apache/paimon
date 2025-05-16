@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.DelegateCatalog
 import org.apache.paimon.fs.Path
-import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -376,11 +374,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(s"show partitions $tblName"),
                 Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
               // check partitions in HMS
-              var catalog = paimonCatalog
-              while (catalog.isInstanceOf[DelegateCatalog]) {
-                catalog = catalog.asInstanceOf[DelegateCatalog].wrapped()
-              }
-              val hmsClient = catalog.asInstanceOf[HiveCatalog].getHmsClient
+              val hmsClient = getHmsClient(paimonCatalog)
               assert(hmsClient.listPartitions(dbName, tblName, 100).size() == 3)
               // check partitions in filesystem
               if (dataFilePathDir.isEmpty) {
@@ -666,6 +660,25 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               }
             }
         }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: sync unset table props to HMS") {
+    spark.sql(s"USE $paimonHiveCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+      spark.sql(s"USE paimon_db")
+      withTable("t") {
+        spark.sql("CREATE TABLE t (id INT) USING paimon")
+
+        val hmsClient = getHmsClient(paimonCatalog)
+        spark.sql("ALTER TABLE t SET TBLPROPERTIES ('write-buffer-spillable' = 'true')")
+        assert(
+          hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+        spark.sql("ALTER TABLE t UNSET TBLPROPERTIES ('write-buffer-spillable')")
+        assert(
+          !hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+      }
     }
   }
 
