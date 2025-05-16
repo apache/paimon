@@ -70,6 +70,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
@@ -127,6 +128,7 @@ public class RESTApi {
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
 
+    public static final String DATABASE_NAME_PATTERN = "databaseNamePattern";
     public static final String TABLE_NAME_PATTERN = "tableNamePattern";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
@@ -223,11 +225,16 @@ public class RESTApi {
      * @return {@link PagedList}: elements and nextPageToken.
      */
     public PagedList<String> listDatabasesPaged(
-            @Nullable Integer maxResults, @Nullable String pageToken) {
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String databaseNamePattern) {
         ListDatabasesResponse response =
                 client.get(
                         resourcePaths.databases(),
-                        buildPagedQueryParams(maxResults, pageToken),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern)),
                         ListDatabasesResponse.class,
                         restAuthFunction);
         List<String> databases = response.getDatabases();
@@ -341,7 +348,9 @@ public class RESTApi {
                 client.get(
                         resourcePaths.tables(databaseName),
                         buildPagedQueryParams(
-                                maxResults, pageToken, TABLE_NAME_PATTERN, tableNamePattern),
+                                maxResults,
+                                pageToken,
+                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
                         ListTablesResponse.class,
                         restAuthFunction);
         List<String> tables = response.getTables();
@@ -379,10 +388,54 @@ public class RESTApi {
                 client.get(
                         resourcePaths.tableDetails(databaseName),
                         buildPagedQueryParams(
-                                maxResults, pageToken, TABLE_NAME_PATTERN, tableNamePattern),
+                                maxResults,
+                                pageToken,
+                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
                         ListTableDetailsResponse.class,
                         restAuthFunction);
         List<GetTableResponse> tables = response.getTableDetails();
+        if (tables == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(tables, response.getNextPageToken());
+    }
+
+    /**
+     * List table for a catalog.
+     *
+     * <p>Gets an array of table for a catalog. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<String> searchTablesPaged(
+            @Nullable String databaseNamePattern,
+            @Nullable String tableNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        ListTablesResponse response =
+                client.get(
+                        resourcePaths.tables(),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
+                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
+                        ListTablesResponse.class,
+                        restAuthFunction);
+        List<String> tables = response.getTables();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
         }
@@ -614,8 +667,7 @@ public class RESTApi {
                         buildPagedQueryParams(
                                 maxResults,
                                 pageToken,
-                                PARTITION_NAME_PATTERN,
-                                partitionNamePattern),
+                                Pair.of(PARTITION_NAME_PATTERN, partitionNamePattern)),
                         ListPartitionsResponse.class,
                         restAuthFunction);
         List<Partition> partitions = response.getPartitions();
@@ -829,7 +881,7 @@ public class RESTApi {
                 client.get(
                         resourcePaths.views(databaseName),
                         buildPagedQueryParams(
-                                maxResults, pageToken, VIEW_NAME_PATTERN, viewNamePattern),
+                                maxResults, pageToken, Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
                         ListViewsResponse.class,
                         restAuthFunction);
         List<String> views = response.getViews();
@@ -867,10 +919,52 @@ public class RESTApi {
                 client.get(
                         resourcePaths.viewDetails(databaseName),
                         buildPagedQueryParams(
-                                maxResults, pageToken, VIEW_NAME_PATTERN, viewNamePattern),
+                                maxResults, pageToken, Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
                         ListViewDetailsResponse.class,
                         restAuthFunction);
         List<GetViewResponse> views = response.getViewDetails();
+        if (views == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(views, response.getNextPageToken());
+    }
+
+    /**
+     * List views for a catalog.
+     *
+     * <p>Gets an array of views for a catalog. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<String> searchViewsPaged(
+            @Nullable String databaseNamePattern,
+            @Nullable String viewNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        ListViewsResponse response =
+                client.get(
+                        resourcePaths.views(),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
+                                Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
+                        ListViewsResponse.class,
+                        restAuthFunction);
+        List<String> views = response.getViews();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
         }
@@ -960,14 +1054,14 @@ public class RESTApi {
 
     private Map<String, String> buildPagedQueryParams(
             @Nullable Integer maxResults, @Nullable String pageToken) {
-        return buildPagedQueryParams(maxResults, pageToken, null, null);
+        return buildPagedQueryParams(maxResults, pageToken, null);
     }
 
-    private Map<String, String> buildPagedQueryParams(
+    @SafeVarargs
+    private final Map<String, String> buildPagedQueryParams(
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String namePatternKey,
-            @Nullable String namePatternValue) {
+            @Nullable Pair<String, String>... namePatternPairs) {
         Map<String, String> queryParams = Maps.newHashMap();
         if (Objects.nonNull(maxResults) && maxResults > 0) {
             queryParams.put(MAX_RESULTS, maxResults.toString());
@@ -975,8 +1069,15 @@ public class RESTApi {
         if (Objects.nonNull(pageToken)) {
             queryParams.put(PAGE_TOKEN, pageToken);
         }
-        if (Objects.nonNull(namePatternValue)) {
-            queryParams.put(namePatternKey, namePatternValue);
+        if (Objects.nonNull(namePatternPairs)) {
+            for (Pair<String, String> namePatternPair : namePatternPairs) {
+                String namePatternKey = namePatternPair.getKey();
+                String namePatternValue = namePatternPair.getValue();
+                if (StringUtils.isNotEmpty(namePatternKey)
+                        && StringUtils.isNotEmpty(namePatternValue)) {
+                    queryParams.put(namePatternKey, namePatternValue);
+                }
+            }
         }
         return queryParams;
     }
