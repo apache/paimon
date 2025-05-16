@@ -186,4 +186,27 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
     assertResult(1)(loadTable("T").tagManager().tagObjects().size())
     assertResult("haha")(loadTable("T").tagManager().tagObjects().get(0).getRight)
   }
+
+  test("Tag expiration: batch write expire tag") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES (
+                |'file.format' = 'avro',
+                |'tag.automatic-creation'='batch',
+                |'tag.num-retained-max'='1')""".stripMargin)
+
+    val table = loadTable("T")
+
+    withSparkSQLConf("spark.paimon.tag.batch.customized-name" -> "batch-tag-1") {
+      spark.sql("insert into T values(1, 'a')")
+      assertResult(1)(table.tagManager().tagObjects().size())
+      assertResult("batch-tag-1")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+    }
+
+    withSparkSQLConf("spark.paimon.tag.batch.customized-name" -> "batch-tag-2") {
+      spark.sql("insert into T values(2, 'b')")
+      assertResult(1)(table.tagManager().tagObjects().size())
+      assertResult("batch-tag-2")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+    }
+  }
 }
