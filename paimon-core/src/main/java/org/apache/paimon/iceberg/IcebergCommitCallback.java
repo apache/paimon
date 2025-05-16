@@ -174,6 +174,7 @@ public class IcebergCommitCallback implements CommitCallback {
                 return IcebergOptions.StorageLocation.TABLE_LOCATION;
             case HIVE_CATALOG:
             case HADOOP_CATALOG:
+            case REST_CATALOG:
                 return IcebergOptions.StorageLocation.CATALOG_STORAGE;
             default:
                 throw new UnsupportedOperationException(

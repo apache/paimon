@@ -77,7 +77,13 @@ public class IcebergOptions {
             key("metadata.iceberg.uri")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Hive metastore uri for Iceberg Hive catalog.");
+                    .withDescription("Uri for Hive metastore or REST catalog.");
+
+    public static final ConfigOption<String> REST_WAREHOUSE =
+            key("metadata.iceberg.rest-warehouse")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST catalog warehouse.");
 
     public static final ConfigOption<String> HIVE_CONF_DIR =
             key("metadata.iceberg.hive-conf-dir")
@@ -144,7 +150,11 @@ public class IcebergOptions {
         HIVE_CATALOG(
                 "hive-catalog",
                 "Not only store Iceberg metadata like hadoop-catalog, "
-                        + "but also create Iceberg external table in Hive.");
+                        + "but also create Iceberg external table in Hive."),
+        REST_CATALOG(
+                "rest-catalog",
+                "Store Iceberg metadata in a REST catalog. "
+                        + "This allows integration with Iceberg REST catalog services.");
 
         private final String value;
         private final String description;
