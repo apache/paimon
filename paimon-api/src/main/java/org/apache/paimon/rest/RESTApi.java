@@ -702,7 +702,12 @@ public class RESTApi {
         return response.branches();
     }
 
-    /** TODO. */
+    /**
+     * List functions for database.
+     *
+     * @param databaseName
+     * @return a list of function name
+     */
     public List<String> listFunctions(String databaseName) {
         return listDataFromPageApi(
                 queryParams ->
@@ -713,7 +718,14 @@ public class RESTApi {
                                 restAuthFunction));
     }
 
-    /** TODO. */
+    /**
+     * Get a function by identifier.
+     *
+     * @param identifier the identifier of the function to retrieve
+     * @return the function response object
+     * @throws NoSuchResourceException if the function does not exist
+     * @throws ForbiddenException if the user lacks permission to access the function
+     */
     public GetFunctionResponse getFunction(Identifier identifier) {
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
@@ -721,7 +733,15 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** TODO. */
+    /**
+     * Create a function.
+     *
+     * @param identifier database name and function name.
+     * @param function the function to be created
+     * @throws AlreadyExistsException Exception thrown on HTTP 409 means a function already exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     creating function
+     */
     public void createFunction(
             Identifier identifier, org.apache.paimon.function.Function function) {
         client.post(
@@ -730,14 +750,28 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** TODO. */
+    /**
+     * Drop a function.
+     *
+     * @param identifier database name and function name.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the function not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this function
+     */
     public void dropFunction(Identifier identifier) {
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
     }
 
-    /** TODO. */
+    /**
+     * Alter a function.
+     *
+     * @param identifier database name and function name.
+     * @param changes list of function changes to apply
+     * @throws NoSuchResourceException if the function does not exist
+     * @throws ForbiddenException if the user lacks permission to modify the function
+     */
     public void alterFunction(Identifier identifier, List<FunctionChange> changes) {
         client.post(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
