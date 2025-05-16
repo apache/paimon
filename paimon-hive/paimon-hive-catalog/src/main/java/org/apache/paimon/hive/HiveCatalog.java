@@ -870,6 +870,7 @@ public class HiveCatalog extends AbstractCatalog {
     public PagedList<View> listViewDetailsPaged(
             String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, viewNamePattern);
         if (isSystemDatabase(databaseName)) {
             return new PagedList<>(Collections.emptyList(), null);
         }

@@ -70,6 +70,10 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLE_DETAILS);
     }
 
+    public String tables() {
+        return SLASH.join(V1, prefix, TABLES);
+    }
+
     public String table(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -204,6 +208,10 @@ public class ResourcePaths {
 
     public String viewDetails(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
+    }
+
+    public String views() {
+        return SLASH.join(V1, prefix, VIEWS);
     }
 
     public String view(String databaseName, String viewName) {

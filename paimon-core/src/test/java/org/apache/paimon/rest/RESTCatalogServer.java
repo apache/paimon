@@ -96,6 +96,7 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
@@ -120,6 +121,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.rest.RESTApi.DATABASE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
@@ -283,6 +285,10 @@ public class RESTCatalogServer {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
+                    } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
+                        return tablesHandle(parameters);
+                    } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
+                        return viewsHandle(parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -913,7 +919,17 @@ public class RESTCatalogServer {
             String method, String data, Map<String, String> parameters) throws Exception {
         switch (method) {
             case "GET":
-                List<String> databases = new ArrayList<>(databaseStore.keySet());
+                String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+                List<String> databases =
+                        new ArrayList<>(databaseStore.keySet())
+                                .stream()
+                                        .filter(
+                                                databaseName ->
+                                                        Objects.isNull(databaseNamePattern)
+                                                                || matchNamePattern(
+                                                                        databaseName,
+                                                                        databaseNamePattern))
+                                        .collect(Collectors.toList());
                 return generateFinalListDatabasesResponse(parameters, databases);
             case "POST":
                 CreateDatabaseRequest requestBody =
@@ -968,18 +984,8 @@ public class RESTCatalogServer {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
-            } catch (Exception e) {
-                LOG.error(
-                        "parse maxResults {} to int failed",
-                        parameters.getOrDefault(MAX_RESULTS, null));
-                return mockResponse(
-                        new ErrorResponse(
-                                ErrorResponse.RESOURCE_TYPE_TABLE,
-                                null,
-                                "invalid input queryParameter maxResults"
-                                        + parameters.get(MAX_RESULTS),
-                                400),
-                        400);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
             PagedList<String> pagedDbs = buildPagedEntities(databases, maxResults, pageToken);
@@ -1157,18 +1163,8 @@ public class RESTCatalogServer {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
-            } catch (Exception e) {
-                LOG.error(
-                        "parse maxResults {} to int failed",
-                        parameters.getOrDefault(MAX_RESULTS, null));
-                return mockResponse(
-                        new ErrorResponse(
-                                ErrorResponse.RESOURCE_TYPE_TABLE,
-                                null,
-                                "invalid input queryParameter maxResults"
-                                        + parameters.get(MAX_RESULTS),
-                                400),
-                        400);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
@@ -1189,18 +1185,8 @@ public class RESTCatalogServer {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
-            } catch (Exception e) {
-                LOG.error(
-                        "parse maxResults {} to int failed",
-                        parameters.getOrDefault(MAX_RESULTS, null));
-                return mockResponse(
-                        new ErrorResponse(
-                                ErrorResponse.RESOURCE_TYPE_TABLE,
-                                null,
-                                "invalid input queryParameter maxResults"
-                                        + parameters.get(MAX_RESULTS),
-                                400),
-                        400);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
             PagedList<GetTableResponse> pagedTableDetails =
@@ -1240,6 +1226,44 @@ public class RESTCatalogServer {
             }
         }
         return tableDetails;
+    }
+
+    private MockResponse tablesHandle(Map<String, String> parameters) {
+        RESTResponse response;
+        List<String> tables = listTables(parameters);
+        if (!tables.isEmpty()) {
+            int maxResults;
+            try {
+                maxResults = getMaxResults(parameters);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
+            }
+            String pageToken = parameters.get(PAGE_TOKEN);
+            PagedList<String> pagedTables = buildPagedEntities(tables, maxResults, pageToken);
+            response =
+                    new ListTablesResponse(
+                            pagedTables.getElements(), pagedTables.getNextPageToken());
+        } else {
+            response = new ListTablesResponse(Collections.emptyList(), null);
+        }
+        return mockResponse(response, 200);
+    }
+
+    private List<String> listTables(Map<String, String> parameters) {
+        String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
+        String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+        List<String> tables = new ArrayList<>();
+        for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
+            Identifier identifier = Identifier.fromString(entry.getKey());
+            if ((Objects.isNull(databaseNamePattern))
+                    || matchNamePattern(identifier.getDatabaseName(), databaseNamePattern)
+                            && (Objects.isNull(tableNamePattern)
+                                    || matchNamePattern(
+                                            identifier.getTableName(), tableNamePattern))) {
+                tables.add(identifier.getFullName());
+            }
+        }
+        return tables;
     }
 
     private boolean isFormatTable(Schema schema) {
@@ -1441,18 +1465,8 @@ public class RESTCatalogServer {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
-            } catch (Exception e) {
-                LOG.error(
-                        "parse maxResults {} to int failed",
-                        parameters.getOrDefault(MAX_RESULTS, null));
-                return mockResponse(
-                        new ErrorResponse(
-                                ErrorResponse.RESOURCE_TYPE_TABLE,
-                                null,
-                                "invalid input queryParameter maxResults"
-                                        + parameters.get(MAX_RESULTS),
-                                400),
-                        400);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
@@ -1516,18 +1530,8 @@ public class RESTCatalogServer {
             int maxResults;
             try {
                 maxResults = getMaxResults(parameters);
-            } catch (Exception e) {
-                LOG.error(
-                        "parse maxResults {} to int failed",
-                        parameters.getOrDefault(MAX_RESULTS, null));
-                return mockResponse(
-                        new ErrorResponse(
-                                ErrorResponse.RESOURCE_TYPE_TABLE,
-                                null,
-                                "invalid input queryParameter maxResults"
-                                        + parameters.get(MAX_RESULTS),
-                                400),
-                        400);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
@@ -1551,18 +1555,8 @@ public class RESTCatalogServer {
                 int maxResults;
                 try {
                     maxResults = getMaxResults(parameters);
-                } catch (Exception e) {
-                    LOG.error(
-                            "parse maxResults {} to int failed",
-                            parameters.getOrDefault(MAX_RESULTS, null));
-                    return mockResponse(
-                            new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_TABLE,
-                                    null,
-                                    "invalid input queryParameter maxResults"
-                                            + parameters.get(MAX_RESULTS),
-                                    400),
-                            400);
+                } catch (NumberFormatException e) {
+                    return handleInvalidMaxResults(parameters);
                 }
                 String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
@@ -1613,6 +1607,43 @@ public class RESTCatalogServer {
                                     "updated");
                         })
                 .collect(Collectors.toList());
+    }
+
+    private MockResponse viewsHandle(Map<String, String> parameters) {
+        RESTResponse response;
+        List<String> views = listViews(parameters);
+        if (!views.isEmpty()) {
+            int maxResults;
+            try {
+                maxResults = getMaxResults(parameters);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
+            }
+            String pageToken = parameters.get(PAGE_TOKEN);
+            PagedList<String> pagedViews = buildPagedEntities(views, maxResults, pageToken);
+            response =
+                    new ListViewsResponse(pagedViews.getElements(), pagedViews.getNextPageToken());
+        } else {
+            response = new ListViewsResponse(Collections.emptyList(), null);
+        }
+        return mockResponse(response, 200);
+    }
+
+    private List<String> listViews(Map<String, String> parameters) {
+        String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
+        String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+        List<String> fullViews = new ArrayList<>();
+        for (Map.Entry<String, View> entry : viewStore.entrySet()) {
+            Identifier identifier = Identifier.fromString(entry.getKey());
+            if ((Objects.isNull(databaseNamePattern))
+                    || matchNamePattern(identifier.getDatabaseName(), databaseNamePattern)
+                            && (Objects.isNull(viewNamePattern)
+                                    || matchNamePattern(
+                                            identifier.getTableName(), viewNamePattern))) {
+                fullViews.add(identifier.getFullName());
+            }
+        }
+        return fullViews;
     }
 
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
@@ -2033,18 +2064,25 @@ public class RESTCatalogServer {
                 escaped = true;
                 continue;
             }
-            switch (c) {
-                case '%':
-                    regex.append(".*");
-                    break;
-                case '_':
-                    regex.append(".");
-                    break;
-                default:
-                    regex.append(c);
-                    break;
+            if (c == '%') {
+                regex.append(".*");
+            } else {
+                regex.append(c);
             }
         }
         return "^" + regex + "$";
+    }
+
+    private MockResponse handleInvalidMaxResults(Map<String, String> parameters) {
+        String maxResults = parameters.get(MAX_RESULTS);
+        LOG.error("Invalid maxResults value: {}", maxResults);
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponse.RESOURCE_TYPE_TABLE,
+                        null,
+                        String.format(
+                                "Invalid input for queryParameter maxResults: %s", maxResults),
+                        400),
+                400);
     }
 }

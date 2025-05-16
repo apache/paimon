@@ -67,11 +67,18 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned * if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of databases with provided page size in this catalog and next
      *     page token, or a list of the names of all databases if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
+     * @throws UnsupportedOperationException if and does not {@link #supportsListByPattern()} when
+     *     databaseNamePattern is not null
      */
-    PagedList<String> listDatabasesPaged(@Nullable Integer maxResults, @Nullable String pageToken);
+    PagedList<String> listDatabasesPaged(
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String databaseNamePattern);
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
@@ -166,13 +173,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All tables will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of tables with provided page size in this database and next page
      *     token, or a list of the names of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
-     * @throws DatabaseNotExistException if the database does not exist
+     * @throws DatabaseNotExistException if the database does not exist.
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<String> listTablesPaged(
             String databaseName,
@@ -193,13 +200,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All table details will
-     *     be returned if not set or empty. Currently, only prefix matching is supported. Note
-     *     please escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All table details will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<Table> listTableDetailsPaged(
             String databaseName,
@@ -207,6 +214,34 @@ public interface Catalog extends AutoCloseable {
             @Nullable String pageToken,
             @Nullable String tableNamePattern)
             throws DatabaseNotExistException;
+
+    /**
+     * Gets an array of tables for a catalog.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the tables with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}.
+     */
+    default PagedList<String> listTablesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String tableNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listTablesPagedGlobally");
+    }
 
     /**
      * Drop a table.
@@ -324,13 +359,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param partitionNamePattern A sql LIKE pattern (% and _) for partition names. All partitions
-     *     will be * returned if not set or empty. Currently, only prefix matching is supported.
-     *     Note please * escape the underline if you want to match it exactly.
+     * @param partitionNamePattern A sql LIKE pattern (%) for partition names. All partitions will
+     *     be * returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the partitions with provided page size(@param maxResults) in this table and
      *     next page token, or a list of all partitions of the table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
      * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<Partition> listPartitionsPaged(
             Identifier identifier,
@@ -400,13 +435,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All views will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     default PagedList<String> listViewsPaged(
             String databaseName,
@@ -427,13 +462,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All view details will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All view details will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     default PagedList<View> listViewDetailsPaged(
             String databaseName,
@@ -442,6 +477,34 @@ public interface Catalog extends AutoCloseable {
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         return new PagedList<>(Collections.emptyList(), null);
+    }
+
+    /**
+     * Gets an array of views for a catalog.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the views with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}}.
+     */
+    default PagedList<String> listViewsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String viewNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listViewsPagedGlobally");
     }
 
     /**
@@ -504,7 +567,7 @@ public interface Catalog extends AutoCloseable {
      * String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
-     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
      *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
@@ -519,7 +582,7 @@ public interface Catalog extends AutoCloseable {
      * corresponding methods will throw exception if name pattern provided.
      *
      * <ul>
-     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
      *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.

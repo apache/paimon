@@ -119,8 +119,10 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<String> listDatabasesPaged(
-            @Nullable Integer maxResults, @Nullable String pageToken) {
-        return api.listDatabasesPaged(maxResults, pageToken);
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String databaseNamePattern) {
+        return api.listDatabasesPaged(maxResults, pageToken, databaseNamePattern);
     }
 
     @Override
@@ -243,6 +245,18 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
         }
+    }
+
+    @Override
+    public PagedList<String> listTablesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String tableNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        PagedList<String> tables =
+                api.listTablesPagedGlobally(
+                        databaseNamePattern, tableNamePattern, maxResults, pageToken);
+        return new PagedList<>(tables.getElements(), tables.getNextPageToken());
     }
 
     @Override
@@ -763,6 +777,18 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
         }
+    }
+
+    @Override
+    public PagedList<String> listViewsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String viewNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        PagedList<String> views =
+                api.listViewsPagedGlobally(
+                        databaseNamePattern, viewNamePattern, maxResults, pageToken);
+        return new PagedList<>(views.getElements(), views.getNextPageToken());
     }
 
     private ViewImpl toView(String db, GetViewResponse response) {

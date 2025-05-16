@@ -233,7 +233,7 @@ paths:
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names.
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -311,7 +311,7 @@ paths:
           schema:
             type: string
         - name: tableNamePattern
-          description: A sql LIKE pattern (% and _) for table names.
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -326,6 +326,50 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/tables:
+    get:
+      tags:
+        - table
+      summary: List tables globally
+      operationId: List tables globally
+      description: list tables paged globally which matches the given database name pattern and table name pattern both.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: path
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. All tables will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -716,7 +760,7 @@ paths:
           schema:
             type: string
         - name: partitionNamePattern
-          description: A sql LIKE pattern (% and _) for partition names.
+          description: A sql LIKE pattern (%) for partition names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -959,7 +1003,7 @@ paths:
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names.
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -1037,7 +1081,7 @@ paths:
           schema:
             type: string
         - name: viewNamePattern
-          description: A sql LIKE pattern (% and _) for view names.
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -1052,6 +1096,50 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/view-summaries:
+    get:
+      tags:
+        - table
+      summary: List views globally
+      operationId: listViewsGlobally
+      description: List views globally which matches the given database name pattern and view name pattern both.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: path
+          schema:
+            type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (%) for view names. All views will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -2383,6 +2471,7 @@ components:
           type: array
           items:
             type: string
+            description: table name or full table name of the table. full table name format is like "db.table"
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2460,6 +2549,7 @@ components:
           type: array
           items:
             type: string
+            description: view name or full view name of the view. full view name format is like "db.view"
         nextPageToken:
           type: string
     ListViewDetailsResponse:

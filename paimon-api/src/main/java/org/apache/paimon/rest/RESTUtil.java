@@ -116,13 +116,12 @@ public class RESTUtil {
                     continue;
                 }
 
-                if (c == '%' || c == '_') {
+                if (c == '%') {
                     inWildcardZone = true;
                 } else {
                     if (inWildcardZone) {
                         throw new IllegalArgumentException(
-                                "Can only support sql like prefix query now. "
-                                        + "Note please escape the underline if you want to match it exactly");
+                                "Can only support prefix sql like pattern query now.");
                     }
                 }
             }
