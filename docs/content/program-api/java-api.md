@@ -1,6 +1,6 @@
 ---
 title: "Java API"
-weight: 2
+weight: 3
 type: docs
 aliases:
 - /api/java-api.html

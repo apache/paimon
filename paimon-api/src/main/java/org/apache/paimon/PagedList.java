@@ -28,6 +28,7 @@ import java.util.List;
  * @since 1.1.0
  */
 public class PagedList<T> {
+
     private final List<T> elements;
 
     @Nullable private final String nextPageToken;
@@ -37,10 +38,12 @@ public class PagedList<T> {
         this.nextPageToken = nextPageToken;
     }
 
+    /** An array of element objects. */
     public List<T> getElements() {
         return this.elements;
     }
 
+    /** Page token to retrieve the next page of results. Absent if there are no more pages. */
     @Nullable
     public String getNextPageToken() {
         return this.nextPageToken;

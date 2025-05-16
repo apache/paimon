@@ -559,16 +559,21 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        return catalog.listFunctions().stream()
-                .map(name -> Identifier.of(namespace, name))
-                .toArray(Identifier[]::new);
+        String databaseName = getDatabaseNameFromNamespace(namespace);
+        try {
+            return catalog.listFunctions(databaseName).stream()
+                    .map(name -> Identifier.of(namespace, name))
+                    .toArray(Identifier[]::new);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
+        }
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
         if (isFunctionNamespace(ident.namespace())) {
             try {
-                Function func = catalog.getFunction(ident.name());
+                Function func = catalog.getFunction(toIdentifier(ident));
                 FunctionDefinition functionDefinition = func.definition(FUNCTION_DEFINITION_NAME);
                 if (functionDefinition != null
                         && functionDefinition

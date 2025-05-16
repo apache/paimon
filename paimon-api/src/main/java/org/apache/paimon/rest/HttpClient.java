@@ -47,7 +47,6 @@ import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
 import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
 import static org.apache.paimon.rest.LoggingInterceptor.REQUEST_ID_KEY;
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
@@ -125,7 +124,7 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
         try {
-            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            String bodyStr = RESTApi.toJson(body);
             Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
@@ -156,7 +155,7 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
-            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            String bodyStr = RESTApi.toJson(body);
             Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
@@ -190,7 +189,7 @@ public class HttpClient implements RESTClient {
             if (!response.isSuccessful()) {
                 ErrorResponse error;
                 try {
-                    error = OBJECT_MAPPER.readValue(responseBodyStr, ErrorResponse.class);
+                    error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
                 } catch (JsonProcessingException e) {
                     error =
                             new ErrorResponse(
@@ -205,7 +204,7 @@ public class HttpClient implements RESTClient {
                 errorHandler.accept(error, requestId);
             }
             if (responseType != null && responseBodyStr != null) {
-                return OBJECT_MAPPER.readValue(responseBodyStr, responseType);
+                return RESTApi.fromJson(responseBodyStr, responseType);
             } else if (responseType == null) {
                 return null;
             } else {

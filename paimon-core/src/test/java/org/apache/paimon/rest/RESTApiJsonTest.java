@@ -52,12 +52,11 @@ import org.junit.Test;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Test for {@link RESTObjectMapper}. */
-public class RESTObjectMapperTest {
+/** Test for {@link RESTApi} json. */
+public class RESTApiJsonTest {
 
     @Test
     public void configResponseParseTest() throws Exception {
@@ -65,8 +64,8 @@ public class RESTObjectMapperTest {
         Map<String, String> conf = new HashMap<>();
         conf.put(confKey, "b");
         ConfigResponse response = new ConfigResponse(conf, conf);
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        ConfigResponse parseData = OBJECT_MAPPER.readValue(responseStr, ConfigResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        ConfigResponse parseData = RESTApi.fromJson(responseStr, ConfigResponse.class);
         assertEquals(conf.get(confKey), parseData.getDefaults().get(confKey));
     }
 
@@ -75,8 +74,8 @@ public class RESTObjectMapperTest {
         String message = "message";
         Integer code = 400;
         ErrorResponse response = new ErrorResponse(null, null, message, code);
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        ErrorResponse parseData = OBJECT_MAPPER.readValue(responseStr, ErrorResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        ErrorResponse parseData = RESTApi.fromJson(responseStr, ErrorResponse.class);
         assertEquals(message, parseData.getMessage());
         assertEquals(code, parseData.getCode());
     }
@@ -85,9 +84,8 @@ public class RESTObjectMapperTest {
     public void createDatabaseRequestParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         CreateDatabaseRequest request = MockRESTMessage.createDatabaseRequest(name);
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreateDatabaseRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreateDatabaseRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        CreateDatabaseRequest parseData = RESTApi.fromJson(requestStr, CreateDatabaseRequest.class);
         assertEquals(request.getName(), parseData.getName());
         assertEquals(request.getOptions().size(), parseData.getOptions().size());
     }
@@ -96,9 +94,8 @@ public class RESTObjectMapperTest {
     public void getDatabaseResponseParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        GetDatabaseResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, GetDatabaseResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        GetDatabaseResponse parseData = RESTApi.fromJson(responseStr, GetDatabaseResponse.class);
         assertEquals(name, parseData.getName());
         assertEquals(response.getOptions().size(), parseData.getOptions().size());
     }
@@ -107,9 +104,9 @@ public class RESTObjectMapperTest {
     public void listDatabaseResponseParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        String responseStr = RESTApi.toJson(response);
         ListDatabasesResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, ListDatabasesResponse.class);
+                RESTApi.fromJson(responseStr, ListDatabasesResponse.class);
         assertEquals(response.getDatabases().size(), parseData.getDatabases().size());
         assertEquals(name, parseData.getDatabases().get(0));
     }
@@ -117,9 +114,8 @@ public class RESTObjectMapperTest {
     @Test
     public void alterDatabaseRequestParseTest() throws Exception {
         AlterDatabaseRequest request = MockRESTMessage.alterDatabaseRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        AlterDatabaseRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, AlterDatabaseRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        AlterDatabaseRequest parseData = RESTApi.fromJson(requestStr, AlterDatabaseRequest.class);
         assertEquals(request.getRemovals().size(), parseData.getRemovals().size());
         assertEquals(request.getUpdates().size(), parseData.getUpdates().size());
     }
@@ -127,9 +123,9 @@ public class RESTObjectMapperTest {
     @Test
     public void alterDatabaseResponseParseTest() throws Exception {
         AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        String responseStr = RESTApi.toJson(response);
         AlterDatabaseResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, AlterDatabaseResponse.class);
+                RESTApi.fromJson(responseStr, AlterDatabaseResponse.class);
         assertEquals(response.getRemoved().size(), parseData.getRemoved().size());
         assertEquals(response.getUpdated().size(), parseData.getUpdated().size());
         assertEquals(response.getMissing().size(), parseData.getMissing().size());
@@ -138,9 +134,8 @@ public class RESTObjectMapperTest {
     @Test
     public void createTableRequestParseTest() throws Exception {
         CreateTableRequest request = MockRESTMessage.createTableRequest("t1");
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreateTableRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreateTableRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        CreateTableRequest parseData = RESTApi.fromJson(requestStr, CreateTableRequest.class);
         assertEquals(request.getIdentifier(), parseData.getIdentifier());
         assertEquals(request.getSchema(), parseData.getSchema());
     }
@@ -156,7 +151,7 @@ public class RESTObjectMapperTest {
                 String.format(
                         "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\", \"description\":\"%s\"}",
                         id, name, type, descStr);
-        DataField parseData = OBJECT_MAPPER.readValue(dataFieldStr, DataField.class);
+        DataField parseData = RESTApi.fromJson(dataFieldStr, DataField.class);
         assertEquals(id, parseData.id());
         assertEquals(name, parseData.name());
         assertEquals(type, parseData.type());
@@ -166,9 +161,8 @@ public class RESTObjectMapperTest {
     @Test
     public void renameTableRequestParseTest() throws Exception {
         RenameTableRequest request = MockRESTMessage.renameRequest("t1", "t2");
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        RenameTableRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, RenameTableRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        RenameTableRequest parseData = RESTApi.fromJson(requestStr, RenameTableRequest.class);
         assertEquals(request.getSource(), parseData.getSource());
         assertEquals(request.getDestination(), parseData.getDestination());
     }
@@ -176,8 +170,8 @@ public class RESTObjectMapperTest {
     @Test
     public void getTableResponseParseTest() throws Exception {
         GetTableResponse response = MockRESTMessage.getTableResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        GetTableResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetTableResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        GetTableResponse parseData = RESTApi.fromJson(responseStr, GetTableResponse.class);
         assertEquals(response.getSchemaId(), parseData.getSchemaId());
         assertEquals(response.getSchema(), parseData.getSchema());
     }
@@ -185,26 +179,25 @@ public class RESTObjectMapperTest {
     @Test
     public void listTablesResponseParseTest() throws Exception {
         ListTablesResponse response = MockRESTMessage.listTablesResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        ListTablesResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, ListTablesResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        ListTablesResponse parseData = RESTApi.fromJson(responseStr, ListTablesResponse.class);
         assertEquals(response.getTables(), parseData.getTables());
     }
 
     @Test
     public void alterTableRequestParseTest() throws Exception {
         AlterTableRequest request = MockRESTMessage.alterTableRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        AlterTableRequest parseData = OBJECT_MAPPER.readValue(requestStr, AlterTableRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        AlterTableRequest parseData = RESTApi.fromJson(requestStr, AlterTableRequest.class);
         assertEquals(parseData.getChanges().size(), parseData.getChanges().size());
     }
 
     @Test
     public void listPartitionsResponseParseTest() throws Exception {
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        String responseStr = RESTApi.toJson(response);
         ListPartitionsResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, ListPartitionsResponse.class);
+                RESTApi.fromJson(responseStr, ListPartitionsResponse.class);
         assertEquals(
                 response.getPartitions().get(0).fileCount(),
                 parseData.getPartitions().get(0).fileCount());
@@ -213,8 +206,8 @@ public class RESTObjectMapperTest {
     @Test
     public void createViewRequestParseTest() throws Exception {
         CreateViewRequest request = MockRESTMessage.createViewRequest("t1");
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreateViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, CreateViewRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        CreateViewRequest parseData = RESTApi.fromJson(requestStr, CreateViewRequest.class);
         assertEquals(request.getIdentifier(), parseData.getIdentifier());
         assertEquals(request.getSchema(), parseData.getSchema());
     }
@@ -222,8 +215,8 @@ public class RESTObjectMapperTest {
     @Test
     public void getViewResponseParseTest() throws Exception {
         GetViewResponse response = MockRESTMessage.getViewResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        GetViewResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetViewResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        GetViewResponse parseData = RESTApi.fromJson(responseStr, GetViewResponse.class);
         assertEquals(response.getId(), parseData.getId());
         assertEquals(response.getName(), parseData.getName());
         assertEquals(response.getSchema(), parseData.getSchema());
@@ -232,17 +225,17 @@ public class RESTObjectMapperTest {
     @Test
     public void listViewsResponseParseTest() throws Exception {
         ListViewsResponse response = MockRESTMessage.listViewsResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        ListViewsResponse parseData = OBJECT_MAPPER.readValue(responseStr, ListViewsResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        ListViewsResponse parseData = RESTApi.fromJson(responseStr, ListViewsResponse.class);
         assertEquals(response.getViews(), parseData.getViews());
     }
 
     @Test
     public void getTableTokenResponseParseTest() throws Exception {
         GetTableTokenResponse response = MockRESTMessage.getTableCredentialsResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        String responseStr = RESTApi.toJson(response);
         GetTableTokenResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, GetTableTokenResponse.class);
+                RESTApi.fromJson(responseStr, GetTableTokenResponse.class);
         assertEquals(response.getToken(), parseData.getToken());
         assertEquals(response.getExpiresAtMillis(), parseData.getExpiresAtMillis());
     }
@@ -253,24 +246,20 @@ public class RESTObjectMapperTest {
         String tagName = "tagName";
         RollbackTableRequest rollbackTableRequestBySnapshot =
                 MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
-        String rollbackTableRequestBySnapshotStr =
-                OBJECT_MAPPER.writeValueAsString(rollbackTableRequestBySnapshot);
+        String rollbackTableRequestBySnapshotStr = RESTApi.toJson(rollbackTableRequestBySnapshot);
         Instant.SnapshotInstant rollbackTableRequestParseData =
                 (Instant.SnapshotInstant)
-                        OBJECT_MAPPER
-                                .readValue(
+                        RESTApi.fromJson(
                                         rollbackTableRequestBySnapshotStr,
                                         RollbackTableRequest.class)
                                 .getInstant();
         assertTrue(rollbackTableRequestParseData.getSnapshotId() == snapshotId);
         RollbackTableRequest rollbackTableRequestByTag =
                 MockRESTMessage.rollbackTableRequestByTag(tagName);
-        String rollbackTableRequestByTagStr =
-                OBJECT_MAPPER.writeValueAsString(rollbackTableRequestByTag);
+        String rollbackTableRequestByTagStr = RESTApi.toJson(rollbackTableRequestByTag);
         Instant.TagInstant rollbackTableRequestByTagParseData =
                 (Instant.TagInstant)
-                        OBJECT_MAPPER
-                                .readValue(rollbackTableRequestByTagStr, RollbackTableRequest.class)
+                        RESTApi.fromJson(rollbackTableRequestByTagStr, RollbackTableRequest.class)
                                 .getInstant();
         assertEquals(rollbackTableRequestByTagParseData.getTagName(), tagName);
     }
@@ -278,8 +267,8 @@ public class RESTObjectMapperTest {
     @Test
     public void alterViewRequestParseTest() throws Exception {
         AlterViewRequest request = MockRESTMessage.alterViewRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        AlterViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, AlterViewRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        AlterViewRequest parseData = RESTApi.fromJson(requestStr, AlterViewRequest.class);
         assertEquals(parseData.viewChanges().size(), request.viewChanges().size());
         for (int i = 0; i < request.viewChanges().size(); i++) {
             assertEquals(parseData.viewChanges().get(i), request.viewChanges().get(i));
@@ -289,27 +278,24 @@ public class RESTObjectMapperTest {
     @Test
     public void getFunctionResponseParseTest() throws Exception {
         GetFunctionResponse response = MockRESTMessage.getFunctionResponse();
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        GetFunctionResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, GetFunctionResponse.class);
+        String responseStr = RESTApi.toJson(response);
+        GetFunctionResponse parseData = RESTApi.fromJson(responseStr, GetFunctionResponse.class);
         assertEquals(response.uuid(), parseData.uuid());
     }
 
     @Test
     public void createFunctionRequestParseTest() throws JsonProcessingException {
         CreateFunctionRequest request = MockRESTMessage.createFunctionRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreateFunctionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreateFunctionRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        CreateFunctionRequest parseData = RESTApi.fromJson(requestStr, CreateFunctionRequest.class);
         assertEquals(parseData.name(), request.name());
     }
 
     @Test
     public void alterFunctionRequestParseTest() throws JsonProcessingException {
         AlterFunctionRequest request = MockRESTMessage.alterFunctionRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        AlterFunctionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, AlterFunctionRequest.class);
+        String requestStr = RESTApi.toJson(request);
+        AlterFunctionRequest parseData = RESTApi.fromJson(requestStr, AlterFunctionRequest.class);
         assertEquals(parseData.changes().size(), request.changes().size());
     }
 }

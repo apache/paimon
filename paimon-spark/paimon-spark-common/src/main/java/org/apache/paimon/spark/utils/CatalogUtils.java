@@ -189,7 +189,7 @@ public class CatalogUtils {
             return null;
         }
         if (sparkType == StringType) {
-            return (String) value;
+            return (String) value.toString();
         } else if (sparkType == BooleanType) {
             return (Boolean) value;
         } else if (sparkType == BinaryType) {

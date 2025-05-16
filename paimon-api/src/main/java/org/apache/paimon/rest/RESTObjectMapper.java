@@ -18,12 +18,15 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.utils.JsonSerdeUtil;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-/** Object mapper for REST request and response. */
+/**
+ * Object mapper for REST request and response.
+ *
+ * @deprecated Use {@link RESTApi}
+ */
+@Deprecated
 public class RESTObjectMapper {
 
-    public static final ObjectMapper OBJECT_MAPPER = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE;
+    public static final ObjectMapper OBJECT_MAPPER = RESTApi.OBJECT_MAPPER;
 }

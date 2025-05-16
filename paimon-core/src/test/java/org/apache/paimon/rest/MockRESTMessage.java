@@ -286,9 +286,9 @@ public class MockRESTMessage {
     }
 
     public static GetFunctionResponse getFunctionResponse() {
-        Function function = function("function");
+        Function function = function(Identifier.create(databaseName(), "function"));
         return new GetFunctionResponse(
-                function.uuid(),
+                UUID.randomUUID().toString(),
                 function.name(),
                 function.inputParams().orElse(null),
                 function.returnParams().orElse(null),
@@ -304,7 +304,7 @@ public class MockRESTMessage {
     }
 
     public static CreateFunctionRequest createFunctionRequest() {
-        Function function = function("function");
+        Function function = function(Identifier.create(databaseName(), "function"));
         return new CreateFunctionRequest(
                 function.name(),
                 function.inputParams().orElse(null),
@@ -315,7 +315,7 @@ public class MockRESTMessage {
                 function.options());
     }
 
-    public static Function function(String functionName) {
+    public static Function function(Identifier identifier) {
         List<DataField> inputParams =
                 Lists.newArrayList(
                         new DataField(0, "length", DataTypes.DOUBLE()),
@@ -334,8 +334,7 @@ public class MockRESTMessage {
         definitions.put("spark", sparkFunction);
         definitions.put("trino", trinoFunction);
         return new FunctionImpl(
-                UUID.randomUUID().toString(),
-                functionName,
+                identifier,
                 inputParams,
                 returnParams,
                 false,

@@ -27,9 +27,9 @@ import java.util.Optional;
 /** Interface for function. */
 public interface Function {
 
-    String uuid();
-
     String name();
+
+    String fullName();
 
     Optional<List<DataField>> inputParams();
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
@@ -131,17 +132,17 @@ public class SparkCatalogWithRestTest {
                 FunctionDefinition.lambda(
                         "(String x, Integer y) -> { String z = \"hello\"; return z + x + y; }",
                         "JAVA");
+        Identifier identifier = Identifier.create("db2", functionName);
         Function function =
                 new FunctionImpl(
-                        UUID.randomUUID().toString(),
-                        functionName,
+                        identifier,
                         inputParams,
                         returnParams,
                         false,
                         ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
                         null,
                         null);
-        paimonCatalog.createFunction(functionName, function, false);
+        paimonCatalog.createFunction(identifier, function, false);
         assertThat(
                         spark.sql(String.format("select paimon.db2.%s('haha', 5555)", functionName))
                                 .collectAsList()
@@ -150,7 +151,7 @@ public class SparkCatalogWithRestTest {
                 .isEqualTo("[hellohaha5555]");
         definition = FunctionDefinition.lambda("(String x, Integer y) ->  x + y", "JAVA");
         paimonCatalog.alterFunction(
-                functionName,
+                identifier,
                 ImmutableList.of(
                         FunctionChange.updateDefinition(
                                 SparkCatalog.FUNCTION_DEFINITION_NAME, definition)),
@@ -166,27 +167,26 @@ public class SparkCatalogWithRestTest {
 
     @Test
     public void testArrayFunction() throws Exception {
-
         List<DataField> inputParams = new ArrayList<>();
         Catalog paimonCatalog = getPaimonCatalog();
         inputParams.add(new DataField(0, "x", DataTypes.ARRAY(DataTypes.INT())));
         List<DataField> returnParams = new ArrayList<>();
         returnParams.add(new DataField(0, "y", DataTypes.INT()));
         String functionName = "test";
+        Identifier identifier = Identifier.create("db2", functionName);
         FunctionDefinition definition =
                 FunctionDefinition.lambda(
                         "(java.util.List<java.util.List<Integer>> x) -> x.size()", "JAVA");
         Function function =
                 new FunctionImpl(
-                        UUID.randomUUID().toString(),
-                        functionName,
+                        identifier,
                         inputParams,
                         returnParams,
                         false,
                         ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
                         null,
                         null);
-        paimonCatalog.createFunction(functionName, function, false);
+        paimonCatalog.createFunction(identifier, function, false);
         assertThat(
                         spark.sql(
                                         String.format(
