@@ -36,6 +36,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartin
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
+import org.apache.paimon.table.source.snapshot.CreationTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.EmptyResultStartingScanner;
 import org.apache.paimon.table.source.snapshot.FileCreationTimeStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
@@ -244,6 +245,15 @@ abstract class AbstractDataTableScan implements DataTableScan {
             case FROM_FILE_CREATION_TIME:
                 Long fileCreationTimeMills = options.scanFileCreationTimeMills();
                 return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
+            case FROM_CREATION_TIMESTAMP:
+                Long creationTimeMills = options.scanCreationTimeMills();
+                return new CreationTimestampStartingScanner(
+                        snapshotManager,
+                        changelogManager,
+                        creationTimeMills,
+                        options.changelogLifecycleDecoupled(),
+                        isStreaming);
+
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
