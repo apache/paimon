@@ -626,65 +626,71 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<String> listFunctions() {
-        return api.listFunctions();
+    public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
+        try {
+            return api.listFunctions(databaseName);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName, e);
+        }
     }
 
     @Override
-    public org.apache.paimon.function.Function getFunction(String functionName)
+    public org.apache.paimon.function.Function getFunction(Identifier identifier)
             throws FunctionNotExistException {
         try {
-            GetFunctionResponse response = api.getFunction(functionName);
-            return response.toFunction();
+            GetFunctionResponse response = api.getFunction(identifier);
+            return response.toFunction(identifier);
         } catch (NoSuchResourceException e) {
-            throw new FunctionNotExistException(functionName, e);
+            throw new FunctionNotExistException(identifier, e);
         }
     }
 
     @Override
     public void createFunction(
-            String functionName,
+            Identifier identifier,
             org.apache.paimon.function.Function function,
             boolean ignoreIfExists)
-            throws FunctionAlreadyExistException {
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
         try {
-            api.createFunction(function);
+            api.createFunction(identifier, function);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
         } catch (AlreadyExistsException e) {
             if (ignoreIfExists) {
                 return;
             }
-            throw new FunctionAlreadyExistException(functionName, e);
+            throw new FunctionAlreadyExistException(identifier, e);
         }
     }
 
     @Override
-    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         try {
-            api.dropFunction(functionName);
+            api.dropFunction(identifier);
         } catch (NoSuchResourceException e) {
             if (ignoreIfNotExists) {
                 return;
             }
-            throw new FunctionNotExistException(functionName, e);
+            throw new FunctionNotExistException(identifier, e);
         }
     }
 
     @Override
     public void alterFunction(
-            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
         try {
-            api.alterFunction(functionName, changes);
+            api.alterFunction(identifier, changes);
         } catch (AlreadyExistsException e) {
-            throw new DefinitionAlreadyExistException(functionName, e.resourceName());
+            throw new DefinitionAlreadyExistException(identifier, e.resourceName());
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DEFINITION)) {
-                throw new DefinitionNotExistException(functionName, e.resourceName());
+                throw new DefinitionNotExistException(identifier, e.resourceName());
             }
             if (!ignoreIfNotExists) {
-                throw new FunctionNotExistException(functionName);
+                throw new FunctionNotExistException(identifier, e);
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());

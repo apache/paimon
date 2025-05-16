@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
@@ -136,10 +137,9 @@ public class GetFunctionResponse extends AuditRESTResponse {
         return options;
     }
 
-    public Function toFunction() {
+    public Function toFunction(Identifier identifier) {
         return new FunctionImpl(
-                uuid,
-                functionName,
+                identifier,
                 inputParams,
                 returnParams,
                 deterministic,

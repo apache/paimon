@@ -223,33 +223,33 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public List<String> listFunctions() {
-        return wrapped.listFunctions();
+    public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listFunctions(databaseName);
     }
 
     @Override
-    public Function getFunction(String functionName) throws FunctionNotExistException {
-        return wrapped.getFunction(functionName);
+    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
+        return wrapped.getFunction(identifier);
     }
 
     @Override
-    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
-            throws FunctionAlreadyExistException {
-        wrapped.createFunction(functionName, function, ignoreIfExists);
+    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
+        wrapped.createFunction(identifier, function, ignoreIfExists);
     }
 
     @Override
-    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
-        wrapped.dropFunction(functionName, ignoreIfNotExists);
+        wrapped.dropFunction(identifier, ignoreIfNotExists);
     }
 
     @Override
     public void alterFunction(
-            String functionName, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
-        wrapped.alterFunction(functionName, changes, ignoreIfNotExists);
+        wrapped.alterFunction(identifier, changes, ignoreIfNotExists);
     }
 
     @Override

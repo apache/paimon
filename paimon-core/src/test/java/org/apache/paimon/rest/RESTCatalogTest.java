@@ -1549,86 +1549,90 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testFunction() throws Exception {
-        Function function = MockRESTMessage.function("function");
+        Identifier identifier = new Identifier("rest_catalog_db", "function");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Function function = MockRESTMessage.function(identifier);
 
-        catalog.createFunction(function.name(), function, true);
+        catalog.createFunction(identifier, function, true);
         assertThrows(
                 Catalog.FunctionAlreadyExistException.class,
-                () -> catalog.createFunction(function.name(), function, false));
+                () -> catalog.createFunction(identifier, function, false));
 
-        assertThat(catalog.listFunctions().contains(function.name())).isTrue();
+        assertThat(catalog.listFunctions(identifier.getDatabaseName()).contains(function.name()))
+                .isTrue();
 
-        Function getFunction = catalog.getFunction(function.name());
+        Function getFunction = catalog.getFunction(identifier);
         assertThat(getFunction.name()).isEqualTo(function.name());
         for (String dialect : function.definitions().keySet()) {
             assertThat(getFunction.definition(dialect)).isEqualTo(function.definition(dialect));
         }
-        catalog.dropFunction(function.name(), true);
+        catalog.dropFunction(identifier, true);
 
-        assertThat(catalog.listFunctions().contains(function.name())).isFalse();
+        assertThat(catalog.listFunctions(identifier.getDatabaseName()).contains(function.name()))
+                .isFalse();
         assertThrows(
                 Catalog.FunctionNotExistException.class,
-                () -> catalog.dropFunction(function.name(), false));
+                () -> catalog.dropFunction(identifier, false));
         assertThrows(
-                Catalog.FunctionNotExistException.class,
-                () -> catalog.getFunction(function.name()));
+                Catalog.FunctionNotExistException.class, () -> catalog.getFunction(identifier));
     }
 
     @Test
     void testAlterFunction() throws Exception {
-        String functionName = "alter_function_name";
-        Function function = MockRESTMessage.function(functionName);
+        Identifier identifier = new Identifier("rest_catalog_db", "alter_function_name");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Function function = MockRESTMessage.function(identifier);
         FunctionDefinition definition = FunctionDefinition.sql("x * y + 1");
         FunctionChange.AddDefinition addDefinition =
                 (FunctionChange.AddDefinition) FunctionChange.addDefinition("flink_1", definition);
         assertDoesNotThrow(
-                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), true));
+                () -> catalog.alterFunction(identifier, ImmutableList.of(addDefinition), true));
         assertThrows(
                 Catalog.FunctionNotExistException.class,
-                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false));
-        catalog.createFunction(function.name(), function, true);
+                () -> catalog.alterFunction(identifier, ImmutableList.of(addDefinition), false));
+        catalog.createFunction(identifier, function, true);
         // set options
         String key = UUID.randomUUID().toString();
         String value = UUID.randomUUID().toString();
         FunctionChange setOption = FunctionChange.setOption(key, value);
-        catalog.alterFunction(functionName, ImmutableList.of(setOption), false);
-        Function catalogFunction = catalog.getFunction(functionName);
+        catalog.alterFunction(identifier, ImmutableList.of(setOption), false);
+        Function catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.options().get(key)).isEqualTo(value);
 
         // remove options
         catalog.alterFunction(
-                functionName, ImmutableList.of(FunctionChange.removeOption(key)), false);
-        catalogFunction = catalog.getFunction(functionName);
+                identifier, ImmutableList.of(FunctionChange.removeOption(key)), false);
+        catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.options().containsKey(key)).isEqualTo(false);
 
         // update comment
         String newComment = "new comment";
         catalog.alterFunction(
-                functionName, ImmutableList.of(FunctionChange.updateComment(newComment)), false);
-        catalogFunction = catalog.getFunction(functionName);
+                identifier, ImmutableList.of(FunctionChange.updateComment(newComment)), false);
+        catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.comment()).isEqualTo(newComment);
         // add definition
-        catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false);
-        catalogFunction = catalog.getFunction(functionName);
+        catalog.alterFunction(identifier, ImmutableList.of(addDefinition), false);
+        catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.definition(addDefinition.name()))
                 .isEqualTo(addDefinition.definition());
         assertThrows(
                 Catalog.DefinitionAlreadyExistException.class,
-                () -> catalog.alterFunction(functionName, ImmutableList.of(addDefinition), false));
+                () -> catalog.alterFunction(identifier, ImmutableList.of(addDefinition), false));
 
         // update definition
         FunctionChange.UpdateDefinition updateDefinition =
                 (FunctionChange.UpdateDefinition)
                         FunctionChange.updateDefinition("flink_1", definition);
-        catalog.alterFunction(functionName, ImmutableList.of(updateDefinition), false);
-        catalogFunction = catalog.getFunction(functionName);
+        catalog.alterFunction(identifier, ImmutableList.of(updateDefinition), false);
+        catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.definition(updateDefinition.name()))
                 .isEqualTo(updateDefinition.definition());
         assertThrows(
                 Catalog.DefinitionNotExistException.class,
                 () ->
                         catalog.alterFunction(
-                                functionName,
+                                identifier,
                                 ImmutableList.of(
                                         FunctionChange.updateDefinition("no_exist", definition)),
                                 false));
@@ -1637,13 +1641,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         FunctionChange.DropDefinition dropDefinition =
                 (FunctionChange.DropDefinition)
                         FunctionChange.dropDefinition(updateDefinition.name());
-        catalog.alterFunction(functionName, ImmutableList.of(dropDefinition), false);
-        catalogFunction = catalog.getFunction(functionName);
+        catalog.alterFunction(identifier, ImmutableList.of(dropDefinition), false);
+        catalogFunction = catalog.getFunction(identifier);
         assertThat(catalogFunction.definition(updateDefinition.name())).isNull();
 
         assertThrows(
                 Catalog.DefinitionNotExistException.class,
-                () -> catalog.alterFunction(functionName, ImmutableList.of(dropDefinition), false));
+                () -> catalog.alterFunction(identifier, ImmutableList.of(dropDefinition), false));
     }
 
     @Test

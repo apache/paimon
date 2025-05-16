@@ -22,17 +22,18 @@ import org.apache.paimon.types.DataField;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Interface for function. */
 public interface Function {
 
-    String uuid();
-
     String name();
 
-    List<DataField> inputParams();
+    String fullName();
 
-    List<DataField> returnParams();
+    Optional<List<DataField>> inputParams();
+
+    Optional<List<DataField>> returnParams();
 
     boolean isDeterministic();
 

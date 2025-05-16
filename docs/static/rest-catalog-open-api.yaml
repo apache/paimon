@@ -1272,7 +1272,7 @@ paths:
           $ref: '#/components/responses/ViewAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/functions:
+  /v1/{prefix}/databases/{database}/functions:
     get:
       tags:
         - function
@@ -1280,6 +1280,11 @@ paths:
       operationId: listFunctions
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1302,6 +1307,8 @@ paths:
                 $ref: '#/components/schemas/ListFunctionsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     post:
@@ -1311,6 +1318,11 @@ paths:
       operationId: createFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1327,12 +1339,14 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "409":
           $ref: '#/components/responses/FunctionAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
 
-  /v1/{prefix}/functions/{function}:
+  /v1/{prefix}/databases/{database}/functions/{function}:
     get:
       tags:
         - function
@@ -1340,6 +1354,11 @@ paths:
       operationId: getFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1359,7 +1378,7 @@ paths:
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
     post:
@@ -1369,6 +1388,11 @@ paths:
       operationId: alterFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -1399,6 +1423,11 @@ paths:
       operationId: dropFunction
       parameters:
         - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -2573,8 +2602,6 @@ components:
     GetFunctionResponse:
       type: object
       properties:
-        uuid:
-          type: string
         name:
           type: string
         inputParams:
