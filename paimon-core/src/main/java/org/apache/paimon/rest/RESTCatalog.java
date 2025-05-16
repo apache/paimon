@@ -206,6 +206,8 @@ public class RESTCatalog implements Catalog {
             return api.listTables(databaseName);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName);
         }
     }
 
@@ -489,6 +491,8 @@ public class RESTCatalog implements Catalog {
             api.markDonePartitions(identifier, partitions);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier);
         } catch (NotImplementedException ignored) {
             // not a metastore partitioned table
         }
