@@ -190,8 +190,24 @@ public class CatalogUtils {
         }
         if (sparkType == StringType) {
             return (String) value;
+        } else if (sparkType == BooleanType) {
+            return (Boolean) value;
+        } else if (sparkType == BinaryType) {
+            return (byte[]) value;
+        } else if (sparkType == ByteType) {
+            return (byte) value;
+        } else if (sparkType == ShortType) {
+            return (short) value;
         } else if (sparkType == IntegerType) {
             return (Integer) value;
+        } else if (sparkType == LongType) {
+            return (Long) value;
+        } else if (sparkType == FloatType) {
+            return (Float) value;
+        } else if (sparkType == DoubleType) {
+            return (Double) value;
+        } else if (sparkType instanceof org.apache.spark.sql.types.DecimalType) {
+            return (java.math.BigDecimal) value;
         } else if (sparkType instanceof org.apache.spark.sql.types.ArrayType) {
             org.apache.spark.sql.types.ArrayType arrayType =
                     (org.apache.spark.sql.types.ArrayType) sparkType;

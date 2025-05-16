@@ -173,9 +173,9 @@ public class SparkCatalogWithRestTest {
         List<DataField> returnParams = new ArrayList<>();
         returnParams.add(new DataField(0, "y", DataTypes.INT()));
         String functionName = "test";
-
         FunctionDefinition definition =
-                FunctionDefinition.lambda("(java.util.List<Integer> x) -> x.size()", "JAVA");
+                FunctionDefinition.lambda(
+                        "(java.util.List<java.util.List<Integer>> x) -> x.size()", "JAVA");
         Function function =
                 new FunctionImpl(
                         UUID.randomUUID().toString(),
@@ -190,12 +190,12 @@ public class SparkCatalogWithRestTest {
         assertThat(
                         spark.sql(
                                         String.format(
-                                                "select paimon.db2.%s(array(1, 2, 3))",
+                                                "select paimon.db2.%s(array(array(1, 2, 3), array(1, 2, 3)))",
                                                 functionName))
                                 .collectAsList()
                                 .get(0)
                                 .toString())
-                .isEqualTo("[3]");
+                .isEqualTo("[2]");
         cleanFunction(functionName);
     }
 
