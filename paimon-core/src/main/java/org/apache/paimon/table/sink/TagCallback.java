@@ -27,5 +27,10 @@ public interface TagCallback extends AutoCloseable {
 
     void notifyCreation(String tagName);
 
+    // Iceberg tag callbacks require snapshotId
+    default void notifyCreation(String tagName, long snapshotId) {
+        notifyCreation(tagName);
+    }
+
     void notifyDeletion(String tagName);
 }

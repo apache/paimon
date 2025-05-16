@@ -146,7 +146,7 @@ public class TagManager {
 
         if (callbacks != null) {
             try {
-                callbacks.forEach(callback -> callback.notifyCreation(tagName));
+                callbacks.forEach(callback -> callback.notifyCreation(tagName, snapshot.id()));
             } finally {
                 for (TagCallback tagCallback : callbacks) {
                     IOUtils.closeQuietly(tagCallback);

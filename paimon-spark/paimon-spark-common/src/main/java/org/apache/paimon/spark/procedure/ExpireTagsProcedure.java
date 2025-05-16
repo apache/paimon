@@ -74,7 +74,10 @@ public class ExpireTagsProcedure extends BaseProcedure {
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     TagTimeExpire tagTimeExpire =
-                            fileStoreTable.store().newTagCreationManager().getTagTimeExpire();
+                            fileStoreTable
+                                    .store()
+                                    .newTagCreationManager(fileStoreTable)
+                                    .getTagTimeExpire();
                     if (olderThanStr != null) {
                         LocalDateTime olderThanTime =
                                 DateTimeUtils.parseTimestampData(
