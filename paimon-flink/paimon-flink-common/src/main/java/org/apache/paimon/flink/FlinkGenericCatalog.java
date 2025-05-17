@@ -27,6 +27,7 @@ import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogView;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
@@ -179,6 +180,15 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
+        // create view
+        // TODO: By default, use the Paimon catalog to create the view. Create views with options is
+        // not supported.
+        if (table instanceof CatalogView) {
+            paimon.createTable(tablePath, table, ignoreIfExists);
+            return;
+        }
+
+        // create table
         String connector = table.getOptions().get(CONNECTOR.key());
         if (connector == null) {
             throw new RuntimeException(
