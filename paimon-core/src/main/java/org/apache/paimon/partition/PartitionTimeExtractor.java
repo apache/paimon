@@ -112,7 +112,8 @@ public class PartitionTimeExtractor {
         DateTimeFormatter dateTimeFormatter =
                 DateTimeFormatter.ofPattern(Objects.requireNonNull(formatterPattern), Locale.ROOT);
         try {
-            return LocalDateTime.parse(timestampString, Objects.requireNonNull(dateTimeFormatter));
+            return LocalDate.parse(timestampString, Objects.requireNonNull(dateTimeFormatter))
+                    .atStartOfDay();
         } catch (DateTimeParseException e) {
             return LocalDateTime.of(
                     LocalDate.parse(timestampString, Objects.requireNonNull(dateTimeFormatter)),
