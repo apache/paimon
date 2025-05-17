@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
@@ -54,6 +55,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private boolean dropStats = false;
 
+    private MetricRegistry metricRegistry = null;
+
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
     }
@@ -61,6 +64,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public String tableName() {
         return table.name();
+    }
+
+    @Override
+    public void withMetricsRegistry(MetricRegistry metricRegistry) {
+        this.metricRegistry = metricRegistry;
+        this.table.withMetricRegistry(metricRegistry);
     }
 
     @Override
@@ -150,7 +159,11 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public StreamTableScan newStreamScan() {
-        return (StreamTableScan) configureScan(table.newStreamScan());
+        StreamTableScan streamTableScan = (StreamTableScan) configureScan(table.newStreamScan());
+        if (this.metricRegistry != null) {
+            streamTableScan.withMetricRegistry(this.metricRegistry);
+        }
+        return streamTableScan;
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
@@ -185,6 +198,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         InnerTableRead read = table.newRead().withFilter(filter);
         if (readType != null) {
             read.withReadType(readType);
+        }
+        if (this.metricRegistry != null) {
+            read.withMetricRegistry(this.metricRegistry);
         }
         return read;
     }
