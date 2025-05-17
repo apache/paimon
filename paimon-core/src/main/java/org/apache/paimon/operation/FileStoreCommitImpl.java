@@ -1318,7 +1318,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             "You are writing data to expired partitions, and you can filter this data to avoid job failover."
                                     + " Otherwise, continuous expired records will cause the job to failover restart continuously."
                                     + " Expired partitions are: "
-                                    + expiredPartitions);
+                                    + expiredPartitions
+                                    + " ,tableName: "
+                                    + tableName);
                 }
             }
             conflictHandler.accept(e);
