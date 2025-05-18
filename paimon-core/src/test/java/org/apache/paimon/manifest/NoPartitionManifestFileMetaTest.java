@@ -25,7 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +56,49 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         // the first one is not deleted, it should not be merged
         assertThat(merged.get(0)).isSameAs(input.get(0));
+    }
+
+    @Test
+    public void testMergeFullCompactionWithoutDeleteFile() {
+        // entries are All ADD.
+        List<ManifestFileMeta> input = new ArrayList<>();
+        // base
+        for (int j = 0; j < 6; j++) {
+            List<ManifestEntry> entrys = new ArrayList<>();
+            for (int i = 1; i < 50; i++) {
+                entrys.add(makeEntry(true, String.format(manifestFileNameTemplate, j, i), null));
+            }
+            input.add(makeManifest(entrys.toArray(new ManifestEntry[0])));
+        }
+        // The base file all meet the manifest file size.
+        long threshold = input.stream().mapToLong(ManifestFileMeta::fileSize).min().getAsLong();
+        Set<String> baseFiles =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        // assert base manifest are not accessed
+        for (String baseFile : baseFiles) {
+            manifestFile.delete(baseFile);
+        }
+
+        // delta
+        input.add(makeManifest(makeEntry(true, "A", null)));
+        input.add(makeManifest(makeEntry(true, "B", null)));
+        input.add(makeManifest(makeEntry(true, "C", null)));
+        input.add(makeManifest(makeEntry(true, "D", null)));
+        input.add(makeManifest(makeEntry(true, "E", null)));
+        input.add(makeManifest(makeEntry(true, "F", null)));
+        input.add(makeManifest(makeEntry(true, "G", null)));
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+        assertEquivalentEntries(
+                input.stream()
+                        .filter(f -> !baseFiles.contains(f.fileName()))
+                        .collect(Collectors.toList()),
+                merged.stream()
+                        .filter(f -> !baseFiles.contains(f.fileName()))
+                        .collect(Collectors.toList()));
     }
 
     @Override

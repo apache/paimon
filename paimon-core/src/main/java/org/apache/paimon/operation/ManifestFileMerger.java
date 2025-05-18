@@ -19,8 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
@@ -200,46 +198,35 @@ public class ManifestFileMerger {
 
         // 2.2. try to skip base files by partition filter
 
+        PartitionPredicate predicate;
+        if (deleteEntries.isEmpty()) {
+            predicate = PartitionPredicate.alwaysFalse();
+        } else {
+            if (partitionType.getFieldCount() > 0) {
+                Set<BinaryRow> deletePartitions = computeDeletePartitions(deleteEntries);
+                predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+            } else {
+                predicate = PartitionPredicate.alwaysTrue();
+            }
+        }
+
         List<ManifestFileMeta> result = new ArrayList<>();
         List<ManifestFileMeta> toBeMerged = new LinkedList<>(inputs);
-        if (partitionType.getFieldCount() > 0) {
-            Set<BinaryRow> deletePartitions = computeDeletePartitions(deleteEntries);
-            PartitionPredicate predicate;
-            if (deletePartitions.isEmpty()) {
-                predicate =
-                        new PartitionPredicate() {
-                            @Override
-                            public boolean test(BinaryRow part) {
-                                return false;
-                            }
 
-                            @Override
-                            public boolean test(
-                                    long rowCount,
-                                    InternalRow minValues,
-                                    InternalRow maxValues,
-                                    InternalArray nullCounts) {
-                                return false;
-                            }
-                        };
-            } else {
-                predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
-            }
-            if (predicate != null) {
-                Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
-                while (iterator.hasNext()) {
-                    ManifestFileMeta file = iterator.next();
-                    if (mustChange.test(file)) {
-                        continue;
-                    }
-                    if (!predicate.test(
-                            file.numAddedFiles() + file.numDeletedFiles(),
-                            file.partitionStats().minValues(),
-                            file.partitionStats().maxValues(),
-                            file.partitionStats().nullCounts())) {
-                        iterator.remove();
-                        result.add(file);
-                    }
+        if (predicate != null) {
+            Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
+            while (iterator.hasNext()) {
+                ManifestFileMeta file = iterator.next();
+                if (mustChange.test(file)) {
+                    continue;
+                }
+                if (!predicate.test(
+                        file.numAddedFiles() + file.numDeletedFiles(),
+                        file.partitionStats().minValues(),
+                        file.partitionStats().maxValues(),
+                        file.partitionStats().nullCounts())) {
+                    iterator.remove();
+                    result.add(file);
                 }
             }
         }
