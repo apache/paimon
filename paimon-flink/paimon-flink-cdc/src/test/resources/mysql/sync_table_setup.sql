@@ -292,6 +292,7 @@ CREATE TABLE test_computed_column (
     _date DATE,
     _datetime DATETIME,
     _timestamp TIMESTAMP,
+    _value VARCHAR(10),
     PRIMARY KEY (pk)
 );
 

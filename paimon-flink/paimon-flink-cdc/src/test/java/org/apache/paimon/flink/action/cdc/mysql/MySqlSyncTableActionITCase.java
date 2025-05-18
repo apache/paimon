@@ -856,7 +856,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_substring_date1=substring(_date,2)",
                         "_substring_date2=substring(_timestamp,5,10)",
                         "_truncate_date=trUNcate(pk,2)", // test case-insensitive too
-                        "_constant=cast(11,INT)");
+                        "_constant=cast(11,INT)",
+                        "_upper=upper(_value)",
+                        "_lower=lower(_value)",
+                        "_trim=trim(_value)");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
@@ -870,9 +873,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             try (Statement statement = getStatement()) {
                 statement.execute("USE " + DATABASE_NAME);
                 statement.executeUpdate(
-                        "INSERT INTO test_computed_column VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10')");
+                        "INSERT INTO test_computed_column VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10', ' vaLUE ')");
                 statement.executeUpdate(
-                        "INSERT INTO test_computed_column VALUES (2, '2023-03-23', null, null)");
+                        "INSERT INTO test_computed_column VALUES (2, '2023-03-23', null, null, null)");
             }
         }
 
@@ -884,6 +887,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.DATE(),
                             DataTypes.TIMESTAMP(0),
                             DataTypes.TIMESTAMP(0),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT().notNull(),
                             DataTypes.INT(),
                             DataTypes.INT(),
@@ -908,13 +912,17 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(),
                             DataTypes.STRING(),
                             DataTypes.INT().notNull(),
-                            DataTypes.INT()
+                            DataTypes.INT(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
                         new String[] {
                             "pk",
                             "_date",
                             "_datetime",
                             "_timestamp",
+                            "_value",
                             "_year_date",
                             "_year_datetime",
                             "_year_timestamp",
@@ -939,12 +947,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_substring_date1",
                             "_substring_date2",
                             "_truncate_date",
-                            "_constant"
+                            "_constant",
+                            "_upper",
+                            "_lower",
+                            "_trim"
                         });
         List<String> expected =
                 Arrays.asList(
-                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 0, 30, 0, 0, 0, 10, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0, 11]",
-                        "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2, 11]");
+                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10,  vaLUE , 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 0, 30, 0, 0, 0, 10, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0, 11,  VALUE ,  value , vaLUE]",
+                        "+I[2, 19439, NULL, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2, 11, NULL, NULL, NULL]");
         waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
     }
 
