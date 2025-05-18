@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
@@ -202,8 +204,27 @@ public class ManifestFileMerger {
         List<ManifestFileMeta> toBeMerged = new LinkedList<>(inputs);
         if (partitionType.getFieldCount() > 0) {
             Set<BinaryRow> deletePartitions = computeDeletePartitions(deleteEntries);
-            PartitionPredicate predicate =
-                    PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+            PartitionPredicate predicate;
+            if (deletePartitions.isEmpty()) {
+                predicate =
+                        new PartitionPredicate() {
+                            @Override
+                            public boolean test(BinaryRow part) {
+                                return false;
+                            }
+
+                            @Override
+                            public boolean test(
+                                    long rowCount,
+                                    InternalRow minValues,
+                                    InternalRow maxValues,
+                                    InternalArray nullCounts) {
+                                return false;
+                            }
+                        };
+            } else {
+                predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+            }
             if (predicate != null) {
                 Iterator<ManifestFileMeta> iterator = toBeMerged.iterator();
                 while (iterator.hasNext()) {
