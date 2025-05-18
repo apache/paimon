@@ -566,4 +566,18 @@ public class StringUtils {
         }
         return value.trim();
     }
+
+    public static String toUpperCase(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.toUpperCase();
+    }
+
+    public static String toLowerCase(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.toLowerCase();
+    }
 }
