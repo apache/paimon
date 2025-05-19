@@ -1220,7 +1220,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v");
+                        "Cannot update column type from nullable to non nullable for v");
     }
 
     @ParameterizedTest()
@@ -1248,12 +1248,12 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT NOT NULL, f2 INT) NOT NULL)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v.f1");
+                        "Cannot update column type from nullable to non nullable for v.f1");
 
         sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT))"); // convert entire row to nullable
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v");
+                        "Cannot update column type from nullable to non nullable for v");
     }
 
     @ParameterizedTest()
@@ -1287,26 +1287,26 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 sql(
                                         "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v1");
+                        "Cannot update column type from nullable to non nullable for v1");
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT NOT NULL, f2 INT) NOT NULL>)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v1.element.f1");
+                        "Cannot update column type from nullable to non nullable for v1.element.f1");
 
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v2");
+                        "Cannot update column type from nullable to non nullable for v2");
 
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT NOT NULL) NOT NULL>)"))
                 .hasRootCauseMessage(
-                        "Cannot update key type from nullable to non nullable of column v2.value.f2");
+                        "Cannot update column type from nullable to non nullable for v2.value.f2");
     }
 }
