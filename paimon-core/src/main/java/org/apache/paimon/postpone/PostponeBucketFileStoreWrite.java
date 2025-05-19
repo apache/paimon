@@ -42,7 +42,6 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -73,15 +72,18 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
         // use avro for postpone bucket
         newOptions.set(CoreOptions.FILE_FORMAT, "avro");
         newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
-        // each writer should have its unique prefix, so files from the same writer can be consumed
-        // by the same compaction reader to keep the input order
+        // Each writer should have its unique prefix, so files from the same writer can be consumed
+        // by the same compaction reader to keep the input order.
+        // Also note that, for Paimon CDC, this object might be created multiple times in the same
+        // job, however the object will always stay in the same thread, so we use hash of thread
+        // name as the identifier.
         newOptions.set(
                 CoreOptions.DATA_FILE_PREFIX,
                 String.format(
                         "%s-u-%s-s-%d-w-",
                         options.dataFilePrefix(),
                         commitUser,
-                        ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)));
+                        Math.abs((long) Thread.currentThread().getName().hashCode())));
         this.options = new CoreOptions(newOptions);
 
         FileFormat fileFormat = fileFormat(this.options);
@@ -119,7 +121,7 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(writerFactory);
+        return new PostponeBucketWriter(writerFactory, restoreFiles, restoreIncrement);
     }
 
     @Override

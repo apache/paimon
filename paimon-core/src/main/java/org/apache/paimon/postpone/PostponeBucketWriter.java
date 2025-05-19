@@ -28,6 +28,9 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -36,10 +39,20 @@ import java.util.List;
 public class PostponeBucketWriter implements RecordWriter<KeyValue> {
 
     private final KeyValueFileWriterFactory writerFactory;
+    private final List<DataFileMeta> files;
+
     private RollingFileWriter<KeyValue, DataFileMeta> writer;
 
-    public PostponeBucketWriter(KeyValueFileWriterFactory writerFactory) {
+    public PostponeBucketWriter(
+            KeyValueFileWriterFactory writerFactory,
+            List<DataFileMeta> restoreFiles,
+            @Nullable CommitIncrement restoreIncrement) {
         this.writerFactory = writerFactory;
+        this.files = new ArrayList<>(restoreFiles);
+        if (restoreIncrement != null) {
+            files.addAll(restoreIncrement.newFilesIncrement().newFiles());
+        }
+
         this.writer = null;
     }
 
@@ -55,12 +68,13 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     public void compact(boolean fullCompaction) throws Exception {}
 
     @Override
-    public void addNewFiles(List<DataFileMeta> files) {}
+    public void addNewFiles(List<DataFileMeta> files) {
+        this.files.addAll(files);
+    }
 
     @Override
     public Collection<DataFileMeta> dataFiles() {
-        // this method is only for checkpointing, while this writer does not need any checkpoint
-        return Collections.emptyList();
+        return files;
     }
 
     @Override
@@ -71,14 +85,16 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        List<DataFileMeta> newFiles = Collections.emptyList();
         if (writer != null) {
             writer.close();
-            newFiles = writer.result();
+            files.addAll(writer.result());
             writer = null;
         }
+
+        List<DataFileMeta> result = new ArrayList<>(files);
+        files.clear();
         return new CommitIncrement(
-                new DataIncrement(newFiles, Collections.emptyList(), Collections.emptyList()),
+                new DataIncrement(result, Collections.emptyList(), Collections.emptyList()),
                 CompactIncrement.emptyIncrement(),
                 null);
     }
