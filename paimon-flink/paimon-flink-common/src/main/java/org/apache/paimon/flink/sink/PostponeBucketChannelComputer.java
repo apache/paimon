@@ -50,7 +50,8 @@ public class PostponeBucketChannelComputer implements ChannelComputer<InternalRo
     @Override
     public int channel(InternalRow record) {
         extractor.setRecord(record);
-        return Math.abs(extractor.partition().hashCode() + extractor.trimmedPrimaryKey().hashCode())
-                % numChannels;
+        return Math.abs(
+                (extractor.partition().hashCode() + extractor.trimmedPrimaryKey().hashCode())
+                        % numChannels);
     }
 }
