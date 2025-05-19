@@ -209,7 +209,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         } catch (ForbiddenException e) {
-            throw new DatabaseNoPermissionException(databaseName);
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -506,7 +506,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier);
+            throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException ignored) {
             // not a metastore partitioned table
         }
