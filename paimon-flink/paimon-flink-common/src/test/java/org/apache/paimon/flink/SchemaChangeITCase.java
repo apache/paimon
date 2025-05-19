@@ -1199,4 +1199,114 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 },
                                 3));
     }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityPrimitiveType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT NOT NULL, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("INSERT INTO T VALUES (1, 100), (2, 200)");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200));
+
+        sql("ALTER TABLE T MODIFY v INT"); // convert non nullable to nullable
+        sql("INSERT INTO T VALUES " + "(3, CAST(NULL AS INT))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200), Row.of(3, null));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityRowType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v ROW(f1 INT, f2 INT NOT NULL) NOT NULL, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("INSERT INTO T VALUES (1, ROW(10, 100)), (2, ROW(20, 200))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, Row.of(10, 100)), Row.of(2, Row.of(20, 200)));
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"); // convert non nullable
+        // field in row to
+        // nullable
+        sql("INSERT INTO T VALUES " + "(3, ROW(30, CAST(NULL AS INT)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(10, 100)),
+                        Row.of(2, Row.of(20, 200)),
+                        Row.of(3, Row.of(30, null)));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT NOT NULL, f2 INT) NOT NULL)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v.f1");
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT))"); // convert entire row to nullable
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityArrayAndMapType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL>, v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL>, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(10, 100), ROW(20, 200)], MAP[11, ROW(10, 100), 12, ROW(11, 110)]), "
+                        + "(2, ARRAY[ROW(30, 300), ROW(40, 400)], MAP[21, ROW(20, 200), 22, ROW(21, 210)])");
+        Map<Integer, Row> map1 = new HashMap<>();
+        map1.put(11, Row.of(10, 100));
+        map1.put(12, Row.of(11, 110));
+
+        Map<Integer, Row> map2 = new HashMap<>();
+        map2.put(21, Row.of(20, 200));
+        map2.put(22, Row.of(21, 210));
+
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Row[] {Row.of(10, 100), Row.of(20, 200)}, map1),
+                        Row.of(2, new Row[] {Row.of(30, 300), Row.of(40, 400)}, map2));
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v1");
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT NOT NULL, f2 INT) NOT NULL>)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v1.element.f1");
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v2");
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT NOT NULL) NOT NULL>)"))
+                .hasRootCauseMessage(
+                        "Cannot update key type from nullable to non nullable of column v2.value.f2");
+    }
 }
