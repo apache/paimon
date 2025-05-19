@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AuditLogTable;
+import org.apache.paimon.table.system.BinlogTable;
 
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -67,15 +68,18 @@ public class SystemCatalogTable implements CatalogTable {
                 deserializeWatermarkSpec(newOptions, builder);
             }
 
-            // add non-physical columns
-            List<String> physicalColumns = table.rowType().getFieldNames();
-            int columnCount =
-                    physicalColumns.size() + nonPhysicalColumnsCount(newOptions, physicalColumns);
-            for (int i = 0; i < columnCount; i++) {
-                String optionalName = newOptions.get(compoundKey(SCHEMA, i, NAME));
-                if (optionalName != null && !physicalColumns.contains(optionalName)) {
-                    // build non-physical column from options
-                    deserializeNonPhysicalColumn(newOptions, i, builder);
+            if (!(table instanceof BinlogTable)) {
+                // add non-physical columns
+                List<String> physicalColumns = table.rowType().getFieldNames();
+                int columnCount =
+                        physicalColumns.size()
+                                + nonPhysicalColumnsCount(newOptions, physicalColumns);
+                for (int i = 0; i < columnCount; i++) {
+                    String optionalName = newOptions.get(compoundKey(SCHEMA, i, NAME));
+                    if (optionalName != null && !physicalColumns.contains(optionalName)) {
+                        // build non-physical column from options
+                        deserializeNonPhysicalColumn(newOptions, i, builder);
+                    }
                 }
             }
             return builder.build();

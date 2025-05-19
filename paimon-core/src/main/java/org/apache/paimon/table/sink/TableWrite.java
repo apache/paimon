@@ -76,6 +76,6 @@ public interface TableWrite extends AutoCloseable {
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
-    /** With metrics to measure compaction. */
+    /** Set {@link MetricRegistry} to table write. */
     TableWrite withMetricRegistry(MetricRegistry registry);
 }

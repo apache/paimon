@@ -20,6 +20,8 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -65,8 +67,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
-        return wrapped.listDatabasesPaged(maxResults, pageToken);
+    public PagedList<String> listDatabasesPaged(
+            Integer maxResults, String pageToken, String databaseNamePattern) {
+        return wrapped.listDatabasesPaged(maxResults, pageToken, databaseNamePattern);
     }
 
     @Override
@@ -109,6 +112,16 @@ public abstract class DelegateCatalog implements Catalog {
             String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
         return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken, tableNamePattern);
+    }
+
+    @Override
+    public PagedList<String> listTablesPagedGlobally(
+            String databaseNamePattern,
+            String tableNamePattern,
+            Integer maxResults,
+            String pageToken) {
+        return wrapped.listTablesPagedGlobally(
+                databaseNamePattern, tableNamePattern, maxResults, pageToken);
     }
 
     @Override
@@ -210,6 +223,36 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<String> listFunctions(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listFunctions(databaseName);
+    }
+
+    @Override
+    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
+        return wrapped.getFunction(identifier);
+    }
+
+    @Override
+    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
+        wrapped.createFunction(identifier, function, ignoreIfExists);
+    }
+
+    @Override
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        wrapped.dropFunction(identifier, ignoreIfNotExists);
+    }
+
+    @Override
+    public void alterFunction(
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
+        wrapped.alterFunction(identifier, changes, ignoreIfNotExists);
+    }
+
+    @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.markDonePartitions(identifier, partitions);
@@ -257,6 +300,16 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listViewsPagedGlobally(
+            String databaseNamePattern,
+            String viewNamePattern,
+            Integer maxResults,
+            String pageToken) {
+        return wrapped.listViewsPagedGlobally(
+                databaseNamePattern, viewNamePattern, maxResults, pageToken);
+    }
+
+    @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
@@ -281,6 +334,12 @@ public abstract class DelegateCatalog implements Catalog {
             String partitionNamePattern)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
+    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+            throws TableNotExistException {
+        wrapped.authTableQuery(identifier, select, filter);
     }
 
     @Override

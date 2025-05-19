@@ -106,7 +106,7 @@ public class FileFormatTest {
         tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
         tableOptions.setString(identifier.toLowerCase() + ".hello", "world");
-        FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
+        FileFormat fileFormat = FileFormat.fromIdentifier(identifier, tableOptions);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
@@ -134,6 +134,6 @@ public class FileFormatTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         tableOptions.setString("avro.codec", codec);
-        return CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, tableOptions);
     }
 }

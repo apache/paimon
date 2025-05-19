@@ -641,7 +641,7 @@ public class TestFileStore extends KeyValueFileStore {
         boolean changelogDecoupled = changelogManager.earliestLongLivedChangelogId() != null;
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
-        Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
+        Snapshot snapshot = SnapshotManager.fromPath(fileIO, snapshotPath);
 
         // snapshot file
         result.add(snapshotPath);

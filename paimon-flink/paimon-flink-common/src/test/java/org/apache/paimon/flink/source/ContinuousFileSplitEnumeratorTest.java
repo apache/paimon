@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -893,6 +894,11 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
             this.results = results;
             this.nextSnapshotId = null;
             this.nextSnapshotIdForConsumer = null;
+        }
+
+        @Override
+        public TableScan withMetricRegistry(MetricRegistry registry) {
+            return this;
         }
 
         @Override

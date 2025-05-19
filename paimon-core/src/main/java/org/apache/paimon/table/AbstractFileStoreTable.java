@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.AppendTableRowKeyExtractor;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketWriteSelector;
+import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -217,6 +218,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case HASH_FIXED:
                 return Optional.of(new FixedBucketWriteSelector(schema()));
             case BUCKET_UNAWARE:
+            case POSTPONE_MODE:
                 return Optional.empty();
             default:
                 throw new UnsupportedOperationException(
@@ -238,6 +240,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 return new DynamicBucketRowKeyExtractor(schema());
             case BUCKET_UNAWARE:
                 return new AppendTableRowKeyExtractor(schema());
+            case POSTPONE_MODE:
+                return new PostponeBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
@@ -262,21 +266,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                tableSchema.primaryKeys().size() > 0,
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()));
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
                 changelogManager(),
                 supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()));
     }
 
     protected abstract SplitGenerator splitGenerator();

@@ -85,7 +85,8 @@ public class ReportPartStatsListener implements PartitionListener {
         this.idleTime = idleTime;
     }
 
-    public void notifyCommittable(List<ManifestCommittable> committables) {
+    public void notifyCommittable(
+            List<ManifestCommittable> committables, boolean recoverFromCheckpoint) {
         Set<String> partition = new HashSet<>();
         boolean endInput = false;
         for (ManifestCommittable committable : committables) {

@@ -51,20 +51,19 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 /** Schema converter converts Parquet schema to and from Paimon internal types. */
 public class ParquetSchemaConverter {
 
-    static final String PAIMON_SCHEMA = "paimon_schema";
+    public static final String PAIMON_SCHEMA = "paimon_schema";
 
-    static final String MAP_REPEATED_NAME = "key_value";
-    static final String MAP_KEY_NAME = "key";
-    static final String MAP_VALUE_NAME = "value";
-    static final String LIST_REPEATED_NAME = "list";
-    static final String LIST_ELEMENT_NAME = "element";
+    public static final String MAP_REPEATED_NAME = "key_value";
+    public static final String MAP_KEY_NAME = "key";
+    public static final String MAP_VALUE_NAME = "value";
+    public static final String LIST_ELEMENT_NAME = "element";
 
     /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
     public static MessageType convertToParquetMessageType(RowType rowType) {
         return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType));
     }
 
-    private static Type[] convertToParquetTypes(RowType rowType) {
+    public static Type[] convertToParquetTypes(RowType rowType) {
         return rowType.getFields().stream()
                 .map(ParquetSchemaConverter::convertToParquetType)
                 .toArray(Type[]::new);
@@ -75,7 +74,7 @@ public class ParquetSchemaConverter {
         return convertToParquetType(field.name(), field.type(), field.id(), 0);
     }
 
-    private static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
+    public static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
         Type.Repetition repetition =
                 type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
         switch (type.getTypeRoot()) {
@@ -234,7 +233,7 @@ public class ParquetSchemaConverter {
         }
     }
 
-    private static Type createTimestampWithLogicalType(
+    public static Type createTimestampWithLogicalType(
             String name, int precision, Type.Repetition repetition, boolean isAdjustToUTC) {
         if (precision <= 3) {
             return Types.primitive(INT64, repetition)
@@ -374,9 +373,11 @@ public class ParquetSchemaConverter {
         } else {
             GroupType groupType = parquetType.asGroupType();
             if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
+                int level = groupType.getType(0) instanceof GroupType ? 3 : 2;
                 paimonDataType =
                         new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType)).type());
+                                convertToPaimonField(parquetListElementType(groupType, level))
+                                        .type());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -401,12 +402,23 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType) {
-        return listType.getType(LIST_REPEATED_NAME).asGroupType().getType(LIST_ELEMENT_NAME);
+    public static Type parquetListElementType(GroupType listType, int level) {
+        if (level == 3) {
+            // Level 3 representation of list type.
+            // List type should only have one middle group type, which is repeated, and one element
+            // type, which is optional.
+            return listType.getType(0).asGroupType().getType(0);
+        } else if (level == 2) {
+            // Level 2 representation of list type
+            return listType.getType(0);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Parquet list type only have two level representation and three level representation.");
+        }
     }
 
     public static Pair<Type, Type> parquetMapKeyValueType(GroupType mapType) {
-        GroupType keyValue = mapType.getType(MAP_REPEATED_NAME).asGroupType();
+        GroupType keyValue = mapType.getType(0).asGroupType();
         return Pair.of(keyValue.getType(MAP_KEY_NAME), keyValue.getType(MAP_VALUE_NAME));
     }
 }

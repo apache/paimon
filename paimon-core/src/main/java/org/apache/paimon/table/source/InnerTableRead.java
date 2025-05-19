@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
@@ -55,6 +56,11 @@ public interface InnerTableRead extends TableRead {
 
     @Override
     default TableRead executeFilter() {
+        return this;
+    }
+
+    @Override
+    default InnerTableRead withMetricRegistry(MetricRegistry registry) {
         return this;
     }
 }

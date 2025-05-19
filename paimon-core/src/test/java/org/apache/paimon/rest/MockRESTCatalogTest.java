@@ -44,6 +44,7 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -141,7 +142,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter("/path", parameters, "method", "data");
-        Map<String, String> headers = restCatalog.headers(restAuthParameter);
+        Map<String, String> headers = restCatalog.api().authFunction().apply(restAuthParameter);
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
         assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
@@ -172,6 +173,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     @Override
     protected void revokeTablePermission(Identifier identifier) {
         restCatalogServer.addNoPermissionTable(identifier);
+    }
+
+    @Override
+    protected void authTableColumns(Identifier identifier, List<String> columns) {
+        restCatalogServer.addTableColumnAuth(identifier, columns);
     }
 
     @Override

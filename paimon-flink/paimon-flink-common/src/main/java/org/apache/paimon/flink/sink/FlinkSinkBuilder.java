@@ -56,7 +56,6 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
 import static org.apache.paimon.CoreOptions.OrderType.ORDER;
 import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
-import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -235,12 +234,10 @@ public class FlinkSinkBuilder {
 
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
+            case POSTPONE_MODE:
+                return buildPostponeBucketSink(input);
             case HASH_FIXED:
-                if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-                    return buildPostponeBucketSink(input);
-                } else {
-                    return buildForFixedBucket(input);
-                }
+                return buildForFixedBucket(input);
             case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
             case CROSS_PARTITION:
@@ -298,10 +295,10 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
+        DataStream<InternalRow> partitioned =
+                partition(input, new PostponeBucketChannelComputer(table.schema()), parallelism);
         FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, null);
-        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
-        DataStream<Committable> written = sink.doWrite(input, commitUser, parallelism);
-        return sink.doCommit(written, commitUser);
+        return sink.sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {

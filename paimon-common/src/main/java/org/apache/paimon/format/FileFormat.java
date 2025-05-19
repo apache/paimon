@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.normalizeFileFormat;
+
 /**
  * Factory class which creates reader and writer factories for specific file format.
  *
@@ -77,7 +79,7 @@ public abstract class FileFormat {
 
     public static FileFormat fromIdentifier(String identifier, Options options) {
         return fromIdentifier(
-                identifier,
+                normalizeFileFormat(identifier),
                 new FormatContext(
                         options,
                         options.get(CoreOptions.READ_BATCH_SIZE),
@@ -102,5 +104,13 @@ public abstract class FileFormat {
             }
         }
         return new Options(result);
+    }
+
+    public static FileFormat fileFormat(CoreOptions options) {
+        return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
+    }
+
+    public static FileFormat manifestFormat(CoreOptions options) {
+        return FileFormat.fromIdentifier(options.manifestFormatString(), options.toConfiguration());
     }
 }

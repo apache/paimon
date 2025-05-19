@@ -33,8 +33,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
-import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -187,15 +185,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             return null;
         } else {
             return super.newExpireRunnable();
-        }
-    }
-
-    @Override
-    public RowKeyExtractor createRowKeyExtractor() {
-        if (coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-            return new PostponeBucketRowKeyExtractor(schema());
-        } else {
-            return super.createRowKeyExtractor();
         }
     }
 }

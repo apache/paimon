@@ -33,10 +33,16 @@ under the License.
             <td>Controls whether the catalog will cache databases, tables, manifests and partitions.</td>
         </tr>
         <tr>
-            <td><h5>cache.expiration-interval</h5></td>
+            <td><h5>cache.expire-after-access</h5></td>
             <td style="word-wrap: break-word;">10 min</td>
             <td>Duration</td>
-            <td>Controls the duration for which databases and tables in the catalog are cached.</td>
+            <td>Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last access.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.expire-after-write</h5></td>
+            <td style="word-wrap: break-word;">30 min</td>
+            <td>Duration</td>
+            <td>Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last refresh.</td>
         </tr>
         <tr>
             <td><h5>cache.manifest.max-memory</h5></td>

@@ -44,7 +44,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +56,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
+    protected String path;
     protected TableEnvironment tEnv;
 
     @HiveSQL(files = {})
@@ -70,6 +71,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
     @Before
     public void before() throws Exception {
+        path = folder.newFolder().toURI().toString();
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
@@ -81,7 +83,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
         FlinkGenericCatalog catalog =
                 FlinkGenericCatalogFactory.createCatalog(
                         this.getClass().getClassLoader(),
-                        new HashMap<>(),
+                        Collections.singletonMap("warehouse", path),
                         hiveCatalog.getName(),
                         hiveCatalog);
         catalog.open();

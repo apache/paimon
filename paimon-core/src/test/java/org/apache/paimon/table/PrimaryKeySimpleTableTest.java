@@ -99,6 +99,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_STATS_MODE;
@@ -109,6 +110,7 @@ import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PER_LEVEL;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
@@ -163,9 +165,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(
                         options -> {
                             options.set(FILE_FORMAT, format);
-                            options.set(
-                                    METADATA_STATS_MODE_PER_LEVEL,
-                                    Collections.singletonMap("0", "none"));
+                            options.set(METADATA_STATS_MODE_PER_LEVEL, singletonMap("0", "none"));
                         });
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -219,10 +219,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     @Test
     public void testAsyncReader() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        table =
-                table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1 b"));
+        table = table.copy(singletonMap(CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1 b"));
 
         Map<Integer, GenericRow> rows = new HashMap<>();
         for (int i = 0; i < 20; i++) {
@@ -868,6 +865,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(DELETION_VECTORS_ENABLED, true);
                             conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
                             conf.set("file-index.bloom-filter.columns", "b");
+                            conf.set(FILE_FORMAT_PER_LEVEL, singletonMap("0", "avro"));
                         });
 
         StreamTableWrite write =
@@ -880,13 +878,18 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         write.write(rowData(1, 4, 500L));
         commit.commit(0, write.prepareCommit(true, 0));
 
+        // assert forcing rewriting when upgrading from level 0 to level x with different file
+        // formats
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).fileName()).endsWith("parquet");
+
         write.write(rowData(1, 5, 100L));
         write.write(rowData(1, 6, 600L));
         write.write(rowData(1, 7, 400L));
         commit.commit(1, write.prepareCommit(true, 1));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        splits = toSplits(table.newSnapshotReader().read().dataSplits());
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
@@ -2311,10 +2314,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     private void assertReadChangelog(int id, FileStoreTable table) throws Exception {
         // read the changelog at #{id}
-        table =
-                table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
+        table = table.copy(singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
         ReadBuilder readBuilder = table.newReadBuilder();
         StreamTableScan scan = readBuilder.newStreamScan();
 

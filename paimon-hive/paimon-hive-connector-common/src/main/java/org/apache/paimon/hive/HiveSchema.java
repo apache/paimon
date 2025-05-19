@@ -255,6 +255,17 @@ public class HiveSchema {
         for (int i = 0; i < hiveFieldNames.size(); i++) {
             if (!hiveFieldNames.get(i).equalsIgnoreCase(schemaFieldNames.get(i))
                     || !Objects.equals(hiveFieldTypeInfos.get(i), schemaFieldTypeInfos.get(i))) {
+                if (hiveFieldNames.get(i).equalsIgnoreCase(schemaFieldNames.get(i))
+                        && hiveFieldTypeInfos.get(i).getTypeName().equals("timestamp")
+                        && schemaFieldTypeInfos
+                                .get(i)
+                                .getTypeName()
+                                .equals("timestamp with local time zone")) {
+                    // Hive timestamp is compatible with paimon timestamp with local time zone
+                    LOG.warn(
+                            "Hive DDL and paimon schema mismatched, but Hive timestamp is compatible with paimon timestamp with local time zone");
+                    continue;
+                }
                 String ddlField =
                         hiveFieldNames.get(i) + " " + hiveFieldTypeInfos.get(i).getTypeName();
                 String schemaField =

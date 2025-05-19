@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -45,6 +46,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
@@ -82,13 +84,14 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
                         ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)));
         this.options = new CoreOptions(newOptions);
 
+        FileFormat fileFormat = fileFormat(this.options);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
                         schema.id(),
                         keyType,
                         valueType,
-                        this.options.fileFormat(),
+                        fileFormat,
                         createFormatPathFactories(this.options, formatPathFactory),
                         this.options.targetFileSize(true));
 

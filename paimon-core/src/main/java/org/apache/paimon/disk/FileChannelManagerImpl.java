@@ -62,12 +62,17 @@ public class FileChannelManagerImpl implements FileChannelManager {
         // Creates directories after registering shutdown hook to ensure the directories can be
         // removed if required.
         this.paths = createFiles(tempDirs, prefix);
+
+        LOG.info(
+                "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
+                FileChannelManager.class.getSimpleName(),
+                String.join("\n\t", tempDirs));
     }
 
     private static File[] createFiles(String[] tempDirs, String prefix) {
         List<File> filesList = new ArrayList<>();
-        for (int i = 0; i < tempDirs.length; i++) {
-            File baseDir = new File(tempDirs[i]);
+        for (String tempDir : tempDirs) {
+            File baseDir = new File(tempDir);
             String subfolder = String.format("paimon-%s-%s", prefix, UUID.randomUUID());
             File storageDir = new File(baseDir, subfolder);
 
@@ -75,7 +80,7 @@ public class FileChannelManagerImpl implements FileChannelManager {
                 LOG.warn(
                         "Failed to create directory {}, temp directory {} will not be used",
                         storageDir.getAbsolutePath(),
-                        tempDirs[i]);
+                        tempDir);
                 continue;
             }
 
@@ -123,6 +128,12 @@ public class FileChannelManagerImpl implements FileChannelManager {
                         .filter(File::exists)
                         .map(this::getFileCloser)
                         .collect(Collectors.toList()));
+        LOG.info(
+                "Closed {} with directories:\n\t{}",
+                FileChannelManager.class.getSimpleName(),
+                Arrays.stream(paths)
+                        .map(File::getAbsolutePath)
+                        .collect(Collectors.joining("\n\t")));
     }
 
     private AutoCloseable getFileCloser(File path) {

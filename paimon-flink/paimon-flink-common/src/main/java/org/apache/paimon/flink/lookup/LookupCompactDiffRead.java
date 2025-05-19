@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -38,7 +37,7 @@ import java.io.IOException;
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
 /** An {@link InnerTableRead} that reads the data changed before and after compaction. */
-public class LookupCompactDiffRead extends AbstractDataTableRead<KeyValue> {
+public class LookupCompactDiffRead extends AbstractDataTableRead {
     private final SplitRead<InternalRow> fullPhaseMergeRead;
     private final SplitRead<InternalRow> incrementalDiffRead;
 

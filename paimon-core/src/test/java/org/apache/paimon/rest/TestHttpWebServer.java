@@ -27,8 +27,6 @@ import okhttp3.mockwebserver.RecordedRequest;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
-
 /** Mock a http web service locally. */
 public class TestHttpWebServer {
 
@@ -75,10 +73,10 @@ public class TestHttpWebServer {
     }
 
     public String createResponseBody(RESTResponse response) throws JsonProcessingException {
-        return OBJECT_MAPPER.writeValueAsString(response);
+        return RESTApi.toJson(response);
     }
 
     public <T> T readRequestBody(String body, Class<T> requestType) throws JsonProcessingException {
-        return OBJECT_MAPPER.readValue(body, requestType);
+        return RESTApi.fromJson(body, requestType);
     }
 }

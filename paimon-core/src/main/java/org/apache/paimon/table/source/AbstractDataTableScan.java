@@ -27,6 +27,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -46,7 +49,9 @@ import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -55,12 +60,17 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -69,12 +79,29 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
+    private final TableSchema schema;
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
+    private final TableQueryAuth queryAuth;
 
-    protected AbstractDataTableScan(CoreOptions options, SnapshotReader snapshotReader) {
+    @Nullable private RowType readType;
+    @Nullable private Predicate predicate;
+
+    protected AbstractDataTableScan(
+            TableSchema schema,
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            TableQueryAuth queryAuth) {
+        this.schema = schema;
         this.options = options;
         this.snapshotReader = snapshotReader;
+        this.queryAuth = queryAuth;
+    }
+
+    @Override
+    public InnerTableScan withFilter(Predicate predicate) {
+        this.predicate = predicate;
+        return this;
     }
 
     @Override
@@ -86,6 +113,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public AbstractDataTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        this.readType = readType;
         return this;
     }
 
@@ -113,9 +146,27 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    public AbstractDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+    public AbstractDataTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
         snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
+    }
+
+    protected void authQuery() {
+        if (!options.queryAuthEnabled()) {
+            return;
+        }
+
+        List<String> projection = readType == null ? schema.fieldNames() : readType.getFieldNames();
+        List<String> filter = new ArrayList<>();
+        if (predicate != null) {
+            List<Predicate> predicates = splitAnd(predicate);
+            for (Predicate predicate : predicates) {
+                if (predicate instanceof LeafPredicate) {
+                    filter.add(predicate.toString());
+                }
+            }
+        }
+        queryAuth.auth(projection, filter);
     }
 
     @Override
@@ -176,7 +227,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
                     return new CompactedStartingScanner(snapshotManager);
                 }
             case FROM_TIMESTAMP:
+                String timestampStr = options.scanTimestamp();
                 Long startupMillis = options.scanTimestampMills();
+                if (startupMillis == null && timestampStr != null) {
+                    startupMillis =
+                            DateTimeUtils.parseTimestampData(timestampStr, 3, TimeZone.getDefault())
+                                    .getMillisecond();
+                }
                 return isStreaming
                         ? new ContinuousFromTimestampStartingScanner(
                                 snapshotManager,
@@ -280,7 +337,32 @@ abstract class AbstractDataTableScan implements DataTableScan {
                                 startId, endId, snapshotManager, toSnapshotScanMode(scanMode));
             }
         } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
-            Pair<Long, Long> incrementalBetween = options.incrementalBetweenTimestamp();
+            String incrementalBetweenStr = options.incrementalBetweenTimestamp();
+            String[] split = incrementalBetweenStr.split(",");
+            if (split.length != 2) {
+                throw new IllegalArgumentException(
+                        "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                                + incrementalBetweenStr);
+            }
+
+            Pair<Long, Long> incrementalBetween;
+            try {
+                incrementalBetween = Pair.of(Long.parseLong(split[0]), Long.parseLong(split[1]));
+            } catch (NumberFormatException nfe) {
+                try {
+                    long startTimestamp =
+                            DateTimeUtils.parseTimestampData(split[0], 3, TimeZone.getDefault())
+                                    .getMillisecond();
+                    long endTimestamp =
+                            DateTimeUtils.parseTimestampData(split[1], 3, TimeZone.getDefault())
+                                    .getMillisecond();
+                    incrementalBetween = Pair.of(startTimestamp, endTimestamp);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(
+                            "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                                    + incrementalBetweenStr);
+                }
+            }
 
             Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();

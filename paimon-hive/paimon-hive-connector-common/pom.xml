@@ -566,6 +566,44 @@ under the License.
             </exclusions>
         </dependency>
 
+        <!-- for huid clone test -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hudi</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hudi</groupId>
+            <artifactId>hudi-flink1.18-bundle</artifactId>
+            <version>${hudi.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- this is for huid clone test, and it should be put before hive-exec
+             for the same reason as org.apache.avro:avro. -->
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>${parquet.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.parquet</groupId>
+                    <artifactId>parquet-column</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.parquet</groupId>
+                    <artifactId>parquet-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.parquet</groupId>
+                    <artifactId>parquet-hadoop</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!--
         Why we need this test dependency:
         IDEA reads classes from the same project from target/classes of that module,
