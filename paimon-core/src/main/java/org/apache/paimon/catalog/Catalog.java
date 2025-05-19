@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
@@ -914,6 +915,7 @@ public interface Catalog extends AutoCloseable {
             this.database = database;
         }
 
+        @VisibleForTesting
         public DatabaseNoPermissionException(String database) {
             this(database, null);
         }
@@ -977,6 +979,7 @@ public interface Catalog extends AutoCloseable {
             this.identifier = identifier;
         }
 
+        @VisibleForTesting
         public TableNoPermissionException(Identifier identifier) {
             this(identifier, null);
         }
