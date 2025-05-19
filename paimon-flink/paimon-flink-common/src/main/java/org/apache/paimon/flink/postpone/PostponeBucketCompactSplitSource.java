@@ -186,13 +186,8 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                     matcher.find(),
                     "Data file name %s does not match the pattern. This is unexpected.",
                     fileName);
-
-            // use long to avoid overflow
-            long subtaskId = Long.parseLong(matcher.group(1));
-            // send records written by the same subtask to the same subtask
-            // to make sure we replay the written records in the exact order
-            long channel = (Math.abs(dataSplit.partition().hashCode()) + subtaskId) % numChannels;
-            return (int) channel;
+            return ChannelComputer.select(
+                    dataSplit.partition(), Integer.parseInt(matcher.group(1)), numChannels);
         }
     }
 }
