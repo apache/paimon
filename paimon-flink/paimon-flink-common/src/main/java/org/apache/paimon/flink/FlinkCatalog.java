@@ -785,7 +785,7 @@ public class FlinkCatalog extends AbstractCatalog {
         if (oldType.isNullable() != newType.isNullable()) {
             Preconditions.checkArgument(
                     !(oldType.isNullable() && !newType.isNullable()),
-                    "Cannot update key type from nullable to non nullable of column %s",
+                    "Cannot update column type from nullable to non nullable for %s",
                     joinedNames);
             schemaChanges.add(
                     SchemaChange.updateColumnNullability(
