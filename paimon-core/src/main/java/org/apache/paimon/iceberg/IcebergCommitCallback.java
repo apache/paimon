@@ -37,6 +37,7 @@ import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionField;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
+import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
@@ -49,6 +50,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
@@ -60,6 +62,9 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -83,7 +88,9 @@ import java.util.stream.Collectors;
  * A {@link CommitCallback} to create Iceberg compatible metadata, so Iceberg readers can read
  * Paimon's {@link RawFile}.
  */
-public class IcebergCommitCallback implements CommitCallback {
+public class IcebergCommitCallback implements CommitCallback, TagCallback {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IcebergCommitCallback.class);
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
@@ -272,6 +279,13 @@ public class IcebergCommitCallback implements CommitCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId);
 
+        Map<String, IcebergRef> icebergTags =
+                table.tagManager().tags().entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        entry -> entry.getValue().get(0),
+                                        entry -> new IcebergRef(entry.getKey().id())));
+
         String tableUuid = UUID.randomUUID().toString();
         IcebergMetadata metadata =
                 new IcebergMetadata(
@@ -289,7 +303,8 @@ public class IcebergCommitCallback implements CommitCallback {
                                         // not sure why, this is a result tested by hand
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
-                        (int) snapshotId);
+                        (int) snapshotId,
+                        icebergTags);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
@@ -439,7 +454,8 @@ public class IcebergCommitCallback implements CommitCallback {
                         baseMetadata.partitionSpecs(),
                         baseMetadata.lastPartitionId(),
                         snapshots,
-                        (int) snapshotId);
+                        (int) snapshotId,
+                        baseMetadata.refs());
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
@@ -795,6 +811,127 @@ public class IcebergCommitCallback implements CommitCallback {
                     table.fileIO().deleteQuietly(path);
                 }
             }
+        }
+    }
+
+    @Override
+    public void notifyCreation(String tagName) {
+        throw new UnsupportedOperationException(
+                "IcebergCommitCallback notifyCreation requires a snapshot ID");
+    }
+
+    @Override
+    public void notifyCreation(String tagName, long snapshotId) {
+        try {
+            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+            if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        tagName,
+                        snapshotId);
+                return;
+            }
+
+            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+            if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        baseMetadataPath,
+                        tagName,
+                        snapshotId);
+                return;
+            }
+
+            IcebergMetadata baseMetadata =
+                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+            baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
+
+            IcebergMetadata metadata =
+                    new IcebergMetadata(
+                            baseMetadata.tableUuid(),
+                            baseMetadata.location(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.lastColumnId(),
+                            baseMetadata.schemas(),
+                            baseMetadata.currentSchemaId(),
+                            baseMetadata.partitionSpecs(),
+                            baseMetadata.lastPartitionId(),
+                            baseMetadata.snapshots(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.refs());
+
+            /*
+            Overwrite the latest metadata file
+            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+            version number. Tag creation overwrites the latest metadata file to maintain this.
+            There is no need to update the catalog after overwrite.
+             */
+            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to add tag {} for snapshot {}.",
+                    baseMetadataPath,
+                    tagName,
+                    snapshotId);
+
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+        }
+    }
+
+    @Override
+    public void notifyDeletion(String tagName) {
+        try {
+            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+            if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when deleting tag {}. Unable to delete tag.",
+                        tagName);
+                return;
+            }
+
+            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+            if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when deleting tag {}. Unable to delete tag.",
+                        baseMetadataPath,
+                        tagName);
+                return;
+            }
+
+            IcebergMetadata baseMetadata =
+                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+            baseMetadata.refs().remove(tagName);
+
+            IcebergMetadata metadata =
+                    new IcebergMetadata(
+                            baseMetadata.tableUuid(),
+                            baseMetadata.location(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.lastColumnId(),
+                            baseMetadata.schemas(),
+                            baseMetadata.currentSchemaId(),
+                            baseMetadata.partitionSpecs(),
+                            baseMetadata.lastPartitionId(),
+                            baseMetadata.snapshots(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.refs());
+
+            /*
+            Overwrite the latest metadata file
+            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+            version number. Tag creation overwrites the latest metadata file to maintain this.
+            There is no need to update the catalog after overwrite.
+             */
+            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to delete tag {}.",
+                    baseMetadataPath,
+                    tagName);
+
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create tag " + tagName, e);
         }
     }
 

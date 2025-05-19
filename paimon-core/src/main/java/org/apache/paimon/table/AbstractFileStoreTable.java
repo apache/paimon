@@ -448,7 +448,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser, this),
                 newExpireRunnable(),
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagCreationManager(),
+                options.writeOnly() ? null : store().newTagCreationManager(this),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
@@ -568,7 +568,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
         tagManager()
                 .createTag(
-                        fromSnapshot, tagName, timeRetained, store().createTagCallbacks(), false);
+                        fromSnapshot,
+                        tagName,
+                        timeRetained,
+                        store().createTagCallbacks(this),
+                        false);
     }
 
     @Override
@@ -596,7 +600,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         tagName,
                         store().newTagDeletion(),
                         snapshotManager(),
-                        store().createTagCallbacks());
+                        store().createTagCallbacks(this));
     }
 
     @Override

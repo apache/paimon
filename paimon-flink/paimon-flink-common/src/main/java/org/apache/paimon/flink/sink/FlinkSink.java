@@ -289,7 +289,7 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion(),
-                            () -> table.store().createTagCallbacks(),
+                            () -> table.store().createTagCallbacks(table),
                             table.coreOptions().tagDefaultTimeRetained());
         }
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
