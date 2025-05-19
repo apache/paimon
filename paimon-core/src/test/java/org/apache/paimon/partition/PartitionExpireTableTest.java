@@ -33,6 +33,7 @@ import java.util.Collections;
 import static org.apache.paimon.CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.partition.CustomPartitionExpirationFactory.TABLE_EXPIRE_PARTITIONS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PartitionExpireTableTest extends TableTestBase {
@@ -53,10 +54,15 @@ class PartitionExpireTableTest extends TableTestBase {
         write(table, GenericRow.of(2, 2));
         assertThat(read(table)).containsExactlyInAnyOrder(GenericRow.of(1, 1), GenericRow.of(2, 2));
 
-        PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1);
-        CustomPartitionExpirationFactory.TABLE_EXPIRE_PARTITIONS.put(
-                table.options().get("path"), Collections.singletonList(expire));
-        write(table, GenericRow.of(3, 3));
-        assertThat(read(table)).containsExactlyInAnyOrder(GenericRow.of(3, 3), GenericRow.of(2, 2));
+        String path = table.options().get("path");
+        try {
+            PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1);
+            TABLE_EXPIRE_PARTITIONS.put(path, Collections.singletonList(expire));
+            write(table, GenericRow.of(3, 3));
+            assertThat(read(table))
+                    .containsExactlyInAnyOrder(GenericRow.of(3, 3), GenericRow.of(2, 2));
+        } finally {
+            TABLE_EXPIRE_PARTITIONS.remove(path);
+        }
     }
 }
