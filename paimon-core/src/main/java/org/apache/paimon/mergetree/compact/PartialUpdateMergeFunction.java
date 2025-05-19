@@ -37,8 +37,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
-import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
-
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -422,7 +420,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                     .split(FIELDS_SEPARATOR))
                                     .mapToInt(fieldName -> requireField(fieldName, fieldNames))
                                     .toArray();
-                    allSequenceFields = Ints.asList(sequenceFields);
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
                             () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
@@ -440,12 +437,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                     });
 
                     // add self
-                    allSequenceFields.forEach(
-                            index -> {
-                                String fieldName = fieldNames.get(index);
-                                fieldSeqComparators.put(index, userDefinedSeqComparator);
-                                sequenceGroupMap.put(fieldName, index);
-                            });
+                    for (int index : sequenceFields) {
+                        allSequenceFields.add(index);
+                        String fieldName = fieldNames.get(index);
+                        fieldSeqComparators.put(index, userDefinedSeqComparator);
+                        sequenceGroupMap.put(fieldName, index);
+                    }
                 }
             }
             this.fieldAggregators =
