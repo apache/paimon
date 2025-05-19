@@ -880,6 +880,15 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void repairTable(Identifier identifier, Map<String, String> repairOptions) {
+        try {
+            api.repairTable(identifier, repairOptions);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
     public boolean caseSensitive() {
         return context.options().getOptional(CASE_SENSITIVE).orElse(true);
     }

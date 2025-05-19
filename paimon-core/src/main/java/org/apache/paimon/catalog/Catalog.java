@@ -563,6 +563,11 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    /** Repair the table with options */
+    default void repairTable(Identifier identifier, Map<String, String> repairOptions) {
+        throw new UnsupportedOperationException();
+    }
+
     /**
      * Whether this catalog supports list objects paged. If not, corresponding methods will fall
      * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
