@@ -22,6 +22,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SerializableSupplier;
@@ -54,6 +55,11 @@ public interface Expression extends Serializable {
 
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
+
+    /** Return name of this expression. */
+    default String name() {
+        return null;
+    }
 
     /** Expression function. */
     enum ExpressionFunction {
@@ -142,7 +148,34 @@ public interface Expression extends Serializable {
                             referencedField.literals());
                 }),
         CAST((typeMapping, caseSensitive, args) -> cast(args)),
-        NOW((typeMapping, caseSensitive, args) -> new NowExpression());
+        NOW((typeMapping, caseSensitive, args) -> new NowExpression()),
+        UPPER(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return new UpperExpression(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        LOWER(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return new LowerExpression(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        TRIM(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return new TrimExpression(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                });
 
         public final ExpressionCreator creator;
 
@@ -625,6 +658,91 @@ public interface Expression extends Serializable {
         @Override
         public String eval(String input) {
             return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
+        }
+    }
+
+    /** Convert string to upper case. */
+    final class UpperExpression extends NoLiteralsStringExpressionBase {
+
+        public UpperExpression(String fieldReference, DataType fieldType, String... literals) {
+            super(fieldReference, fieldType, literals);
+        }
+
+        @Override
+        public String eval(String input) {
+            return StringUtils.toUpperCase(input);
+        }
+
+        @Override
+        public String name() {
+            return "upper";
+        }
+    }
+
+    /** Convert string to lower case. */
+    final class LowerExpression extends NoLiteralsStringExpressionBase {
+
+        public LowerExpression(String fieldReference, DataType fieldType, String... literals) {
+            super(fieldReference, fieldType, literals);
+        }
+
+        @Override
+        public String eval(String input) {
+            return StringUtils.toLowerCase(input);
+        }
+
+        @Override
+        public String name() {
+            return "lower";
+        }
+    }
+
+    /** Get trim string. */
+    final class TrimExpression extends NoLiteralsStringExpressionBase {
+
+        public TrimExpression(String fieldReference, DataType fieldType, String... literals) {
+            super(fieldReference, fieldType, literals);
+        }
+
+        @Override
+        public String eval(String input) {
+            return StringUtils.trim(input);
+        }
+
+        @Override
+        public String name() {
+            return "trim";
+        }
+    }
+
+    /** No literals string expression. */
+    abstract class NoLiteralsStringExpressionBase implements Expression {
+
+        private final String fieldReference;
+
+        public NoLiteralsStringExpressionBase(
+                String fieldReference, DataType fieldType, String... literals) {
+            this.fieldReference = fieldReference;
+            checkArgument(
+                    fieldType.getTypeRoot() == DataTypeRoot.VARCHAR,
+                    String.format(
+                            "'%s' expression only supports type root of '%s', but found '%s'.",
+                            name(), DataTypeRoot.VARCHAR, fieldType.getTypeRoot()));
+            checkArgument(
+                    literals.length == 0,
+                    String.format(
+                            "'%s' expression only supports 0 argument, but found '%s'.",
+                            name(), literals.length));
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.STRING();
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
         }
     }
 }
