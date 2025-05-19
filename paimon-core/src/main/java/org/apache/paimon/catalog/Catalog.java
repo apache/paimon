@@ -563,7 +563,7 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
-    /** Repair the table with options */
+    /** Repair the table with options. */
     default void repairTable(Identifier identifier, Map<String, String> repairOptions) {
         throw new UnsupportedOperationException();
     }
