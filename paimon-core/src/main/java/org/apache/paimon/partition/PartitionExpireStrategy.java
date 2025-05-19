@@ -19,11 +19,15 @@
 package org.apache.paimon.partition;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -66,13 +70,22 @@ public abstract class PartitionExpireStrategy {
             FileStoreScan scan, LocalDateTime expirationTime);
 
     public static PartitionExpireStrategy createPartitionExpireStrategy(
-            CoreOptions options, RowType partitionType) {
+            CoreOptions options,
+            RowType partitionType,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable Identifier identifier) {
         switch (options.partitionExpireStrategy()) {
             case UPDATE_TIME:
                 return new PartitionUpdateTimeExpireStrategy(partitionType);
             case VALUES_TIME:
-            default:
                 return new PartitionValuesTimeExpireStrategy(options, partitionType);
+            case CUSTOM:
+                return PartitionExpireStrategyFactory.INSTANCE
+                        .get()
+                        .create(catalogLoader, identifier, partitionType);
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown partitionExpireStrategy: " + options.partitionExpireStrategy());
         }
     }
 }

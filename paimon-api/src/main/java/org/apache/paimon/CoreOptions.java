@@ -3248,7 +3248,9 @@ public class CoreOptions implements Serializable {
 
         UPDATE_TIME(
                 "update-time",
-                "This strategy compares the last update time of the partition with the current time.");
+                "This strategy compares the last update time of the partition with the current time."),
+
+        CUSTOM("custom", "This strategy use custom class to expire partitions.");
 
         private final String value;
 

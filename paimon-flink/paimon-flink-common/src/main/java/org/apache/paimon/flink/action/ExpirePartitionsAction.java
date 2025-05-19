@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
@@ -63,7 +64,10 @@ public class ExpirePartitionsAction extends TableActionBase {
                         TimeUtils.parseDuration(expirationTime),
                         Duration.ofMillis(0L),
                         createPartitionExpireStrategy(
-                                CoreOptions.fromMap(map), fileStore.partitionType()));
+                                CoreOptions.fromMap(map),
+                                fileStore.partitionType(),
+                                catalogLoader(),
+                                new Identifier(databaseName, tableName)));
     }
 
     @Override
