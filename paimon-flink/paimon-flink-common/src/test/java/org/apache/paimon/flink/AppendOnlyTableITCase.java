@@ -28,6 +28,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -488,6 +489,21 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> paimonTable("T$branch_branch2"))
                 .isInstanceOf(Catalog.TableNotExistException.class)
                 .hasMessage("Table %s does not exist.", "default.T$branch_branch2");
+    }
+
+    @Test
+    public void testStreamReadOverwriteTable() throws Exception {
+        // create table
+        sql(
+                "CREATE TABLE T (id INT, p STRING) PARTITIONED BY (p) with ("
+                        + "'streaming-read-append-overwrite' = 'true')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
+        // insert data
+        batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (1)");
+        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, "2024"));
+        batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (2)");
+        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2, "2024"));
+        iterator.close();
     }
 
     @Override
