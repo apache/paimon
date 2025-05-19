@@ -199,6 +199,37 @@ public class SparkCatalogWithRestTest {
         cleanFunction(functionName);
     }
 
+    @Test
+    public void testMapFunction() throws Exception {
+        List<DataField> inputParams = new ArrayList<>();
+        Catalog paimonCatalog = getPaimonCatalog();
+        inputParams.add(new DataField(0, "x", DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
+        List<DataField> returnParams = new ArrayList<>();
+        returnParams.add(new DataField(0, "y", DataTypes.INT()));
+        String functionName = "test";
+        Identifier identifier = Identifier.create("db2", functionName);
+        FunctionDefinition definition =
+                FunctionDefinition.lambda(
+                        "(java.util.Map<Integer, Integer> x) -> x.size()", "JAVA");
+        Function function =
+                new FunctionImpl(
+                        identifier,
+                        inputParams,
+                        returnParams,
+                        false,
+                        ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
+                        null,
+                        null);
+        paimonCatalog.createFunction(identifier, function, false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s(map(1, 2))", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[1]");
+        cleanFunction(functionName);
+    }
+
     private Catalog getPaimonCatalog() {
         CatalogManager catalogManager = spark.sessionState().catalogManager();
         WithPaimonCatalog withPaimonCatalog = (WithPaimonCatalog) catalogManager.currentCatalog();

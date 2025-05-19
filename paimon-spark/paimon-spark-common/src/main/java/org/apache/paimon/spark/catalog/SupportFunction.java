@@ -20,12 +20,10 @@ package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 
-import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
-import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 
 /** Catalog methods for working with Functions. */
 public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
@@ -46,17 +44,5 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
         }
 
         throw new NoSuchNamespaceException(namespace);
-    }
-
-    @Override
-    default UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        if (isFunctionNamespace(ident.namespace())) {
-            UnboundFunction func = PaimonFunctions.load(ident.name());
-            if (func != null) {
-                return func;
-            }
-        }
-
-        throw new NoSuchFunctionException(ident);
     }
 }

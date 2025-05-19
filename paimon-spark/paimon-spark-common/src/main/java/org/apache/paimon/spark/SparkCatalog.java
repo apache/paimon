@@ -31,6 +31,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
@@ -572,16 +573,21 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
         if (isFunctionNamespace(ident.namespace())) {
+            UnboundFunction func = PaimonFunctions.load(ident.name());
+            if (func != null) {
+                return func;
+            }
             try {
-                Function func = catalog.getFunction(toIdentifier(ident));
-                FunctionDefinition functionDefinition = func.definition(FUNCTION_DEFINITION_NAME);
+                Function paimonFunction = catalog.getFunction(toIdentifier(ident));
+                FunctionDefinition functionDefinition =
+                        paimonFunction.definition(FUNCTION_DEFINITION_NAME);
                 if (functionDefinition != null
                         && functionDefinition
                                 instanceof FunctionDefinition.LambdaFunctionDefinition) {
                     FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
                             (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
-                    if (func.returnParams().isPresent()) {
-                        List<DataField> dataFields = func.returnParams().get();
+                    if (paimonFunction.returnParams().isPresent()) {
+                        List<DataField> dataFields = paimonFunction.returnParams().get();
                         if (dataFields.size() == 1) {
                             DataField dataField = dataFields.get(0);
                             return new LambdaScalarFunction(

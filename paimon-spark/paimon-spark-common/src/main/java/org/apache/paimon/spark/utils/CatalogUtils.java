@@ -25,6 +25,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 
+import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.GenericArrayData;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.types.BooleanType;
@@ -225,14 +226,22 @@ public class CatalogUtils {
         } else if (sparkType instanceof org.apache.spark.sql.types.MapType) {
             org.apache.spark.sql.types.MapType mapType =
                     (org.apache.spark.sql.types.MapType) sparkType;
-            Map<Object, Object> sparkMap = (Map<Object, Object>) value;
-            Map<Object, Object> javaMap = new HashMap<>();
-            for (Map.Entry<Object, Object> entry : sparkMap.entrySet()) {
-                Object key = convert(mapType.keyType(), entry.getKey());
-                Object val = convert(mapType.valueType(), entry.getValue());
-                javaMap.put(key, val);
+            if (value instanceof ArrayBasedMapData) {
+                ArrayBasedMapData arrayBasedMapData = (ArrayBasedMapData) value;
+                Map<Object, Object> sparkMap =
+                        ArrayBasedMapData.toJavaMap(
+                                arrayBasedMapData.keyArray().array(),
+                                arrayBasedMapData.valueArray().array());
+                Map<Object, Object> javaMap = new HashMap<>();
+                for (Map.Entry<Object, Object> entry : sparkMap.entrySet()) {
+                    Object key = convert(mapType.keyType(), entry.getKey());
+                    Object val = convert(mapType.valueType(), entry.getValue());
+                    javaMap.put(key, val);
+                }
+                return javaMap;
+            } else {
+                throw new IllegalArgumentException("Unexpected array type: " + value.getClass());
             }
-            return javaMap;
         }
 
         throw new IllegalArgumentException("Unsupported Spark data type: " + sparkType);

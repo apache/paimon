@@ -129,7 +129,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -1472,7 +1471,11 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final List<String> listFunctions(String dbName) throws CatalogException {
-        return catalog.listFunctions();
+        try {
+            return catalog.listFunctions(dbName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new CatalogException(e.getMessage(), e);
+        }
     }
 
     @Override
@@ -1480,7 +1483,7 @@ public class FlinkCatalog extends AbstractCatalog {
             throws FunctionNotExistException, CatalogException {
         try {
             org.apache.paimon.function.Function function =
-                    catalog.getFunction(functionPath.getObjectName());
+                    catalog.getFunction(toIdentifier(functionPath));
             FunctionDefinition functionDefinition = function.definition(FUNCTION_DEFINITION_NAME);
             if (functionDefinition instanceof FunctionDefinition.FileFunctionDefinition) {
                 FunctionDefinition.FileFunctionDefinition fileFunctionDefinition =
@@ -1507,7 +1510,12 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final boolean functionExists(ObjectPath functionPath) throws CatalogException {
-        return catalog.listFunctions().contains(functionPath.getObjectName());
+        try {
+            return catalog.listFunctions(functionPath.getDatabaseName())
+                    .contains(functionPath.getObjectName());
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new CatalogException(e.getMessage(), e);
+        }
     }
 
     @Override
@@ -1518,11 +1526,10 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, FunctionDefinition> definitions = new HashMap<>();
         definitions.put(FUNCTION_DEFINITION_NAME, functionDefinition);
         org.apache.paimon.function.Function paimonFunction =
-                new FunctionImpl(
-                        UUID.randomUUID().toString(), functionPath.getObjectName(), definitions);
+                new FunctionImpl(toIdentifier(functionPath), definitions);
         try {
-            catalog.createFunction(functionPath.getObjectName(), paimonFunction, ignoreIfExists);
-        } catch (Catalog.FunctionAlreadyExistException e) {
+            catalog.createFunction(toIdentifier(functionPath), paimonFunction, ignoreIfExists);
+        } catch (Catalog.FunctionAlreadyExistException | Catalog.DatabaseNotExistException e) {
             if (ignoreIfExists) {
                 return;
             }
@@ -1536,7 +1543,7 @@ public class FlinkCatalog extends AbstractCatalog {
             throws FunctionNotExistException, CatalogException {
         try {
             org.apache.paimon.function.Function function =
-                    catalog.getFunction(functionPath.getObjectName());
+                    catalog.getFunction(toIdentifier(functionPath));
             FunctionDefinition functionDefinition = function.definition(FUNCTION_DEFINITION_NAME);
             if (functionDefinition != null) {
                 FunctionDefinition newFunctionDefinition =
@@ -1545,7 +1552,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         FunctionChange.updateDefinition(
                                 FUNCTION_DEFINITION_NAME, newFunctionDefinition);
                 catalog.alterFunction(
-                        functionPath.getObjectName(),
+                        toIdentifier(functionPath),
                         ImmutableList.of(functionChange),
                         ignoreIfNotExists);
             }
@@ -1565,7 +1572,7 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void dropFunction(ObjectPath functionPath, boolean ignoreIfNotExists)
             throws FunctionNotExistException, CatalogException {
         try {
-            catalog.dropFunction(functionPath.getObjectName(), ignoreIfNotExists);
+            catalog.dropFunction(toIdentifier(functionPath), ignoreIfNotExists);
         } catch (Catalog.FunctionNotExistException e) {
             throw new FunctionNotExistException(getName(), functionPath);
         }
