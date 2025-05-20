@@ -337,9 +337,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
-        wrapped.authTableQuery(identifier, select, filter);
+        return wrapped.authTableQuery(identifier, select);
     }
 
     @Override

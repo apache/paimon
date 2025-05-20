@@ -58,6 +58,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -677,21 +678,26 @@ public class RESTCatalogServer {
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
         }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        if (metadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
         List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
         if (columnAuth != null) {
-            requestBody
-                    .select()
-                    .forEach(
-                            column -> {
-                                if (!columnAuth.contains(column)) {
-                                    throw new Catalog.TableNoPermissionException(identifier);
-                                }
-                            });
+            List<String> select = requestBody.select();
+            if (select == null) {
+                select = metadata.schema().fieldNames();
+            }
+            select.forEach(
+                    column -> {
+                        if (!columnAuth.contains(column)) {
+                            throw new Catalog.TableNoPermissionException(identifier);
+                        }
+                    });
         }
-        return new MockResponse().setResponseCode(200);
+        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        return mockResponse(response, 200);
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
