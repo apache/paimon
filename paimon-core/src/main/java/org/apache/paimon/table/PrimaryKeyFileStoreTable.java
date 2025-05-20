@@ -72,35 +72,44 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         if (lazyStore == null) {
-            RowType rowType = tableSchema.logicalRowType();
-            CoreOptions options = CoreOptions.fromMap(tableSchema.options());
-            KeyValueFieldsExtractor extractor =
-                    PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
+            synchronized (this) {
+                RowType rowType = tableSchema.logicalRowType();
+                CoreOptions options = CoreOptions.fromMap(tableSchema.options());
+                KeyValueFieldsExtractor extractor =
+                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
-            MergeFunctionFactory<KeyValue> mfFactory =
-                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
-            if (options.needLookup()) {
-                mfFactory = LookupMergeFunction.wrap(mfFactory);
+                MergeFunctionFactory<KeyValue> mfFactory =
+                        PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
+                if (options.needLookup()) {
+                    mfFactory = LookupMergeFunction.wrap(mfFactory);
+                }
+
+                lazyStore =
+                        new KeyValueFileStore(
+                                fileIO(),
+                                schemaManager(),
+                                tableSchema,
+                                tableSchema.crossPartitionUpdate(),
+                                options,
+                                tableSchema.logicalPartitionType(),
+                                PrimaryKeyTableUtils.addKeyNamePrefix(
+                                        tableSchema.logicalBucketKeyType()),
+                                new RowType(extractor.keyFields(tableSchema)),
+                                rowType,
+                                extractor,
+                                mfFactory,
+                                name(),
+                                catalogEnvironment);
             }
-
-            lazyStore =
-                    new KeyValueFileStore(
-                            fileIO(),
-                            schemaManager(),
-                            tableSchema,
-                            tableSchema.crossPartitionUpdate(),
-                            options,
-                            tableSchema.logicalPartitionType(),
-                            PrimaryKeyTableUtils.addKeyNamePrefix(
-                                    tableSchema.logicalBucketKeyType()),
-                            new RowType(extractor.keyFields(tableSchema)),
-                            rowType,
-                            extractor,
-                            mfFactory,
-                            name(),
-                            catalogEnvironment);
         }
         return lazyStore;
+    }
+
+    @Override
+    public void resetStore() {
+        synchronized (this) {
+            lazyStore = null;
+        }
     }
 
     @Override
