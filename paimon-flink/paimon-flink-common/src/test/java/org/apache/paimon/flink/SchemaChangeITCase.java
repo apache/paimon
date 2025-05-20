@@ -1188,7 +1188,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200), Row.of(3, null));
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v");
     }
 
@@ -1216,12 +1216,12 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         Row.of(3, Row.of(30, null)));
 
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT NOT NULL, f2 INT) NOT NULL)"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v.f1");
 
         sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT))"); // convert entire row to nullable
         assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v");
     }
 
@@ -1256,26 +1256,67 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 sql(
                                         "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
                 .hasRootCauseMessage(
-                        "Cannot update column type from nullable to non nullable for v1");
+                        "Cannot update column type from nullable to non nullable for v1. You can set table configuration option 'alter-column-null-to-not-null.disabled' = 'false' to allow converting null columns to not null");
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT NOT NULL, f2 INT) NOT NULL>)"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v1.element.f1");
 
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v2");
 
         assertThatCode(
                         () ->
                                 sql(
                                         "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT NOT NULL) NOT NULL>)"))
-                .hasRootCauseMessage(
+                .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for v2.value.f2");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityByEnablingNullToNotNullOption(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+
+        // enable null to not null option
+        sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
+        sql("ALTER TABLE T MODIFY v INT NOT NULL");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+    }
+
+    @Test
+    public void testAlterColumnTypeWithNullabilityUpdate() {
+        sql("CREATE TABLE T ( k INT, v INT, PRIMARY KEY(k) NOT ENFORCED )");
+
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v BIGINT NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+
+        // enable null to not null option
+        sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
+        sql("ALTER TABLE T MODIFY v BIGINT NOT NULL");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
     }
 }
