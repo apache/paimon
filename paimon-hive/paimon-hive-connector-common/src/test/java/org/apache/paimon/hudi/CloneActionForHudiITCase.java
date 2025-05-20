@@ -21,11 +21,13 @@ package org.apache.paimon.hudi;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.hive.TestHiveMetastore;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
@@ -35,7 +37,6 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /** Test clone Hudi table. */
 public class CloneActionForHudiITCase extends ActionITCaseBase {
@@ -59,43 +60,47 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
     @Test
     public void testMigrateOneNonPartitionedTable() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        String dbName = "hudidb" + StringUtils.randomNumericString(10);
+        String tableName = "huditable" + StringUtils.randomNumericString(10);
 
-        tEnv.executeSql(
-                "CREATE TABLE hudi_table ("
+        sql(
+                tEnv,
+                "CREATE TABLE %s ("
                         + "  id STRING PRIMARY KEY NOT ENFORCED,"
                         + "  name STRING,"
                         + "  price INT"
                         + ") WITH ("
                         + "  'connector' = 'hudi',"
-                        + String.format(
-                                "'path' = '%s/%s/hudi_table',",
-                                System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                                UUID.randomUUID())
+                        + "  'path' = '%s/%s',"
                         + "  'table.type' = 'COPY_ON_WRITE',"
                         + "  'hive_sync.enable' = 'true',"
                         + "  'hive_sync.mode' = 'hms',"
-                        + String.format(
-                                "'hive_sync.metastore.uris' = 'thrift://localhost:%s',", PORT)
-                        + "  'hive_sync.db' = 'default',"
-                        + "  'hive_sync.table' = 'hudi_table'"
-                        + ")");
+                        + "  'hive_sync.metastore.uris' = 'thrift://localhost:%s',"
+                        + "  'hive_sync.db' = '%s',"
+                        + "  'hive_sync.table' = '%s'"
+                        + ")",
+                tableName,
+                System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                tableName,
+                PORT,
+                dbName,
+                tableName);
 
         List<String> insertValues = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
             insertValues.add(String.format("('%s', '%s', %s)", i, "A", i));
         }
-        tEnv.executeSql("INSERT INTO hudi_table VALUES " + String.join(",", insertValues)).await();
+        sql(tEnv, "INSERT INTO %s VALUES %s", tableName, String.join(",", insertValues));
 
         // test pk
         insertValues.clear();
         for (int i = 0; i < 50; i++) {
             insertValues.add(String.format("('%s', '%s', %s)", i, "B", i));
         }
-        tEnv.executeSql("INSERT INTO hudi_table VALUES " + String.join(",", insertValues)).await();
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hudi_table").collect());
+        sql(tEnv, "INSERT INTO %s VALUES %s", tableName, String.join(",", insertValues));
+        List<Row> r1 = sql(tEnv, "SELECT * FROM %s", tableName);
 
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        sql(tEnv, "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '%s')", warehouse);
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql("CREATE DATABASE test");
 
@@ -103,9 +108,9 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                         CloneAction.class,
                         "clone",
                         "--database",
-                        "default",
+                        dbName,
                         "--table",
-                        "hudi_table",
+                        tableName,
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
@@ -118,54 +123,57 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                         "warehouse=" + warehouse)
                 .run();
 
-        List<Row> r2 =
-                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
+        List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
     public void testMigrateOnePartitionedTable() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        String dbName = "hudidb" + StringUtils.randomNumericString(10);
+        String tableName = "huditable" + StringUtils.randomNumericString(10);
 
-        tEnv.executeSql(
-                "CREATE TABLE hudi_table ("
+        sql(
+                tEnv,
+                "CREATE TABLE %s ("
                         + "  id STRING PRIMARY KEY NOT ENFORCED,"
                         + "  name STRING,"
                         + "  pt STRING"
                         + ") PARTITIONED BY (pt) WITH ("
                         + "  'connector' = 'hudi',"
-                        + String.format(
-                                "'path' = '%s/%s/hudi_table',",
-                                System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                                UUID.randomUUID())
+                        + "  'path' = '%s/%s',"
                         + "  'table.type' = 'COPY_ON_WRITE',"
                         + "  'hive_sync.enable' = 'true',"
                         + "  'hive_sync.mode' = 'hms',"
-                        + String.format(
-                                "'hive_sync.metastore.uris' = 'thrift://localhost:%s',", PORT)
-                        + "  'hive_sync.db' = 'default',"
-                        + "  'hive_sync.table' = 'hudi_table',"
+                        + "  'hive_sync.metastore.uris' = 'thrift://localhost:%s',"
+                        + "  'hive_sync.db' = '%s',"
+                        + "  'hive_sync.table' = '%s',"
                         + "  'hive_sync.partition_fields' = 'pt',"
                         + "  'hoodie.datasource.write.hive_style_partitioning' = 'true',"
                         + "  'hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.HiveStylePartitionValueExtractor'"
-                        + ")");
+                        + ")",
+                tableName,
+                System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                tableName,
+                PORT,
+                dbName,
+                tableName);
 
         List<String> insertValues = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
             insertValues.add(String.format("('%s', '%s', '%s')", i, "A", "2025-01-01"));
         }
-        tEnv.executeSql("insert into hudi_table values " + String.join(",", insertValues)).await();
+        sql(tEnv, "INSERT INTO %s VALUES %s", tableName, String.join(",", insertValues));
 
         // test pk
         insertValues.clear();
         for (int i = 0; i < 50; i++) {
             insertValues.add(String.format("('%s', '%s', '%s')", i, "B", "2025-01-01"));
         }
-        tEnv.executeSql("INSERT INTO hudi_table VALUES " + String.join(",", insertValues)).await();
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hudi_table").collect());
+        sql(tEnv, "INSERT INTO %s VALUES %s", tableName, String.join(",", insertValues));
+        List<Row> r1 = sql(tEnv, "SELECT * FROM %s", tableName);
 
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        sql(tEnv, "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '%s')", warehouse);
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql("CREATE DATABASE test");
 
@@ -173,9 +181,9 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                         CloneAction.class,
                         "clone",
                         "--database",
-                        "default",
+                        dbName,
                         "--table",
-                        "hudi_table",
+                        tableName,
                         "--catalog_conf",
                         "metastore=hive",
                         "--catalog_conf",
@@ -188,8 +196,15 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                         "warehouse=" + warehouse)
                 .run();
 
-        List<Row> r2 =
-                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
+        List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    private List<Row> sql(TableEnvironment tEnv, String query, Object... args) {
+        try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
+            return ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }
