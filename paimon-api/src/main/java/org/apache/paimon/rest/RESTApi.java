@@ -462,7 +462,8 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @return {@link TableSnapshot} Optional snapshot.
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the latest
+     *     snapshot not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
@@ -505,7 +506,8 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
+     *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
