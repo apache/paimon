@@ -335,7 +335,7 @@ Run the following sql:
 
 ```sql
 -- history partition compact table
-CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
+CALL sys.compact(`table` => 'default.T', partition_idle_time => '1 d')
 ```
 
 {{< /tab >}}
