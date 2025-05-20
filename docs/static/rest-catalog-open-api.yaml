@@ -663,7 +663,11 @@ paths:
               $ref: '#/components/schemas/AuthTableQueryRequest'
       responses:
         "200":
-          description: Success, no content
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTableQueryResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "403":
@@ -2431,6 +2435,9 @@ components:
           type: array
           items:
             type: string
+    AuthTableQueryResponse:
+      type: object
+      properties:
         filter:
           type: array
           items:

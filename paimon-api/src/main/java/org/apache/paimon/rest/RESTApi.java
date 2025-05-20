@@ -48,6 +48,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -569,18 +570,22 @@ public class RESTApi {
      * Auth table query.
      *
      * @param identifier database name and table name.
-     * @param select select columns
-     * @param filter pushed filter
+     * @param select select columns, null if select all
+     * @return additional filter for row level access control
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter) {
-        AuthTableQueryRequest request = new AuthTableQueryRequest(select, filter);
-        client.post(
-                resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
-                request,
-                restAuthFunction);
+    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select) {
+        AuthTableQueryRequest request = new AuthTableQueryRequest(select);
+        AuthTableQueryResponse response =
+                client.post(
+                        resourcePaths.authTable(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        AuthTableQueryResponse.class,
+                        restAuthFunction);
+        return response.filter();
     }
 
     /**

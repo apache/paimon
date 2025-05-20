@@ -16,37 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 
-/** Request for auth table query. */
+/** Response for auth table query. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AuthTableQueryRequest implements RESTRequest {
+public class AuthTableQueryResponse implements RESTResponse {
 
-    private static final String FIELD_SELECT = "select";
+    private static final String FIELD_FILTER = "filter";
 
-    @JsonProperty(FIELD_SELECT)
-    @Nullable
-    private final List<String> select;
+    @JsonProperty(FIELD_FILTER)
+    private final List<String> filter;
 
     @JsonCreator
-    public AuthTableQueryRequest(@JsonProperty(FIELD_SELECT) @Nullable List<String> select) {
-        this.select = select;
+    public AuthTableQueryResponse(@JsonProperty(FIELD_FILTER) List<String> filter) {
+        this.filter = filter;
     }
 
-    @JsonGetter(FIELD_SELECT)
-    @Nullable
-    public List<String> select() {
-        return select;
+    @JsonGetter(FIELD_FILTER)
+    public List<String> filter() {
+        return filter;
     }
 }
