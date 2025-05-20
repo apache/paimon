@@ -178,15 +178,9 @@ public class IcebergCompatibilityTest {
 
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
-        if (deletionVector) {
-            // level 0 file is compacted into deletion vector, so max level data file does not
-            // change
-            // this is still a valid table state at some time in the history
-            assertThat(getIcebergResult())
-                    .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 21)");
-        } else {
-            assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
-        }
+
+        // In dv mode, full compaction will remove all dv index and rewrite data files
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
 
         write.close();
         commit.close();
