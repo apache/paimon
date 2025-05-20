@@ -88,7 +88,10 @@ public interface FileStore<T> {
 
     FileStoreWrite<T> newWrite(String commitUser);
 
-    FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
+    FileStoreWrite<T> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId);
 
     FileStoreCommit newCommit(String commitUser, FileStoreTable table);
 

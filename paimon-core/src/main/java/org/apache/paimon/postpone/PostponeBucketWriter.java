@@ -44,11 +44,9 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     private RollingFileWriter<KeyValue, DataFileMeta> writer;
 
     public PostponeBucketWriter(
-            KeyValueFileWriterFactory writerFactory,
-            List<DataFileMeta> restoreFiles,
-            @Nullable CommitIncrement restoreIncrement) {
+            KeyValueFileWriterFactory writerFactory, @Nullable CommitIncrement restoreIncrement) {
         this.writerFactory = writerFactory;
-        this.files = new ArrayList<>(restoreFiles);
+        this.files = new ArrayList<>();
         if (restoreIncrement != null) {
             files.addAll(restoreIncrement.newFilesIncrement().newFiles());
         }
@@ -74,7 +72,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
 
     @Override
     public Collection<DataFileMeta> dataFiles() {
-        return files;
+        return new ArrayList<>(files);
     }
 
     @Override

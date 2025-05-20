@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -65,7 +66,8 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            String tableName) {
+            String tableName,
+            @Nullable Integer writeId) {
         super(snapshotManager, scan, null, null, tableName, options, partitionType);
 
         Options newOptions = new Options(options.toMap());
@@ -83,7 +85,9 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
                         "%s-u-%s-s-%d-w-",
                         options.dataFilePrefix(),
                         commitUser,
-                        Math.abs((long) Thread.currentThread().getName().hashCode())));
+                        writeId == null
+                                ? ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)
+                                : writeId));
         this.options = new CoreOptions(newOptions);
 
         FileFormat fileFormat = fileFormat(this.options);
@@ -110,6 +114,12 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
     }
 
     @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        // see comments in constructor
+        super.withIgnorePreviousFiles(true);
+    }
+
+    @Override
     protected PostponeBucketWriter createWriter(
             BinaryRow partition,
             int bucket,
@@ -119,9 +129,12 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
+        Preconditions.checkArgument(
+                restoreFiles.isEmpty(),
+                "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(writerFactory, restoreFiles, restoreIncrement);
+        return new PostponeBucketWriter(writerFactory, restoreIncrement);
     }
 
     @Override

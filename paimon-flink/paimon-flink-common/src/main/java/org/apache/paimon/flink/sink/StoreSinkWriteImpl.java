@@ -145,7 +145,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(
                                 commitUser,
                                 (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket))
+                                        state.stateValueFilter().filter(table.name(), part, bucket),
+                                state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)

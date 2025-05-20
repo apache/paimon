@@ -46,6 +46,8 @@ import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
+import javax.annotation.Nullable;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -154,12 +156,14 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
@@ -182,7 +186,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     snapshotManager(),
                     newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
-                    tableName);
+                    tableName,
+                    writeId);
         } else {
             return new KeyValueFileStoreWrite(
                     fileIO,

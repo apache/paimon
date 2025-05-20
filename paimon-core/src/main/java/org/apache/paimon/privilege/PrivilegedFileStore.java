@@ -147,9 +147,12 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+    public FileStoreWrite<T> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newWrite(commitUser, manifestFilter);
+        return wrapped.newWrite(commitUser, manifestFilter, writeId);
     }
 
     @Override
