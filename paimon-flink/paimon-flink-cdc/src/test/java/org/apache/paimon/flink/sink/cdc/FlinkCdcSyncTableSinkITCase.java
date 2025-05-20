@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -35,6 +36,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -53,6 +55,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -75,6 +78,12 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
         innerTestRandomCdcEvents(-1, false, false);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsPostponeBucket() throws Exception {
+        innerTestRandomCdcEvents(BucketMode.POSTPONE_BUCKET, false, false);
     }
 
     @Disabled
@@ -176,6 +185,17 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
+
+        if (numBucket == BucketMode.POSTPONE_BUCKET) {
+            // postpone bucket tables must be compacted, so data can be consumed
+            StreamExecutionEnvironment compactEnv =
+                    streamExecutionEnvironmentBuilder().batchMode().parallelism(3).build();
+            CompactAction compactAction =
+                    new CompactAction(
+                            DATABASE_NAME, TABLE_NAME, catalogOptions.toMap(), new HashMap<>());
+            compactAction.withStreamExecutionEnvironment(compactEnv);
+            compactAction.run();
+        }
 
         table = table.copyWithLatestSchema();
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());

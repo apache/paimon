@@ -93,6 +93,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         state =
                 new StoreSinkWriteStateImpl(
+                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                         context,
                         (tableName, partition, bucket) ->
                                 ChannelComputer.select(

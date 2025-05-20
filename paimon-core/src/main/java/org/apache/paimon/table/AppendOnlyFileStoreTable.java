@@ -42,6 +42,8 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.function.BiConsumer;
 
@@ -125,13 +127,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
-        BaseAppendFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
+        BaseAppendFileStoreWrite writer = store().newWrite(commitUser, manifestFilter, writeId);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,

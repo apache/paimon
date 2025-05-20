@@ -64,16 +64,17 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         boolean containLogSystem = containLogSystem();
         int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
+        int subtaskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
+                    return task == subtaskId;
                 };
 
-        state = createState(context, stateFilter);
+        state = createState(subtaskId, context, stateFilter);
         write =
                 storeSinkWriteProvider.provide(
                         table,
@@ -85,9 +86,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     }
 
     protected StoreSinkWriteState createState(
-            StateInitializationContext context, StoreSinkWriteState.StateValueFilter stateFilter)
+            int subtaskId,
+            StateInitializationContext context,
+            StoreSinkWriteState.StateValueFilter stateFilter)
             throws Exception {
-        return new StoreSinkWriteStateImpl(context, stateFilter);
+        return new StoreSinkWriteStateImpl(subtaskId, context, stateFilter);
     }
 
     protected String getCommitUser(StateInitializationContext context) throws Exception {

@@ -39,6 +39,8 @@ public interface StoreSinkWriteState {
 
     void snapshotState() throws Exception;
 
+    int getSubtaskId();
+
     /**
      * A state value for {@link StoreSinkWrite}. All state values should be given a partition and a
      * bucket so that they can be redistributed once the sink parallelism is changed.

@@ -28,9 +28,11 @@ import java.util.List;
  */
 public class NoopStoreSinkWriteState implements StoreSinkWriteState {
 
+    private final int subtaskId;
     private final StateValueFilter stateValueFilter;
 
-    public NoopStoreSinkWriteState(StateValueFilter stateValueFilter) {
+    public NoopStoreSinkWriteState(int subtaskId, StateValueFilter stateValueFilter) {
+        this.subtaskId = subtaskId;
         this.stateValueFilter = stateValueFilter;
     }
 
@@ -49,4 +51,9 @@ public class NoopStoreSinkWriteState implements StoreSinkWriteState {
 
     @Override
     public void snapshotState() throws Exception {}
+
+    @Override
+    public int getSubtaskId() {
+        return subtaskId;
+    }
 }

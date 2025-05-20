@@ -36,6 +36,8 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -89,12 +91,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BaseAppendFileStoreWrite newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public BaseAppendFileStoreWrite newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         DeletionVectorsMaintainer.Factory dvMaintainerFactory =
                 options.deletionVectorsEnabled()
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())

@@ -45,27 +45,27 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         return new RowDataStoreWriteOperator.Factory(
                 table, logSinkFunction, writeProvider, commitUser) {
             @Override
+            @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
                 return new RowDataStoreWriteOperator(
                         parameters, table, logSinkFunction, writeProvider, commitUser) {
 
                     @Override
                     protected StoreSinkWriteState createState(
+                            int subtaskId,
                             StateInitializationContext context,
                             StoreSinkWriteState.StateValueFilter stateFilter)
                             throws Exception {
                         // No conflicts will occur in append only unaware bucket writer, so no state
-                        // is
-                        // needed.
-                        return new NoopStoreSinkWriteState(stateFilter);
+                        // is needed.
+                        return new NoopStoreSinkWriteState(subtaskId, stateFilter);
                     }
 
                     @Override
                     protected String getCommitUser(StateInitializationContext context)
                             throws Exception {
                         // No conflicts will occur in append only unaware bucket writer, so
-                        // commitUser does
-                        // not matter.
+                        // commitUser does not matter.
                         return commitUser;
                     }
                 };
