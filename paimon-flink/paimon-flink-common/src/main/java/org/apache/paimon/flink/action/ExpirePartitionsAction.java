@@ -39,6 +39,7 @@ public class ExpirePartitionsAction extends TableActionBase {
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
+            Map<String, String> tableConfig,
             String expirationTime,
             String timestampFormatter,
             String timestampPattern,
@@ -50,6 +51,7 @@ public class ExpirePartitionsAction extends TableActionBase {
                             "Only FileStoreTable supports expire_partitions action. The table type is '%s'.",
                             table.getClass().getName()));
         }
+        table = table.copy(tableConfig);
         Map<String, String> map = new HashMap<>();
         map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
