@@ -23,6 +23,7 @@ import org.apache.paimon.rest.RESTResponse;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -33,6 +34,7 @@ public class AuthTableQueryResponse implements RESTResponse {
 
     private static final String FIELD_FILTER = "filter";
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_FILTER)
     private final List<String> filter;
 
