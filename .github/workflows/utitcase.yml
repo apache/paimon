@@ -46,7 +46,12 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Build And Test Others
+      - name: Build Others
+        run: |
+          echo "Start compiling modules"
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+
+      - name: Test Others
         timeout-minutes: 60
         run: |
           . .github/workflows/utils.sh
