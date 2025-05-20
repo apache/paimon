@@ -1491,7 +1491,8 @@ public class CoreOptions implements Serializable {
             key("commit.force-create-snapshot")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to force create snapshot on commit.");
+                    .withDescription(
+                            "In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.");
 
     public static final ConfigOption<Boolean> DELETION_VECTORS_ENABLED =
             key("deletion-vectors.enabled")
