@@ -23,6 +23,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.SortedRun;
@@ -54,6 +55,7 @@ public class MergeTreeCompactTask extends CompactTask {
     private int upgradeFilesNum;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
+    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
 
     public MergeTreeCompactTask(
             Comparator<InternalRow> keyComparator,
@@ -64,12 +66,14 @@ public class MergeTreeCompactTask extends CompactTask {
             int maxLevel,
             @Nullable CompactionMetrics.Reporter metricsReporter,
             Supplier<CompactDeletionFile> compactDfSupplier,
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
             @Nullable RecordLevelExpire recordLevelExpire) {
         super(metricsReporter);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();
         this.compactDfSupplier = compactDfSupplier;
+        this.dvMaintainer = dvMaintainer;
         this.partitioned = new IntervalPartition(unit.files(), keyComparator).partition();
         this.dropDelete = dropDelete;
         this.maxLevel = maxLevel;
@@ -122,8 +126,13 @@ public class MergeTreeCompactTask extends CompactTask {
 
     private void upgrade(DataFileMeta file, CompactResult toUpdate) throws Exception {
         if (file.level() == outputLevel) {
-            if (isContainExpiredRecords(file)) {
-                // if the large file in maxLevel has expired records, we need to rewrite it
+            if (isContainExpiredRecords(file)
+                    || (dvMaintainer != null
+                            && dvMaintainer.deletionVectorOf(file.fileName()).isPresent())) {
+                /*
+                 * 1. if the large file in maxLevel has expired records, we need to rewrite it.
+                 * 2. if the large file in maxLevel has corresponding deletion vector, we need to rewrite it.
+                 */
                 rewriteFile(file, toUpdate);
             }
             return;

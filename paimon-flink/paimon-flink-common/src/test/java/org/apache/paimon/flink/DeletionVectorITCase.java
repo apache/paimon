@@ -339,4 +339,45 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of(1, "1"), Row.of(2, "2_1"), Row.of(3, "3_1"), Row.of(4, "4"));
     }
+
+    @Test
+    public void testRemoveDvsAfterFullCompaction() throws Exception {
+        sql(
+                "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'lookup', "
+                        + "'bucket' = '1')");
+
+        // one small file in level 5
+        sql("INSERT INTO T VALUES (1, '1'), (2, '2'), (3, '3'), (4, '4')");
+        sql("DELETE FROM T WHERE id=1");
+        assertThat(sql("SELECT * FROM T").size()).isEqualTo(3);
+
+        // full compact
+        tEnv.getConfig().set("table.dml-sync", "true");
+        sql("CALL sys.compact(`table` => 'default.T')");
+        // disable dv and select
+        sql("ALTER TABLE T SET('deletion-vectors.enabled' = 'false')");
+        assertThat(sql("SELECT * FROM T").size()).isEqualTo(3);
+
+        // ***************** another table ******************
+        sql(
+                "CREATE TABLE TT (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'lookup', "
+                        + "'target-file-size' = '1000 B', 'bucket' = '1')");
+
+        // two large files in level 5
+        sql("INSERT INTO TT VALUES (1, '1'), (2, '2'), (3, '3'), (4, '4')");
+        sql("INSERT INTO TT VALUES (5, '5'), (6, '6'), (7, '7')");
+        sql("CALL sys.compact(`table` => 'default.TT')");
+
+        sql("DELETE FROM TT WHERE id = 1");
+        sql("DELETE FROM TT WHERE id = 7");
+        assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
+
+        // full compact
+        sql("CALL sys.compact(`table` => 'default.TT')");
+        // disable dv and select
+        sql("ALTER TABLE TT SET('deletion-vectors.enabled' = 'false')");
+        assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
+    }
 }
