@@ -107,6 +107,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -982,13 +983,22 @@ public class RESTCatalogServer {
     }
 
     private <T> PagedList<T> buildPagedEntities(List<T> names, int maxResults, String pageToken) {
-        List<T> sortedNames = names.stream().sorted(this::compareTo).collect(Collectors.toList());
+        return buildPagedEntities(names, maxResults, pageToken, false);
+    }
+
+    private <T> PagedList<T> buildPagedEntities(
+            List<T> names, int maxResults, String pageToken, boolean desc) {
+        Comparator<Object> comparator = this::compareTo;
+        if (desc) {
+            comparator = comparator.reversed();
+        }
+        List<T> sortedNames = names.stream().sorted(comparator).collect(Collectors.toList());
         List<T> pagedNames = new ArrayList<>();
         for (T sortedName : sortedNames) {
             if (pagedNames.size() < maxResults) {
                 if (pageToken == null) {
                     pagedNames.add(sortedName);
-                } else if (this.compareTo(sortedName, pageToken) > 0) {
+                } else if (comparator.compare(sortedName, pageToken) > 0) {
                     pagedNames.add(sortedName);
                 }
             } else {
@@ -1455,7 +1465,7 @@ public class RESTCatalogServer {
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
             PagedList<Partition> pagedPartitions =
-                    buildPagedEntities(partitions, maxResults, pageToken);
+                    buildPagedEntities(partitions, maxResults, pageToken, true);
             response =
                     new ListPartitionsResponse(
                             pagedPartitions.getElements(), pagedPartitions.getNextPageToken());
