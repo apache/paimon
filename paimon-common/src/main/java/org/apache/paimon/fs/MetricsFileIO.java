@@ -25,9 +25,9 @@ import org.apache.paimon.fs.metrics.IOMetrics;
 import java.io.IOException;
 
 /**
- * FileIOWrapper is a wrapper class for the {@link FileIO}.
+ * MetricsFileIO is a wrapper class for the {@link FileIO}.
  *
- * <p>It allows users to monitor and track file I/O operations (e.g., read, write, delete, rename).
+ * <p>It allows users to monitor and track file I/O operations.
  */
 public class MetricsFileIO implements FileIO {
 
