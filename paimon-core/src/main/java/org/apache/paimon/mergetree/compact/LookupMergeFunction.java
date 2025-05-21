@@ -22,7 +22,6 @@ import org.apache.paimon.KeyValue;
 
 import javax.annotation.Nullable;
 
-import java.util.Iterator;
 import java.util.LinkedList;
 
 /**
@@ -52,17 +51,21 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public KeyValue getResult() {
         // 1. Find the latest high level record
-        Iterator<KeyValue> descending = candidates.descendingIterator();
-        KeyValue highLevel = null;
-        while (descending.hasNext()) {
-            KeyValue kv = descending.next();
+        KeyValue keptHighLevel = null;
+        LinkedList<KeyValue> highLevels = new LinkedList<>();
+
+        for (KeyValue kv : candidates) {
             if (kv.level() > 0) {
-                if (highLevel != null) {
-                    descending.remove();
-                } else {
-                    highLevel = kv;
+                highLevels.add(kv);
+                if (keptHighLevel == null || kv.level() < keptHighLevel.level()) {
+                    keptHighLevel = kv;
                 }
             }
+        }
+
+        if (highLevels.size() > 1) {
+            highLevels.remove(keptHighLevel);
+            candidates.removeAll(highLevels);
         }
 
         // 2. Do the merge for inputs

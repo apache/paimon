@@ -508,4 +508,43 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNull();
     }
+
+    @Test
+    public void testKeepLowestHighLevel() {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        null);
+
+        // Without level-0
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(2));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        assertThat(result.changelogs()).isEmpty();
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // With level-0 record, with multiple level-x (x > 0) record
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(2));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(3)).setLevel(0));
+        result = function.getResult();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(1);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(3);
+        kv = result.result();
+        assertThat(kv.value().getInt(0)).isEqualTo(3);
+    }
 }

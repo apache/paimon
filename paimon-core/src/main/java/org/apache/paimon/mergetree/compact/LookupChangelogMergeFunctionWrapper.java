@@ -114,7 +114,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
             KeyValue kv = descending.next();
             if (kv.level() > 0) {
                 descending.remove();
-                if (highLevel == null) {
+                if (highLevel == null || kv.level() < highLevel.level()) {
                     highLevel = kv;
                 }
             } else {
