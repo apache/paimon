@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 
@@ -48,29 +49,45 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         candidates.add(kv);
     }
 
-    @Override
-    public KeyValue getResult() {
-        // 1. Find the latest high level record
-        KeyValue keptHighLevel = null;
-        LinkedList<KeyValue> highLevels = new LinkedList<>();
-
+    @Nullable
+    public KeyValue pickHighLevel() {
+        KeyValue highLevel = null;
         for (KeyValue kv : candidates) {
             if (kv.level() > 0) {
-                highLevels.add(kv);
-                if (keptHighLevel == null || kv.level() < keptHighLevel.level()) {
-                    keptHighLevel = kv;
+                if (highLevel == null || kv.level() < highLevel.level()) {
+                    highLevel = kv;
                 }
             }
         }
+        return highLevel;
+    }
 
-        if (highLevels.size() > 1) {
-            highLevels.remove(keptHighLevel);
-            candidates.removeAll(highLevels);
+    public boolean containLevel0() {
+        for (KeyValue kv : candidates) {
+            if (kv.level() == 0) {
+                return true;
+            }
         }
+        return false;
+    }
 
-        // 2. Do the merge for inputs
+    public InternalRow key() {
+        return candidates.get(0).key();
+    }
+
+    public LinkedList<KeyValue> candidates() {
+        return candidates;
+    }
+
+    @Override
+    public KeyValue getResult() {
         mergeFunction.reset();
-        candidates.forEach(mergeFunction::add);
+        KeyValue highLevel = pickHighLevel();
+        for (KeyValue kv : candidates) {
+            if (kv.level() == 0 || kv == highLevel) {
+                mergeFunction.add(kv);
+            }
+        }
         return mergeFunction.getResult();
     }
 

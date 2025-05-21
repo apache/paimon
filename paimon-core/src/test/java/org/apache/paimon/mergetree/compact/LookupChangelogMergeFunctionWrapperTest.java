@@ -547,4 +547,17 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv.value().getInt(0)).isEqualTo(3);
     }
+
+    @Test
+    public void testKeepLowestHighLevelLookupFunction() {
+        LookupMergeFunction function =
+                (LookupMergeFunction)
+                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()).create();
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(2));
+        KeyValue kv = function.getResult();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+    }
 }
