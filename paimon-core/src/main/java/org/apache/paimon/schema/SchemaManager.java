@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
@@ -305,8 +304,8 @@ public class SchemaManager implements Serializable {
         boolean disableNullToNotNull =
                 Boolean.parseBoolean(
                         oldOptions.getOrDefault(
-                                CatalogOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(),
-                                CatalogOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(),
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL
                                         .defaultValue()
                                         .toString()));
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());

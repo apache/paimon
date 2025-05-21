@@ -1015,8 +1015,7 @@ public abstract class CatalogTestBase {
                 identifier,
                 Lists.newArrayList(
                         SchemaChange.setOption(
-                                CatalogOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(),
-                                "false")),
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")),
                 false);
 
         catalog.alterTable(

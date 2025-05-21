@@ -184,12 +184,4 @@ public class CatalogOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to populate file metadata while listing or getting file status.");
-
-    public static final ConfigOption<Boolean> DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL =
-            ConfigOptions.key("alter-column-null-to-not-null.disabled")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "If true, it disables altering column type from null to not null. Default is true. "
-                                    + "Users can disable this option to explicitly convert null column type to not null.");
 }
