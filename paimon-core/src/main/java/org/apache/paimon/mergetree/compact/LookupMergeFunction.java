@@ -53,7 +53,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     public KeyValue pickHighLevel() {
         KeyValue highLevel = null;
         for (KeyValue kv : candidates) {
-            if (kv.level() == 0) {
+            // records that has not been stored on the disk yet, such as the data in the write
+            // buffer being at level -1
+            if (kv.level() <= 0) {
                 continue;
             }
             // For high-level comparison logic (not involving Level 0), only the value of the
@@ -63,15 +65,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
             }
         }
         return highLevel;
-    }
-
-    public boolean containLevel0() {
-        for (KeyValue kv : candidates) {
-            if (kv.level() == 0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public InternalRow key() {
@@ -87,7 +80,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         mergeFunction.reset();
         KeyValue highLevel = pickHighLevel();
         for (KeyValue kv : candidates) {
-            if (kv.level() == 0 || kv == highLevel) {
+            // records that has not been stored on the disk yet, such as the data in the write
+            // buffer being at level -1
+            if (kv.level() <= 0 || kv == highLevel) {
                 mergeFunction.add(kv);
             }
         }

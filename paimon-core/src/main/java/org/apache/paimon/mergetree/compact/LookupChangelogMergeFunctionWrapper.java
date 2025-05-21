@@ -106,7 +106,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     public ChangelogResult getResult() {
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
-        boolean containLevel0 = mergeFunction.containLevel0();
+        boolean containLevel0 = containLevel0();
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
@@ -136,6 +136,15 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         return reusedResult.setResult(result);
+    }
+
+    public boolean containLevel0() {
+        for (KeyValue kv : mergeFunction.candidates()) {
+            if (kv.level() == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void insertInto(LinkedList<KeyValue> candidates, KeyValue highLevel) {
