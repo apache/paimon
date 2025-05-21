@@ -64,7 +64,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final KeyValue reusedAfter = new KeyValue();
     @Nullable private final RecordEqualiser valueEqualiser;
     private final LookupStrategy lookupStrategy;
-    private final @Nullable DeletionVectorsMaintainer dvMaintainer;
+    private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
 
     public LookupChangelogMergeFunctionWrapper(
@@ -72,23 +72,23 @@ public class LookupChangelogMergeFunctionWrapper<T>
             Function<InternalRow, T> lookup,
             @Nullable RecordEqualiser valueEqualiser,
             LookupStrategy lookupStrategy,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
             @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
-        if (lookupStrategy.deletionVector) {
-            checkArgument(
-                    dvMaintainer != null,
-                    "deletionVectorsMaintainer should not be null, there is a bug.");
-        }
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
                 "Merge function should be a LookupMergeFunction, but is %s, there is a bug.",
                 mergeFunction.getClass().getName());
+        if (lookupStrategy.deletionVector) {
+            checkArgument(
+                    deletionVectorsMaintainer != null,
+                    "deletionVectorsMaintainer should not be null, there is a bug.");
+        }
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
         this.lookupStrategy = lookupStrategy;
-        this.dvMaintainer = dvMaintainer;
+        this.deletionVectorsMaintainer = deletionVectorsMaintainer;
         this.comparator = createSequenceComparator(userDefinedSeqComparator);
     }
 
@@ -115,7 +115,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 if (lookupStrategy.deletionVector) {
                     PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
                     highLevel = positionedKeyValue.keyValue();
-                    dvMaintainer.notifyNewDeletion(
+                    deletionVectorsMaintainer.notifyNewDeletion(
                             positionedKeyValue.fileName(), positionedKeyValue.rowPosition());
                 } else {
                     highLevel = (KeyValue) lookupResult;
@@ -186,21 +186,16 @@ public class LookupChangelogMergeFunctionWrapper<T>
     }
 
     private Comparator<KeyValue> createSequenceComparator(
-            @Nullable FieldsComparator udsComparator) {
+            @Nullable FieldsComparator userDefinedSeqComparator) {
+        if (userDefinedSeqComparator == null) {
+            return Comparator.comparingLong(KeyValue::sequenceNumber);
+        }
+
         return (o1, o2) -> {
-            // For high-level comparison logic (not involving Level 0), only the value of the
-            // minimum Level should be selected
-            if (o1.level() > 0 && o2.level() > 0 && o1.level() != o2.level()) {
-                return Integer.compare(o2.level(), o1.level());
+            int result = userDefinedSeqComparator.compare(o1.value(), o2.value());
+            if (result != 0) {
+                return result;
             }
-
-            if (udsComparator != null) {
-                int result = udsComparator.compare(o1.value(), o2.value());
-                if (result != 0) {
-                    return result;
-                }
-            }
-
             return Long.compare(o1.sequenceNumber(), o2.sequenceNumber());
         };
     }
