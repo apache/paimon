@@ -53,10 +53,13 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     public KeyValue pickHighLevel() {
         KeyValue highLevel = null;
         for (KeyValue kv : candidates) {
-            if (kv.level() > 0) {
-                if (highLevel == null || kv.level() < highLevel.level()) {
-                    highLevel = kv;
-                }
+            if (kv.level() == 0) {
+                continue;
+            }
+            // For high-level comparison logic (not involving Level 0), only the value of the
+            // minimum Level should be selected
+            if (highLevel == null || kv.level() < highLevel.level()) {
+                highLevel = kv;
             }
         }
         return highLevel;
