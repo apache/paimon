@@ -72,6 +72,8 @@ public class IcebergPathFactory {
         return new Path(metadataDirectory(), metadataName);
     }
 
+    // This is going to be slow when adopting REST catalog - from list to get all files in a
+    // sequence
     public Stream<Path> getAllMetadataPathBefore(FileIO fileIO, long snapshotId)
             throws IOException {
         return FileUtils.listVersionedFileStatus(fileIO, metadataDirectory, "v")
