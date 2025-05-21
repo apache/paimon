@@ -16,39 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
-import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 
 /**
- * {@link ChannelComputer} for writing {@link InternalRow}s into postpone bucket tables. Records
- * with same primary keys are distributed to the same subtask.
+ * {@link ChannelComputer} for writing {@link CdcRecord}s into postpone bucket tables. Records with
+ * same primary keys are distributed to the same subtask.
  */
-public class PostponeBucketChannelComputer implements ChannelComputer<InternalRow> {
-
-    private static final long serialVersionUID = 1L;
+public class CdcPostponeBucketChannelComputer implements ChannelComputer<CdcRecord> {
 
     private final TableSchema schema;
 
     private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
+    private transient KeyAndBucketExtractor<CdcRecord> extractor;
 
-    public PostponeBucketChannelComputer(TableSchema schema) {
+    public CdcPostponeBucketChannelComputer(TableSchema schema) {
         this.schema = schema;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new PostponeBucketRowKeyExtractor(schema);
+        this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
     }
 
     @Override
-    public int channel(InternalRow record) {
+    public int channel(CdcRecord record) {
         extractor.setRecord(record);
         return Math.abs(
                 (extractor.partition().hashCode() + extractor.trimmedPrimaryKey().hashCode())

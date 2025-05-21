@@ -452,6 +452,49 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         containSameIdentifyEntryFile(fullCompacted, entryIdentifierExpected);
     }
 
+    @Test
+    public void testMergeFullCompactionWithoutDeleteFile() {
+        // entries are All ADD.
+        List<ManifestFileMeta> input = new ArrayList<>();
+        // base
+        for (int j = 0; j < 6; j++) {
+            List<ManifestEntry> entrys = new ArrayList<>();
+            for (int i = 1; i < 50; i++) {
+                entrys.add(makeEntry(true, String.format(manifestFileNameTemplate, j, i), j));
+            }
+            input.add(makeManifest(entrys.toArray(new ManifestEntry[0])));
+        }
+        // The base file all meet the manifest file size.
+        long threshold = input.stream().mapToLong(ManifestFileMeta::fileSize).min().getAsLong();
+        Set<String> baseFiles =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        // assert base manifest are not accessed
+        for (String baseFile : baseFiles) {
+            manifestFile.delete(baseFile);
+        }
+
+        // delta
+        input.add(makeManifest(makeEntry(true, "A")));
+        input.add(makeManifest(makeEntry(true, "B")));
+        input.add(makeManifest(makeEntry(true, "C")));
+        input.add(makeManifest(makeEntry(true, "D")));
+        input.add(makeManifest(makeEntry(true, "E")));
+        input.add(makeManifest(makeEntry(true, "F")));
+        input.add(makeManifest(makeEntry(true, "G")));
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+        assertEquivalentEntries(
+                input.stream()
+                        .filter(f -> !baseFiles.contains(f.fileName()))
+                        .collect(Collectors.toList()),
+                merged.stream()
+                        .filter(f -> !baseFiles.contains(f.fileName()))
+                        .collect(Collectors.toList()));
+    }
+
     @RepeatedTest(10)
     public void testRandomFullCompaction() throws Exception {
         List<ManifestFileMeta> input = new ArrayList<>();

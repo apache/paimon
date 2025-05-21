@@ -27,7 +27,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
@@ -62,7 +61,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -70,7 +68,6 @@ import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -155,18 +152,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (!options.queryAuthEnabled()) {
             return;
         }
-
-        List<String> projection = readType == null ? schema.fieldNames() : readType.getFieldNames();
-        List<String> filter = new ArrayList<>();
-        if (predicate != null) {
-            List<Predicate> predicates = splitAnd(predicate);
-            for (Predicate predicate : predicates) {
-                if (predicate instanceof LeafPredicate) {
-                    filter.add(predicate.toString());
-                }
-            }
-        }
-        queryAuth.auth(projection, filter);
+        queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        // TODO add support for row level access control
     }
 
     @Override

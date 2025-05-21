@@ -663,7 +663,11 @@ paths:
               $ref: '#/components/schemas/AuthTableQueryRequest'
       responses:
         "200":
-          description: Success, no content
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTableQueryResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "403":
@@ -1098,10 +1102,10 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/view-summaries:
+  /v1/{prefix}/views:
     get:
       tags:
-        - table
+        - view
       summary: List views globally
       operationId: listViewsGlobally
       description: List views globally which matches the given database name pattern and view name pattern both.
@@ -2431,6 +2435,9 @@ components:
           type: array
           items:
             type: string
+    AuthTableQueryResponse:
+      type: object
+      properties:
         filter:
           type: array
           items:

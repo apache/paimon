@@ -41,6 +41,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -111,7 +113,10 @@ public interface FileStoreTable extends DataTable {
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 
-    TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
+    TableWriteImpl<?> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId);
 
     @Override
     TableCommitImpl newCommit(String commitUser);

@@ -58,6 +58,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -106,6 +107,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -677,21 +679,26 @@ public class RESTCatalogServer {
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
         }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        if (metadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
         List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
         if (columnAuth != null) {
-            requestBody
-                    .select()
-                    .forEach(
-                            column -> {
-                                if (!columnAuth.contains(column)) {
-                                    throw new Catalog.TableNoPermissionException(identifier);
-                                }
-                            });
+            List<String> select = requestBody.select();
+            if (select == null) {
+                select = metadata.schema().fieldNames();
+            }
+            select.forEach(
+                    column -> {
+                        if (!columnAuth.contains(column)) {
+                            throw new Catalog.TableNoPermissionException(identifier);
+                        }
+                    });
         }
-        return new MockResponse().setResponseCode(200);
+        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        return mockResponse(response, 200);
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
@@ -976,13 +983,22 @@ public class RESTCatalogServer {
     }
 
     private <T> PagedList<T> buildPagedEntities(List<T> names, int maxResults, String pageToken) {
-        List<T> sortedNames = names.stream().sorted(this::compareTo).collect(Collectors.toList());
+        return buildPagedEntities(names, maxResults, pageToken, false);
+    }
+
+    private <T> PagedList<T> buildPagedEntities(
+            List<T> names, int maxResults, String pageToken, boolean desc) {
+        Comparator<Object> comparator = this::compareTo;
+        if (desc) {
+            comparator = comparator.reversed();
+        }
+        List<T> sortedNames = names.stream().sorted(comparator).collect(Collectors.toList());
         List<T> pagedNames = new ArrayList<>();
         for (T sortedName : sortedNames) {
             if (pagedNames.size() < maxResults) {
                 if (pageToken == null) {
                     pagedNames.add(sortedName);
-                } else if (this.compareTo(sortedName, pageToken) > 0) {
+                } else if (comparator.compare(sortedName, pageToken) > 0) {
                     pagedNames.add(sortedName);
                 }
             } else {
@@ -1449,7 +1465,7 @@ public class RESTCatalogServer {
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
             PagedList<Partition> pagedPartitions =
-                    buildPagedEntities(partitions, maxResults, pageToken);
+                    buildPagedEntities(partitions, maxResults, pageToken, true);
             response =
                     new ListPartitionsResponse(
                             pagedPartitions.getElements(), pagedPartitions.getNextPageToken());

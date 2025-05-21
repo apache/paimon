@@ -35,6 +35,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
@@ -126,11 +127,11 @@ public class CatalogEnvironment implements Serializable {
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
-            return (select, filter) -> {};
+            return select -> Collections.emptyList();
         }
-        return (select, filter) -> {
+        return select -> {
             try (Catalog catalog = catalogLoader.load()) {
-                catalog.authTableQuery(identifier, select, filter);
+                return catalog.authTableQuery(identifier, select);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

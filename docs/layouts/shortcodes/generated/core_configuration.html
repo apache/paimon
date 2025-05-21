@@ -33,6 +33,12 @@ under the License.
             <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
         </tr>
         <tr>
+            <td><h5>alter-column-null-to-not-null.disabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -144,7 +150,7 @@ under the License.
             <td><h5>commit.force-create-snapshot</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to force create snapshot on commit.</td>
+            <td>In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.</td>
         </tr>
         <tr>
             <td><h5>commit.max-retries</h5></td>
@@ -699,7 +705,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.expiration-strategy</h5></td>
             <td style="word-wrap: break-word;">values-time</td>
             <td><p>Enum</p></td>
-            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li><li>"custom": This strategy use custom class to expire partitions.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>
@@ -983,6 +989,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
             <td>Default spill compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming-read-append-overwrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read the delta from append table's overwrite commit in streaming mode.</td>
         </tr>
         <tr>
             <td><h5>streaming-read-mode</h5></td>

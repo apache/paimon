@@ -140,4 +140,37 @@ public class FactoryUtil {
 
         return loadResults;
     }
+
+    /**
+     * Discover a singleton factory.
+     *
+     * @param classLoader the class loader
+     * @param klass the klass
+     * @param <T> the type of the factory
+     * @return the factory
+     */
+    public static <T> T discoverSingletonFactory(ClassLoader classLoader, Class<T> klass) {
+        List<T> factories = FactoryUtil.discoverFactories(classLoader, klass);
+        if (factories.isEmpty()) {
+            throw new FactoryException(
+                    String.format(
+                            "Could not find any factories that implement '%s' in the classpath.",
+                            klass.getName()));
+        }
+
+        if (factories.size() > 1) {
+            throw new FactoryException(
+                    String.format(
+                            "Multiple factories that implement '%s' found in the classpath.\n\n"
+                                    + "Ambiguous factory classes are:\n\n"
+                                    + "%s",
+                            klass.getName(),
+                            factories.stream()
+                                    .map(f -> f.getClass().getName())
+                                    .sorted()
+                                    .collect(Collectors.joining("\n"))));
+        }
+
+        return factories.get(0);
+    }
 }

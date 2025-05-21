@@ -152,16 +152,18 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
-                store().newWrite(commitUser, manifestFilter),
+                store().newWrite(commitUser, manifestFilter, writeId),
                 createRowKeyExtractor(),
                 (record, rowKind) ->
                         kv.replace(

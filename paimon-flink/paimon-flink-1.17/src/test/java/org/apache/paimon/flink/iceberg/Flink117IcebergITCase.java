@@ -19,4 +19,14 @@
 package org.apache.paimon.flink.iceberg;
 
 /** IT cases for Paimon Iceberg compatibility in Flink 1.17. */
-public class Flink117IcebergITCase extends FlinkIcebergITCaseBase {}
+public class Flink117IcebergITCase extends FlinkIcebergITCaseBase {
+    @Override
+    public void testCreateTags(String format) throws Exception {
+        // Flink 1.17 does not support create_tag procedure so we skip this test.
+    }
+
+    @Override
+    public void testDeleteTags(String format) throws Exception {
+        // Flink 1.17 does not support delete_tag procedure so we skip this test.
+    }
+}

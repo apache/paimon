@@ -43,7 +43,7 @@ public class ExpireTagsProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         TagTimeExpire tagTimeExpire =
-                fileStoreTable.store().newTagCreationManager().getTagTimeExpire();
+                fileStoreTable.store().newTagCreationManager(fileStoreTable).getTagTimeExpire();
         if (olderThanStr != null) {
             LocalDateTime olderThanTime =
                     DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())

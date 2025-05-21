@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
@@ -790,14 +791,14 @@ public interface Catalog extends AutoCloseable {
     // ==================== Table Auth ==========================
 
     /**
-     * Auth table query select and filter.
+     * Auth table query select and get the filter for row level access control.
      *
      * @param identifier path of the table to alter partitions
-     * @param select selected fields
-     * @param filter query filters
+     * @param select selected fields, null if select all
+     * @return additional filter for row level access control
      * @throws TableNotExistException if the table does not exist
      */
-    void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+    List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
 
     // ==================== Catalog Information ==========================
@@ -914,6 +915,7 @@ public interface Catalog extends AutoCloseable {
             this.database = database;
         }
 
+        @VisibleForTesting
         public DatabaseNoPermissionException(String database) {
             this(database, null);
         }
@@ -977,6 +979,7 @@ public interface Catalog extends AutoCloseable {
             this.identifier = identifier;
         }
 
+        @VisibleForTesting
         public TableNoPermissionException(Identifier identifier) {
             this(identifier, null);
         }

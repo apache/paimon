@@ -41,6 +41,8 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -228,9 +230,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+    public TableWriteImpl<?> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newWrite(commitUser, manifestFilter);
+        return wrapped.newWrite(commitUser, manifestFilter, writeId);
     }
 
     @Override

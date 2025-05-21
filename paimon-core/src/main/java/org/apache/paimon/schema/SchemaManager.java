@@ -301,6 +301,13 @@ public class SchemaManager implements Serializable {
             throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
         Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
         Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
+        boolean disableNullToNotNull =
+                Boolean.parseBoolean(
+                        oldOptions.getOrDefault(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(),
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL
+                                        .defaultValue()
+                                        .toString()));
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
@@ -413,6 +420,12 @@ public class SchemaManager implements Serializable {
                             DataType targetType = update.newDataType();
                             if (update.keepNullability()) {
                                 targetType = targetType.copy(field.type().isNullable());
+                            } else {
+                                assertNullabilityChange(
+                                        field.type().isNullable(),
+                                        update.newDataType().isNullable(),
+                                        StringUtils.join(Arrays.asList(update.fieldNames()), "."),
+                                        disableNullToNotNull);
                             }
                             checkState(
                                     DataTypeCasts.supportsExplicitCast(field.type(), targetType)
@@ -435,12 +448,18 @@ public class SchemaManager implements Serializable {
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
-                        (field) ->
-                                new DataField(
-                                        field.id(),
-                                        field.name(),
-                                        field.type().copy(update.newNullability()),
-                                        field.description()));
+                        (field) -> {
+                            assertNullabilityChange(
+                                    field.type().isNullable(),
+                                    update.newNullability(),
+                                    StringUtils.join(Arrays.asList(update.fieldNames()), "."),
+                                    disableNullToNotNull);
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    field.type().copy(update.newNullability()),
+                                    field.description());
+                        });
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
                 updateNestedColumn(
@@ -481,6 +500,21 @@ public class SchemaManager implements Serializable {
                 newSchema.primaryKeys(),
                 newSchema.options(),
                 newSchema.comment());
+    }
+
+    private void assertNullabilityChange(
+            boolean oldNullability,
+            boolean newNullability,
+            String fieldName,
+            boolean disableNullToNotNull) {
+        if (disableNullToNotNull && oldNullability && !newNullability) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot update column type from nullable to non nullable for %s. "
+                                    + "You can set table configuration option 'alter-column-null-to-not-null.disabled' = 'false' "
+                                    + "to allow converting null columns to not null",
+                            fieldName));
+        }
     }
 
     public void applyMove(List<DataField> newFields, SchemaChange.Move move) {

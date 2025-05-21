@@ -132,6 +132,8 @@ public class CdcSinkBuilder<T> {
             case HASH_DYNAMIC:
                 return new CdcDynamicBucketSink((FileStoreTable) table)
                         .build(converted, parallelism);
+            case POSTPONE_MODE:
+                return buildForPostponeBucket(converted);
             case BUCKET_UNAWARE:
                 return buildForUnawareBucket(converted);
             default:
@@ -143,6 +145,16 @@ public class CdcSinkBuilder<T> {
         FileStoreTable dataTable = (FileStoreTable) table;
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
+        return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
+    }
+
+    private DataStreamSink<?> buildForPostponeBucket(DataStream<CdcRecord> parsed) {
+        FileStoreTable dataTable = (FileStoreTable) table;
+        DataStream<CdcRecord> partitioned =
+                partition(
+                        parsed,
+                        new CdcPostponeBucketChannelComputer(dataTable.schema()),
+                        parallelism);
         return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
     }
 

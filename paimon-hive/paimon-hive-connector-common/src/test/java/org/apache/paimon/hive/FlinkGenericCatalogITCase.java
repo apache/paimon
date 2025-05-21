@@ -219,4 +219,15 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
         List<Row> result = sql("SELECT tag_name FROM paimon_t$tags");
         assertThat(result).contains(Row.of("tag_1"));
     }
+
+    @Test
+    public void testCreateView() {
+        sql("CREATE TABLE paimon_t ( " + "f0 INT, " + "f1 INT " + ") WITH ('connector'='paimon')");
+        sql("INSERT INTO paimon_t VALUES (1, 1), (2, 2)");
+        assertThat(sql("SELECT * FROM paimon_t"))
+                .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        sql("CREATE VIEW paimon_t_view AS SELECT * FROM paimon_t WHERE f0=1");
+
+        assertThat(sql("SELECT * FROM paimon_t_view")).containsExactlyInAnyOrder(Row.of(1, 1));
+    }
 }
