@@ -19,7 +19,7 @@
 package org.apache.paimon.iceberg;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.metadata.IcebergSchema;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 
 import javax.annotation.Nullable;
 
@@ -32,5 +32,5 @@ public interface IcebergMetadataCommitter {
     void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath);
 
     void commitMetadataREST(
-            IcebergSchema schema, Path newMetadataPath, @Nullable Path baseMetadataPath);
+            IcebergMetadata icebergMetadata, Path newMetadataPath, @Nullable Path baseMetadataPath);
 }

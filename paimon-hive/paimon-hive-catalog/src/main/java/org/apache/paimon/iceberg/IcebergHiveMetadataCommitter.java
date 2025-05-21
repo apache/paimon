@@ -24,7 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.hive.pool.CachedClientPool;
-import org.apache.paimon.iceberg.metadata.IcebergSchema;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -232,7 +232,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     @Override
     public void commitMetadataREST(
-            IcebergSchema schema,
+            IcebergMetadata icebergMetadata,
             Path newMetadataPath,
             @org.jetbrains.annotations.Nullable Path baseMetadataPath) {}
 }
