@@ -20,11 +20,14 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.metadata.IcebergSchema;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.rest.requests.CreateTableRequest;
+import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,23 +69,29 @@ public class IcebergRESTMetadataCommitter implements IcebergMetadataCommitter {
     }
 
     @Override
-    public void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath) {
+    public void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath) {}
+
+    @Override
+    public void commitMetadataREST(
+            IcebergMetadata icebergMetadata,
+            Path newMetadataPath,
+            @Nullable Path baseMetadataPath) {
         try {
-            commitMetadataImpl(newMetadataPath, baseMetadataPath);
+            commitMetadataImpl(newMetadataPath, icebergMetadata);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    @Override
-    public void commitMetadataREST(
-            IcebergSchema schema,
-            Path newMetadataPath,
-            @org.jetbrains.annotations.Nullable Path baseMetadataPath) {}
-
-    private void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
+    private void commitMetadataImpl(Path newMetadataPath, IcebergMetadata icebergMetadata)
             throws Exception {
         boolean ignoreIfAlreadyExists = true;
+
+        boolean stageCreate = false;
+        Schema schema = new Schema(Types.NestedField.required(1, "id", Types.LongType.get()));
+
+        CreateTableRequest createTableRequest =
+                CreateTableRequest.builder().withName(icebergTable).withSchema(schema).build();
 
         // Create database
         /*
