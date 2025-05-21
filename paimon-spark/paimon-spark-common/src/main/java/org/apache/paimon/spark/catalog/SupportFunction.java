@@ -18,11 +18,7 @@
 
 package org.apache.paimon.spark.catalog;
 
-import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
-
-import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
-import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 
 /** Catalog methods for working with Functions. */
@@ -33,16 +29,5 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
         // namespace to generate transforms for partitioning.
         // Otherwise, check if it is paimon namespace.
         return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
-    }
-
-    @Override
-    default Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (isFunctionNamespace(namespace)) {
-            return PaimonFunctions.names().stream()
-                    .map(name -> Identifier.of(namespace, name))
-                    .toArray(Identifier[]::new);
-        }
-
-        throw new NoSuchNamespaceException(namespace);
     }
 }
