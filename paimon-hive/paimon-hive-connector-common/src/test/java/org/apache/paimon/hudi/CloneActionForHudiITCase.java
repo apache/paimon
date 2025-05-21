@@ -30,11 +30,10 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,15 +44,13 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
 
     private static final int PORT = 9089;
 
-    @BeforeEach
-    public void beforeEach() throws IOException {
-        super.before();
+    @BeforeAll
+    public static void beforeAll() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    @AfterEach
-    public void afterEach() throws Exception {
-        super.after();
+    @AfterAll
+    public static void afterAll() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
