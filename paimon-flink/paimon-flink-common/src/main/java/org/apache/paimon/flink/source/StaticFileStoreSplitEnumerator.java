@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
+import org.apache.paimon.flink.source.assigners.ShardReadSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 
 import org.apache.flink.api.connector.source.SourceEvent;
@@ -144,7 +145,10 @@ public class StaticFileStoreSplitEnumerator
                     dynamicPartitionFilteringInfo,
                     "Cannot apply dynamic filtering because dynamicPartitionFilteringInfo hasn't been set.");
 
-            if (splitAssigner instanceof PreAssignSplitAssigner) {
+            if (splitAssigner instanceof ShardReadSplitAssigner) {
+                throw new IllegalArgumentException(
+                        "Flink withShard read can not be used with dynamic partition filtering.");
+            } else if (splitAssigner instanceof PreAssignSplitAssigner) {
                 this.splitAssigner =
                         ((PreAssignSplitAssigner) splitAssigner)
                                 .ofDynamicPartitionPruning(

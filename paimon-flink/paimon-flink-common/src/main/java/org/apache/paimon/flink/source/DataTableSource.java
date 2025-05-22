@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -42,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode.SHARD_READ;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -156,6 +159,12 @@ public class DataTableSource extends BaseDataTableSource
                 !table.partitionKeys().isEmpty(),
                 "Cannot apply dynamic filtering to non-partitioned Paimon table '%s'.",
                 table.name());
+
+        Options options = Options.fromMap(table.options());
+        checkState(
+                !SHARD_READ.equals(
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE)),
+                "Flink withShard read can not be used with dynamic partition filtering.");
 
         this.dynamicPartitionFilteringFields = candidateFilterFields;
     }

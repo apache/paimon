@@ -132,7 +132,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
      * this method only reload restore for batch execute, because in streaming mode, we need to
      * assign certain bucket to certain task.
      */
-    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
+    public Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =
                 BinPacking.packForFixedBinNumber(
