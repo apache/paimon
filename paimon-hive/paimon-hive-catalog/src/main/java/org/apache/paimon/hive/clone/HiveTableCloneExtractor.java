@@ -73,7 +73,7 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
 
     @Override
     public List<HivePartitionFiles> extractFiles(
-            Map<String, String> configuration,
+            Map<String, String> catalogOptions,
             IMetaStoreClient client,
             Table table,
             FileIO fileIO,

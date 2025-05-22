@@ -80,7 +80,7 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
 
     @Override
     public List<HivePartitionFiles> extractFiles(
-            Map<String, String> configuration,
+            Map<String, String> catalogOptions,
             IMetaStoreClient client,
             Table table,
             FileIO fileIO,
@@ -93,7 +93,7 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
 
         String location = table.getSd().getLocation();
         HudiFileIndex fileIndex =
-                new HudiFileIndex(location, options, configuration, partitionRowType, predicate);
+                new HudiFileIndex(location, options, catalogOptions, partitionRowType, predicate);
 
         if (fileIndex.isPartitioned()) {
             return fileIndex.getAllFilteredPartitionFiles(fileIO);

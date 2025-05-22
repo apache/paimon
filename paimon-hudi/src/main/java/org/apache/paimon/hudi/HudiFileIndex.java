@@ -82,15 +82,15 @@ public class HudiFileIndex {
     public HudiFileIndex(
             String location,
             Map<String, String> tableOptions,
-            Map<String, String> configuration,
+            Map<String, String> catalogOptions,
             RowType partitionType,
             @Nullable PartitionPredicate partitionPredicate) {
         this.path = new Path(location);
         this.metadataConfig = metadataConfig(tableOptions);
         Configuration hadoopConf =
                 HadoopConfigurations.getHadoopConf(
-                        org.apache.flink.configuration.Configuration.fromMap(configuration));
-        configuration.forEach(hadoopConf::set);
+                        org.apache.flink.configuration.Configuration.fromMap(catalogOptions));
+        catalogOptions.forEach(hadoopConf::set);
         this.partitionType = partitionType;
         this.partitionPredicate = partitionPredicate;
         this.engineContext = new HoodieFlinkEngineContext(hadoopConf);
