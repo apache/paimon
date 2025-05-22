@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
+import org.apache.paimon.flink.source.assigners.ShardReadSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 
 import org.apache.flink.api.connector.source.SourceEvent;
@@ -46,6 +47,8 @@ public class StaticFileStoreSplitEnumerator
                 SupportsHandleExecutionAttemptSourceEvent {
 
     private static final Logger LOG = LoggerFactory.getLogger(StaticFileStoreSplitEnumerator.class);
+
+    private static final String DYNAMIC_FILTERING_EVENT = "DynamicFilteringEvent";
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
@@ -139,12 +142,18 @@ public class StaticFileStoreSplitEnumerator
             return;
         }
 
-        if (sourceEvent.getClass().getSimpleName().equals("DynamicFilteringEvent")) {
+        if (sourceEvent.getClass().getSimpleName().equals(DYNAMIC_FILTERING_EVENT)) {
             checkNotNull(
                     dynamicPartitionFilteringInfo,
                     "Cannot apply dynamic filtering because dynamicPartitionFilteringInfo hasn't been set.");
 
-            if (splitAssigner instanceof PreAssignSplitAssigner) {
+            if (splitAssigner instanceof ShardReadSplitAssigner) {
+                this.splitAssigner =
+                        ((ShardReadSplitAssigner) splitAssigner)
+                                .ofDynamicPartitionPruning(
+                                        dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                                        ((DynamicFilteringEvent) sourceEvent).getData());
+            } else if (splitAssigner instanceof PreAssignSplitAssigner) {
                 this.splitAssigner =
                         ((PreAssignSplitAssigner) splitAssigner)
                                 .ofDynamicPartitionPruning(

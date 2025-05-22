@@ -173,6 +173,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Override
+    public AbstractDataTableScan withSnapshotId(long snapshotId) {
+        snapshotReader.withSnapshot(snapshotId);
+        return this;
+    }
+
     public CoreOptions options() {
         return options;
     }

@@ -76,4 +76,8 @@ public interface InnerTableScan extends TableScan {
         // do nothing, should implement this if need
         return this;
     }
+
+    default InnerTableScan withSnapshotId(long snapshotId) {
+        return this;
+    }
 }

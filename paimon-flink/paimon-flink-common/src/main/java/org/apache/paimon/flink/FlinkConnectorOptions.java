@@ -547,7 +547,10 @@ public class FlinkConnectorOptions {
                 "Distribute splits evenly when batch reading to prevent a few tasks from reading all."),
         PREEMPTIVE(
                 "preemptive",
-                "Distribute splits preemptively according to the consumption speed of the task.");
+                "Distribute splits preemptively according to the consumption speed of the task."),
+        SHARD_READ(
+                "shard_read",
+                "Distribute empty split, the real splits will generate on TaskManager.");
 
         private final String value;
         private final String description;

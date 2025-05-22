@@ -48,6 +48,10 @@ public class FileStoreSourceSplitGenerator {
                 .collect(Collectors.toList());
     }
 
+    public FileStoreSourceSplit createSplit(Split split) {
+        return new FileStoreSourceSplit(getNextId(), split);
+    }
+
     protected final String getNextId() {
         // because we just increment numbers, we increment the char representation directly,
         // rather than incrementing an integer and converting it to a string representation

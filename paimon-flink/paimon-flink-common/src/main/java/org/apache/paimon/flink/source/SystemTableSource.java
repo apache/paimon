@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.Projection;
+import org.apache.paimon.flink.source.shardread.ShardStaticFileStoreSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
@@ -38,6 +40,11 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
+
+import java.util.Optional;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode.SHARD_READ;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
@@ -100,9 +107,23 @@ public class SystemTableSource extends FlinkTableSource {
                     new ContinuousFileStoreSource(
                             readBuilder, table.options(), limit, BucketMode.HASH_FIXED, rowData);
         } else {
-            source =
-                    new StaticFileStoreSource(
-                            readBuilder, limit, splitBatchSize, splitAssignMode, null, rowData);
+            if (SHARD_READ.equals(splitAssignMode)) {
+                Optional<Snapshot> latestSnapshot = table.latestSnapshot();
+                checkState(latestSnapshot.isPresent(), "The table has no Snapshot now.");
+                source =
+                        new ShardStaticFileStoreSource(
+                                readBuilder,
+                                limit,
+                                splitBatchSize,
+                                splitAssignMode,
+                                null,
+                                rowData,
+                                latestSnapshot.get().id());
+            } else {
+                source =
+                        new StaticFileStoreSource(
+                                readBuilder, limit, splitBatchSize, splitAssignMode, null, rowData);
+            }
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,

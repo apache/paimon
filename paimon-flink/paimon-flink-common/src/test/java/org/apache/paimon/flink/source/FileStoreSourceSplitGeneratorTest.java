@@ -23,6 +23,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileStoreSourceSplitGeneratorTest {
 
     @Test
-    public void test() {
+    public void testCreateSplitsByPlan() {
         List<DataSplit> scanSplits =
                 Arrays.asList(
                         dataSplit(1, 0, "f0", "f1"),
@@ -57,8 +58,38 @@ public class FileStoreSourceSplitGeneratorTest {
                         dataSplit(6, 1, "f14"));
         DataFilePlan tableScanPlan = new DataFilePlan(scanSplits);
 
-        List<FileStoreSourceSplit> splits =
-                new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);
+        assertCreateSplitsInternal(new FileStoreSourceSplitGenerator().createSplits(tableScanPlan));
+    }
+
+    @Test
+    public void testCreateSplitsBySplitList() {
+        List<Split> splits =
+                Arrays.asList(
+                        dataSplit(1, 0, "f0", "f1"),
+                        dataSplit(1, 1, "f2"),
+                        dataSplit(2, 0, "f3", "f4", "f5"),
+                        dataSplit(2, 1, "f6"),
+                        dataSplit(3, 0, "f7"),
+                        dataSplit(3, 1, "f8"),
+                        dataSplit(4, 0, "f9"),
+                        dataSplit(4, 1, "f10"),
+                        dataSplit(5, 0, "f11"),
+                        dataSplit(5, 1, "f12"),
+                        dataSplit(6, 0, "f13"),
+                        dataSplit(6, 1, "f14"));
+
+        assertCreateSplitsInternal(new FileStoreSourceSplitGenerator().createSplits(splits));
+    }
+
+    @Test
+    public void testCreateSplit() {
+        Split split = dataSplit(2, 0, "f3", "f4", "f5");
+        FileStoreSourceSplit fileStoreSourceSplit =
+                new FileStoreSourceSplitGenerator().createSplit(split);
+        assertSplit(fileStoreSourceSplit, "0000000001", 2, 0, Arrays.asList("f3", "f4", "f5"));
+    }
+
+    private void assertCreateSplitsInternal(List<FileStoreSourceSplit> splits) {
         assertThat(splits.size()).isEqualTo(12);
         splits.sort(
                 Comparator.comparingInt(

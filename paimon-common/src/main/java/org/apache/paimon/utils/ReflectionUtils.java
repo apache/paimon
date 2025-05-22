@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -80,5 +81,16 @@ public class ReflectionUtils {
             }
         }
         throw new NoSuchFieldException(fieldName);
+    }
+
+    public static Constructor<?> getPrivateStaticClassConstructor(
+            String classPath, Class<?>... parameterTypes)
+            throws ClassNotFoundException, NoSuchMethodException {
+        Class<?> innerClass;
+        Constructor<?> constructor;
+        innerClass = Class.forName(classPath);
+        constructor = innerClass.getDeclaredConstructor(parameterTypes);
+        constructor.setAccessible(true);
+        return constructor;
     }
 }
