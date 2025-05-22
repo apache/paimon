@@ -233,7 +233,9 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         LinkedList<BitmapIndexBlock> indexBlocks = new LinkedList<>();
         this.indexBlocks = indexBlocks;
-        indexBlocks.add(new BitmapIndexBlock(0));
+        if (!bitmapOffsets.isEmpty()) {
+            indexBlocks.add(new BitmapIndexBlock(0));
+        }
         Comparator<Object> comparator = getComparator(dataType);
         bitmapOffsets.entrySet().stream()
                 .map(
