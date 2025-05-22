@@ -191,6 +191,13 @@ public class FlinkConnectorOptions {
                             "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
                                     + "to avoid exceed `akka.framesize` limit.");
 
+    public static final ConfigOption<Integer> SCAN_MAX_SNAPSHOT_COUNT =
+            key("scan.max-snapshot.count")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "The max snapshot count to scan per checkpoint. Not limited when it's negative.");
+
     public static final ConfigOption<SplitAssignMode> SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE =
             key("scan.split-enumerator.mode")
                     .enumType(SplitAssignMode.class)
