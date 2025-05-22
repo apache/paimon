@@ -24,9 +24,10 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.table.source.DataTableStreamScan.createCreationTimestampStartingScanner;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CreationTimestampStartingScanner}. */
+/** Tests for createCreationTimestampStartingScanner. */
 public class CreationTimestampStartingScannerTest extends ScannerTestBase {
 
     @Test
@@ -51,65 +52,65 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
         write.close();
         commit.close();
 
-        CreationTimestampStartingScanner scanner =
-                new CreationTimestampStartingScanner(
+        StartingScanner scanner =
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t1, false, true);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t1, false, false);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
 
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t2, false, true);
-        assertThat(scanner.scanner() instanceof ContinuousFromSnapshotStartingScanner).isTrue();
+        assertThat(scanner instanceof ContinuousFromSnapshotStartingScanner).isTrue();
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t2, false, false);
-        assertThat(scanner.scanner() instanceof StaticFromSnapshotStartingScanner).isTrue();
+        assertThat(scanner instanceof StaticFromSnapshotStartingScanner).isTrue();
 
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t3, false, true);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t3, false, false);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
 
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager,
                         table.changelogManager(),
                         snapshotManager.earliestSnapshot().timeMillis(),
                         true,
                         true);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager,
                         table.changelogManager(),
                         snapshotManager.earliestSnapshot().timeMillis(),
                         false,
                         false);
-        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        assertThat(scanner instanceof FileCreationTimeStartingScanner).isTrue();
 
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager,
                         table.changelogManager(),
                         snapshotManager.latestSnapshot().timeMillis(),
                         true,
                         true);
-        assertThat(scanner.scanner() instanceof ContinuousFromSnapshotStartingScanner).isTrue();
+        assertThat(scanner instanceof ContinuousFromSnapshotStartingScanner).isTrue();
         scanner =
-                new CreationTimestampStartingScanner(
+                createCreationTimestampStartingScanner(
                         snapshotManager,
                         table.changelogManager(),
                         snapshotManager.latestSnapshot().timeMillis(),
                         false,
                         false);
-        assertThat(scanner.scanner() instanceof StaticFromSnapshotStartingScanner).isTrue();
+        assertThat(scanner instanceof StaticFromSnapshotStartingScanner).isTrue();
     }
 }

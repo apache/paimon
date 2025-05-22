@@ -36,7 +36,6 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartin
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
-import org.apache.paimon.table.source.snapshot.CreationTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.EmptyResultStartingScanner;
 import org.apache.paimon.table.source.snapshot.FileCreationTimeStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
@@ -49,6 +48,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
@@ -247,7 +247,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
             case FROM_CREATION_TIMESTAMP:
                 Long creationTimeMills = options.scanCreationTimeMills();
-                return new CreationTimestampStartingScanner(
+                return createCreationTimestampStartingScanner(
                         snapshotManager,
                         changelogManager,
                         creationTimeMills,
@@ -291,6 +291,43 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());
         }
+    }
+
+    public static StartingScanner createCreationTimestampStartingScanner(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            long creationMillis,
+            boolean changelogDecoupled,
+            boolean isStreaming) {
+        Long startingSnapshotPrevId =
+                TimeTravelUtil.earlierThanTimeMills(
+                        snapshotManager,
+                        changelogManager,
+                        creationMillis,
+                        changelogDecoupled,
+                        true);
+        final StartingScanner scanner;
+        Optional<Long> startingSnapshotId =
+                Optional.ofNullable(startingSnapshotPrevId)
+                        .map(id -> id + 1)
+                        .filter(
+                                id ->
+                                        snapshotManager.snapshotExists(id)
+                                                || changelogManager.longLivedChangelogExists(id));
+        if (startingSnapshotId.isPresent()) {
+            scanner =
+                    isStreaming
+                            ? new ContinuousFromSnapshotStartingScanner(
+                                    snapshotManager,
+                                    changelogManager,
+                                    startingSnapshotId.get(),
+                                    changelogDecoupled)
+                            : new StaticFromSnapshotStartingScanner(
+                                    snapshotManager, startingSnapshotId.get());
+        } else {
+            scanner = new FileCreationTimeStartingScanner(snapshotManager, creationMillis);
+        }
+        return scanner;
     }
 
     private StartingScanner createIncrementalStartingScanner(SnapshotManager snapshotManager) {
