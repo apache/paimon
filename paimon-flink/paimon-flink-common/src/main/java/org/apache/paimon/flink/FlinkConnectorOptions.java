@@ -378,6 +378,13 @@ public class FlinkConnectorOptions {
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
 
+    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_RECOVER_FROM_STATE =
+            key("partition.mark-done.recover-from-state")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether trigger partition mark done when recover from state.");
+
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")
                     .stringType()
