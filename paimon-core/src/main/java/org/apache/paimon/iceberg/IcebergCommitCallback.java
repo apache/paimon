@@ -181,6 +181,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 return IcebergOptions.StorageLocation.TABLE_LOCATION;
             case HIVE_CATALOG:
             case HADOOP_CATALOG:
+            case REST_CATALOG:
                 return IcebergOptions.StorageLocation.CATALOG_STORAGE;
             default:
                 throw new UnsupportedOperationException(
@@ -232,6 +233,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 table.fileIO().delete(pathFactory.metadataDirectory(), true);
             }
 
+            // With REST, check catalog to get baseMetadataPath and do comparisons
             if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))) {
                 return;
             }
@@ -279,6 +281,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId);
 
+        // Create metadata
+        // Commit metadata
+
+        // For hive these are separate steps
+        // For REST these are the same step
+
+        // Hive needs IcebergMetadata, newMetadataPath, baseMetadataPath
+        // REST needs IcebergSnapshot
         Map<String, IcebergRef> icebergTags =
                 table.tagManager().tags().entrySet().stream()
                         .collect(
@@ -313,6 +323,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                         String.valueOf(snapshotId));
 
+        // TODO what to do about this - looks like one time cleanup when creating a fresh metadata
+        // file
         expireAllBefore(snapshotId);
 
         if (metadataCommitter != null) {
@@ -753,6 +765,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
+    // happens after commit
     private void expireManifestList(String toExpire, String next) {
         Set<IcebergManifestFileMeta> metaInUse = new HashSet<>(manifestList.read(next));
         for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
@@ -764,6 +777,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         table.fileIO().deleteQuietly(pathFactory.toManifestListPath(toExpire));
     }
 
+    // happens after commit
     private void expireAllBefore(long snapshotId) throws IOException {
         Set<String> expiredManifestLists = new HashSet<>();
         Set<String> expiredManifestFileMetas = new HashSet<>();
@@ -796,6 +810,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
     }
 
+    // happens after commit
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
         Options options = new Options(table.options());
         if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
