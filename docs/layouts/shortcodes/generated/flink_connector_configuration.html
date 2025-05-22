@@ -99,6 +99,12 @@ under the License.
             <td>How to trigger partition mark done action.<br /><br />Possible values:<ul><li>"process-time": Based on the time of the machine, mark the partition done once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, mark the partition done once the watermark passes period time plus delay.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>partition.mark-done.recover-from-state</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether trigger partition mark done when recover from state.</td>
+        </tr>
+        <tr>
             <td><h5>partition.time-interval</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>

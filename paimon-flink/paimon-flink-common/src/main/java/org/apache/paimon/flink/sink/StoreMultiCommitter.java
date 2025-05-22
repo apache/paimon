@@ -180,13 +180,16 @@ public class StoreMultiCommitter
     public int filterAndCommit(
             List<WrappedManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
-            boolean recoveryFromState) {
+            boolean partitionMarkDoneRecoverFromState) {
         int result = 0;
         for (Map.Entry<Identifier, List<ManifestCommittable>> entry :
                 groupByTable(globalCommittables).entrySet()) {
             result +=
                     getStoreCommitter(entry.getKey())
-                            .filterAndCommit(entry.getValue(), checkAppendFiles, recoveryFromState);
+                            .filterAndCommit(
+                                    entry.getValue(),
+                                    checkAppendFiles,
+                                    partitionMarkDoneRecoverFromState);
         }
         return result;
     }

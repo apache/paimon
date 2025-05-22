@@ -51,12 +51,21 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
     /** The committable's serializer. */
     private final SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer;
 
+    private final boolean partitionMarkDoneRecoverFromState;
+
     /** GlobalCommitT state of this job. Used to filter out previous successful commits. */
     private ListState<GlobalCommitT> streamingCommitterState;
 
     public RestoreAndFailCommittableStateManager(
             SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer) {
+        this(committableSerializer, true);
+    }
+
+    public RestoreAndFailCommittableStateManager(
+            SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer,
+            boolean partitionMarkDoneRecoverFromState) {
         this.committableSerializer = committableSerializer;
+        this.partitionMarkDoneRecoverFromState = partitionMarkDoneRecoverFromState;
     }
 
     @Override
@@ -79,7 +88,8 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
 
     private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
-        int numCommitted = committer.filterAndCommitFromState(committables);
+        int numCommitted =
+                committer.filterAndCommit(committables, true, partitionMarkDoneRecoverFromState);
         if (numCommitted > 0) {
             throw new RuntimeException(
                     "This exception is intentionally thrown "

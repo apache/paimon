@@ -86,7 +86,7 @@ public class ReportPartStatsListener implements PartitionListener {
     }
 
     public void notifyCommittable(
-            List<ManifestCommittable> committables, boolean recoverFromCheckpoint) {
+            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
         Set<String> partition = new HashSet<>();
         boolean endInput = false;
         for (ManifestCommittable committable : committables) {
