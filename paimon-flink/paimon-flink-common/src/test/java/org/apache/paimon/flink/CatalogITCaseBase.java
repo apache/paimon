@@ -77,14 +77,6 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         Map<String, String> options = new HashMap<>(catalogOptions());
         options.put("type", "paimon");
-        options.put("metastore", "rest");
-        options.put("uri", "http://localhost:8080");
-        options.put("token.provider", "dlf");
-        options.put("dlf.accessKeyId", "ak");
-        options.put("dlf.accessKeySecret", "sk");
-        options.put("dlf.region", "cn-hangzhou");
-        options.put("data-token.enabled", "false");
-        options.put("dlf.accessKeySecret", "sk");
         if (supportDefineWarehouse()) {
             options.put("warehouse", toWarehouse(path));
         }
