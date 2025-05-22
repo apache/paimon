@@ -43,6 +43,7 @@ public interface HiveCloneExtractor {
             throws Exception;
 
     List<HivePartitionFiles> extractFiles(
+            Map<String, String> configuration,
             IMetaStoreClient client,
             Table table,
             FileIO fileIO,
