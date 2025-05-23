@@ -26,7 +26,10 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitive
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampLocalTZObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
+import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 
 /**
  * {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP WITH LOCAL TIME ZONE type. The
@@ -45,7 +48,9 @@ public class PaimonTimestampLocalTZObjectInspector extends AbstractPrimitiveJava
             return null;
         }
 
-        return new TimestampTZ(((Timestamp) o).toLocalDateTime().atZone(ZoneId.systemDefault()));
+        Instant instant = ((Timestamp) o).toLocalDateTime().toInstant(ZoneOffset.UTC);
+        ZonedDateTime zonedDateTime = instant.atZone(ZoneId.systemDefault());
+        return new TimestampTZ(zonedDateTime);
     }
 
     @Override
@@ -72,8 +77,12 @@ public class PaimonTimestampLocalTZObjectInspector extends AbstractPrimitiveJava
             return null;
         }
         if (value instanceof TimestampTZ) {
-            return Timestamp.fromLocalDateTime(
-                    ((TimestampTZ) value).getZonedDateTime().toLocalDateTime());
+            TimestampTZ timestampTZ = (TimestampTZ) value;
+            long millisecond =
+                    timestampTZ.getEpochSecond() * 1000L
+                            + (long) (timestampTZ.getNanos() / 1000000);
+            int nanoOfMillisecond = timestampTZ.getNanos() % 1000000;
+            return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
         } else {
             return null;
         }
