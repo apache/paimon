@@ -146,12 +146,12 @@ public class CommitStats {
     }
 
     @VisibleForTesting
-    protected long getTableFilesAdded() {
+    public long getTableFilesAdded() {
         return tableFilesAdded;
     }
 
     @VisibleForTesting
-    protected long getTableFilesDeleted() {
+    public long getTableFilesDeleted() {
         return tableFilesDeleted;
     }
 

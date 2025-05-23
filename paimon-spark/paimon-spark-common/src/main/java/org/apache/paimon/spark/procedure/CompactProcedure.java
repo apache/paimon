@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.PaimonSplitScan;
 import org.apache.paimon.spark.SparkUtils;
@@ -120,7 +121,14 @@ public class CompactProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField(
+                                "involved_files_num", DataTypes.LongType, true, Metadata.empty()),
+                        new StructField(
+                                "involved_files_bytes", DataTypes.LongType, true, Metadata.empty()),
+                        new StructField(
+                                "new_files_num", DataTypes.LongType, true, Metadata.empty()),
+                        new StructField(
+                                "new_files_bytes", DataTypes.LongType, true, Metadata.empty())
                     });
 
     private static final String MINOR = "minor";
@@ -203,17 +211,16 @@ public class CompactProcedure extends BaseProcedure {
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
-                    InternalRow internalRow =
-                            newInternalRow(
-                                    execute(
-                                            (FileStoreTable) table,
-                                            compactStrategy,
-                                            sortType,
-                                            sortColumns,
-                                            relation,
-                                            condition,
-                                            partitionIdleTime));
-                    return new InternalRow[] {internalRow};
+                    CompactResult compactResult =
+                            execute(
+                                    (FileStoreTable) table,
+                                    compactStrategy,
+                                    sortType,
+                                    sortColumns,
+                                    relation,
+                                    condition,
+                                    partitionIdleTime);
+                    return toOutputRows(compactResult);
                 });
     }
 
@@ -226,7 +233,7 @@ public class CompactProcedure extends BaseProcedure {
         return args.isNullAt(index) || StringUtils.isNullOrWhitespaceOnly(args.getString(index));
     }
 
-    private boolean execute(
+    private CompactResult execute(
             FileStoreTable table,
             String compactStrategy,
             String sortType,
@@ -234,6 +241,7 @@ public class CompactProcedure extends BaseProcedure {
             DataSourceV2Relation relation,
             @Nullable Expression condition,
             @Nullable Duration partitionIdleTime) {
+        CompactResult compactResult = new CompactResult();
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
@@ -251,11 +259,18 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
-                    compactAwareBucketTable(
-                            table, fullCompact, filter, partitionIdleTime, javaSparkContext);
+                    compactResult =
+                            compactAwareBucketTable(
+                                    table,
+                                    fullCompact,
+                                    filter,
+                                    partitionIdleTime,
+                                    javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    compactUnAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
+                    compactResult =
+                            compactUnAwareBucketTable(
+                                    table, filter, partitionIdleTime, javaSparkContext);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -264,7 +279,9 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
-                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, relation, filter);
+                    compactResult =
+                            sortCompactUnAwareBucketTable(
+                                    table, orderType, sortColumns, relation, filter);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -273,10 +290,10 @@ public class CompactProcedure extends BaseProcedure {
                                     + " only support unaware-bucket append-only table yet.");
             }
         }
-        return true;
+        return compactResult;
     }
 
-    private void compactAwareBucketTable(
+    private CompactResult compactAwareBucketTable(
             FileStoreTable table,
             boolean fullCompact,
             @Nullable Predicate filter,
@@ -302,7 +319,7 @@ public class CompactProcedure extends BaseProcedure {
 
         if (partitionBuckets.isEmpty()) {
             LOG.info("Partition bucket is empty, no compact job to execute.");
-            return;
+            return new CompactResult();
         }
 
         int readParallelism = readParallelism(partitionBuckets, spark());
@@ -342,7 +359,6 @@ public class CompactProcedure extends BaseProcedure {
                                                 ioManager.close();
                                             }
                                         });
-
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
             List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
@@ -351,12 +367,13 @@ public class CompactProcedure extends BaseProcedure {
                 messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
             }
             commit.commit(messages);
+            return toCompactResult(commit.getCommitStats());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void compactUnAwareBucketTable(
+    private CompactResult compactUnAwareBucketTable(
             FileStoreTable table,
             @Nullable Predicate filter,
             @Nullable Duration partitionIdleTime,
@@ -387,7 +404,7 @@ public class CompactProcedure extends BaseProcedure {
         }
         if (compactionTasks.isEmpty()) {
             LOG.info("Task plan is empty, no compact job to execute.");
-            return;
+            return new CompactResult();
         }
 
         AppendCompactTaskSerializer serializer = new AppendCompactTaskSerializer();
@@ -431,7 +448,6 @@ public class CompactProcedure extends BaseProcedure {
                                                 write.close();
                                             }
                                         });
-
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
             List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
@@ -442,6 +458,7 @@ public class CompactProcedure extends BaseProcedure {
                                 messageSerializerser.getVersion(), serializedMessage));
             }
             commit.commit(messages);
+            return toCompactResult(commit.getCommitStats());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -472,7 +489,7 @@ public class CompactProcedure extends BaseProcedure {
         return partitionInfo.stream().map(Pair::getKey).collect(Collectors.toSet());
     }
 
-    private void sortCompactUnAwareBucketTable(
+    private CompactResult sortCompactUnAwareBucketTable(
             FileStoreTable table,
             OrderType orderType,
             List<String> sortColumns,
@@ -504,7 +521,11 @@ public class CompactProcedure extends BaseProcedure {
             // Use dynamic partition overwrite
             writer.writeBuilder().withOverwrite();
             writer.commit(writer.write(datasetForWrite));
+            CommitStats commitStat = writer.getCommitStat();
+            // TODO: Add detail metric for OVERWRITE commit kind
+            return new CompactResult(-1, -1, commitStat.getTableFilesAdded(), -1);
         }
+        return null;
     }
 
     private Map<BinaryRow, DataSplit[]> packForSort(List<DataSplit> dataSplits) {
@@ -558,5 +579,59 @@ public class CompactProcedure extends BaseProcedure {
                 return new CompactProcedure(tableCatalog());
             }
         };
+    }
+
+    public CompactResult toCompactResult(CommitStats commitStats) {
+        return new CompactResult(
+                commitStats.getTableFilesDeleted(),
+                commitStats.getCompactionInputFileSize(),
+                commitStats.getTableFilesAdded(),
+                commitStats.getCompactionOutputFileSize());
+    }
+
+    private InternalRow[] toOutputRows(CompactResult compactResult) {
+        long involvedFilesNum = compactResult.getInvolvedFilesNum();
+        long involvedFilesBytes = compactResult.getInvolvedFilesBytes();
+        long newFilesNum = compactResult.getNewFilesNum();
+        long newFilesBytes = compactResult.getNewFilesBytes();
+        InternalRow row =
+                newInternalRow(involvedFilesNum, involvedFilesBytes, newFilesNum, newFilesBytes);
+        return new InternalRow[] {row};
+    }
+
+    private static class CompactResult {
+        private long involvedFilesNum;
+        private long involvedFilesBytes;
+        private long newFilesNum;
+        private long newFilesBytes;
+
+        public CompactResult() {}
+
+        public CompactResult(
+                long involvedFilesNum,
+                long involvedFilesBytes,
+                long newFilesNum,
+                long newFilesBytes) {
+            this.involvedFilesNum = involvedFilesNum;
+            this.involvedFilesBytes = involvedFilesBytes;
+            this.newFilesNum = newFilesNum;
+            this.newFilesBytes = newFilesBytes;
+        }
+
+        public long getInvolvedFilesNum() {
+            return involvedFilesNum;
+        }
+
+        public long getInvolvedFilesBytes() {
+            return involvedFilesBytes;
+        }
+
+        public long getNewFilesNum() {
+            return newFilesNum;
+        }
+
+        public long getNewFilesBytes() {
+            return newFilesBytes;
+        }
     }
 }
