@@ -230,9 +230,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
       "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3', snapshot => 3, time_retained => '1d')")
     spark.sql(
       "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')")
-    // check tag
-
-    Thread.sleep(1000)
+    checkAnswer(spark.sql("select count(tag_name) from `T$tags`"), Row(4) :: Nil)
 
     withSparkSQLConf("spark.paimon.tag.num-retained-max" -> "2") {
       // expire tag-1,tag-2, even if tag-2 has not reached the retention time

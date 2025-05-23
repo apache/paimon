@@ -1433,7 +1433,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<TagExpireStrategy> TAG_EXPIRATION_STRATEGY =
             key("tag.expiration-strategy")
                     .enumType(TagExpireStrategy.class)
-                    .defaultValue(TagExpireStrategy.RETAIN_TIME)
+                    .defaultValue(TagExpireStrategy.HYBRID)
                     .withDescription("The strategy determines how to expire tags.");
 
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
