@@ -133,6 +133,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.memoryPool = memoryPool;
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
+        table.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
         this.write = newTableWrite(table);
     }
 

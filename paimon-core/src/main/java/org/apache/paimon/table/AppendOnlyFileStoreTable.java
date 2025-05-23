@@ -69,19 +69,28 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public AppendOnlyFileStore store() {
         if (lazyStore == null) {
-            lazyStore =
-                    new AppendOnlyFileStore(
-                            fileIO,
-                            schemaManager(),
-                            tableSchema,
-                            new CoreOptions(tableSchema.options()),
-                            tableSchema.logicalPartitionType(),
-                            tableSchema.logicalBucketKeyType(),
-                            tableSchema.logicalRowType().notNull(),
-                            name(),
-                            catalogEnvironment);
+            synchronized (this) {
+                lazyStore =
+                        new AppendOnlyFileStore(
+                                fileIO(),
+                                schemaManager(),
+                                tableSchema,
+                                new CoreOptions(tableSchema.options()),
+                                tableSchema.logicalPartitionType(),
+                                tableSchema.logicalBucketKeyType(),
+                                tableSchema.logicalRowType().notNull(),
+                                name(),
+                                catalogEnvironment);
+            }
         }
         return lazyStore;
+    }
+
+    @Override
+    public void resetStore() {
+        synchronized (this) {
+            lazyStore = null;
+        }
     }
 
     @Override

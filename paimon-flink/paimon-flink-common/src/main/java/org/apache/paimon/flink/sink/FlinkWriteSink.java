@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.options.Options;
@@ -47,13 +48,19 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return context ->
-                new StoreCommitter(
-                        table,
-                        table.newCommit(context.commitUser())
-                                .withOverwrite(overwritePartition)
-                                .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
-                        context);
+        return context -> {
+            FileStoreTable storeTable =
+                    (FileStoreTable)
+                            table.withMetricRegistry(
+                                    new FlinkMetricRegistry(context.metricGroup()));
+            return new StoreCommitter(
+                    storeTable,
+                    storeTable
+                            .newCommit(context.commitUser())
+                            .withOverwrite(overwritePartition)
+                            .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
+                    context);
+        };
     }
 
     @Override

@@ -801,6 +801,12 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
+    public static final ConfigOption<Boolean> METRICS_FILE_IO_ENABLED =
+            key("metrics.file-io.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable MetricsFileIO metrics statistics.");
+
     public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")
                     .durationType()
@@ -2367,6 +2373,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public boolean isMetricsFileIOEnabled() {
+        return options.get(METRICS_FILE_IO_ENABLED);
     }
 
     public Duration streamingReadDelay() {

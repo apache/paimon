@@ -23,10 +23,13 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.metrics.IOMetrics;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
@@ -90,6 +93,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
+    @Nullable protected transient MetricsFileIO metricsFileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
@@ -104,6 +108,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
+        this.metricsFileIO = new MetricsFileIO(fileIO);
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
@@ -113,6 +118,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    public AbstractFileStoreTable withMetricRegistry(MetricRegistry registry) {
+        if (coreOptions().isMetricsFileIOEnabled()) {
+            if (metricsFileIO == null) {
+                metricsFileIO = new MetricsFileIO(fileIO);
+            }
+            String tableName =
+                    catalogEnvironment.identifier() != null
+                            ? catalogEnvironment.identifier().getTableName()
+                            : "unknown";
+            IOMetrics ioMetrics = new IOMetrics(registry, tableName);
+            this.metricsFileIO.withMetrics(ioMetrics);
+            resetStore();
+        }
+        return this;
     }
 
     public String currentBranch() {
@@ -373,9 +394,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         AbstractFileStoreTable copied =
                 newTableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment)
+                                fileIO(), path, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
-                                fileIO, path, newTableSchema, catalogEnvironment);
+                                fileIO(), path, newTableSchema, catalogEnvironment);
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
@@ -400,7 +421,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileIO fileIO() {
-        return fileIO;
+        return metricsFileIO == null ? fileIO : metricsFileIO;
     }
 
     @Override
@@ -450,7 +471,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
                 options.writeOnly() ? null : store().newTagCreationManager(this),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
-                new ConsumerManager(fileIO, path, snapshotManager().branch()),
+                new ConsumerManager(fileIO(), path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot());
@@ -458,7 +479,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public ConsumerManager consumerManager() {
-        return new ConsumerManager(fileIO, path, snapshotManager().branch());
+        return new ConsumerManager(fileIO(), path, snapshotManager().branch());
     }
 
     @Nullable
@@ -656,10 +677,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint
             if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-                fileIO.writeFile(
-                        snapshotManager().snapshotPath(taggedSnapshot.id()),
-                        fileIO.readFileUtf8(tagManager.tagPath(tagName)),
-                        false);
+                fileIO().writeFile(
+                                snapshotManager().snapshotPath(taggedSnapshot.id()),
+                                fileIO().readFileUtf8(tagManager.tagPath(tagName)),
+                                false);
                 snapshotManager.commitEarliestHint(taggedSnapshot.id());
             }
         } catch (IOException e) {
@@ -669,7 +690,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TagManager tagManager() {
-        return new TagManager(fileIO, path, currentBranch());
+        return new TagManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -679,7 +700,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             return new CatalogBranchManager(catalogEnvironment.catalogLoader(), identifier());
         }
         return new FileSystemBranchManager(
-                fileIO, path, snapshotManager(), tagManager(), schemaManager());
+                fileIO(), path, snapshotManager(), tagManager(), schemaManager());
     }
 
     @Override
@@ -708,7 +729,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 tagManager(),
-                fileIO,
+                fileIO(),
                 store().newSnapshotDeletion(),
                 store().newChangelogDeletion(),
                 store().newTagDeletion());

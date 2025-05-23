@@ -97,6 +97,8 @@ public interface FileStoreTable extends DataTable {
 
     FileStore<?> store();
 
+    default void resetStore() {}
+
     CatalogEnvironment catalogEnvironment();
 
     @Override
