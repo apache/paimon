@@ -18,6 +18,7 @@
 
 package org.apache.paimon.tag;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
@@ -35,29 +36,23 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A manager to expire tags by time. */
-public class TagTimeExpire {
+/** A strategy to expire tags by retain time. */
+public class TagTimeExpire extends TagExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagTimeExpire.class);
-
-    private final SnapshotManager snapshotManager;
-    private final TagManager tagManager;
-    private final TagDeletion tagDeletion;
-    private final List<TagCallback> callbacks;
 
     private LocalDateTime olderThanTime;
 
     private TagTimeExpire(
+            CoreOptions options,
             SnapshotManager snapshotManager,
             TagManager tagManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
-        this.snapshotManager = snapshotManager;
-        this.tagManager = tagManager;
-        this.tagDeletion = tagDeletion;
-        this.callbacks = callbacks;
+        super(options, snapshotManager, tagManager, tagDeletion, callbacks);
     }
 
+    @Override
     public List<String> expire() {
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
         List<String> expired = new ArrayList<>();
@@ -102,16 +97,17 @@ public class TagTimeExpire {
         return expired;
     }
 
-    public TagTimeExpire withOlderThanTime(LocalDateTime olderThanTime) {
+    @Override
+    public void withOlderThanTime(LocalDateTime olderThanTime) {
         this.olderThanTime = olderThanTime;
-        return this;
     }
 
     public static TagTimeExpire create(
+            CoreOptions options,
             SnapshotManager snapshotManager,
             TagManager tagManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
-        return new TagTimeExpire(snapshotManager, tagManager, tagDeletion, callbacks);
+        return new TagTimeExpire(options, snapshotManager, tagManager, tagDeletion, callbacks);
     }
 }

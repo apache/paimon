@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -46,12 +47,19 @@ public class TagBatchCreation {
     private final SnapshotManager snapshotManager;
     private final TagDeletion tagDeletion;
 
+    private final TagExpire tagExpire;
+    private final List<TagCallback> callbacks;
+
     public TagBatchCreation(FileStoreTable table) {
         this.table = table;
         this.snapshotManager = table.snapshotManager();
         this.tagManager = table.tagManager();
         this.tagDeletion = table.store().newTagDeletion();
         this.options = table.coreOptions();
+        this.callbacks = table.store().createTagCallbacks(table);
+        this.tagExpire =
+                TagExpire.createTagExpireStrategy(
+                        options, snapshotManager, tagManager, tagDeletion, callbacks);
     }
 
     public void createTag() {
@@ -92,40 +100,6 @@ public class TagBatchCreation {
             }
         }
         // Expire the tag
-        expireTag();
-    }
-
-    private void expireTag() {
-        Integer tagNumRetainedMax = options.tagNumRetainedMax();
-        if (tagNumRetainedMax != null) {
-            if (snapshotManager.latestSnapshot() == null) {
-                return;
-            }
-            long tagCount = tagManager.tagCount();
-
-            while (tagCount > tagNumRetainedMax) {
-                for (List<String> tagNames : tagManager.tags().values()) {
-                    if (tagCount - tagNames.size() > tagNumRetainedMax) {
-                        tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager);
-                        tagCount = tagCount - tagNames.size();
-                    } else {
-                        List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
-                        for (String toBeDeleted : sortedTagNames) {
-                            tagManager.deleteTag(
-                                    toBeDeleted,
-                                    tagDeletion,
-                                    snapshotManager,
-                                    table.store().createTagCallbacks(table));
-                            tagCount--;
-                            if (tagCount == tagNumRetainedMax) {
-                                break;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
+        tagExpire.expire();
     }
 }

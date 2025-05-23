@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.tag.TagTimeExpire;
+import org.apache.paimon.tag.TagExpire;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -73,19 +73,19 @@ public class ExpireTagsProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    TagTimeExpire tagTimeExpire =
+                    TagExpire tagExpire =
                             fileStoreTable
                                     .store()
                                     .newTagCreationManager(fileStoreTable)
-                                    .getTagTimeExpire();
+                                    .getTagExpire();
                     if (olderThanStr != null) {
                         LocalDateTime olderThanTime =
                                 DateTimeUtils.parseTimestampData(
                                                 olderThanStr, 3, TimeZone.getDefault())
                                         .toLocalDateTime();
-                        tagTimeExpire.withOlderThanTime(olderThanTime);
+                        tagExpire.withOlderThanTime(olderThanTime);
                     }
-                    List<String> expired = tagTimeExpire.expire();
+                    List<String> expired = tagExpire.expire();
                     return expired.isEmpty()
                             ? new InternalRow[] {
                                 newInternalRow(UTF8String.fromString("No expired tags."))

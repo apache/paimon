@@ -30,7 +30,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
   test("Paimon procedure: expire tags that reached its timeRetained") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING)
-                 |USING PAIMON
+                 |USING PAIMON TBLPROPERTIES ('file.format'='avro')
                  |""".stripMargin)
 
     val table = loadTable("T")
@@ -69,7 +69,7 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
   test("Paimon procedure: expire tags that createTime less than specified older_than") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING)
-                 |USING PAIMON
+                 |USING PAIMON TBLPROPERTIES ('file.format'='avro')
                  |""".stripMargin)
 
     val table = loadTable("T")
@@ -122,6 +122,125 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
     )
 
     checkAnswer(spark.sql("select tag_name from `T$tags`"), Row("tag-4") :: Nil)
+  }
+
+  test("Test tag expire strategy: TagHybridExpireStrategy") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id STRING, name STRING)
+         |USING PAIMON TBLPROPERTIES ('tag.expiration-strategy'='hybrid', 'file.format'='avro')
+         |""".stripMargin)
+
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager()
+
+    for (i <- 1 to 5) {
+      spark.sql(s"INSERT INTO T VALUES($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1', snapshot => 1)")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2', snapshot => 2, time_retained => '1s')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3', snapshot => 3, time_retained => '1s')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')")
+    checkAnswer(spark.sql("select count(tag_name) from `T$tags`"), Row(4) :: Nil)
+
+    Thread.sleep(1000)
+
+    // expire tag-2,tag-3 by retain time
+    checkAnswer(
+      spark.sql("CALL paimon.sys.expire_tags(table => 'test.T')"),
+      Row("tag-2") :: Row("tag-3") :: Nil)
+
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2', snapshot => 2, time_retained => '1s')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3', snapshot => 3, time_retained => '1s')")
+    checkAnswer(spark.sql("select count(tag_name) from `T$tags`"), Row(4) :: Nil)
+
+    Thread.sleep(1000)
+    withSparkSQLConf("spark.paimon.tag.num-retained-max" -> "1") {
+      // expire tag-1,tag-2,tag-3
+      // first expire tag-2,tag-3 by retain time, then expire tag-1 by retain number
+      checkAnswer(
+        spark.sql("CALL paimon.sys.expire_tags(table => 'test.T')"),
+        Row("tag-1") :: Row("tag-2") :: Row("tag-3") :: Nil)
+    }
+  }
+
+  test("Test tag expire strategy: TagTimeExpireStrategy") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id STRING, name STRING)
+         |USING PAIMON TBLPROPERTIES ('tag.expiration-strategy'='retain-time', 'file.format'='avro')
+         |""".stripMargin)
+
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager()
+
+    for (i <- 1 to 5) {
+      spark.sql(s"INSERT INTO T VALUES($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1', snapshot => 1)")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2', snapshot => 2, time_retained => '1s')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3', snapshot => 3, time_retained => '1s')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')")
+    checkAnswer(spark.sql("select count(tag_name) from `T$tags`"), Row(4) :: Nil)
+
+    Thread.sleep(1000)
+
+    withSparkSQLConf("spark.paimon.tag.num-retained-max" -> "1") {
+      // expire tag-2,tag-3
+      checkAnswer(
+        spark.sql("CALL paimon.sys.expire_tags(table => 'test.T')"),
+        Row("tag-2") :: Row("tag-3") :: Nil)
+
+      // retain-time strategy does not expire tag-1 which has no retention time
+      checkAnswer(spark.sql("select tag_name from `T$tags`"), Row("tag-1") :: Row("tag-4") :: Nil)
+    }
+  }
+
+  test("Test tag expire strategy: TagNumberExpireStrategy") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id STRING, name STRING)
+         |USING PAIMON TBLPROPERTIES ('tag.expiration-strategy'='retain-number', 'file.format'='avro')
+         |""".stripMargin)
+
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager()
+
+    for (i <- 1 to 5) {
+      spark.sql(s"INSERT INTO T VALUES($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-1', snapshot => 1)")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-2', snapshot => 2, time_retained => '1d')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-3', snapshot => 3, time_retained => '1d')")
+    spark.sql(
+      "CALL paimon.sys.create_tag(table => 'test.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')")
+    // check tag
+
+    Thread.sleep(1000)
+
+    withSparkSQLConf("spark.paimon.tag.num-retained-max" -> "2") {
+      // expire tag-1,tag-2, even if tag-2 has not reached the retention time
+      checkAnswer(
+        spark.sql("CALL paimon.sys.expire_tags(table => 'test.T')"),
+        Row("tag-1") :: Row("tag-2") :: Nil)
+    }
+
   }
 
   private def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {
