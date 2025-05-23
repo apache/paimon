@@ -58,6 +58,20 @@ CREATE TABLE schema_evolution_multiple (
 ALTER TABLE schema_evolution_multiple
     REPLICA IDENTITY FULL;
 
+CREATE TABLE composite_primary_key_1 (
+    pt INT,
+    _id INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE composite_primary_key_2 (
+    pt INT,
+    _id INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (_id)
+);
+
 CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),
