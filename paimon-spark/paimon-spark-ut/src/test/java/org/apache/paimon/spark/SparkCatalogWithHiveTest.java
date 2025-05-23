@@ -27,6 +27,8 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
+    private SparkSession.Builder sparkSessionBuilder;
 
     private static final int PORT = 9087;
 
@@ -50,6 +53,29 @@ public class SparkCatalogWithHiveTest {
         testHiveMetastore.start(PORT);
     }
 
+    @BeforeEach
+    public void beforeEach() {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        sparkSessionBuilder =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
+                                "thrift://localhost:" + PORT)
+                        .config(
+                                "spark.sql.catalog.spark_catalog.warehouse",
+                                warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+                        .master("local[2]");
+    }
+
     @AfterAll
     public static void closeMetastore() throws Exception {
         testHiveMetastore.stop();
@@ -57,28 +83,9 @@ public class SparkCatalogWithHiveTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private SparkSession.Builder createSessionBuilder() {
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        return SparkSession.builder()
-                .config("spark.sql.warehouse.dir", warehousePath.toString())
-                // with hive metastore
-                .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                .config(
-                        "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
-                .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
-                .config(
-                        "spark.sql.extensions",
-                        "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                .master("local[2]");
-    }
-
     @Test
     public void testCreateFormatTable() {
-        SparkSession spark = createSessionBuilder().getOrCreate();
+        SparkSession spark = sparkSessionBuilder.getOrCreate();
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
         spark.sql("USE spark_catalog.my_db1");
 
@@ -131,9 +138,10 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
+    @Order(1)
     public void testSpecifyHiveConfDirInGenericCatalog() {
         SparkSession spark =
-                createSessionBuilder()
+                sparkSessionBuilder
                         .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
                         .config(
                                 "spark.sql.catalog.spark_catalog",
@@ -149,7 +157,7 @@ public class SparkCatalogWithHiveTest {
 
     @Test
     public void testCreateExternalTable() {
-        SparkSession spark = createSessionBuilder().getOrCreate();
+        SparkSession spark = sparkSessionBuilder.getOrCreate();
         String warehousePath = spark.sparkContext().conf().get("spark.sql.warehouse.dir");
         spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
         spark.sql("USE spark_catalog.test_db");
