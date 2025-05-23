@@ -1039,6 +1039,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Use customized name when creating tags in Batch mode.</td>
         </tr>
         <tr>
+            <td><h5>tag.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">hybrid</td>
+            <td><p>Enum</p></td>
+            <td>The strategy determines how to expire tags.<br /><br />Possible values:<ul><li>"retain-time": Expire tags by retain time only.</li><li>"retain-number": Expire tags by retain number only.</li><li>"hybrid": Expire tags by retain time and retain number.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>tag.callback.#.param</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
