@@ -50,6 +50,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     private @Nullable Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter;
 
+    private @Nullable Long specifiedSnapshotId = null;
+
     private @Nullable RowType readType;
 
     private boolean dropStats = false;
@@ -122,6 +124,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withSnapshot(long snapshotId) {
+        this.specifiedSnapshotId = snapshotId;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withBucket(int bucket) {
         this.specifiedBucket = bucket;
         return this;
@@ -176,6 +184,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (dropStats) {
             scan.dropStats();
+        }
+        if (specifiedSnapshotId != null) {
+            scan.withSnapshotId(specifiedSnapshotId);
         }
         return scan;
     }

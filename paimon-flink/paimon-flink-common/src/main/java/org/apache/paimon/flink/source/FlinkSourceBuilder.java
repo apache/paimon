@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
@@ -28,6 +29,7 @@ import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
+import org.apache.paimon.flink.source.shardread.ShardStaticFileStoreSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -66,6 +68,7 @@ import java.util.Optional;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode.SHARD_READ;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
@@ -198,6 +201,22 @@ public class FlinkSourceBuilder {
                         outerProject()));
     }
 
+    private DataStream<RowData> buildShardStaticFileSource() {
+        Options options = Options.fromMap(table.options());
+        Optional<Snapshot> latestSnapshot = table.latestSnapshot();
+        checkState(latestSnapshot.isPresent(), "The table has no Snapshot now.");
+
+        return toDataStream(
+                new ShardStaticFileStoreSource(
+                        createReadBuilder(projectedRowType()),
+                        limit,
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                        dynamicPartitionFilteringInfo,
+                        outerProject(),
+                        latestSnapshot.get().id()));
+    }
+
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
                 new ContinuousFileStoreSource(
@@ -295,6 +314,11 @@ public class FlinkSourceBuilder {
         }
 
         if (sourceBounded) {
+            Options options = Options.fromMap(table.options());
+            if (SHARD_READ.equals(
+                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE))) {
+                return buildShardStaticFileSource();
+            }
             return buildStaticFileSource();
         }
         TableScanUtils.streamingReadingValidate(table);

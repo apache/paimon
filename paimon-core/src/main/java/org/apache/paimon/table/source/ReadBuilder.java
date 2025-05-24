@@ -139,6 +139,9 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
+    /** Specify the snapshotId to be read. */
+    ReadBuilder withSnapshot(long snapshotId);
+
     /** Delete stats in scan plan result. */
     ReadBuilder dropStats();
 
