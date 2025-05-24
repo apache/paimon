@@ -84,6 +84,10 @@ public class ContinuousFileSplitEnumerator
 
     private boolean stopTriggerScan = false;
 
+    private long handledSnapshotCount = 0;
+
+    private final int maxSnapshotCount;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -92,7 +96,8 @@ public class ContinuousFileSplitEnumerator
             StreamTableScan scan,
             BucketMode bucketMode,
             int splitMaxPerTask,
-            boolean shuffleBucketWithPartition) {
+            boolean shuffleBucketWithPartition,
+            int maxSnapshotCount) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -107,6 +112,7 @@ public class ContinuousFileSplitEnumerator
 
         this.consumerProgressCalculator =
                 new ConsumerProgressCalculator(context.currentParallelism());
+        this.maxSnapshotCount = maxSnapshotCount;
     }
 
     @VisibleForTesting
@@ -189,6 +195,7 @@ public class ContinuousFileSplitEnumerator
         consumerProgressCalculator
                 .notifyCheckpointComplete(checkpointId)
                 .ifPresent(scan::notifyCheckpointComplete);
+        handledSnapshotCount = 0;
     }
 
     // ------------------------------------------------------------------------
@@ -200,8 +207,22 @@ public class ContinuousFileSplitEnumerator
         if (splitAssigner.numberOfRemainingSplits() >= splitMaxNum) {
             return Optional.empty();
         }
+        if (maxSnapshotCount > 0 && handledSnapshotCount >= maxSnapshotCount) {
+            LOG.debug(
+                    "There is {} in-flight snapshot, pending to scan next snapshot.",
+                    handledSnapshotCount);
+            return Optional.empty();
+        }
+
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
+        if (nextSnapshotId != null && !plan.splits().isEmpty()) {
+            if (this.nextSnapshotId == null) {
+                handledSnapshotCount++;
+            } else if (!nextSnapshotId.equals(this.nextSnapshotId)) {
+                handledSnapshotCount++;
+            }
+        }
         return Optional.of(new PlanWithNextSnapshotId(plan, nextSnapshotId));
     }
 

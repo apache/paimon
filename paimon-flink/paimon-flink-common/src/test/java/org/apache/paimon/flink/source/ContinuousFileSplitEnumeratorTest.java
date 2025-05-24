@@ -802,6 +802,56 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(15 * 2);
     }
 
+    @Test
+    public void testEnumeratorSnapshotMax() throws Exception {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(2);
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
+                        .withMaxSnapshotCount(1)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        // splits 1
+        splits.add(createDataSplit(snapshot++, 0, Collections.emptyList()));
+        results.put(1L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+
+        // splits 2
+        splits = new ArrayList<>();
+        splits.add(createDataSplit(snapshot++, 0, Collections.emptyList()));
+        results.put(2L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // The snapshot 2 is pending to scan.
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+
+        // consumed splits 1
+        enumerator.handleSplitRequest(0, "test");
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
+        context.triggerAllActions();
+
+        // no new snapshot is scanned, because checkpoint is not completed.
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
+
+        enumerator.notifyCheckpointComplete(1);
+        context.triggerAllActions();
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+        Assertions.assertThat(enumerator.nextSnapshotId).isEqualTo(3);
+    }
+
     private void triggerCheckpointAndComplete(
             ContinuousFileSplitEnumerator enumerator, long checkpointId) throws Exception {
         enumerator.snapshotState(checkpointId);
@@ -850,6 +900,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
 
         private StreamTableScan scan;
         private BucketMode bucketMode = BucketMode.HASH_FIXED;
+        private int maxSnapshotCount = -1;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -877,9 +928,22 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
             return this;
         }
 
+        public Builder withMaxSnapshotCount(int maxSnapshotCount) {
+            this.maxSnapshotCount = maxSnapshotCount;
+            return this;
+        }
+
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode, 10, false);
+                    context,
+                    initialSplits,
+                    null,
+                    discoveryInterval,
+                    scan,
+                    bucketMode,
+                    10,
+                    false,
+                    maxSnapshotCount);
         }
     }
 
