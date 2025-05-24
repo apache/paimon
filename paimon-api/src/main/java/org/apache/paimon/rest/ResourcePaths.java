@@ -36,6 +36,7 @@ public class ResourcePaths {
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
+    protected static final String REPAIR = "repair";
     protected static final String FUNCTIONS = "functions";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -108,6 +109,17 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 ROLLBACK);
+    }
+
+    public String repairTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                REPAIR);
     }
 
     public String tableToken(String databaseName, String objectName) {
