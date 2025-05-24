@@ -1430,6 +1430,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Use customized name when creating tags in Batch mode.");
 
+    public static final ConfigOption<TagExpireStrategy> TAG_EXPIRATION_STRATEGY =
+            key("tag.expiration-strategy")
+                    .enumType(TagExpireStrategy.class)
+                    .defaultValue(TagExpireStrategy.HYBRID)
+                    .withDescription("The strategy determines how to expire tags.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -2545,6 +2551,10 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_BATCH_CUSTOMIZED_NAME);
     }
 
+    public TagExpireStrategy tagExpireStrategy() {
+        return options.get(TAG_EXPIRATION_STRATEGY);
+    }
+
     public Duration snapshotWatermarkIdleTimeout() {
         return options.get(SNAPSHOT_WATERMARK_IDLE_TIMEOUT);
     }
@@ -3295,6 +3305,33 @@ public class CoreOptions implements Serializable {
         }
 
         @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The tag expiration strategy. */
+    public enum TagExpireStrategy implements DescribedEnum {
+        RETAIN_TIME("retain-time", "Expire tags by retain time only"),
+
+        RETAIN_NUMBER("retain-number", "Expire tags by retain number only."),
+
+        HYBRID("hybrid", "Expire tags by retain time and retain number.");
+
+        private final String value;
+
+        private final String description;
+
+        TagExpireStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
         public String toString() {
             return value;
         }
