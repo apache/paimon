@@ -172,7 +172,11 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
 
         if (Decimal.isCompact(precision)) {
             // compact format
-            setLong(pos, value.toUnscaledLong());
+            if (value == null) {
+                setNullAt(pos);
+            } else {
+                setLong(pos, value.toUnscaledLong());
+            }
         } else {
             int fieldOffset = getFieldOffset(pos);
             int cursor = (int) (segments[0].getLong(fieldOffset) >>> 32);
@@ -202,7 +206,11 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
         assertIndexIsValid(pos);
 
         if (Timestamp.isCompact(precision)) {
-            setLong(pos, value.getMillisecond());
+            if (value == null) {
+                setNullAt(pos);
+            } else {
+                setLong(pos, value.getMillisecond());
+            }
         } else {
             int fieldOffset = getFieldOffset(pos);
             int cursor = (int) (segments[0].getLong(fieldOffset) >>> 32);

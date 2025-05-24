@@ -126,8 +126,11 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         assert value == null || (value.precision() == precision);
 
         if (Decimal.isCompact(precision)) {
-            assert value != null;
-            writeLong(pos, value.toUnscaledLong());
+            if (value == null) {
+                setNullBit(pos);
+            } else {
+                writeLong(pos, value.toUnscaledLong());
+            }
         } else {
             // grow the global buffer before writing data.
             ensureCapacity(16);
@@ -159,7 +162,11 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     @Override
     public void writeTimestamp(int pos, Timestamp value, int precision) {
         if (Timestamp.isCompact(precision)) {
-            writeLong(pos, value.getMillisecond());
+            if (value == null) {
+                setNullBit(pos);
+            } else {
+                writeLong(pos, value.getMillisecond());
+            }
         } else {
             // store the nanoOfMillisecond in fixed-length part as offset and nanoOfMillisecond
             ensureCapacity(8);
