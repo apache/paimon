@@ -269,6 +269,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ManifestCommittable committable,
             Map<String, String> properties,
             boolean checkAppendFiles) {
+        LOG.info(
+                "Ready to commit to table {}, number of commit messages: {}",
+                tableName,
+                committable.fileCommittables().size());
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit\n{}", committable.toString());
         }
@@ -368,6 +372,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            LOG.info("Finished commit to table {}, duration {} ms", tableName, commitDuration);
             if (this.commitMetrics != null) {
                 reportCommit(
                         appendTableFiles,
@@ -406,6 +411,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties) {
+        LOG.info(
+                "Ready to overwrite to table {}, number of commit messages: {}",
+                tableName,
+                committable.fileCommittables().size());
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Ready to overwrite partition {}\nManifestCommittable: {}\nProperties: {}",
@@ -513,6 +522,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            LOG.info("Finished overwrite to table {}, duration {} ms", tableName, commitDuration);
             if (this.commitMetrics != null) {
                 reportCommit(
                         appendTableFiles,
@@ -700,6 +710,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                     + f.indexType());
                                 }
                             });
+        }
+        if (!commitMessages.isEmpty()) {
+            List<String> msg = new ArrayList<>();
+            if (appendTableFiles.size() > 0) {
+                msg.add(appendTableFiles.size() + " append table files");
+            }
+            if (appendChangelog.size() > 0) {
+                msg.add(appendChangelog.size() + " append Changelogs");
+            }
+            if (compactTableFiles.size() > 0) {
+                msg.add(compactTableFiles.size() + " compact table files");
+            }
+            if (compactChangelog.size() > 0) {
+                msg.add(compactChangelog.size() + " compact Changelogs");
+            }
+            if (appendHashIndexFiles.size() > 0) {
+                msg.add(appendHashIndexFiles.size() + " append hash index files");
+            }
+            if (compactDvIndexFiles.size() > 0) {
+                msg.add(compactDvIndexFiles.size() + " compact dv index files");
+            }
+            LOG.info("Finished collecting changes, including: {}", String.join(", ", msg));
         }
     }
 
@@ -1013,13 +1045,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (commitSnapshotImpl(newSnapshot, deltaStatistics)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        String.format(
-                                "Successfully commit snapshot #%d by user %s "
-                                        + "with identifier %s and kind %s.",
-                                newSnapshotId, commitUser, identifier, commitKind.name()));
-            }
+            LOG.info(
+                    "Successfully commit snapshot {} to table {} by user {} "
+                            + "with identifier {} and kind {}.",
+                    newSnapshotId,
+                    tableName,
+                    commitUser,
+                    identifier,
+                    commitKind.name());
             commitCallbacks.forEach(callback -> callback.call(deltaFiles, newSnapshot));
             return new SuccessResult();
         }
