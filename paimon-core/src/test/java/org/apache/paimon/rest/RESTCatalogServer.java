@@ -67,11 +67,13 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
@@ -86,6 +88,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -109,6 +112,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -325,6 +329,14 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "snapshot".equals(resources[3]);
+                        boolean isListSnapshots =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isLoadSnapshot =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SNAPSHOTS.equals(resources[3]);
                         boolean isTableAuth =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -397,6 +409,10 @@ public class RESTCatalogServer {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
                             return snapshotHandle(identifier);
+                        } else if (isListSnapshots) {
+                            return listSnapshots(identifier);
+                        } else if (isLoadSnapshot) {
+                            return loadSnapshot(identifier, resources[4]);
                         } else if (isTableAuth) {
                             return authTable(identifier, restAuthParameter.data());
                         } else if (isCommitSnapshot) {
@@ -656,6 +672,50 @@ public class RESTCatalogServer {
         return new MockResponse()
                 .setResponseCode(200)
                 .setBody(RESTApi.toJson(getTableSnapshotResponse));
+    }
+
+    private MockResponse listSnapshots(Identifier identifier) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Iterator<Snapshot> snapshots = table.snapshotManager().snapshots();
+        List<Snapshot> snapshotList = new ArrayList<>();
+        while (snapshots.hasNext()) {
+            snapshotList.add(snapshots.next());
+        }
+        ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
+    private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = null;
+        try {
+            if (version.equals("EARLIEST")) {
+                snapshot = snapshotManager.earliestSnapshot();
+            } else if (version.equals("LATEST")) {
+                snapshot = snapshotManager.latestSnapshot();
+            } else {
+                try {
+                    long snapshotId = Long.parseLong(version);
+                    snapshot = snapshotManager.snapshot(snapshotId);
+                } catch (NumberFormatException e) {
+                    snapshot = table.tagManager().get(version).get().trimToSnapshot();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (snapshot == null) {
+            RESTResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                            identifier.getDatabaseName(),
+                            "No Snapshot",
+                            404);
+            return mockResponse(response, 404);
+        }
+        GetVersionSnapshotResponse response = new GetVersionSnapshotResponse(snapshot);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
     }
 
     private Optional<MockResponse> checkTablePartitioned(Identifier identifier) {

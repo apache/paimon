@@ -171,6 +171,19 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
+            throws TableNotExistException {
+        return wrapped.loadSnapshot(identifier, version);
+    }
+
+    @Override
+    public PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        return wrapped.listSnapshotsPaged(identifier, maxResults, pageToken);
+    }
+
+    @Override
     public void rollbackTo(Identifier identifier, Instant instant)
             throws Catalog.TableNotExistException {
         wrapped.rollbackTo(identifier, instant);
