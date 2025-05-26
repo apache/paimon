@@ -404,14 +404,14 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                 row => {
                   val bytes: Array[Byte] =
                     SerializationUtils.serializeBinaryRow(bootstrapSer.toBinaryRow(row))
-                  (Math.abs(keyPartProject(row).hashCode()), (KeyPartOrRow.KEY_PART, bytes))
+                  (keyPartProject(row).hashCode(), (KeyPartOrRow.KEY_PART, bytes))
                 }) ++ iter.map(
               r => {
                 val sparkRow =
                   new SparkRow(rowType, r, SparkRowUtils.getRowKind(r, rowKindColIdx))
                 val bytes: Array[Byte] =
                   SerializationUtils.serializeBinaryRow(rowSer.toBinaryRow(sparkRow))
-                (Math.abs(rowProject(sparkRow).hashCode()), (KeyPartOrRow.ROW, bytes))
+                (rowProject(sparkRow).hashCode(), (KeyPartOrRow.ROW, bytes))
               })
           }
       }
@@ -471,6 +471,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private case class ModPartitioner(partitions: Int) extends Partitioner {
     override def numPartitions: Int = partitions
-    override def getPartition(key: Any): Int = key.asInstanceOf[Int] % numPartitions
+    override def getPartition(key: Any): Int = Math.abs(key.asInstanceOf[Int] % numPartitions)
   }
 }
