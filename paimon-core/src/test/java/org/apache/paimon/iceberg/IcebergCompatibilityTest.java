@@ -25,11 +25,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -41,6 +44,7 @@ import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -48,6 +52,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -67,6 +73,8 @@ import org.apache.iceberg.data.Record;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.StructLikeSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -929,6 +937,140 @@ public class IcebergCompatibilityTest {
                 .refs();
     }
 
+    @Test
+    public void testSyncDVWithoutBase() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        // must set deletion-vectors.bitmap64 = true
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        customOptions);
+
+        // disable iceberg metadata storage
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.DISABLED.toString());
+        table = table.copy(options);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        // produce dv
+        write.compact(BinaryRow.EMPTY_ROW, 0, false);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        assertThat(
+                        table.store()
+                                .newIndexFileHandler()
+                                .scan(DeletionVectorsIndexFile.DELETION_VECTORS_INDEX)
+                                .size())
+                .isGreaterThan(0);
+        // enable iceberg metadata storage and commit changes to iceberg
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        table = table.copy(options);
+        write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit.commit(4, write.prepareCommit(false, 4));
+
+        validateIcebergResult(Collections.singletonList(new Object[] {1, 10}));
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSyncDVWithBase() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        // must set deletion-vectors.bitmap64 = true
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1));
+        write.write(GenericRow.of(2, 2));
+        write.write(GenericRow.of(3, 3));
+        commit.commit(1, write.prepareCommit(false, 1));
+        validateIcebergResult(
+                Arrays.asList(new Object[] {1, 1}, new Object[] {2, 2}, new Object[] {3, 3}));
+
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(4, 4));
+        // compact to generate dv index
+        write.compact(BinaryRow.EMPTY_ROW, 0, false);
+        commit.commit(2, write.prepareCommit(true, 2));
+        validateIcebergResult(
+                Arrays.asList(
+                        new Object[] {1, 11},
+                        new Object[] {2, 2},
+                        new Object[] {3, 3},
+                        new Object[] {4, 4}));
+
+        // level-0 file will not be added to iceberg
+        write.write(GenericRow.of(2, 22));
+        write.write(GenericRow.of(5, 5));
+        commit.commit(3, write.prepareCommit(false, 3));
+        validateIcebergResult(
+                Arrays.asList(
+                        new Object[] {1, 11},
+                        new Object[] {2, 2},
+                        new Object[] {3, 3},
+                        new Object[] {4, 4}));
+
+        // compact to generate dv index
+        write.compact(BinaryRow.EMPTY_ROW, 0, false);
+        commit.commit(4, write.prepareCommit(true, 4));
+        validateIcebergResult(
+                Arrays.asList(
+                        new Object[] {1, 11},
+                        new Object[] {2, 22},
+                        new Object[] {3, 3},
+                        new Object[] {4, 4},
+                        new Object[] {5, 5}));
+
+        write.close();
+        commit.close();
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------
@@ -1158,5 +1300,48 @@ public class IcebergCompatibilityTest {
         }
         result.close();
         return actual;
+    }
+
+    private void validateIcebergResult(List<Object[]> expected) throws Exception {
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+
+        Types.StructType type = icebergTable.schema().asStruct();
+
+        StructLikeSet actualSet = StructLikeSet.create(type);
+        StructLikeSet expectSet = StructLikeSet.create(type);
+
+        try (CloseableIterable<Record> reader = IcebergGenerics.read(icebergTable).build()) {
+            reader.forEach(actualSet::add);
+        }
+        expectSet.addAll(
+                expected.stream().map(r -> icebergRecord(type, r)).collect(Collectors.toList()));
+
+        assertThat(actualSet).isEqualTo(expectSet);
+    }
+
+    private org.apache.iceberg.data.GenericRecord icebergRecord(
+            Types.StructType type, Object[] row) {
+        org.apache.iceberg.data.GenericRecord record =
+                org.apache.iceberg.data.GenericRecord.create(type);
+        for (int i = 0; i < row.length; i++) {
+            record.set(i, row[i]);
+        }
+        return record;
+    }
+
+    private List<String> getPaimonResult(FileStoreTable paimonTable) throws Exception {
+        List<Split> splits = paimonTable.newReadBuilder().newScan().plan().splits();
+        TableRead read = paimonTable.newReadBuilder().newRead();
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(
+                    row ->
+                            result.add(
+                                    DataFormatTestUtil.toStringWithRowKind(
+                                            row, paimonTable.rowType())));
+            return result;
+        }
     }
 }

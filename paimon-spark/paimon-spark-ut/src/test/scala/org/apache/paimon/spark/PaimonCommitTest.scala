@@ -19,12 +19,11 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.manifest.{ManifestCommittable, ManifestEntry}
+import org.apache.paimon.manifest.{IndexManifestEntry, ManifestCommittable, ManifestEntry}
 import org.apache.paimon.table.sink.CommitCallback
 
 import org.junit.jupiter.api.Assertions
 
-import java.lang
 import java.util.List
 
 class PaimonCommitTest extends PaimonSparkTestBase {
@@ -64,7 +63,10 @@ object PaimonCommitTest {
 
 case class CustomCommitCallback(testId: String) extends CommitCallback {
 
-  override def call(committedEntries: List[ManifestEntry], snapshot: Snapshot): Unit = {
+  override def call(
+      committedEntries: List[ManifestEntry],
+      indexFiles: List[IndexManifestEntry],
+      snapshot: Snapshot): Unit = {
     PaimonCommitTest.id = testId
   }
 
