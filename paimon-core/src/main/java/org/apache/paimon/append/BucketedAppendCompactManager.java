@@ -104,6 +104,10 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             return;
         }
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Submit full compaction with these files {}", toCompact);
+        }
+
         taskFuture =
                 executor.submit(
                         new FullCompactTask(
@@ -130,6 +134,10 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         Optional<List<DataFileMeta>> picked = pickCompactBefore();
         if (picked.isPresent()) {
             compacting = picked.get();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Submit normal compaction with these files {}", compacting);
+            }
+
             taskFuture =
                     executor.submit(
                             new AutoCompactTask(
