@@ -36,4 +36,9 @@ public class Flink116IcebergITCase extends FlinkIcebergITCaseBase {
     public void testDeleteTags(String format) throws Exception {
         // Flink 1.16 does not support delete_tag procedure so we skip this test.
     }
+
+    @Override
+    public void testReplaceTags(String format) throws Exception {
+        // Flink 1.17 does not support replace_tag procedure so we skip this test.
+    }
 }
