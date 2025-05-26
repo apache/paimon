@@ -39,6 +39,6 @@ public class Flink116IcebergITCase extends FlinkIcebergITCaseBase {
 
     @Override
     public void testReplaceTags(String format) throws Exception {
-        // Flink 1.17 does not support replace_tag procedure so we skip this test.
+        // Flink 1.16 does not support replace_tag procedure so we skip this test.
     }
 }
