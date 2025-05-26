@@ -37,6 +37,8 @@ import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.LinkedHashSet;
@@ -53,6 +55,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * in the first few columns, and bucket number in the last column.
  */
 public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committable> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(StoreCompactOperator.class);
 
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
@@ -129,6 +133,15 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         int bucket = record.getInt(2);
         byte[] serializedFiles = record.getBinary(3);
         List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(serializedFiles);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Store compact operator received record, snapshotId {}, partition {}, bucket {}, files {}",
+                    snapshotId,
+                    partition,
+                    bucket,
+                    files);
+        }
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
