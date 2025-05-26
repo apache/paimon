@@ -352,7 +352,8 @@ public interface Catalog extends AutoCloseable {
     List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
-     * Get paged partitioned list of the table.
+     * Get paged partition list of the table, the partition list will be returned in descending
+     * order.
      *
      * @param identifier path of the table to list partitions
      * @param maxResults Optional parameter indicating the maximum number of results to include in
@@ -361,7 +362,7 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param partitionNamePattern A sql LIKE pattern (%) for partition names. All partitions will
-     *     be * returned if not set or empty. Currently, only prefix matching is supported.
+     *     be returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the partitions with provided page size(@param maxResults) in this table and
      *     next page token, or a list of all partitions of the table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
@@ -638,6 +639,46 @@ public interface Catalog extends AutoCloseable {
      */
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
+
+    /**
+     * Return the snapshot of table for given version. Version parsing order is:
+     *
+     * <ul>
+     *   <li>1. If it is 'EARLIEST', get the earliest snapshot.
+     *   <li>2. If it is 'LATEST', get the latest snapshot.
+     *   <li>3. If it is a number, get snapshot by snapshot id.
+     *   <li>4. Else try to get snapshot from Tag name.
+     * </ul>
+     *
+     * @param identifier Path of the table
+     * @param version version to snapshot
+     * @return The requested snapshot
+     * @throws Catalog.TableNotExistException if the target does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
+            throws Catalog.TableNotExistException;
+
+    /**
+     * Get paged snapshot list of the table, the snapshot list will be returned in descending order.
+     *
+     * @param identifier path of the table to list partitions
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the snapshots with provided page size(@param maxResults) in this table and
+     *     next page token, or a list of all snapshots of the table if the catalog does not {@link
+     *     #supportsListObjectsPaged()}.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException;
 
     /**
      * rollback table by the given {@link Identifier} and instant.

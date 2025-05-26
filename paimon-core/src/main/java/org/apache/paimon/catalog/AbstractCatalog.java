@@ -487,6 +487,17 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public Optional<Snapshot> loadSnapshot(Identifier identifier, String version) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void rollbackTo(Identifier identifier, Instant instant)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();

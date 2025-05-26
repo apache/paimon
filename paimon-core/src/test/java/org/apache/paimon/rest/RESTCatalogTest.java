@@ -82,6 +82,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
@@ -1262,7 +1263,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
-                                new ArrayList<PartitionStatistics>()));
+                                new ArrayList<>()));
 
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
@@ -1685,6 +1686,47 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         table.newReadBuilder().withProjection(new int[] {1}).newScan().plan();
     }
 
+    @Test
+    void testSnapshotMethods() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "snapshots_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        Table table = catalog.getTable(identifier);
+        batchWrite(table, singletonList(1));
+        batchWrite(table, singletonList(2));
+        batchWrite(table, singletonList(3));
+        batchWrite(table, singletonList(4));
+
+        assertThat(catalog.listSnapshotsPaged(identifier, null, null).getElements())
+                .containsExactlyInAnyOrder(
+                        table.snapshot(1), table.snapshot(2), table.snapshot(3), table.snapshot(4));
+
+        assertThat(catalog.loadSnapshot(identifier, "3"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(3));
+        assertThat(catalog.loadSnapshot(identifier, "EARLIEST"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(1));
+
+        table.createTag("MY_TAG", 2);
+        assertThat(catalog.loadSnapshot(identifier, "MY_TAG"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(2));
+
+        assertThat(catalog.loadSnapshot(identifier, "15")).isEmpty();
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
@@ -1778,8 +1820,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             long fileCount,
             long lastFileCreationTime);
 
-    protected void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
-        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+    protected void batchWrite(Table table, List<Integer> data) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         for (Integer i : data) {
             GenericRow record = GenericRow.of(i);
@@ -1792,8 +1834,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         commit.close();
     }
 
-    protected List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
-        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+    protected List<String> batchRead(Table table) throws IOException {
+        ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
