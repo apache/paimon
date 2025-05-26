@@ -623,6 +623,83 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                 .containsExactlyInAnyOrder(Row.of("tag1", "TAG", 1L));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet", "avro"})
+    public void testReplaceTags(String format) throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
+        tEnv.executeSql(
+                "CREATE CATALOG paimon WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                "CREATE TABLE paimon.`default`.T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v1 INT,\n"
+                        + "  v2 STRING,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'metadata.iceberg.storage' = 'hadoop-catalog',\n"
+                        // make sure all changes are visible in iceberg metadata
+                        + "  'full-compaction.delta-commits' = '1',\n"
+                        + "  'file.format' = '"
+                        + format
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(1, 10, 100, 'apple'), "
+                                + "(1, 11, 110, 'banana'), "
+                                + "(2, 20, 200, 'cat'), "
+                                + "(2, 21, 210, 'dog')")
+                .await();
+
+        tEnv.executeSql(
+                        "INSERT INTO paimon.`default`.T VALUES "
+                                + "(1, 10, 101, 'red'), "
+                                + "(1, 12, 121, 'green'), "
+                                + "(2, 20, 201, 'blue'), "
+                                + "(2, 22, 221, 'yellow')")
+                .await();
+
+        tEnv.executeSql(
+                "CREATE CATALOG iceberg WITH (\n"
+                        + "  'type' = 'iceberg',\n"
+                        + "  'catalog-type' = 'hadoop',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "/iceberg',\n"
+                        + "  'cache-enabled' = 'false'\n"
+                        + ")");
+
+        tEnv.executeSql("CALL paimon.sys.create_tag('default.T', 'tag1', 1)");
+
+        // Replace tag
+        tEnv.executeSql("CALL paimon.sys.replace_tag('default.T', 'tag1', 4, '1d')");
+
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT name, type, snapshot_id FROM iceberg.`default`.T$refs")))
+                .containsExactlyInAnyOrder(Row.of("tag1", "TAG", 4L));
+
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT v1, k, v2, pt FROM iceberg.`default`.T /*+ OPTIONS('tag'='tag1') */ ORDER BY pt, k")))
+                .containsExactly(
+                        Row.of(101, 10, "red", 1),
+                        Row.of(110, 11, "banana", 1),
+                        Row.of(121, 12, "green", 1),
+                        Row.of(201, 20, "blue", 2),
+                        Row.of(210, 21, "dog", 2),
+                        Row.of(221, 22, "yellow", 2));
+    }
+
     private List<Row> collect(TableResult result) throws Exception {
         List<Row> rows = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
