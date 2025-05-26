@@ -86,6 +86,28 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
       Row(0) :: Row(1) :: Row(2) :: Nil)
   }
 
+  test(s"Paimon dynamic bucket table: write with max buckets") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |  pk STRING,
+                 |  v STRING,
+                 |  pt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'pk, pt',
+                 |  'bucket' = '-1',
+                 |  'dynamic-bucket.max-buckets'='2'
+                 |)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    spark.sql(
+      "INSERT INTO T VALUES ('1', 'a', 'p'), ('2', 'b', 'p'), ('3', 'c', 'p'), ('4', 'd', 'p'), ('5', 'e', 'p'), ('6', 'e', 'p')")
+    spark.sql(
+      "INSERT INTO T VALUES ('11', 'a', 'p'), ('22', 'b', 'p'), ('33', 'c', 'p'), ('44', 'd', 'p'), ('55', 'e', 'p'), ('66', 'e', 'p')")
+
+    checkAnswer(spark.sql("SELECT DISTINCT bucket FROM `T$FILES`"), Seq(Row(0), Row(1)))
+  }
+
   test(s"Paimon cross partition table: write with partition change") {
     sql(s"""
            |CREATE TABLE T (

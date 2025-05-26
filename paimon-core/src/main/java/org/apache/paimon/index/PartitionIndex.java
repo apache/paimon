@@ -91,21 +91,16 @@ public class PartitionIndex {
             }
         }
 
-        if (-1 == maxBucketsNum || totalBucketSet.isEmpty() || maxBucketId < maxBucketsNum - 1) {
+        int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
+        if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
             // 3. create a new bucket
-            for (int i = 0; i < Short.MAX_VALUE; i++) {
+            for (int i = 0; i <= globalMaxBucketId; i++) {
                 if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
-                    // The new bucketId may still be larger than the upper bound
-                    if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {
-                        nonFullBucketInformation.put(i, 1L);
-                        totalBucketSet.add(i);
-                        totalBucketArray.add(i);
-                        hash2Bucket.put(hash, (short) i);
-                        return i;
-                    } else {
-                        // No need to enter the next iteration when upper bound exceeded
-                        break;
-                    }
+                    nonFullBucketInformation.put(i, 1L);
+                    totalBucketSet.add(i);
+                    totalBucketArray.add(i);
+                    hash2Bucket.put(hash, (short) i);
+                    return i;
                 }
             }
             if (-1 == maxBucketsNum) {
