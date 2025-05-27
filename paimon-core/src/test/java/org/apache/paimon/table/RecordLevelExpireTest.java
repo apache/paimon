@@ -25,6 +25,8 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
@@ -43,7 +45,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,6 +83,27 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         options.set(CoreOptions.RECORD_LEVEL_EXPIRE_TIME, Duration.ofSeconds(1));
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "col1");
         return options;
+    }
+
+    @Test
+    public void testConvertFieldToSecond() {
+        Function<InternalRow, Optional<Long>> fieldGetter =
+                RecordLevelExpire.createFieldGetterAndConvertToSecond(DataTypes.INT(), 0);
+        assertThat(fieldGetter.apply(GenericRow.of(1))).get().isEqualTo(1L);
+        assertThat(fieldGetter.apply(GenericRow.of(2147483647))).get().isEqualTo(2147483647L);
+        fieldGetter = RecordLevelExpire.createFieldGetterAndConvertToSecond(DataTypes.BIGINT(), 0);
+        assertThat(fieldGetter.apply(GenericRow.of(2147483649L))).get().isEqualTo(2147483649L);
+        assertThat(fieldGetter.apply(GenericRow.of(1_000_000_000_000L)))
+                .get()
+                .isEqualTo(1_000_000_000L);
+        assertThat(fieldGetter.apply(GenericRow.of(1_000_000_000_001L)))
+                .get()
+                .isEqualTo(1_000_000_000L);
+        fieldGetter =
+                RecordLevelExpire.createFieldGetterAndConvertToSecond(DataTypes.TIMESTAMP(6), 0);
+        assertThat(fieldGetter.apply(GenericRow.of(Timestamp.fromEpochMillis(2147483649L))))
+                .get()
+                .isEqualTo(2147483L);
     }
 
     @Test
