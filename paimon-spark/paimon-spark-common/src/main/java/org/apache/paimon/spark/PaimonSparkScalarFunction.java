@@ -72,7 +72,9 @@ public class PaimonSparkScalarFunction implements ScalarFunction<Object>, Serial
             }
             List<Object> parameters = new ArrayList<>();
             for (int i = 0; i < inputTypes().length; i++) {
-                Object obj = CatalogUtils.convert(inputTypes()[i], input.get(i, inputTypes()[i]));
+                Object obj =
+                        CatalogUtils.convertSparkJavaToPaimonJava(
+                                inputTypes()[i], input.get(i, inputTypes()[i]));
                 parameters.add(obj);
             }
             return this.compiledMethod.invoke(

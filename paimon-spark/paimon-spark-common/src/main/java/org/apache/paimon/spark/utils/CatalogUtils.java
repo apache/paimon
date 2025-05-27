@@ -185,7 +185,8 @@ public class CatalogUtils {
         }
     }
 
-    public static Object convert(org.apache.spark.sql.types.DataType sparkType, Object value) {
+    public static Object convertSparkJavaToPaimonJava(
+            org.apache.spark.sql.types.DataType sparkType, Object value) {
         if (value == null) {
             return null;
         }
@@ -217,7 +218,7 @@ public class CatalogUtils {
                 GenericArrayData genericArray = (GenericArrayData) value;
                 Object[] array = genericArray.array();
                 for (Object elem : array) {
-                    list.add(convert(arrayType.elementType(), elem));
+                    list.add(convertSparkJavaToPaimonJava(arrayType.elementType(), elem));
                 }
                 return list;
             } else {
@@ -234,8 +235,9 @@ public class CatalogUtils {
                                 arrayBasedMapData.valueArray().array());
                 Map<Object, Object> javaMap = new HashMap<>();
                 for (Map.Entry<Object, Object> entry : sparkMap.entrySet()) {
-                    Object key = convert(mapType.keyType(), entry.getKey());
-                    Object val = convert(mapType.valueType(), entry.getValue());
+                    Object key = convertSparkJavaToPaimonJava(mapType.keyType(), entry.getKey());
+                    Object val =
+                            convertSparkJavaToPaimonJava(mapType.valueType(), entry.getValue());
                     javaMap.put(key, val);
                 }
                 return javaMap;
