@@ -115,6 +115,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     private final FileStorePathFactory fileStorePathFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
+    private final int formatVersion;
 
     private final IndexFileHandler indexFileHandler;
 
@@ -146,6 +147,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         this.fileStorePathFactory = table.store().pathFactory();
         this.manifestFile = IcebergManifestFile.create(table, pathFactory);
         this.manifestList = IcebergManifestList.create(table, pathFactory);
+
+        this.formatVersion =
+                table.coreOptions().toConfiguration().get(IcebergOptions.FORMAT_VERSION);
+        Preconditions.checkArgument(
+                formatVersion == IcebergMetadata.FORMAT_VERSION_V2
+                        || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
+                "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is ",
+                formatVersion);
 
         this.indexFileHandler = table.store().newIndexFileHandler();
     }
@@ -262,6 +271,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
 
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
+
             if (table.fileIO().exists(baseMetadataPath)) {
                 createMetadataWithBase(
                         fileChangesCollector,
@@ -339,6 +349,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         String tableUuid = UUID.randomUUID().toString();
         IcebergMetadata metadata =
                 new IcebergMetadata(
+                        formatVersion,
                         tableUuid,
                         table.location().toString(),
                         snapshotId,
@@ -468,6 +479,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             throws IOException {
         long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+        if (!isSameFormatVersion(baseMetadata.formatVersion())) {
+            // we need to recreate iceberg metadata if format version changed
+            createMetadataWithoutBase(snapshot.id());
+            return;
+        }
+
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
 
@@ -571,6 +589,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         IcebergMetadata metadata =
                 new IcebergMetadata(
+                        baseMetadata.formatVersion(),
                         baseMetadata.tableUuid(),
                         baseMetadata.location(),
                         snapshotId,
@@ -978,6 +997,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             IcebergMetadata metadata =
                     new IcebergMetadata(
+                            baseMetadata.formatVersion(),
                             baseMetadata.tableUuid(),
                             baseMetadata.location(),
                             baseMetadata.currentSnapshotId(),
@@ -1035,6 +1055,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             IcebergMetadata metadata =
                     new IcebergMetadata(
+                            baseMetadata.formatVersion(),
                             baseMetadata.tableUuid(),
                             baseMetadata.location(),
                             baseMetadata.currentSnapshotId(),
@@ -1073,7 +1094,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // there may be dv indexes using bitmap32 in index files even if 'deletion-vectors.bitmap64'
         // is true, but analyzing all deletion vectors is very costly, so we do not check exactly
         // currently.
-        return options.deletionVectorsEnabled() && options.deletionVectorBitmap64();
+        return options.deletionVectorsEnabled()
+                && options.deletionVectorBitmap64()
+                && formatVersion == IcebergMetadata.FORMAT_VERSION_V3;
     }
 
     private List<IcebergManifestFileMeta> createDvManifestFileMetas(Snapshot snapshot) {
@@ -1136,6 +1159,24 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     // -------------------------------------------------------------------------------------
     // Utils
     // -------------------------------------------------------------------------------------
+
+    private boolean isSameFormatVersion(int baseFormatVersion) {
+        if (baseFormatVersion != formatVersion) {
+            Preconditions.checkArgument(
+                    formatVersion > baseFormatVersion,
+                    "format version in base metadata is {}, and it's bigger than the current format version {}, "
+                            + "this is not allowed!");
+
+            LOG.info(
+                    "format version in base metadata is {}, and it's different from the current format version {}. "
+                            + "New metadata will be recreated using format version {}.",
+                    baseFormatVersion,
+                    formatVersion,
+                    formatVersion);
+            return false;
+        }
+        return true;
+    }
 
     private class SchemaCache {
 

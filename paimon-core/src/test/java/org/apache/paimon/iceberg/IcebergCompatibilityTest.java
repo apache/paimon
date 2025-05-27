@@ -946,6 +946,8 @@ public class IcebergCompatibilityTest {
         customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         // must set deletion-vectors.bitmap64 = true
         customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        // must set metadata.iceberg.format-version = 3
+        customOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
 
         FileStoreTable table =
                 createPaimonTable(
@@ -1011,6 +1013,8 @@ public class IcebergCompatibilityTest {
         customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         // must set deletion-vectors.bitmap64 = true
         customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        // must set metadata.iceberg.format-version = 3
+        customOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
 
         FileStoreTable table =
                 createPaimonTable(
@@ -1066,6 +1070,55 @@ public class IcebergCompatibilityTest {
                         new Object[] {3, 3},
                         new Object[] {4, 4},
                         new Object[] {5, 5}));
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testUpgradeFormatVersion() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        // must set deletion-vectors.bitmap64 = true
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1));
+        write.write(GenericRow.of(2, 2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        validateIcebergResult(Arrays.asList(new Object[] {1, 1}, new Object[] {2, 2}));
+
+        // upgrade format version to 3
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        table = table.copy(options);
+        write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 3));
+        // compact to generate dv index
+        write.compact(BinaryRow.EMPTY_ROW, 0, false);
+        commit.commit(2, write.prepareCommit(true, 2));
+        validateIcebergResult(
+                Arrays.asList(new Object[] {1, 11}, new Object[] {2, 2}, new Object[] {3, 3}));
 
         write.close();
         commit.close();
