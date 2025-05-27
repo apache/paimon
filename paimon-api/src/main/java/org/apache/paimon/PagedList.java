@@ -18,9 +18,13 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.utils.StringUtils;
+
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Paged List which supports request data from page streaming.
@@ -47,5 +51,23 @@ public class PagedList<T> {
     @Nullable
     public String getNextPageToken() {
         return this.nextPageToken;
+    }
+
+    /** Util method to list all from paged api. */
+    public static <T> List<T> listAllFromPagedApi(Function<String, PagedList<T>> pagedApi) {
+        List<T> results = new ArrayList<>();
+        String pageToken = null;
+        do {
+            PagedList<T> response = pagedApi.apply(pageToken);
+            pageToken = response.getNextPageToken();
+            List<T> elements = response.getElements();
+            if (elements != null) {
+                results.addAll(elements);
+            }
+            if (pageToken == null || elements == null || elements.isEmpty()) {
+                break;
+            }
+        } while (StringUtils.isNotEmpty(pageToken));
+        return results;
     }
 }

@@ -1701,9 +1701,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 true);
         Table table = catalog.getTable(identifier);
         batchWrite(table, singletonList(1));
-        batchWrite(table, singletonList(2));
-        batchWrite(table, singletonList(3));
-        batchWrite(table, singletonList(4));
+        batchWrite(table, singletonList(1));
+        batchWrite(table, singletonList(1));
+        batchWrite(table, singletonList(1));
 
         assertThat(catalog.listSnapshotsPaged(identifier, null, null).getElements())
                 .containsExactlyInAnyOrder(
@@ -1713,10 +1713,16 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isPresent()
                 .get()
                 .isEqualTo(table.snapshot(3));
+
         assertThat(catalog.loadSnapshot(identifier, "EARLIEST"))
                 .isPresent()
                 .get()
                 .isEqualTo(table.snapshot(1));
+
+        assertThat(catalog.loadSnapshot(identifier, "LATEST"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(4));
 
         table.createTag("MY_TAG", 2);
         assertThat(catalog.loadSnapshot(identifier, "MY_TAG"))
@@ -1725,6 +1731,31 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isEqualTo(table.snapshot(2));
 
         assertThat(catalog.loadSnapshot(identifier, "15")).isEmpty();
+
+        // test more snapshots
+        for (int i = 0; i < 10; i++) {
+            batchWrite(table, singletonList(1));
+        }
+        RESTApi api = ((RESTCatalog) catalog).api();
+        List<Snapshot> snapshots =
+                PagedList.listAllFromPagedApi(
+                        token -> api.listSnapshotsPaged(identifier, null, token));
+        assertThat(snapshots)
+                .containsExactlyInAnyOrder(
+                        table.snapshot(1),
+                        table.snapshot(2),
+                        table.snapshot(3),
+                        table.snapshot(4),
+                        table.snapshot(5),
+                        table.snapshot(6),
+                        table.snapshot(7),
+                        table.snapshot(8),
+                        table.snapshot(9),
+                        table.snapshot(10),
+                        table.snapshot(11),
+                        table.snapshot(12),
+                        table.snapshot(13),
+                        table.snapshot(14));
     }
 
     private TestPagedResponse generateTestPagedResponse(
