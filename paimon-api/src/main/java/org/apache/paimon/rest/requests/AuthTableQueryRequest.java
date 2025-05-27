@@ -25,6 +25,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Request for auth table query. */
@@ -32,29 +34,19 @@ import java.util.List;
 public class AuthTableQueryRequest implements RESTRequest {
 
     private static final String FIELD_SELECT = "select";
-    private static final String FIELD_FILTER = "filter";
 
     @JsonProperty(FIELD_SELECT)
+    @Nullable
     private final List<String> select;
 
-    @JsonProperty(FIELD_FILTER)
-    private final List<String> filter;
-
     @JsonCreator
-    public AuthTableQueryRequest(
-            @JsonProperty(FIELD_SELECT) List<String> select,
-            @JsonProperty(FIELD_FILTER) List<String> filter) {
+    public AuthTableQueryRequest(@JsonProperty(FIELD_SELECT) @Nullable List<String> select) {
         this.select = select;
-        this.filter = filter;
     }
 
     @JsonGetter(FIELD_SELECT)
+    @Nullable
     public List<String> select() {
         return select;
-    }
-
-    @JsonGetter(FIELD_FILTER)
-    public List<String> filter() {
-        return filter;
     }
 }

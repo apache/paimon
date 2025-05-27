@@ -173,7 +173,10 @@ public class SchemaValidation {
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
-                    "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
+                    String.format(
+                            "Doesn't support streaming read the changes from overwrite when the primary keys are "
+                                    + "not defined. Please use %s to enable the streaming read overwrite commit for append table.",
+                            CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
         }
 
         if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {

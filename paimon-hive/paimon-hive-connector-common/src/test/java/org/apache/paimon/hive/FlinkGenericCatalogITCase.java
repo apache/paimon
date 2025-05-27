@@ -44,7 +44,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +56,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
+    protected String path;
     protected TableEnvironment tEnv;
 
     @HiveSQL(files = {})
@@ -70,6 +71,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
     @Before
     public void before() throws Exception {
+        path = folder.newFolder().toURI().toString();
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
@@ -81,7 +83,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
         FlinkGenericCatalog catalog =
                 FlinkGenericCatalogFactory.createCatalog(
                         this.getClass().getClassLoader(),
-                        new HashMap<>(),
+                        Collections.singletonMap("warehouse", path),
                         hiveCatalog.getName(),
                         hiveCatalog);
         catalog.open();
@@ -216,5 +218,16 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
         List<Row> result = sql("SELECT tag_name FROM paimon_t$tags");
         assertThat(result).contains(Row.of("tag_1"));
+    }
+
+    @Test
+    public void testCreateView() {
+        sql("CREATE TABLE paimon_t ( " + "f0 INT, " + "f1 INT " + ") WITH ('connector'='paimon')");
+        sql("INSERT INTO paimon_t VALUES (1, 1), (2, 2)");
+        assertThat(sql("SELECT * FROM paimon_t"))
+                .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        sql("CREATE VIEW paimon_t_view AS SELECT * FROM paimon_t WHERE f0=1");
+
+        assertThat(sql("SELECT * FROM paimon_t_view")).containsExactlyInAnyOrder(Row.of(1, 1));
     }
 }

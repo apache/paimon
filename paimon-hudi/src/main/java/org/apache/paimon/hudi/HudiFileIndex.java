@@ -43,6 +43,8 @@ import org.apache.hudi.storage.StoragePath;
 import org.apache.hudi.storage.StoragePathInfo;
 import org.apache.hudi.storage.hadoop.HoodieHadoopStorage;
 import org.apache.hudi.util.StreamerUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -64,6 +66,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @see org.apache.hudi.source.FileIndex
  */
 public class HudiFileIndex {
+    private static final Logger LOG = LoggerFactory.getLogger(HudiFileIndex.class);
 
     private final Path path;
     private final HoodieMetadataConfig metadataConfig;
@@ -78,14 +81,16 @@ public class HudiFileIndex {
 
     public HudiFileIndex(
             String location,
-            Map<String, String> conf,
+            Map<String, String> tableOptions,
+            Map<String, String> catalogOptions,
             RowType partitionType,
             @Nullable PartitionPredicate partitionPredicate) {
         this.path = new Path(location);
-        this.metadataConfig = metadataConfig(conf);
+        this.metadataConfig = metadataConfig(tableOptions);
         Configuration hadoopConf =
                 HadoopConfigurations.getHadoopConf(
-                        org.apache.flink.configuration.Configuration.fromMap(conf));
+                        org.apache.flink.configuration.Configuration.fromMap(catalogOptions));
+        catalogOptions.forEach(hadoopConf::set);
         this.partitionType = partitionType;
         this.partitionPredicate = partitionPredicate;
         this.engineContext = new HoodieFlinkEngineContext(hadoopConf);

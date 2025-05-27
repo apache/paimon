@@ -63,6 +63,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
     private final NextSnapshotFetcher nextSnapshotProvider;
+    private final boolean hasPk;
 
     private boolean initialized = false;
     private StartingScanner startingScanner;
@@ -82,7 +83,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
-            TableQueryAuth queryAuth) {
+            TableQueryAuth queryAuth,
+            boolean hasPk) {
         super(schema, options, snapshotReader, queryAuth);
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
@@ -92,6 +94,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
                         snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
+        this.hasPk = hasPk;
     }
 
     @Override
@@ -255,7 +258,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         if (supportStreamingReadOverwrite) {
             LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
             SnapshotReader.Plan overwritePlan =
-                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
+                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader, !hasPk);
             currentWatermark = overwritePlan.watermark();
             return overwritePlan;
         }

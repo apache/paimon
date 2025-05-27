@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Flink.
 
 ## Jars
 
-Paimon currently supports Flink 1.20, 1.19, 1.18, 1.17, 1.16, 1.15. We recommend the latest Flink version for a better experience.
+Paimon currently supports Flink 2.0, 1.20, 1.19, 1.18, 1.17, 1.16, 1.15. We recommend the latest Flink version for a better experience.
 
 Download the jar file with corresponding version.
 

@@ -79,6 +79,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -423,7 +424,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 table,
                 partitionExpireTime,
                 options.partitionExpireCheckInterval(),
-                PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()));
+                createPartitionExpireStrategy(
+                        options,
+                        partitionType(),
+                        catalogEnvironment.catalogLoader(),
+                        catalogEnvironment.identifier()));
     }
 
     @Override
@@ -450,17 +455,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public TagAutoManager newTagCreationManager() {
+    public TagAutoManager newTagCreationManager(FileStoreTable table) {
         return TagAutoManager.create(
                 options,
                 snapshotManager(),
                 newTagManager(),
                 newTagDeletion(),
-                createTagCallbacks());
+                createTagCallbacks(table));
     }
 
     @Override
-    public List<TagCallback> createTagCallbacks() {
+    public List<TagCallback> createTagCallbacks(FileStoreTable table) {
         List<TagCallback> callbacks = new ArrayList<>(CallbackUtils.loadTagCallbacks(options));
         String partitionField = options.tagToPartitionField();
 
@@ -472,6 +477,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
         if (options.tagCreateSuccessFile()) {
             callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));
+        }
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergCommitCallback(table, ""));
         }
         return callbacks;
     }

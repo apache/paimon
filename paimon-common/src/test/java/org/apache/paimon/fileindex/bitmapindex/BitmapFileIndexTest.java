@@ -111,6 +111,7 @@ public class BitmapFileIndexTest {
         testBooleanType(BitmapFileIndex.VERSION_1);
         testHighCardinality(BitmapFileIndex.VERSION_1, 1000000, 100000, null);
         testStringTypeWithReusing(BitmapFileIndex.VERSION_1);
+        testAllNull(BitmapFileIndex.VERSION_1);
     }
 
     @Test
@@ -120,6 +121,7 @@ public class BitmapFileIndexTest {
         testBooleanType(BitmapFileIndex.VERSION_2);
         testHighCardinality(BitmapFileIndex.VERSION_2, 1000000, 100000, null);
         testStringTypeWithReusing(BitmapFileIndex.VERSION_2);
+        testAllNull(BitmapFileIndex.VERSION_2);
     }
 
     private FileIndexReader createTestReaderOnWriter(
@@ -202,6 +204,25 @@ public class BitmapFileIndexTest {
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1));
         assert !reader.visitEqual(fieldRef, 2).remain();
+    }
+
+    private void testAllNull(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.INT());
+        Object[] dataColumn = {null, null, null};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.INT(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 1, 2));
+        assert !reader.visitIsNotNull(fieldRef).remain();
     }
 
     private void testBooleanType(int version) throws Exception {

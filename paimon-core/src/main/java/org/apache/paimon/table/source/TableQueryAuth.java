@@ -18,10 +18,12 @@
 
 package org.apache.paimon.table.source;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Table query auth. */
 public interface TableQueryAuth {
 
-    void auth(List<String> select, List<String> filter);
+    List<String> auth(@Nullable List<String> select);
 }

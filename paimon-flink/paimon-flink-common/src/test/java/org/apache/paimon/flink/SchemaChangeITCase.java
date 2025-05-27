@@ -700,6 +700,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `e` FLOAT");
 
         // Nullable -> not null
+        sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
         sql("ALTER TABLE T MODIFY c STRING NOT NULL");
         result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
@@ -1198,5 +1199,156 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                     Row.of(3000000000001L, "cherry", "C")
                                 },
                                 3));
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityPrimitiveType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT NOT NULL, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("INSERT INTO T VALUES (1, 100), (2, 200)");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200));
+
+        sql("ALTER TABLE T MODIFY v INT"); // convert non nullable to nullable
+        sql("INSERT INTO T VALUES " + "(3, CAST(NULL AS INT))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200), Row.of(3, null));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityRowType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v ROW(f1 INT, f2 INT NOT NULL) NOT NULL, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("INSERT INTO T VALUES (1, ROW(10, 100)), (2, ROW(20, 200))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, Row.of(10, 100)), Row.of(2, Row.of(20, 200)));
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"); // convert non nullable
+        // field in row to
+        // nullable
+        sql("INSERT INTO T VALUES " + "(3, ROW(30, CAST(NULL AS INT)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(10, 100)),
+                        Row.of(2, Row.of(20, 200)),
+                        Row.of(3, Row.of(30, null)));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT NOT NULL, f2 INT) NOT NULL)"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v.f1");
+
+        sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT))"); // convert entire row to nullable
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY (v ROW(f1 INT, f2 INT) NOT NULL)"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+    }
+
+    @ParameterizedTest()
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityArrayAndMapType(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL>, v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL>, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql(
+                "INSERT INTO T VALUES "
+                        + "(1, ARRAY[ROW(10, 100), ROW(20, 200)], MAP[11, ROW(10, 100), 12, ROW(11, 110)]), "
+                        + "(2, ARRAY[ROW(30, 300), ROW(40, 400)], MAP[21, ROW(20, 200), 22, ROW(21, 210)])");
+        Map<Integer, Row> map1 = new HashMap<>();
+        map1.put(11, Row.of(10, 100));
+        map1.put(12, Row.of(11, 110));
+
+        Map<Integer, Row> map2 = new HashMap<>();
+        map2.put(21, Row.of(20, 200));
+        map2.put(22, Row.of(21, 210));
+
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Row[] {Row.of(10, 100), Row.of(20, 200)}, map1),
+                        Row.of(2, new Row[] {Row.of(30, 300), Row.of(40, 400)}, map2));
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
+                .hasRootCauseMessage(
+                        "Cannot update column type from nullable to non nullable for v1. You can set table configuration option 'alter-column-null-to-not-null.disabled' = 'false' to allow converting null columns to not null");
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v1 ARRAY<ROW(f1 INT NOT NULL, f2 INT) NOT NULL>)"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v1.element.f1");
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT) NOT NULL> NOT NULL)"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v2");
+
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY (v2 MAP<INT, ROW(f1 INT, f2 INT NOT NULL) NOT NULL>)"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v2.value.f2");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testUpdateNullabilityByEnablingNullToNotNullOption(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+
+        // enable null to not null option
+        sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
+        sql("ALTER TABLE T MODIFY v INT NOT NULL");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+    }
+
+    @Test
+    public void testAlterColumnTypeWithNullabilityUpdate() {
+        sql("CREATE TABLE T ( k INT, v INT, PRIMARY KEY(k) NOT ENFORCED )");
+
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v BIGINT NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v");
+
+        // enable null to not null option
+        sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
+        sql("ALTER TABLE T MODIFY v BIGINT NOT NULL");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
     }
 }

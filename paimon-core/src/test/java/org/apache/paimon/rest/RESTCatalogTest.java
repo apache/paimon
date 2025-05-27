@@ -75,7 +75,6 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +82,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
@@ -1033,6 +1033,15 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testListPartitions() throws Exception {
+        innerTestListPartitions(true);
+    }
+
+    @Test
+    void testListPartitionsNonMetastore() throws Exception {
+        innerTestListPartitions(false);
+    }
+
+    private void innerTestListPartitions(boolean metastore) throws Exception {
         if (!supportPartitions()) {
             return;
         }
@@ -1046,14 +1055,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         singletonMap("dt", "20250103"));
         Map[] sortedSpecs =
                 partitionSpecs.stream()
-                        .sorted(Comparator.comparing(i -> i.get("dt")))
+                        .sorted((o1, o2) -> o2.get("dt").compareTo(o1.get("dt")))
                         .toArray(Map[]::new);
 
-        String databaseName = "partitions_db";
+        String databaseName = "partitions_db" + metastore;
         Identifier identifier = Identifier.create(databaseName, "table");
         Schema schema =
                 Schema.newBuilder()
-                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_PARTITIONED_TABLE.key(), Boolean.toString(metastore))
                         .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
                         .column("col", DataTypes.INT())
                         .column("dt", DataTypes.STRING())
@@ -1073,7 +1082,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         }
 
         List<Partition> restPartitions = restCatalog.listPartitions(identifier);
-        assertThat(restPartitions.stream().map(Partition::spec)).containsExactly(sortedSpecs);
+        if (metastore) {
+            assertThat(restPartitions.stream().map(Partition::spec)).containsExactly(sortedSpecs);
+        } else {
+            assertThat(restPartitions.stream().map(Partition::spec))
+                    .containsExactlyInAnyOrder(sortedSpecs);
+        }
     }
 
     @Test
@@ -1123,34 +1137,31 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 catalog.listPartitionsPaged(identifier, null, null, null);
         Map[] sortedSpecs =
                 partitionSpecs.stream()
-                        .sorted(Comparator.comparing(i -> i.get("dt")))
+                        .sorted((o1, o2) -> o2.get("dt").compareTo(o1.get("dt")))
                         .toArray(Map[]::new);
         assertPagedPartitions(pagedPartitions, partitionSpecs.size(), sortedSpecs);
 
         int maxResults = 2;
         pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
-        assertPagedPartitions(
-                pagedPartitions, maxResults, partitionSpecs.get(2), partitionSpecs.get(0));
-        assertEquals("dt=20250101", pagedPartitions.getNextPageToken());
+        assertPagedPartitions(pagedPartitions, maxResults, sortedSpecs[0], sortedSpecs[1]);
+        assertEquals(sortedSpecs[1].toString(), "{" + pagedPartitions.getNextPageToken() + "}");
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
                         identifier, maxResults, pagedPartitions.getNextPageToken(), null);
-        assertPagedPartitions(
-                pagedPartitions, maxResults, partitionSpecs.get(1), partitionSpecs.get(5));
-        assertEquals("dt=20250103", pagedPartitions.getNextPageToken());
+        assertPagedPartitions(pagedPartitions, maxResults, sortedSpecs[2], sortedSpecs[3]);
+        assertEquals(sortedSpecs[3].toString(), "{" + pagedPartitions.getNextPageToken() + "}");
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
                         identifier, maxResults, pagedPartitions.getNextPageToken(), null);
-        assertPagedPartitions(
-                pagedPartitions, maxResults, partitionSpecs.get(4), partitionSpecs.get(6));
-        assertEquals("dt=2025010_test", pagedPartitions.getNextPageToken());
+        assertPagedPartitions(pagedPartitions, maxResults, sortedSpecs[4], sortedSpecs[5]);
+        assertEquals(sortedSpecs[5].toString(), "{" + pagedPartitions.getNextPageToken() + "}");
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
                         identifier, maxResults, pagedPartitions.getNextPageToken(), null);
-        assertPagedPartitions(pagedPartitions, 1, partitionSpecs.get(3));
+        assertPagedPartitions(pagedPartitions, 1, sortedSpecs[6]);
         assertNull(pagedPartitions.getNextPageToken());
 
         maxResults = 8;
@@ -1168,11 +1179,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertPagedPartitions(
                 pagedPartitions,
                 5,
-                partitionSpecs.get(0),
-                partitionSpecs.get(1),
-                partitionSpecs.get(5),
+                partitionSpecs.get(6),
                 partitionSpecs.get(4),
-                partitionSpecs.get(6));
+                partitionSpecs.get(5),
+                partitionSpecs.get(1),
+                partitionSpecs.get(0));
         assertNull(pagedPartitions.getNextPageToken());
 
         pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, "dt=2025010_%");
@@ -1252,7 +1263,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
-                                new ArrayList<PartitionStatistics>()));
+                                new ArrayList<>()));
 
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
@@ -1675,6 +1686,47 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         table.newReadBuilder().withProjection(new int[] {1}).newScan().plan();
     }
 
+    @Test
+    void testSnapshotMethods() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "snapshots_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        Table table = catalog.getTable(identifier);
+        batchWrite(table, singletonList(1));
+        batchWrite(table, singletonList(2));
+        batchWrite(table, singletonList(3));
+        batchWrite(table, singletonList(4));
+
+        assertThat(catalog.listSnapshotsPaged(identifier, null, null).getElements())
+                .containsExactlyInAnyOrder(
+                        table.snapshot(1), table.snapshot(2), table.snapshot(3), table.snapshot(4));
+
+        assertThat(catalog.loadSnapshot(identifier, "3"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(3));
+        assertThat(catalog.loadSnapshot(identifier, "EARLIEST"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(1));
+
+        table.createTag("MY_TAG", 2);
+        assertThat(catalog.loadSnapshot(identifier, "MY_TAG"))
+                .isPresent()
+                .get()
+                .isEqualTo(table.snapshot(2));
+
+        assertThat(catalog.loadSnapshot(identifier, "15")).isEmpty();
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
@@ -1707,7 +1759,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Override
     protected boolean supportPartitions() {
-        // TODO support this
         return true;
     }
 
@@ -1769,8 +1820,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             long fileCount,
             long lastFileCreationTime);
 
-    protected void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
-        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+    protected void batchWrite(Table table, List<Integer> data) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         for (Integer i : data) {
             GenericRow record = GenericRow.of(i);
@@ -1783,8 +1834,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         commit.close();
     }
 
-    protected List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
-        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+    protected List<String> batchRead(Table table) throws IOException {
+        ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);

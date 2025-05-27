@@ -58,6 +58,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -66,11 +67,13 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
@@ -85,6 +88,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -106,7 +110,9 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -323,6 +329,14 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "snapshot".equals(resources[3]);
+                        boolean isListSnapshots =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isLoadSnapshot =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SNAPSHOTS.equals(resources[3]);
                         boolean isTableAuth =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -395,6 +409,10 @@ public class RESTCatalogServer {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
                             return snapshotHandle(identifier);
+                        } else if (isListSnapshots) {
+                            return listSnapshots(identifier);
+                        } else if (isLoadSnapshot) {
+                            return loadSnapshot(identifier, resources[4]);
                         } else if (isTableAuth) {
                             return authTable(identifier, restAuthParameter.data());
                         } else if (isCommitSnapshot) {
@@ -656,6 +674,50 @@ public class RESTCatalogServer {
                 .setBody(RESTApi.toJson(getTableSnapshotResponse));
     }
 
+    private MockResponse listSnapshots(Identifier identifier) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Iterator<Snapshot> snapshots = table.snapshotManager().snapshots();
+        List<Snapshot> snapshotList = new ArrayList<>();
+        while (snapshots.hasNext()) {
+            snapshotList.add(snapshots.next());
+        }
+        ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
+    private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = null;
+        try {
+            if (version.equals("EARLIEST")) {
+                snapshot = snapshotManager.earliestSnapshot();
+            } else if (version.equals("LATEST")) {
+                snapshot = snapshotManager.latestSnapshot();
+            } else {
+                try {
+                    long snapshotId = Long.parseLong(version);
+                    snapshot = snapshotManager.snapshot(snapshotId);
+                } catch (NumberFormatException e) {
+                    snapshot = table.tagManager().get(version).get().trimToSnapshot();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (snapshot == null) {
+            RESTResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                            identifier.getDatabaseName(),
+                            "No Snapshot",
+                            404);
+            return mockResponse(response, 404);
+        }
+        GetVersionSnapshotResponse response = new GetVersionSnapshotResponse(snapshot);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
     private Optional<MockResponse> checkTablePartitioned(Identifier identifier) {
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
@@ -677,21 +739,26 @@ public class RESTCatalogServer {
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
         }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        if (metadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
         List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
         if (columnAuth != null) {
-            requestBody
-                    .select()
-                    .forEach(
-                            column -> {
-                                if (!columnAuth.contains(column)) {
-                                    throw new Catalog.TableNoPermissionException(identifier);
-                                }
-                            });
+            List<String> select = requestBody.select();
+            if (select == null) {
+                select = metadata.schema().fieldNames();
+            }
+            select.forEach(
+                    column -> {
+                        if (!columnAuth.contains(column)) {
+                            throw new Catalog.TableNoPermissionException(identifier);
+                        }
+                    });
         }
-        return new MockResponse().setResponseCode(200);
+        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        return mockResponse(response, 200);
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
@@ -979,13 +1046,22 @@ public class RESTCatalogServer {
     }
 
     private <T> PagedList<T> buildPagedEntities(List<T> names, int maxResults, String pageToken) {
-        List<T> sortedNames = names.stream().sorted(this::compareTo).collect(Collectors.toList());
+        return buildPagedEntities(names, maxResults, pageToken, false);
+    }
+
+    private <T> PagedList<T> buildPagedEntities(
+            List<T> names, int maxResults, String pageToken, boolean desc) {
+        Comparator<Object> comparator = this::compareTo;
+        if (desc) {
+            comparator = comparator.reversed();
+        }
+        List<T> sortedNames = names.stream().sorted(comparator).collect(Collectors.toList());
         List<T> pagedNames = new ArrayList<>();
         for (T sortedName : sortedNames) {
             if (pagedNames.size() < maxResults) {
                 if (pageToken == null) {
                     pagedNames.add(sortedName);
-                } else if (this.compareTo(sortedName, pageToken) > 0) {
+                } else if (comparator.compare(sortedName, pageToken) > 0) {
                     pagedNames.add(sortedName);
                 }
             } else {
@@ -1452,7 +1528,7 @@ public class RESTCatalogServer {
             String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
             PagedList<Partition> pagedPartitions =
-                    buildPagedEntities(partitions, maxResults, pageToken);
+                    buildPagedEntities(partitions, maxResults, pageToken, true);
             response =
                     new ListPartitionsResponse(
                             pagedPartitions.getElements(), pagedPartitions.getNextPageToken());

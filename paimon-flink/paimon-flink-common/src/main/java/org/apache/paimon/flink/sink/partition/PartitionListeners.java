@@ -39,14 +39,14 @@ public class PartitionListeners implements Closeable {
 
     public void notifyCommittable(List<ManifestCommittable> committables) {
         for (PartitionListener trigger : listeners) {
-            trigger.notifyCommittable(committables, false);
+            trigger.notifyCommittable(committables, true);
         }
     }
 
     public void notifyCommittable(
-            List<ManifestCommittable> committables, boolean recoveryFromState) {
+            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
         for (PartitionListener trigger : listeners) {
-            trigger.notifyCommittable(committables, recoveryFromState);
+            trigger.notifyCommittable(committables, partitionMarkDoneRecoverFromState);
         }
     }
 

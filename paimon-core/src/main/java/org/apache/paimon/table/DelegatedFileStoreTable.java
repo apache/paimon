@@ -49,6 +49,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -292,8 +294,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
-        return wrapped.newWrite(commitUser, manifestFilter);
+    public TableWriteImpl<?> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
+        return wrapped.newWrite(commitUser, manifestFilter, writeId);
     }
 
     @Override

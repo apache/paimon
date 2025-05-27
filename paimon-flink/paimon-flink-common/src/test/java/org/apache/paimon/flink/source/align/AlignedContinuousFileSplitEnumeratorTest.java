@@ -253,7 +253,8 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
                     bucketMode,
                     timeout,
                     10,
-                    false);
+                    false,
+                    -1);
         }
     }
 }

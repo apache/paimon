@@ -135,6 +135,7 @@ public class HiveCloneUtils {
                 client.getTable(identifier.getDatabaseName(), identifier.getTableName());
         return HiveCloneExtractor.getExtractor(sourceTable)
                 .extractFiles(
+                        hiveCatalog.options(),
                         hiveCatalog.getHmsClient(),
                         sourceTable,
                         hiveCatalog.fileIO(),

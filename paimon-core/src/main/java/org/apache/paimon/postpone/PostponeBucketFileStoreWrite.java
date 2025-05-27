@@ -66,22 +66,28 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            String tableName) {
+            String tableName,
+            @Nullable Integer writeId) {
         super(snapshotManager, scan, null, null, tableName, options, partitionType);
 
         Options newOptions = new Options(options.toMap());
         // use avro for postpone bucket
         newOptions.set(CoreOptions.FILE_FORMAT, "avro");
         newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
-        // each writer should have its unique prefix, so files from the same writer can be consumed
-        // by the same compaction reader to keep the input order
+        // Each writer should have its unique prefix, so files from the same writer can be consumed
+        // by the same compaction reader to keep the input order.
+        // Also note that, for Paimon CDC, this object might be created multiple times in the same
+        // job, however the object will always stay in the same thread, so we use hash of thread
+        // name as the identifier.
         newOptions.set(
                 CoreOptions.DATA_FILE_PREFIX,
                 String.format(
                         "%s-u-%s-s-%d-w-",
                         options.dataFilePrefix(),
                         commitUser,
-                        ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)));
+                        writeId == null
+                                ? ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)
+                                : writeId));
         this.options = new CoreOptions(newOptions);
 
         FileFormat fileFormat = fileFormat(this.options);
@@ -108,6 +114,12 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
     }
 
     @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        // see comments in constructor
+        super.withIgnorePreviousFiles(true);
+    }
+
+    @Override
     protected PostponeBucketWriter createWriter(
             BinaryRow partition,
             int bucket,
@@ -117,9 +129,12 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
+        Preconditions.checkArgument(
+                restoreFiles.isEmpty(),
+                "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(writerFactory);
+        return new PostponeBucketWriter(writerFactory, restoreIncrement);
     }
 
     @Override

@@ -58,20 +58,21 @@ class PartitionMarkDoneTest extends TableTestBase {
 
     @Test
     public void testTriggerByCompaction() throws Exception {
-        innerTest(true, false);
+        innerTest(true, true);
     }
 
     @Test
     public void testNotTriggerByCompaction() throws Exception {
-        innerTest(false, false);
-    }
-
-    @Test
-    public void testTriggerWhenRecoveryFromState() throws Exception {
         innerTest(false, true);
     }
 
-    private void innerTest(boolean deletionVectors, boolean recoveryFromState) throws Exception {
+    @Test
+    public void testNotTriggerWhenRecoveryFromState() throws Exception {
+        innerTest(false, false);
+    }
+
+    private void innerTest(boolean deletionVectors, boolean partitionMarkDoneRecoverFromState)
+            throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -99,26 +100,29 @@ class PartitionMarkDoneTest extends TableTestBase {
                                 table)
                         .get();
 
-        if (recoveryFromState) {
-            notifyCommits(markDone, false, true);
+        if (!partitionMarkDoneRecoverFromState) {
+            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
             assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
+            return;
         }
 
-        notifyCommits(markDone, true);
+        notifyCommits(markDone, true, partitionMarkDoneRecoverFromState);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
 
         if (!deletionVectors) {
-            notifyCommits(markDone, false);
+            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
             assertThat(table.fileIO().exists(successFile)).isEqualTo(true);
         }
     }
 
     public static void notifyCommits(PartitionMarkDone markDone, boolean isCompact) {
-        notifyCommits(markDone, isCompact, false);
+        notifyCommits(markDone, isCompact, true);
     }
 
     private static void notifyCommits(
-            PartitionMarkDone markDone, boolean isCompact, boolean recoveryFromState) {
+            PartitionMarkDone markDone,
+            boolean isCompact,
+            boolean partitionMarkDoneRecoverFromState) {
         ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
         DataFileMeta file = DataFileTestUtils.newFile();
         CommitMessageImpl compactMessage;
@@ -142,7 +146,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                             new IndexIncrement(emptyList()));
         }
         committable.addFileCommittable(compactMessage);
-        markDone.notifyCommittable(singletonList(committable), recoveryFromState);
+        markDone.notifyCommittable(singletonList(committable), partitionMarkDoneRecoverFromState);
     }
 
     public static class MockOperatorStateStore implements OperatorStateStore {

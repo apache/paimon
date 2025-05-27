@@ -754,6 +754,13 @@ public class CoreOptions implements Serializable {
                                     + "It is independent of snapshots, but it is imprecise filtering (depending on whether "
                                     + "or not compaction occurs).");
 
+    public static final ConfigOption<Long> SCAN_CREATION_TIME_MILLIS =
+            key("scan.creation-time-millis")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional timestamp used in case of \"from-creation-timestamp\" scan mode.");
+
     public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
             key("scan.snapshot-id")
                     .longType()
@@ -851,6 +858,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to read the changes from overwrite in streaming mode. Cannot be set to true when "
                                     + "changelog producer is full-compaction or lookup because it will read duplicated changes.");
+
+    public static final ConfigOption<Boolean> STREAMING_READ_APPEND_OVERWRITE =
+            key("streaming-read-append-overwrite")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read the delta from append table's overwrite commit in streaming mode.");
 
     public static final ConfigOption<Boolean> DYNAMIC_PARTITION_OVERWRITE =
             key("dynamic-partition-overwrite")
@@ -1484,7 +1498,8 @@ public class CoreOptions implements Serializable {
             key("commit.force-create-snapshot")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to force create snapshot on commit.");
+                    .withDescription(
+                            "In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.");
 
     public static final ConfigOption<Boolean> DELETION_VECTORS_ENABLED =
             key("deletion-vectors.enabled")
@@ -1712,6 +1727,14 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The serialized refresh handler of materialized table.");
+
+    public static final ConfigOption<Boolean> DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL =
+            ConfigOptions.key("alter-column-null-to-not-null.disabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, it disables altering column type from null to not null. Default is true. "
+                                    + "Users can disable this option to explicitly convert null column type to not null.");
 
     private final Options options;
 
@@ -2224,6 +2247,10 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
     }
 
+    public boolean disableNullToNotNull() {
+        return options.get(DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL);
+    }
+
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
@@ -2263,6 +2290,8 @@ public class CoreOptions implements Serializable {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
                 return StartupMode.FROM_FILE_CREATION_TIME;
+            } else if (options.getOptional(SCAN_CREATION_TIME_MILLIS).isPresent()) {
+                return StartupMode.FROM_CREATION_TIMESTAMP;
             } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()
                     || options.getOptional(INCREMENTAL_BETWEEN_TIMESTAMP).isPresent()) {
                 return StartupMode.INCREMENTAL;
@@ -2290,6 +2319,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanFileCreationTimeMills() {
         return options.get(SCAN_FILE_CREATION_TIME_MILLIS);
+    }
+
+    public Long scanCreationTimeMills() {
+        return options.get(SCAN_CREATION_TIME_MILLIS);
     }
 
     public Long scanBoundedWatermark() {
@@ -2372,6 +2405,10 @@ public class CoreOptions implements Serializable {
 
     public boolean streamingReadOverwrite() {
         return options.get(STREAMING_READ_OVERWRITE);
+    }
+
+    public boolean streamingReadAppendOverwrite() {
+        return options.get(STREAMING_READ_APPEND_OVERWRITE);
     }
 
     public boolean dynamicPartitionOverwrite() {
@@ -2736,9 +2773,16 @@ public class CoreOptions implements Serializable {
                         + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
                         + "but does not read new changes."),
 
+        FROM_CREATION_TIMESTAMP(
+                "from-creation-timestamp",
+                "For streaming sources and batch sources, "
+                        + "If timestamp specified by \"scan.creation-time-millis\" is during in the range of earliest snapshot and latest snapshot: "
+                        + "mode is from-snapshot which snapshot is equal or later the timestamp. "
+                        + "If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time."),
+
         FROM_FILE_CREATION_TIME(
                 "from-file-creation-time",
-                "For streaming and batch sources, produces a snapshot and filters the data files by creation time. "
+                "For streaming and batch sources, consumes a snapshot and filters the data files by creation time. "
                         + "For streaming sources, upon first startup, and continue to read the latest changes."),
 
         FROM_SNAPSHOT(
@@ -3237,7 +3281,9 @@ public class CoreOptions implements Serializable {
 
         UPDATE_TIME(
                 "update-time",
-                "This strategy compares the last update time of the partition with the current time.");
+                "This strategy compares the last update time of the partition with the current time."),
+
+        CUSTOM("custom", "This strategy use custom class to expire partitions.");
 
         private final String value;
 

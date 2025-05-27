@@ -1013,6 +1013,13 @@ public abstract class CatalogTestBase {
 
         catalog.alterTable(
                 identifier,
+                Lists.newArrayList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")),
+                false);
+
+        catalog.alterTable(
+                identifier,
                 Lists.newArrayList(SchemaChange.updateColumnNullability("col1", false)),
                 false);
 

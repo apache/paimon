@@ -33,6 +33,8 @@ import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -54,6 +56,7 @@ import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
 /** A {@link HiveCloneExtractor} for hive tables. */
 public class HiveTableCloneExtractor implements HiveCloneExtractor {
 
+    private static final Logger LOG = LoggerFactory.getLogger(HiveTableCloneExtractor.class);
     public static final HiveTableCloneExtractor INSTANCE = new HiveTableCloneExtractor();
 
     @Override
@@ -70,6 +73,7 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
 
     @Override
     public List<HivePartitionFiles> extractFiles(
+            Map<String, String> catalogOptions,
             IMetaStoreClient client,
             Table table,
             FileIO fileIO,

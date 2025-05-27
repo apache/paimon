@@ -26,4 +26,14 @@ public class Flink116IcebergITCase extends FlinkIcebergITCaseBase {
         // Flink 1.16 (or maybe Calcite?) will mistakenly cast the result to VARCHAR(5),
         // so we skip this test in Flink 1.16.
     }
+
+    @Override
+    public void testCreateTags(String format) throws Exception {
+        // Flink 1.16 does not support create_tag procedure so we skip this test.
+    }
+
+    @Override
+    public void testDeleteTags(String format) throws Exception {
+        // Flink 1.16 does not support delete_tag procedure so we skip this test.
+    }
 }

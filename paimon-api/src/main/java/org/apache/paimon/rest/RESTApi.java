@@ -48,6 +48,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -55,11 +56,13 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
@@ -461,8 +464,9 @@ public class RESTApi {
      * Load latest snapshot for table.
      *
      * @param identifier database name and table name.
-     * @return {@link TableSnapshot} Optional snapshot.
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @return {@link TableSnapshot} snapshot with statistics.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the latest
+     *     snapshot not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
@@ -474,6 +478,66 @@ public class RESTApi {
                         GetTableSnapshotResponse.class,
                         restAuthFunction);
         return response.getSnapshot();
+    }
+
+    /**
+     * Return the snapshot of table for given version. Version parsing order is:
+     *
+     * <ul>
+     *   <li>1. If it is 'EARLIEST', get the earliest snapshot.
+     *   <li>2. If it is 'LATEST', get the latest snapshot.
+     *   <li>3. If it is a number, get snapshot by snapshot id.
+     *   <li>4. Else try to get snapshot from Tag name.
+     * </ul>
+     *
+     * @param identifier database name and table name.
+     * @param version version to snapshot
+     * @return Optional snapshot.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
+     *     not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public Snapshot loadSnapshot(Identifier identifier, String version) {
+        GetVersionSnapshotResponse response =
+                client.get(
+                        resourcePaths.tableSnapshot(
+                                identifier.getDatabaseName(), identifier.getObjectName(), version),
+                        GetVersionSnapshotResponse.class,
+                        restAuthFunction);
+        return response.getSnapshot();
+    }
+
+    /**
+     * Get paged snapshot list of the table, the snapshot list will be returned in descending order.
+     *
+     * @param identifier path of the table to list partitions
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the snapshots with provided page size(@param maxResults) in this table and
+     *     next page token.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the latest
+     *     snapshot not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListSnapshotsResponse response =
+                client.get(
+                        resourcePaths.snapshots(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListSnapshotsResponse.class,
+                        restAuthFunction);
+        List<Snapshot> snapshots = response.getSnapshots();
+        if (snapshots == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(snapshots, response.getNextPageToken());
     }
 
     /**
@@ -505,7 +569,8 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
+     *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
@@ -569,18 +634,22 @@ public class RESTApi {
      * Auth table query.
      *
      * @param identifier database name and table name.
-     * @param select select columns
-     * @param filter pushed filter
+     * @param select select columns, null if select all
+     * @return additional filter for row level access control
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter) {
-        AuthTableQueryRequest request = new AuthTableQueryRequest(select, filter);
-        client.post(
-                resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
-                request,
-                restAuthFunction);
+    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select) {
+        AuthTableQueryRequest request = new AuthTableQueryRequest(select);
+        AuthTableQueryResponse response =
+                client.post(
+                        resourcePaths.authTable(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        AuthTableQueryResponse.class,
+                        restAuthFunction);
+        return response.filter();
     }
 
     /**

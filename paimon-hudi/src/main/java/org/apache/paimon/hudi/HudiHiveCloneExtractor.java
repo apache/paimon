@@ -31,6 +31,8 @@ import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieTableType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -45,6 +47,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link HiveCloneExtractor} for Hudi tables. */
 public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
+    private static final Logger LOG = LoggerFactory.getLogger(HudiHiveCloneExtractor.class);
 
     @Override
     public boolean matches(Table table) {
@@ -62,13 +65,22 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
                 Arrays.stream(HoodieRecord.HoodieMetadataField.values())
                         .map(HoodieRecord.HoodieMetadataField::getFieldName)
                         .collect(Collectors.toSet());
-        return fields.stream()
-                .filter(f -> !hudiMetadataFields.contains(f.getName()))
-                .collect(Collectors.toList());
+        List<FieldSchema> resultFields =
+                fields.stream()
+                        .filter(f -> !hudiMetadataFields.contains(f.getName()))
+                        .collect(Collectors.toList());
+        LOG.info(
+                "Hudi table {}.{} with total field count {}, and result field count {} after filter",
+                database,
+                table,
+                fields.size(),
+                resultFields.size());
+        return resultFields;
     }
 
     @Override
     public List<HivePartitionFiles> extractFiles(
+            Map<String, String> catalogOptions,
             IMetaStoreClient client,
             Table table,
             FileIO fileIO,
@@ -80,7 +92,8 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
         checkTableType(options);
 
         String location = table.getSd().getLocation();
-        HudiFileIndex fileIndex = new HudiFileIndex(location, options, partitionRowType, predicate);
+        HudiFileIndex fileIndex =
+                new HudiFileIndex(location, options, catalogOptions, partitionRowType, predicate);
 
         if (fileIndex.isPartitioned()) {
             return fileIndex.getAllFilteredPartitionFiles(fileIO);

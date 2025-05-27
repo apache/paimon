@@ -18,10 +18,12 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.hive.TestHiveMetastore
+import org.apache.paimon.catalog.{Catalog, DelegateCatalog}
+import org.apache.paimon.hive.{HiveCatalog, TestHiveMetastore}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.hive.metastore.IMetaStoreClient
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.paimon.Utils
 
@@ -84,6 +86,14 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
 
   override def loadTable(tableName: String): FileStoreTable = {
     loadTable(hiveDbName, tableName)
+  }
+
+  def getHmsClient(paimonCatalog: Catalog): IMetaStoreClient = {
+    DelegateCatalog.rootCatalog(paimonCatalog) match {
+      case hiveCatalog: HiveCatalog => hiveCatalog.getHmsClient
+      case other =>
+        throw new IllegalArgumentException(s"Unsupported catalog type: ${other.getClass.getName}")
+    }
   }
 }
 

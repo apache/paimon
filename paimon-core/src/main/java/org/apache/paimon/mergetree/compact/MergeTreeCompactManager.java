@@ -135,7 +135,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             }
             optionalUnit =
                     CompactStrategy.pickFullCompaction(
-                            levels.numberOfLevels(), runs, recordLevelExpire);
+                            levels.numberOfLevels(), runs, recordLevelExpire, dvMaintainer);
         } else {
             if (taskFuture != null) {
                 return;
@@ -209,6 +209,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         levels.maxLevel(),
                         metricsReporter,
                         compactDfSupplier,
+                        dvMaintainer,
                         recordLevelExpire);
         if (LOG.isDebugEnabled()) {
             LOG.debug(

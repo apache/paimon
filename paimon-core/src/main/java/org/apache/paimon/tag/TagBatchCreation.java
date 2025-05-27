@@ -69,13 +69,13 @@ public class TagBatchCreation {
         try {
             // If the tag already exists, delete the tag
             tagManager.deleteTag(
-                    tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
+                    tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks(table));
             // Create a new tag
             tagManager.createTag(
                     snapshot,
                     tagName,
                     table.coreOptions().tagDefaultTimeRetained(),
-                    table.store().createTagCallbacks(),
+                    table.store().createTagCallbacks(table),
                     false);
         } catch (Exception e) {
             LOG.warn(
@@ -85,7 +85,10 @@ public class TagBatchCreation {
                     e);
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(
-                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
+                        tagName,
+                        tagDeletion,
+                        snapshotManager,
+                        table.store().createTagCallbacks(table));
             }
         }
         // Expire the tag
@@ -102,7 +105,7 @@ public class TagBatchCreation {
 
             while (tagCount > tagNumRetainedMax) {
                 for (List<String> tagNames : tagManager.tags().values()) {
-                    if (tagCount - tagNames.size() >= tagNumRetainedMax) {
+                    if (tagCount - tagNames.size() > tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
                                 tagNames, tagDeletion, snapshotManager);
                         tagCount = tagCount - tagNames.size();
@@ -113,7 +116,7 @@ public class TagBatchCreation {
                                     toBeDeleted,
                                     tagDeletion,
                                     snapshotManager,
-                                    table.store().createTagCallbacks());
+                                    table.store().createTagCallbacks(table));
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {
                                 break;

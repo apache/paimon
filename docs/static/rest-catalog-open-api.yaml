@@ -663,7 +663,11 @@ paths:
               $ref: '#/components/schemas/AuthTableQueryRequest'
       responses:
         "200":
-          description: Success, no content
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTableQueryResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "403":
@@ -726,6 +730,102 @@ paths:
                   $ref: '#/components/examples/TableNotExistError'
                 SnapshotNotExist:
                   $ref: '#/components/examples/SnapshotNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshots/{version}:
+    get:
+      tags:
+        - table
+      summary: Get version snapshot
+      operationId: getVersionSnapshot
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetVersionSnapshotResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        404:
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+            - SnapshotNotExistException, the requested snapshot does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+                SnapshotNotExist:
+                  $ref: '#/components/examples/SnapshotNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshots:
+    get:
+      tags:
+        - table
+      summary: List snapshots
+      operationId: listSnapshots
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSnapshotsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
@@ -1098,10 +1198,10 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/view-summaries:
+  /v1/{prefix}/views:
     get:
       tags:
-        - table
+        - view
       summary: List views globally
       operationId: listViewsGlobally
       description: List views globally which matches the given database name pattern and view name pattern both.
@@ -2424,6 +2524,20 @@ components:
       properties:
         snapshot:
           $ref: '#/components/schemas/TableSnapshot'
+    GetVersionSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+    ListSnapshotsResponse:
+      type: object
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Snapshot'
+        nextPageToken:
+          type: string
     AuthTableQueryRequest:
       type: object
       properties:
@@ -2431,6 +2545,9 @@ components:
           type: array
           items:
             type: string
+    AuthTableQueryResponse:
+      type: object
+      properties:
         filter:
           type: array
           items:

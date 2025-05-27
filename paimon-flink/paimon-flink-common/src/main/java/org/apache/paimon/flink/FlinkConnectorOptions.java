@@ -191,6 +191,13 @@ public class FlinkConnectorOptions {
                             "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
                                     + "to avoid exceed `akka.framesize` limit.");
 
+    public static final ConfigOption<Integer> SCAN_MAX_SNAPSHOT_COUNT =
+            key("scan.max-snapshot.count")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "The max snapshot count to scan per checkpoint. Not limited when it's negative.");
+
     public static final ConfigOption<SplitAssignMode> SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE =
             key("scan.split-enumerator.mode")
                     .enumType(SplitAssignMode.class)
@@ -377,6 +384,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
+
+    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_RECOVER_FROM_STATE =
+            key("partition.mark-done.recover-from-state")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether trigger partition mark done when recover from state.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")

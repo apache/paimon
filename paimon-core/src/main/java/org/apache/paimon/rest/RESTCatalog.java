@@ -209,7 +209,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         } catch (ForbiddenException e) {
-            throw new DatabaseNoPermissionException(databaseName);
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -280,6 +280,34 @@ public class RESTCatalog implements Catalog {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
+            throws TableNotExistException {
+        try {
+            return Optional.ofNullable(api.loadSnapshot(identifier, version));
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+                return Optional.empty();
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listSnapshotsPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
@@ -464,11 +492,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            api.authTableQuery(identifier, select, filter);
+            return api.authTableQuery(identifier, select);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -506,7 +534,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier);
+            throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException ignored) {
             // not a metastore partitioned table
         }
