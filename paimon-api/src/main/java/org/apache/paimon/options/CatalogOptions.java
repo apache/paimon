@@ -18,6 +18,7 @@
 
 package org.apache.paimon.options;
 
+import org.apache.paimon.table.CatalogTableOwnerType;
 import org.apache.paimon.table.CatalogTableType;
 
 import java.time.Duration;
@@ -184,4 +185,10 @@ public class CatalogOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to populate file metadata while listing or getting file status.");
+
+    public static final ConfigOption<CatalogTableOwnerType> TABLE_OWNER_TYPE =
+            ConfigOptions.key("table.owner.type")
+                    .enumType(CatalogTableOwnerType.class)
+                    .defaultValue(CatalogTableOwnerType.OS)
+                    .withDescription("Type of table owner.");
 }
