@@ -54,6 +54,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -1752,6 +1753,28 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         table.snapshot(1),
                         table.snapshot(2),
+                        table.snapshot(3),
+                        table.snapshot(4),
+                        table.snapshot(5),
+                        table.snapshot(6),
+                        table.snapshot(7),
+                        table.snapshot(8),
+                        table.snapshot(9),
+                        table.snapshot(10),
+                        table.snapshot(11),
+                        table.snapshot(12),
+                        table.snapshot(13),
+                        table.snapshot(14));
+
+        // expire snapshots
+        SnapshotManager snapshotManager = ((FileStoreTable) table).snapshotManager();
+        snapshotManager.deleteSnapshot(1);
+        snapshotManager.deleteSnapshot(2);
+        snapshots =
+                PagedList.listAllFromPagedApi(
+                        token -> api.listSnapshotsPaged(identifier, null, token));
+        assertThat(snapshots)
+                .containsExactlyInAnyOrder(
                         table.snapshot(3),
                         table.snapshot(4),
                         table.snapshot(5),
