@@ -86,6 +86,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -697,9 +698,12 @@ public class RESTCatalogServer {
             } else {
                 try {
                     long snapshotId = Long.parseLong(version);
-                    snapshot = snapshotManager.snapshot(snapshotId);
+                    snapshot = snapshotManager.tryGetSnapshot(snapshotId);
                 } catch (NumberFormatException e) {
-                    snapshot = table.tagManager().get(version).get().trimToSnapshot();
+                    Optional<Tag> tag = table.tagManager().get(version);
+                    if (tag.isPresent()) {
+                        snapshot = tag.get().trimToSnapshot();
+                    }
                 }
             }
         } catch (Exception ignored) {

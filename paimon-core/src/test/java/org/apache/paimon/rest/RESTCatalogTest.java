@@ -1700,6 +1700,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         ""),
                 true);
         Table table = catalog.getTable(identifier);
+
+        assertThat(catalog.loadSnapshot(identifier, "EARLIEST")).isEmpty();
+        assertThat(catalog.loadSnapshot(identifier, "LATEST")).isEmpty();
+
         batchWrite(table, singletonList(1));
         batchWrite(table, singletonList(1));
         batchWrite(table, singletonList(1));
@@ -1719,6 +1723,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .get()
                 .isEqualTo(table.snapshot(1));
 
+        assertThat(catalog.loadSnapshot(identifier, "8")).isEmpty();
+
         assertThat(catalog.loadSnapshot(identifier, "LATEST"))
                 .isPresent()
                 .get()
@@ -1729,6 +1735,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isPresent()
                 .get()
                 .isEqualTo(table.snapshot(2));
+
+        assertThat(catalog.loadSnapshot(identifier, "NONE_TAG")).isEmpty();
 
         assertThat(catalog.loadSnapshot(identifier, "15")).isEmpty();
 
