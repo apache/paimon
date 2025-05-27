@@ -60,15 +60,35 @@ case class PaimonScan(
           // so we only support one bucket key case.
           assert(bucketSpec.getNumBuckets > 0)
           assert(bucketSpec.getBucketKeys.size() == 1)
-          val bucketKey = bucketSpec.getBucketKeys.get(0)
-          if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
-            Some(Expressions.bucket(bucketSpec.getNumBuckets, bucketKey))
-          } else {
-            None
+          extractBucketNumber() match {
+            case Some(num) =>
+              val bucketKey = bucketSpec.getBucketKeys.get(0)
+              if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
+                Some(Expressions.bucket(num, bucketKey))
+              } else {
+                None
+              }
+
+            case _ => None
           }
         }
 
       case _ => None
+    }
+  }
+
+  private def extractBucketNumber(): Option[Int] = {
+    val splits = getOriginSplits
+    if (splits.exists(!_.isInstanceOf[DataSplit])) {
+      None
+    } else {
+      val deduplicated =
+        splits.map(s => Option(s.asInstanceOf[DataSplit].totalBuckets())).toSeq.distinct
+
+      deduplicated match {
+        case Seq(Some(num)) => Some(num)
+        case _ => None
+      }
     }
   }
 
@@ -120,6 +140,7 @@ case class PaimonScan(
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
       inputPartitions = null
+      inputSplits = null
     }
   }
 }
