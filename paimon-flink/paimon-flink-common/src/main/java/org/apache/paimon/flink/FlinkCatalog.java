@@ -1485,6 +1485,7 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.paimon.function.Function function =
                     catalog.getFunction(toIdentifier(functionPath));
             FunctionDefinition functionDefinition = function.definition(FUNCTION_DEFINITION_NAME);
+            // as current only support file function, so check type
             if (functionDefinition instanceof FunctionDefinition.FileFunctionDefinition) {
                 FunctionDefinition.FileFunctionDefinition fileFunctionDefinition =
                         (FunctionDefinition.FileFunctionDefinition) functionDefinition;
@@ -1530,9 +1531,6 @@ public class FlinkCatalog extends AbstractCatalog {
         try {
             catalog.createFunction(toIdentifier(functionPath), paimonFunction, ignoreIfExists);
         } catch (Catalog.FunctionAlreadyExistException | Catalog.DatabaseNotExistException e) {
-            if (ignoreIfExists) {
-                return;
-            }
             throw new FunctionAlreadyExistException(getName(), functionPath);
         }
     }
@@ -1557,9 +1555,6 @@ public class FlinkCatalog extends AbstractCatalog {
                         ignoreIfNotExists);
             }
         } catch (Catalog.FunctionNotExistException e) {
-            if (ignoreIfNotExists) {
-                return;
-            }
             throw new FunctionNotExistException(getName(), functionPath);
         } catch (Catalog.DefinitionAlreadyExistException e) {
             throw new RuntimeException(e);
