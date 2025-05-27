@@ -655,6 +655,28 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         "+I[2, 20, dog, 2]");
     }
 
+    @Test
+    public void testMainAndFallbackNoPrimaryKeys() throws Exception {
+        sql("CREATE TABLE t ( pt INT, v INT ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+        sql("INSERT INTO t VALUES (1, 110)");
+        sql("CALL sys.create_branch('default.t', 'test')");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'test' )");
+        sql("INSERT INTO `t$branch_test` VALUES (2, 210)");
+        assertThat(collectResult("SELECT * FROM t"))
+                .containsExactlyInAnyOrder("+I[1, 110]", "+I[2, 210]");
+
+        sql("ALTER TABLE t ADD v2 INT");
+        sql("ALTER TABLE `t$branch_test` ADD v2 INT");
+        sql("INSERT INTO t VALUES (1, 120, 1200)");
+        sql("INSERT INTO `t$branch_test` VALUES (2, 220, 2200)");
+        assertThat(collectResult("SELECT * FROM t"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 110, null]",
+                        "+I[2, 210, null]",
+                        "+I[1, 120, 1200]",
+                        "+I[2, 220, 2200]");
+    }
+
     private List<String> collectResult(String sql) throws Exception {
         List<String> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
