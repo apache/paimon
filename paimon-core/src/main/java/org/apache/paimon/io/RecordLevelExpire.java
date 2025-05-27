@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -52,8 +53,8 @@ public class RecordLevelExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(RecordLevelExpire.class);
 
-    private final int expireTime;
-    private final Function<InternalRow, Optional<Integer>> fieldGetter;
+    private final long expireTime;
+    private final Function<InternalRow, Optional<Long>> fieldGetter;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final TableSchema schema;
@@ -84,20 +85,19 @@ public class RecordLevelExpire {
         }
 
         DataType dataType = rowType.getField(timeFieldName).type();
-        Function<InternalRow, Optional<Integer>> fieldGetter =
-                createFieldGetter(dataType, fieldIndex);
+        Function<InternalRow, Optional<Long>> fieldGetter =
+                createFieldGetterAndConvertToSecond(dataType, fieldIndex);
 
         LOG.info(
                 "Create RecordExpire. expireTime is {}s,timeField is {}",
-                (int) expireTime.getSeconds(),
+                expireTime.getSeconds(),
                 timeFieldName);
-        return new RecordLevelExpire(
-                (int) expireTime.getSeconds(), fieldGetter, schema, schemaManager);
+        return new RecordLevelExpire(expireTime.getSeconds(), fieldGetter, schema, schemaManager);
     }
 
     private RecordLevelExpire(
-            int expireTime,
-            Function<InternalRow, Optional<Integer>> fieldGetter,
+            long expireTime,
+            Function<InternalRow, Optional<Long>> fieldGetter,
             TableSchema schema,
             SchemaManager schemaManager) {
         this.expireTime = expireTime;
@@ -132,8 +132,8 @@ public class RecordLevelExpire {
             minValues = result.minValues();
         }
 
-        int currentTime = (int) (System.currentTimeMillis() / 1000);
-        Optional<Integer> minTime = fieldGetter.apply(minValues);
+        long currentTime = System.currentTimeMillis() / 1000L;
+        Optional<Long> minTime = fieldGetter.apply(minValues);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -155,25 +155,16 @@ public class RecordLevelExpire {
         return file -> wrap(readerFactory.createRecordReader(file));
     }
 
-    private RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
-        int currentTime = (int) (System.currentTimeMillis() / 1000);
-        return reader.filter(
-                keyValue ->
-                        fieldGetter
-                                .apply(keyValue.value())
-                                .map(integer -> currentTime <= integer + expireTime)
-                                .orElse(true));
-    }
-
-    private static Function<InternalRow, Optional<Integer>> createFieldGetter(
+    @VisibleForTesting
+    public static Function<InternalRow, Optional<Long>> createFieldGetterAndConvertToSecond(
             DataType dataType, int fieldIndex) {
-        final Function<InternalRow, Optional<Integer>> fieldGetter;
+        final Function<InternalRow, Optional<Long>> fieldGetter;
         if (dataType instanceof IntType) {
             fieldGetter =
                     row ->
                             row.isNullAt(fieldIndex)
                                     ? Optional.empty()
-                                    : Optional.of(row.getInt(fieldIndex));
+                                    : Optional.of((long) row.getInt(fieldIndex));
         } else if (dataType instanceof BigIntType) {
             fieldGetter =
                     row -> {
@@ -182,8 +173,7 @@ public class RecordLevelExpire {
                         }
                         long value = row.getLong(fieldIndex);
                         // If it is milliseconds, convert it to seconds.
-                        return Optional.of(
-                                (int) (value >= 1_000_000_000_000L ? value / 1000 : value));
+                        return Optional.of(value >= 1_000_000_000_000L ? value / 1000L : value);
                     };
         } else if (dataType instanceof TimestampType
                 || dataType instanceof LocalZonedTimestampType) {
@@ -193,10 +183,8 @@ public class RecordLevelExpire {
                             row.isNullAt(fieldIndex)
                                     ? Optional.empty()
                                     : Optional.of(
-                                            (int)
-                                                    (row.getTimestamp(fieldIndex, precision)
-                                                                    .getMillisecond()
-                                                            / 1000));
+                                            row.getTimestamp(fieldIndex, precision).getMillisecond()
+                                                    / 1000L);
         } else {
             throw new IllegalArgumentException(
                     String.format(
@@ -205,6 +193,16 @@ public class RecordLevelExpire {
         }
 
         return fieldGetter;
+    }
+
+    private RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
+        long currentTime = System.currentTimeMillis() / 1000L;
+        return reader.filter(
+                keyValue ->
+                        fieldGetter
+                                .apply(keyValue.value())
+                                .map(integer -> currentTime <= integer + expireTime)
+                                .orElse(true));
     }
 
     private TableSchema scanTableSchema(long id) {
