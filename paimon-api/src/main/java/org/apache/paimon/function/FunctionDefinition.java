@@ -231,7 +231,7 @@ public interface FunctionDefinition {
     @JsonIgnoreProperties(ignoreUnknown = true)
     class FunctionFileResource {
 
-        private static final String FIELD_RESOURCE_TYPE = "definition";
+        private static final String FIELD_RESOURCE_TYPE = "resourceType";
         private static final String FIELD_URI = "uri";
 
         private final String resourceType;
