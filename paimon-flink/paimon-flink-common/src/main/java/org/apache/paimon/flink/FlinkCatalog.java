@@ -1490,13 +1490,13 @@ public class FlinkCatalog extends AbstractCatalog {
                 FunctionDefinition.FileFunctionDefinition fileFunctionDefinition =
                         (FunctionDefinition.FileFunctionDefinition) functionDefinition;
                 List<ResourceUri> resourceUris =
-                        fileFunctionDefinition.storagePaths().stream()
+                        fileFunctionDefinition.fileResources().stream()
                                 .map(
-                                        path ->
+                                        resource ->
                                                 new ResourceUri(
                                                         ResourceType.valueOf(
-                                                                fileFunctionDefinition.fileType()),
-                                                        path))
+                                                                resource.resourceType()),
+                                                        resource.uri()))
                                 .collect(Collectors.toList());
                 return new CatalogFunctionImpl(
                         fileFunctionDefinition.className(),
@@ -1523,15 +1523,16 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void createFunction(
             ObjectPath functionPath, CatalogFunction function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException, CatalogException {
-        String fileType = function.getFunctionResources().get(0).getResourceType().name();
-        List<String> storagePaths =
+        List<FunctionDefinition.FunctionFileResource> fileResources =
                 function.getFunctionResources().stream()
-                        .map(ResourceUri::getUri)
+                        .map(
+                                r ->
+                                        new FunctionDefinition.FunctionFileResource(
+                                                r.getResourceType().name(), r.getUri()))
                         .collect(Collectors.toList());
         FunctionDefinition functionDefinition =
                 FunctionDefinition.file(
-                        fileType,
-                        storagePaths,
+                        fileResources,
                         function.getFunctionLanguage().name(),
                         function.getClassName(),
                         functionPath.getObjectName());
@@ -1559,8 +1560,7 @@ public class FlinkCatalog extends AbstractCatalog {
             if (functionDefinition != null) {
                 FunctionDefinition newFunctionDefinition =
                         FunctionDefinition.file(
-                                functionDefinition.fileType(),
-                                functionDefinition.storagePaths(),
+                                functionDefinition.fileResources(),
                                 newFunction.getFunctionLanguage().name(),
                                 newFunction.getClassName(),
                                 functionPath.getObjectName());

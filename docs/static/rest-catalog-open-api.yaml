@@ -1997,12 +1997,10 @@ components:
         type:
           type: string
           const: "file"
-        fileType:
-          type: string
-        storagePaths:
+        fileResources:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/FunctionFileResource'
         language:
           type: string
         className:
@@ -2019,6 +2017,13 @@ components:
         definition:
           type: string
         language:
+          type: string
+    FunctionFileResource:
+      type: object
+      properties:
+        definition:
+          type: string
+        uri:
           type: string
     ViewChange:
       anyOf:

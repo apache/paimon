@@ -116,47 +116,38 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         Catalog catalog = tEnv.getCatalog("PAIMON").get();
         String functionName = "test_str2";
         String identifier = "com.streaming.flink.udf.StrUdf";
-        String filePath = "xxxx.jar";
-        ResourceType fileType = ResourceType.JAR;
+        String jarResourcePath = "xxxx.jar";
+        String jarResourcePath2 = "xxxx-yyyyy.jar";
         CatalogFunctionImpl function =
-                createCatalogFunction(
-                        ResourceType.JAR, filePath, identifier, FunctionLanguage.JAVA);
+                new CatalogFunctionImpl(
+                        identifier,
+                        FunctionLanguage.JAVA,
+                        ImmutableList.of(
+                                new ResourceUri(ResourceType.JAR, jarResourcePath),
+                                new ResourceUri(ResourceType.JAR, jarResourcePath2)));
         sql(
                 String.format(
-                        "CREATE FUNCTION %s.%s AS '%s' LANGUAGE %s USING %s '%s'",
+                        "CREATE FUNCTION %s.%s AS '%s' LANGUAGE %s USING %s '%s', %s '%s'",
                         DATABASE_NAME,
                         functionName,
                         function.getClassName(),
                         function.getFunctionLanguage(),
-                        fileType,
-                        filePath));
+                        ResourceType.JAR,
+                        jarResourcePath,
+                        ResourceType.JAR,
+                        jarResourcePath2));
         assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
         ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
         CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
         assertThat(getFunction).isEqualTo(function);
         identifier = "com.streaming.flink.udf.StrUdf2";
-        function =
-                createCatalogFunction(
-                        ResourceType.JAR, filePath, identifier, FunctionLanguage.JAVA);
         sql(
                 String.format(
                         "ALTER FUNCTION PAIMON.%s.%s AS '%s' LANGUAGE %s",
-                        DATABASE_NAME,
-                        functionName,
-                        function.getClassName(),
-                        function.getFunctionLanguage()));
+                        DATABASE_NAME, functionName, identifier, function.getFunctionLanguage()));
         getFunction = catalog.getFunction(functionObjectPath);
-        assertThat(getFunction).isEqualTo(function);
+        assertThat(getFunction.getClassName()).isEqualTo(identifier);
         sql(String.format("DROP FUNCTION %s.%s", DATABASE_NAME, functionName));
         assertThat(catalog.functionExists(functionObjectPath)).isFalse();
-    }
-
-    private CatalogFunctionImpl createCatalogFunction(
-            ResourceType resourceType,
-            String filePath,
-            String className,
-            FunctionLanguage functionLanguage) {
-        ResourceUri resourceUri = new ResourceUri(resourceType, filePath);
-        return new CatalogFunctionImpl(className, functionLanguage, ImmutableList.of(resourceUri));
     }
 }
