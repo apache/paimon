@@ -51,6 +51,12 @@ under the License.
             <td>Whether to delete old metadata files after each table commit</td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.format-version</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>The format version of iceberg table, the value can be 2 or 3. Note that only version 3 supports deletion vector.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.glue.skip-archive</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
