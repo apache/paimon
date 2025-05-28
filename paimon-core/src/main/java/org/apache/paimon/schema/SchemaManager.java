@@ -417,25 +417,36 @@ public class SchemaManager implements Serializable {
                         newFields,
                         update.fieldNames(),
                         (field) -> {
-                            DataType targetType = update.newDataType();
+                            // find the dataType at depth and update the type for it
+                            DataType sourceRootType =
+                                    getRootType(field.type(), 1, update.fieldNames().length);
+                            DataType targetRootType = update.newDataType();
                             if (update.keepNullability()) {
-                                targetType = targetType.copy(field.type().isNullable());
+                                targetRootType = targetRootType.copy(sourceRootType.isNullable());
                             } else {
                                 assertNullabilityChange(
-                                        field.type().isNullable(),
-                                        update.newDataType().isNullable(),
+                                        sourceRootType.isNullable(),
+                                        targetRootType.isNullable(),
                                         StringUtils.join(Arrays.asList(update.fieldNames()), "."),
                                         disableNullToNotNull);
                             }
                             checkState(
-                                    DataTypeCasts.supportsExplicitCast(field.type(), targetType)
-                                            && CastExecutors.resolve(field.type(), targetType)
+                                    DataTypeCasts.supportsExplicitCast(
+                                                    sourceRootType, targetRootType)
+                                            && CastExecutors.resolve(sourceRootType, targetRootType)
                                                     != null,
                                     String.format(
                                             "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                            field.name(), field.type(), targetType));
+                                            field.name(), sourceRootType, targetRootType));
                             return new DataField(
-                                    field.id(), field.name(), targetType, field.description());
+                                    field.id(),
+                                    field.name(),
+                                    getArrayMapTypeWithTargetTypeRoot(
+                                            field.type(),
+                                            targetRootType,
+                                            1,
+                                            update.fieldNames().length),
+                                    field.description());
                         });
             } else if (change instanceof UpdateColumnNullability) {
                 UpdateColumnNullability update = (UpdateColumnNullability) change;
@@ -449,15 +460,23 @@ public class SchemaManager implements Serializable {
                         newFields,
                         update.fieldNames(),
                         (field) -> {
+                            // find the DataType at depth and update that DataTypes nullability
+                            DataType sourceRootType =
+                                    getRootType(field.type(), 1, update.fieldNames().length);
                             assertNullabilityChange(
-                                    field.type().isNullable(),
+                                    sourceRootType.isNullable(),
                                     update.newNullability(),
                                     StringUtils.join(Arrays.asList(update.fieldNames()), "."),
                                     disableNullToNotNull);
+                            sourceRootType = sourceRootType.copy(update.newNullability());
                             return new DataField(
                                     field.id(),
                                     field.name(),
-                                    field.type().copy(update.newNullability()),
+                                    getArrayMapTypeWithTargetTypeRoot(
+                                            field.type(),
+                                            sourceRootType,
+                                            1,
+                                            update.fieldNames().length),
                                     field.description());
                         });
             } else if (change instanceof UpdateColumnComment) {
@@ -500,6 +519,58 @@ public class SchemaManager implements Serializable {
                 newSchema.primaryKeys(),
                 newSchema.options(),
                 newSchema.comment());
+    }
+
+    // gets the rootType at the defined depth
+    // ex: ARRAY<MAP<STRING, ARRAY<INT>>>
+    // if we want to update ARRAY<INT> -> ARRAY<BIGINT>
+    // the maxDepth will be based on updateFieldNames
+    // which in the case will be [v, element, value, element],
+    // so maxDepth is 4 and return DataType will be INT
+    private DataType getRootType(DataType type, int currDepth, int maxDepth) {
+        if (currDepth == maxDepth) {
+            return type;
+        }
+        switch (type.getTypeRoot()) {
+            case ARRAY:
+                return getRootType(((ArrayType) type).getElementType(), currDepth + 1, maxDepth);
+            case MAP:
+                return getRootType(((MapType) type).getValueType(), currDepth + 1, maxDepth);
+            default:
+                return type;
+        }
+    }
+
+    // builds the targetType from source type based on the maxDepth which needs to be updated
+    // ex: ARRAY<MAP<STRING, ARRAY<INT>>> -> ARRAY<MAP<STRING, ARRAY<BIGINT>>>
+    // here we only need to update type of ARRAY<INT> to ARRAY<BIGINT> and rest of the type
+    // remains same. This function achieves this.
+    private DataType getArrayMapTypeWithTargetTypeRoot(
+            DataType source, DataType target, int currDepth, int maxDepth) {
+        if (currDepth == maxDepth) {
+            return target;
+        }
+        switch (source.getTypeRoot()) {
+            case ARRAY:
+                return new ArrayType(
+                        source.isNullable(),
+                        getArrayMapTypeWithTargetTypeRoot(
+                                ((ArrayType) source).getElementType(),
+                                target,
+                                currDepth + 1,
+                                maxDepth));
+            case MAP:
+                return new MapType(
+                        source.isNullable(),
+                        ((MapType) source).getKeyType(),
+                        getArrayMapTypeWithTargetTypeRoot(
+                                ((MapType) source).getValueType(),
+                                target,
+                                currDepth + 1,
+                                maxDepth));
+            default:
+                return target;
+        }
     }
 
     private void assertNullabilityChange(
@@ -671,10 +742,22 @@ public class SchemaManager implements Serializable {
             this.updateFieldNames = updateFieldNames;
         }
 
-        public void updateIntermediateColumn(List<DataField> newFields, int depth)
+        private void updateIntermediateColumn(
+                List<DataField> newFields, List<DataField> previousFields, int depth, int prevDepth)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
             if (depth == updateFieldNames.length - 1) {
                 updateLastColumn(newFields, updateFieldNames[depth]);
+                return;
+            } else if (depth >= updateFieldNames.length) {
+                // to handle the case of ARRAY or MAP type evolution
+                // for instance : ARRAY<INT> -> ARRAY<BIGINT>
+                // the updateFieldNames in this case is [v, element] where v is array field name
+                // the depth returned by extractRowDataFields is 2 which will overflow.
+                // So the logic is to go to previous depth and update the column using previous
+                // fields which will have DataFields from prevDepth
+                // The reason for this handling is the addition of element and value for array
+                // and map type in FlinkCatalog as dummy column name
+                updateLastColumn(previousFields, updateFieldNames[prevDepth]);
                 return;
             }
 
@@ -683,13 +766,10 @@ public class SchemaManager implements Serializable {
                 if (!field.name().equals(updateFieldNames[depth])) {
                     continue;
                 }
-
-                String fullFieldName =
-                        String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1));
                 List<DataField> nestedFields = new ArrayList<>();
-                int newDepth =
-                        depth + extractRowDataFields(field.type(), fullFieldName, nestedFields);
-                updateIntermediateColumn(nestedFields, newDepth);
+                int newDepth = depth + extractRowDataFields(field.type(), nestedFields);
+                updateIntermediateColumn(nestedFields, newFields, newDepth, depth);
+                field = newFields.get(i);
                 newFields.set(
                         i,
                         new DataField(
@@ -705,25 +785,23 @@ public class SchemaManager implements Serializable {
                     String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
         }
 
-        private int extractRowDataFields(
-                DataType type, String fullFieldName, List<DataField> nestedFields) {
+        public void updateIntermediateColumn(List<DataField> newFields, int depth)
+                throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
+            updateIntermediateColumn(newFields, newFields, depth, depth);
+        }
+
+        private int extractRowDataFields(DataType type, List<DataField> nestedFields) {
             switch (type.getTypeRoot()) {
                 case ROW:
                     nestedFields.addAll(((RowType) type).getFields());
                     return 1;
                 case ARRAY:
-                    return extractRowDataFields(
-                                    ((ArrayType) type).getElementType(),
-                                    fullFieldName,
-                                    nestedFields)
+                    return extractRowDataFields(((ArrayType) type).getElementType(), nestedFields)
                             + 1;
                 case MAP:
-                    return extractRowDataFields(
-                                    ((MapType) type).getValueType(), fullFieldName, nestedFields)
-                            + 1;
+                    return extractRowDataFields(((MapType) type).getValueType(), nestedFields) + 1;
                 default:
-                    throw new IllegalArgumentException(
-                            fullFieldName + " is not a structured type.");
+                    return 1;
             }
         }
 
@@ -742,8 +820,7 @@ public class SchemaManager implements Serializable {
                             mapType.getKeyType(),
                             wrapNewRowType(mapType.getValueType(), nestedFields));
                 default:
-                    throw new IllegalStateException(
-                            "Trying to wrap a row type in " + type + ". This is unexpected.");
+                    return type;
             }
         }
 
