@@ -18,9 +18,12 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.data.{BinaryRow, GenericRow}
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.ProjectedRow
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
@@ -46,8 +49,10 @@ case class PaimonScan(
     copy(bucketedScanDisabled = true)
   }
 
+  case class TransformInfo(transforms: Seq[Transform], partitionTypes: RowType)
+
   @transient
-  private lazy val extractBucketTransform: Option[Transform] = {
+  private lazy val extractTransform: Option[TransformInfo] = {
     table match {
       case fileStoreTable: FileStoreTable =>
         val bucketSpec = fileStoreTable.bucketSpec()
@@ -58,11 +63,22 @@ case class PaimonScan(
         } else {
           // Spark does not support bucket with several input attributes,
           // so we only support one bucket key case.
-          assert(bucketSpec.getNumBuckets > 0)
-          assert(bucketSpec.getBucketKeys.size() == 1)
+          val partitionKeys = table.partitionKeys()
           val bucketKey = bucketSpec.getBucketKeys.get(0)
           if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
-            Some(Expressions.bucket(bucketSpec.getNumBuckets, bucketKey))
+            val bucket = Expressions.bucket(bucketSpec.getNumBuckets, bucketKey)
+
+            val partition = partitionKeys.asScala
+              .filter(requiredSchema.fieldNames.contains(_))
+              .map(Expressions.identity)
+            val projectedPartitionFields = fileStoreTable
+              .schema()
+              .logicalPartitionType()
+              .getFields
+              .asScala
+              .filter(f => requiredSchema.fieldNames.contains(f.name()))
+              .toArray
+            Some(TransformInfo(partition :+ bucket, RowType.of(projectedPartitionFields: _*)))
           } else {
             None
           }
@@ -73,13 +89,13 @@ case class PaimonScan(
   }
 
   private def shouldDoBucketedScan: Boolean = {
-    !bucketedScanDisabled && conf.v2BucketingEnabled && extractBucketTransform.isDefined
+    !bucketedScanDisabled && conf.v2BucketingEnabled && extractTransform.isDefined
   }
 
   // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
-    extractBucketTransform
-      .map(bucket => new KeyGroupedPartitioning(Array(bucket), lazyInputPartitions.size))
+    extractTransform
+      .map(info => new KeyGroupedPartitioning(info.transforms.toArray, lazyInputPartitions.size))
       .getOrElse(new UnknownPartitioning(0))
   }
 
@@ -88,12 +104,32 @@ case class PaimonScan(
       return super.getInputPartitions(splits)
     }
 
+    assert(extractTransform.isDefined)
+
+    val projectedPartitionType = extractTransform.get.partitionTypes
+    val getters = projectedPartitionType.fieldGetters()
+    val projectedRow = ProjectedRow.from(
+      projectedPartitionType.getFieldNames.asScala
+        .map(s => table.partitionKeys().indexOf(s))
+        .toArray)
+
+    def partitionValue(partition: BinaryRow): GenericRow = {
+      projectedRow.replaceRow(partition)
+      GenericRow.of(getters.map(_.getFieldOrNull(projectedRow)): _*)
+    }
+
     splits
       .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
+      .groupBy(
+        d => {
+          (partitionValue(d.partition()), d.bucket())
+        })
       .map {
-        case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
+        case (key, groupedSplits) =>
+          PaimonBucketedInputPartition(
+            groupedSplits,
+            OutputPartitionKey(key._1, key._2, extractTransform.get.partitionTypes)
+          )
       }
       .toSeq
   }
