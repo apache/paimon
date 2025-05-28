@@ -65,7 +65,6 @@ public class IcebergDataFileMetaSerializer extends ObjectSerializer<IcebergDataF
 
     @Override
     public IcebergDataFileMeta fromRow(InternalRow row) {
-        // TODO: compatible with the old?
         return new IcebergDataFileMeta(
                 IcebergDataFileMeta.Content.fromId(row.getInt(0)),
                 row.getString(1).toString(),
