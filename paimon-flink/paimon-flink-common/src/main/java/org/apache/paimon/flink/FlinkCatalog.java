@@ -1523,7 +1523,18 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void createFunction(
             ObjectPath functionPath, CatalogFunction function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException, CatalogException {
-        FunctionDefinition functionDefinition = createFunctionDefinition(functionPath, function);
+        String fileType = function.getFunctionResources().get(0).getResourceType().name();
+        List<String> storagePaths =
+                function.getFunctionResources().stream()
+                        .map(ResourceUri::getUri)
+                        .collect(Collectors.toList());
+        FunctionDefinition functionDefinition =
+                FunctionDefinition.file(
+                        fileType,
+                        storagePaths,
+                        function.getFunctionLanguage().name(),
+                        function.getClassName(),
+                        functionPath.getObjectName());
         Map<String, FunctionDefinition> definitions = new HashMap<>();
         definitions.put(FUNCTION_DEFINITION_NAME, functionDefinition);
         org.apache.paimon.function.Function paimonFunction =
@@ -1542,10 +1553,17 @@ public class FlinkCatalog extends AbstractCatalog {
         try {
             org.apache.paimon.function.Function function =
                     catalog.getFunction(toIdentifier(functionPath));
-            FunctionDefinition functionDefinition = function.definition(FUNCTION_DEFINITION_NAME);
+            FunctionDefinition.FileFunctionDefinition functionDefinition =
+                    (FunctionDefinition.FileFunctionDefinition)
+                            function.definition(FUNCTION_DEFINITION_NAME);
             if (functionDefinition != null) {
                 FunctionDefinition newFunctionDefinition =
-                        createFunctionDefinition(functionPath, newFunction);
+                        FunctionDefinition.file(
+                                functionDefinition.fileType(),
+                                functionDefinition.storagePaths(),
+                                newFunction.getFunctionLanguage().name(),
+                                newFunction.getClassName(),
+                                functionPath.getObjectName());
                 FunctionChange functionChange =
                         FunctionChange.updateDefinition(
                                 FUNCTION_DEFINITION_NAME, newFunctionDefinition);
@@ -1705,20 +1723,5 @@ public class FlinkCatalog extends AbstractCatalog {
                 MATERIALIZED_TABLE_REFRESH_STATUS.key(),
                 MATERIALIZED_TABLE_REFRESH_HANDLER_DESCRIPTION.key(),
                 MATERIALIZED_TABLE_REFRESH_HANDLER_BYTES.key());
-    }
-
-    private FunctionDefinition createFunctionDefinition(
-            ObjectPath functionPath, CatalogFunction function) {
-        String fileType = function.getFunctionResources().get(0).getResourceType().name();
-        List<String> storagePaths =
-                function.getFunctionResources().stream()
-                        .map(ResourceUri::getUri)
-                        .collect(Collectors.toList());
-        return FunctionDefinition.file(
-                fileType,
-                storagePaths,
-                function.getFunctionLanguage().name(),
-                function.getClassName(),
-                functionPath.getObjectName());
     }
 }
