@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOUtils;
 import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.metrics.IOMetrics;
@@ -93,7 +94,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
-    @Nullable protected transient MetricsFileIO metricsFileIO;
+    @Nullable protected transient MetricsFileIO metricsFileIO = null;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
@@ -108,7 +109,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
-        this.metricsFileIO = new MetricsFileIO(fileIO);
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
@@ -123,7 +123,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public AbstractFileStoreTable withMetricRegistry(MetricRegistry registry) {
         if (coreOptions().isMetricsFileIOEnabled()) {
             if (metricsFileIO == null) {
-                metricsFileIO = new MetricsFileIO(fileIO);
+                metricsFileIO = FileIOUtils.getMetricsFileIO(fileIO);
             }
             String tableName =
                     catalogEnvironment.identifier() != null

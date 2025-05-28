@@ -369,6 +369,7 @@ public class StartupModeTest extends ScannerTestBase {
         initializeTable(StartupMode.LATEST, properties);
         initializeTestData();
         table.withMetricRegistry(new TestMetricRegistry());
+        assertThat(table.fileIO() instanceof MetricsFileIO);
         assertThat(((MetricsFileIO) table.fileIO()).isMetricsEnabled());
     }
 
@@ -380,7 +381,7 @@ public class StartupModeTest extends ScannerTestBase {
         initializeTable(StartupMode.LATEST, properties);
         initializeTestData();
         table.withMetricRegistry(new TestMetricRegistry());
-        assertThat(!((MetricsFileIO) table.fileIO()).isMetricsEnabled());
+        assertThat(!(table.fileIO() instanceof MetricsFileIO));
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {
