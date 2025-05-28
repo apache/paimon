@@ -433,11 +433,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        Snapshot previousSnapshot = ignorePreviousFiles ? null : snapshotManager.latestSnapshot();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         int totalBuckets;
-        if (!ignorePreviousFiles && latestSnapshot != null) {
-            totalBuckets = scanExistingFileMetas(latestSnapshot, partition, bucket, restoreFiles);
+        if (previousSnapshot != null) {
+            totalBuckets = scanExistingFileMetas(previousSnapshot, partition, bucket, restoreFiles);
         } else {
             totalBuckets = getDefaultBucketNum(partition);
         }
@@ -445,13 +445,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         IndexMaintainer<T> indexMaintainer =
                 indexFactory == null
                         ? null
-                        : indexFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
+                        : indexFactory.createOrRestore(previousSnapshot, partition, bucket);
         DeletionVectorsMaintainer deletionVectorsMaintainer =
                 dvMaintainerFactory == null
                         ? null
-                        : dvMaintainerFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
+                        : dvMaintainerFactory.createOrRestore(previousSnapshot, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(
                         partition.copy(),
@@ -468,7 +466,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 totalBuckets,
                 indexMaintainer,
                 deletionVectorsMaintainer,
-                latestSnapshot == null ? null : latestSnapshot.id());
+                previousSnapshot == null ? null : previousSnapshot.id());
     }
 
     @Override
