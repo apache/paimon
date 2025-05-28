@@ -2021,7 +2021,7 @@ components:
     FunctionFileResource:
       type: object
       properties:
-        definition:
+        resourceType:
           type: string
         uri:
           type: string

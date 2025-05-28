@@ -123,14 +123,14 @@ public class SparkCatalogWithRestTest {
     public void testFunction() throws Exception {
         List<DataField> inputParams = new ArrayList<>();
         Catalog paimonCatalog = getPaimonCatalog();
-        inputParams.add(new DataField(0, "x", DataTypes.STRING()));
-        inputParams.add(new DataField(1, "y", DataTypes.INT()));
+        inputParams.add(new DataField(0, "length", DataTypes.INT()));
+        inputParams.add(new DataField(1, "width", DataTypes.INT()));
         List<DataField> returnParams = new ArrayList<>();
-        returnParams.add(new DataField(0, "z", DataTypes.STRING()));
-        String functionName = "test";
+        returnParams.add(new DataField(0, "area", DataTypes.BIGINT()));
+        String functionName = "area_func";
         FunctionDefinition definition =
                 FunctionDefinition.lambda(
-                        "(String x, Integer y) -> { String z = \"hello\"; return z + x + y; }",
+                        "(Integer length, Integer width) -> { return (long) length * width; }",
                         "JAVA");
         Identifier identifier = Identifier.create("db2", functionName);
         Function function =
@@ -144,12 +144,15 @@ public class SparkCatalogWithRestTest {
                         null);
         paimonCatalog.createFunction(identifier, function, false);
         assertThat(
-                        spark.sql(String.format("select paimon.db2.%s('haha', 5555)", functionName))
+                        spark.sql(String.format("select paimon.db2.%s(1, 2)", functionName))
                                 .collectAsList()
                                 .get(0)
                                 .toString())
-                .isEqualTo("[hellohaha5555]");
-        definition = FunctionDefinition.lambda("(String x, Integer y) ->  x + y", "JAVA");
+                .isEqualTo("[2]");
+        definition =
+                FunctionDefinition.lambda(
+                        "(Integer length, Integer width) -> { return length * width + 1L; }",
+                        "JAVA");
         paimonCatalog.alterFunction(
                 identifier,
                 ImmutableList.of(
@@ -157,11 +160,12 @@ public class SparkCatalogWithRestTest {
                                 SparkCatalog.FUNCTION_DEFINITION_NAME, definition)),
                 false);
         assertThat(
-                        spark.sql(String.format("select paimon.db2.%s('haha', 5555)", functionName))
+                        spark.sql(String.format("select paimon.db2.%s(1, 2)", functionName))
                                 .collectAsList()
                                 .get(0)
                                 .toString())
-                .isEqualTo("[haha5555]");
+                .isEqualTo("[3]");
+        paimonCatalog.dropFunction(identifier, false);
         cleanFunction(functionName);
     }
 
