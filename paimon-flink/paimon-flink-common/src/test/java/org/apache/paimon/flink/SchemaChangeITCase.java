@@ -1530,5 +1530,35 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatCode(() -> sql("ALTER TABLE T MODIFY a MAP<STRING, ARRAY<BIGINT NOT NULL>>"))
                 .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for a.value.element");
+
+        sql("DROP TABLE T");
+
+        sql(
+                "CREATE TABLE T ( k INT, a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN> NOT NULL) NOT NULL, PRIMARY KEY(k) NOT ENFORCED )");
+        sql("INSERT INTO T VALUES (1, ROW(1.0, ARRAY[true, false]))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, Row.of(1.0, new Boolean[] {true, false})));
+        sql("ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>) NOT NULL");
+        sql("INSERT INTO T VALUES (2, ROW(2.0, CAST(NULL AS ARRAY<BOOLEAN>)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(1.0, new Boolean[] {true, false})),
+                        Row.of(2, Row.of(2.0, null)));
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN> NOT NULL) NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.c2");
+        sql(
+                "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL");
+        sql(
+                "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN>>) NOT NULL");
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.c3.element.value");
     }
 }

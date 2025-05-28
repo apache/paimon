@@ -70,7 +70,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -344,7 +344,8 @@ public class SchemaManager implements Serializable {
 
                 new NestedColumnModifier(addColumn.fieldNames()) {
                     @Override
-                    protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnAlreadyExistException {
                         assertColumnNotExists(newFields, fieldName);
 
@@ -374,7 +375,8 @@ public class SchemaManager implements Serializable {
                 assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
                 new NestedColumnModifier(rename.fieldNames()) {
                     @Override
-                    protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnNotExistException,
                                     Catalog.ColumnAlreadyExistException {
                         assertColumnExists(newFields, fieldName);
@@ -401,7 +403,8 @@ public class SchemaManager implements Serializable {
                 dropColumnValidation(oldTableSchema, drop);
                 new NestedColumnModifier(drop.fieldNames()) {
                     @Override
-                    protected void updateLastColumn(List<DataField> newFields, String fieldName)
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnNotExistException {
                         assertColumnExists(newFields, fieldName);
                         newFields.removeIf(f -> f.name().equals(fieldName));
@@ -416,10 +419,10 @@ public class SchemaManager implements Serializable {
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
-                        (field) -> {
+                        (field, depth) -> {
                             // find the dataType at depth and update the type for it
                             DataType sourceRootType =
-                                    getRootType(field.type(), 1, update.fieldNames().length);
+                                    getRootType(field.type(), depth, update.fieldNames().length);
                             DataType targetRootType = update.newDataType();
                             if (update.keepNullability()) {
                                 targetRootType = targetRootType.copy(sourceRootType.isNullable());
@@ -444,7 +447,7 @@ public class SchemaManager implements Serializable {
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
-                                            1,
+                                            depth,
                                             update.fieldNames().length),
                                     field.description());
                         });
@@ -459,10 +462,10 @@ public class SchemaManager implements Serializable {
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
-                        (field) -> {
+                        (field, depth) -> {
                             // find the DataType at depth and update that DataTypes nullability
                             DataType sourceRootType =
-                                    getRootType(field.type(), 1, update.fieldNames().length);
+                                    getRootType(field.type(), depth, update.fieldNames().length);
                             assertNullabilityChange(
                                     sourceRootType.isNullable(),
                                     update.newNullability(),
@@ -475,7 +478,7 @@ public class SchemaManager implements Serializable {
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             sourceRootType,
-                                            1,
+                                            depth,
                                             update.fieldNames().length),
                                     field.description());
                         });
@@ -484,7 +487,7 @@ public class SchemaManager implements Serializable {
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
-                        (field) ->
+                        (field, depth) ->
                                 new DataField(
                                         field.id(),
                                         field.name(),
@@ -528,7 +531,7 @@ public class SchemaManager implements Serializable {
     // which in the case will be [v, element, value, element],
     // so maxDepth is 4 and return DataType will be INT
     private DataType getRootType(DataType type, int currDepth, int maxDepth) {
-        if (currDepth == maxDepth) {
+        if (currDepth == maxDepth - 1) {
             return type;
         }
         switch (type.getTypeRoot()) {
@@ -547,7 +550,7 @@ public class SchemaManager implements Serializable {
     // remains same. This function achieves this.
     private DataType getArrayMapTypeWithTargetTypeRoot(
             DataType source, DataType target, int currDepth, int maxDepth) {
-        if (currDepth == maxDepth) {
+        if (currDepth == maxDepth - 1) {
             return target;
         }
         switch (source.getTypeRoot()) {
@@ -746,7 +749,7 @@ public class SchemaManager implements Serializable {
                 List<DataField> newFields, List<DataField> previousFields, int depth, int prevDepth)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
             if (depth == updateFieldNames.length - 1) {
-                updateLastColumn(newFields, updateFieldNames[depth]);
+                updateLastColumn(depth, newFields, updateFieldNames[depth]);
                 return;
             } else if (depth >= updateFieldNames.length) {
                 // to handle the case of ARRAY or MAP type evolution
@@ -757,7 +760,7 @@ public class SchemaManager implements Serializable {
                 // fields which will have DataFields from prevDepth
                 // The reason for this handling is the addition of element and value for array
                 // and map type in FlinkCatalog as dummy column name
-                updateLastColumn(previousFields, updateFieldNames[prevDepth]);
+                updateLastColumn(prevDepth, previousFields, updateFieldNames[prevDepth]);
                 return;
             }
 
@@ -824,7 +827,8 @@ public class SchemaManager implements Serializable {
             }
         }
 
-        protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)
+        protected abstract void updateLastColumn(
+                int depth, List<DataField> newFields, String fieldName)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException;
 
         protected void assertColumnExists(List<DataField> newFields, String fieldName)
@@ -863,11 +867,11 @@ public class SchemaManager implements Serializable {
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
-            Function<DataField, DataField> updateFunc)
+            BiFunction<DataField, Integer, DataField> updateFunc)
             throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
         new NestedColumnModifier(updateFieldNames) {
             @Override
-            protected void updateLastColumn(List<DataField> newFields, String fieldName)
+            protected void updateLastColumn(int depth, List<DataField> newFields, String fieldName)
                     throws Catalog.ColumnNotExistException {
                 for (int i = 0; i < newFields.size(); i++) {
                     DataField field = newFields.get(i);
@@ -875,7 +879,7 @@ public class SchemaManager implements Serializable {
                         continue;
                     }
 
-                    newFields.set(i, updateFunc.apply(field));
+                    newFields.set(i, updateFunc.apply(field, depth));
                     return;
                 }
 
