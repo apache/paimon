@@ -92,3 +92,4 @@ org.apache.paimon.flink.procedure.ClearConsumersProcedure
 org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure
 org.apache.paimon.flink.procedure.RescaleProcedure
 org.apache.paimon.flink.procedure.AlterViewDialectProcedure
+org.apache.paimon.flink.procedure.CreateFunctionProcedure

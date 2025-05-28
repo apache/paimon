@@ -92,10 +92,10 @@ import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 public class SparkCatalog extends SparkBaseCatalog
         implements SupportView, FunctionCatalog, SupportsNamespaces {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
+    public static final String FUNCTION_DEFINITION_NAME = "spark";
 
+    private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
-    protected static final String FUNCTION_DEFINITION_NAME = "spark";
 
     protected Catalog catalog = null;
 

@@ -23,6 +23,7 @@ import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
+import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
@@ -102,6 +103,7 @@ public class SparkProcedures {
         procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
+        procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
         return procedureBuilders.build();
     }
 }
