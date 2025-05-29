@@ -88,56 +88,33 @@ This statement deletes the existing `parse_str` function from the `mydb` databas
 
 ### Create Function
 
-```java
-Catalog paimonCatalog = getPaimonCatalog();
-List<DataField> inputParams = new ArrayList<>();
-inputParams.add(new DataField(0, "length", DataTypes.INT()));
-inputParams.add(new DataField(1, "width", DataTypes.INT()));
-List<DataField> returnParams = new ArrayList<>();
-returnParams.add(new DataField(0, "area", DataTypes.BIGINT()));
-String functionName = "area_func";
-FunctionDefinition definition =
-        FunctionDefinition.lambda(
-                "(Integer length, Integer width) -> { return (long) length * width; }",
-                "JAVA");
-Identifier identifier = Identifier.create("my_db", functionName);
-Function function =
-        new FunctionImpl(
-                identifier,
-                inputParams,
-                returnParams,
-                false,
-                ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
-                null,
-                null);
-paimonCatalog.createFunction(identifier, function, false);
+```sql
+-- Spark SQL
+CALL sys.create_function(`function` => 'my_db.area_func',
+  `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',
+  `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',
+  `deterministic` => true,
+  `comment` => 'comment',
+  `options` => 'k1=v1,k2=v2'
+);
 ```
 
+### Alter Function
+
+```sql
+-- Spark SQL
+CALL sys.alter_function(`function` => 'my_db.area_func',
+  `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'
+);
+```
 ```sql
 -- Spark SQL
 select paimon.my_db.area_func(1, 2);
 ```
 
-### Alter Function
-
-```java
-Catalog paimonCatalog = getPaimonCatalog();
-String functionName = "area_func";
-Identifier identifier = Identifier.create("my_db", functionName);
-FunctionDefinition definition = FunctionDefinition.lambda("(Integer x, Integer y) -> { return x * y + 1L; }", "JAVA");
-paimonCatalog.alterFunction(
-    identifier,
-    ImmutableList.of(
-            FunctionChange.updateDefinition(
-            SparkCatalog.FUNCTION_DEFINITION_NAME, definition)),
-    false);
-```
-
 ### Drop Function
 
-```java
-Catalog paimonCatalog = getPaimonCatalog();
-String functionName = "area_func";
-Identifier identifier = Identifier.create("my_db", functionName);
-paimonCatalog.dropFunction(identifier, false);
+```sql
+-- Spark SQL
+CALL sys.drop_function(`function` => 'my_db.area_func');
 ```
