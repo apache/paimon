@@ -24,6 +24,7 @@ import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -62,6 +63,7 @@ public class CreateFunctionProcedure extends ProcedureBase {
                         type = @DataTypeHint("BOOLEAN"),
                         isOptional = true),
                 @ArgumentHint(name = "comment", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -69,7 +71,8 @@ public class CreateFunctionProcedure extends ProcedureBase {
             String inputParams,
             String returnParams,
             Boolean deterministic,
-            String comment)
+            String comment,
+            String options)
             throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
                     Catalog.DialectNotExistException, Catalog.FunctionAlreadyExistException,
                     Catalog.DatabaseNotExistException {
@@ -82,7 +85,7 @@ public class CreateFunctionProcedure extends ProcedureBase {
                         Optional.ofNullable(deterministic).orElse(true),
                         Maps.newHashMap(),
                         comment,
-                        Maps.newHashMap());
+                        ParameterUtils.parseCommaSeparatedKeyValues(options));
         catalog.createFunction(identifier, functionImpl, false);
         return new String[] {"Success"};
     }

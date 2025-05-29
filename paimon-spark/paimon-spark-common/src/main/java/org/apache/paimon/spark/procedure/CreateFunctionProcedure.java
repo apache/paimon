@@ -26,11 +26,13 @@ import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
@@ -38,7 +40,9 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -52,7 +56,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *  CALL sys.create_function('function_identifier',
  *     '[{"id": 0, "name":"length", "type":"INT"}', '{"id": 1, "name":"width", "type":"INT"}]',
  *     '[{"id": 0, "name":"area", "type":"BIGINT"]',
- *     true, 'comment'
+ *     true, 'comment', 'k1=v1,k2=v2'
  *    )
  *
  * </code></pre>
@@ -66,6 +70,7 @@ public class CreateFunctionProcedure extends BaseProcedure {
                 ProcedureParameter.required("returnParams", StringType),
                 ProcedureParameter.optional("deterministic", BooleanType),
                 ProcedureParameter.optional("comment", StringType),
+                ProcedureParameter.optional("options", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -98,6 +103,8 @@ public class CreateFunctionProcedure extends BaseProcedure {
         List<DataField> returnParams = getParametersFromArguments(2, args);
         boolean deterministic = args.isNullAt(3) ? true : args.getBoolean(3);
         String comment = args.isNullAt(4) ? null : args.getString(4);
+        String properties = args.isNullAt(5) ? null : args.getString(5);
+        Map<String, String> options = ParameterUtils.parseCommaSeparatedKeyValues(properties);
         try {
             FunctionImpl functionImpl =
                     new FunctionImpl(
@@ -107,7 +114,7 @@ public class CreateFunctionProcedure extends BaseProcedure {
                             deterministic,
                             Maps.newHashMap(),
                             comment,
-                            Maps.newHashMap());
+                            options);
             paimonCatalog.createFunction(function, functionImpl, false);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -126,7 +133,7 @@ public class CreateFunctionProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "AlterFunctionDefinitionProcedure";
+        return "CreateFunctionDefinitionProcedure";
     }
 
     public static List<DataField> getParametersFromArguments(int position, InternalRow args) {
@@ -142,5 +149,17 @@ public class CreateFunctionProcedure extends BaseProcedure {
             }
         }
         return list;
+    }
+
+    public static Map<String, String> mapDataToHashMap(MapData mapData) {
+        HashMap<String, String> map = new HashMap<>();
+        if (mapData != null) {
+            for (int index = 0; index < mapData.numElements(); index++) {
+                map.put(
+                        mapData.keyArray().getUTF8String(index).toString(),
+                        mapData.valueArray().getUTF8String(index).toString());
+            }
+        }
+        return map;
     }
 }

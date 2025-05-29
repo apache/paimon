@@ -21,14 +21,24 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonRestCatalogSparkTestBase
 
 import org.apache.spark.sql.Row
+import org.assertj.core.api.Assertions.assertThat
 
 /** Test for [[CreateFunctionProcedure]]. */
 class CreateFunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
   test(s"test create function procedure") {
+    val functionName = "function_test"
     checkAnswer(
-      spark.sql(
-        "CALL sys.create_function('function_test', '[{\"id\": 0, \"name\":\"length\", \"type\":\"INT\"}, {\"id\": 1, \"name\":\"width\", \"type\":\"INT\"}]', '[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]')"),
+      spark.sql(s"CALL sys.create_function('$functionName', " +
+        "'[{\"id\": 0, \"name\":\"length\", \"type\":\"INT\"}, {\"id\": 1, \"name\":\"width\", \"type\":\"INT\"}]'," +
+        " '[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]', true, 'comment', 'k1=v1,k2=v2')"),
       Row(true)
     );
+    assertThat(
+      spark
+        .sql("SHOW FUNCTIONS")
+        .collect()
+        .map(r => r.getString(0))
+        .filter(v => v == s"paimon.test.$functionName")
+        .size).isEqualTo(1)
   }
 }

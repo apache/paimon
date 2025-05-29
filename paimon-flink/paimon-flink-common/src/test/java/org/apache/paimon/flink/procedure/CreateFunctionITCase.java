@@ -32,11 +32,15 @@ public class CreateFunctionITCase extends RESTCatalogITCaseBase {
 
     @Test
     public void testCreateFunction() {
+        String functionName = "test_function";
         List<Row> result =
                 sql(
                         String.format(
-                                "CALL sys.create_function('%s.%s', '[{\"id\": 0, \"name\":\"length\", \"type\":\"INT\"}, {\"id\": 1, \"name\":\"width\", \"type\":\"INT\"}]', '[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]')",
-                                DATABASE_NAME, "test_function"));
+                                "CALL sys.create_function('%s.%s', "
+                                        + "'[{\"id\": 0, \"name\":\"length\", \"type\":\"INT\"}, {\"id\": 1, \"name\":\"width\", \"type\":\"INT\"}]',"
+                                        + "'[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]', true, 'comment', 'k1=v1,k2=v2')",
+                                DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
+        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
     }
 }
