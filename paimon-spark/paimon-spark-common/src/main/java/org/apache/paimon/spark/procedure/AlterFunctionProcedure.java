@@ -20,8 +20,12 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.spark.utils.CatalogUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -33,19 +37,22 @@ import org.apache.spark.sql.types.StructType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
- * drop function procedure. Usage:
+ * alter function procedure. Usage:
  *
  * <pre><code>
  *  -- NOTE: use '' as placeholder for optional arguments
  *
- *  CALL sys.drop_function('function_identifier')
+ *  CALL sys.alter_function('function_identifier', change)
  *
  * </code></pre>
  */
-public class DropFunctionProcedure extends BaseProcedure {
+public class AlterFunctionProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {ProcedureParameter.required("function", StringType)};
+            new ProcedureParameter[] {
+                ProcedureParameter.required("function", StringType),
+                ProcedureParameter.required("change", StringType)
+            };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
@@ -53,7 +60,7 @@ public class DropFunctionProcedure extends BaseProcedure {
                         new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
-    protected DropFunctionProcedure(TableCatalog tableCatalog) {
+    protected AlterFunctionProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
@@ -73,8 +80,10 @@ public class DropFunctionProcedure extends BaseProcedure {
         org.apache.spark.sql.connector.catalog.Identifier ident =
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
         Identifier function = CatalogUtils.toIdentifier(ident);
+        FunctionChange functionChange =
+                JsonSerdeUtil.fromJson(args.getString(1), FunctionChange.class);
         try {
-            paimonCatalog.dropFunction(function, false);
+            paimonCatalog.alterFunction(function, ImmutableList.of(functionChange), false);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -82,16 +91,16 @@ public class DropFunctionProcedure extends BaseProcedure {
     }
 
     public static ProcedureBuilder builder() {
-        return new Builder<DropFunctionProcedure>() {
+        return new Builder<AlterFunctionProcedure>() {
             @Override
-            public DropFunctionProcedure doBuild() {
-                return new DropFunctionProcedure(tableCatalog());
+            public AlterFunctionProcedure doBuild() {
+                return new AlterFunctionProcedure(tableCatalog());
             }
         };
     }
 
     @Override
     public String description() {
-        return "DropFunctionDefinitionProcedure";
+        return "AlterFunctionDefinitionProcedure";
     }
 }

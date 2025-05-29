@@ -41,6 +41,15 @@ class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
         .filter(v => v == s"paimon.test.$functionName")
         .size).isEqualTo(1)
     checkAnswer(
+      spark.sql(s"CALL sys.alter_function('$functionName', " +
+        "'{\"action\" : \"addDefinition\", \"name\" : \"spark\", \"definition\" : {\"type\" : \"lambda\", \"definition\" : \"(Integer length, Integer width) -> { return (long) length * width; }\", \"language\": \"JAVA\" } }')"),
+      Row(true)
+    );
+    checkAnswer(
+      spark.sql(s"select paimon.test.$functionName(1, 2)"),
+      Row(2)
+    );
+    checkAnswer(
       spark.sql(s"CALL sys.drop_function('$functionName')"),
       Row(true)
     );
@@ -50,6 +59,6 @@ class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
         .collect()
         .map(r => r.getString(0))
         .filter(v => v == s"paimon.test.$functionName")
-        .size).isEqualTo(0)
+        .size).isEqualTo(0);
   }
 }

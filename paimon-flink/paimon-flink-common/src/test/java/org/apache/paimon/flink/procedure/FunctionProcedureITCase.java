@@ -20,6 +20,10 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.RESTCatalogITCaseBase;
 
+import org.apache.flink.table.catalog.Catalog;
+import org.apache.flink.table.catalog.CatalogFunction;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FunctionProcedureITCase extends RESTCatalogITCaseBase {
 
     @Test
-    public void testCreateFunction() {
+    public void test() throws FunctionNotExistException {
         String functionName = "test_function";
         List<Row> result =
                 sql(
@@ -42,6 +46,17 @@ public class FunctionProcedureITCase extends RESTCatalogITCaseBase {
                                 DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
         assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        result =
+                sql(
+                        String.format(
+                                "CALL sys.alter_function('%s.%s', '{\"action\" : \"addDefinition\", \"name\" : \"flink\", \"definition\" : {\"type\" : \"file\", \"fileResources\" : [{\"resourceType\": \"JAR\", \"uri\": \"oss://mybucket/xxxx.jar\"}], \"language\": \"JAVA\", \"className\": \"xxxx\", \"functionName\": \"functionName\" } }')",
+                                DATABASE_NAME, functionName));
+        assertThat(result.toString()).contains("Success");
+        Catalog catalog = tEnv.getCatalog("PAIMON").get();
+        ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
+        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction.getClassName()).isEqualTo("xxxx");
         result = sql(String.format("CALL sys.drop_function('%s.%s')", DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
         assertThat(batchSql(String.format("SHOW FUNCTIONS"))).doesNotContain(Row.of(functionName));

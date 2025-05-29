@@ -20,6 +20,10 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.utils.JsonSerdeUtil;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -27,26 +31,32 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * drop function procedure. Usage:
+ * alter function procedure. Usage:
  *
  * <pre><code>
  *  -- NOTE: use '' as placeholder for optional arguments
  *
- *  CALL sys.drop_function('function_identifier')
+ *  CALL sys.alter_function('function_identifier', [change])
  *
  * </code></pre>
  */
-public class DropFunctionProcedure extends ProcedureBase {
-    @ProcedureHint(argument = {@ArgumentHint(name = "function", type = @DataTypeHint("STRING"))})
-    public String[] call(ProcedureContext procedureContext, String function)
-            throws Catalog.FunctionNotExistException {
+public class AlterFunctionProcedure extends ProcedureBase {
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "function", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "change", type = @DataTypeHint("STRING")),
+            })
+    public String[] call(ProcedureContext procedureContext, String function, String change)
+            throws Catalog.FunctionNotExistException, Catalog.DefinitionAlreadyExistException,
+                    Catalog.DefinitionNotExistException {
         Identifier identifier = Identifier.fromString(function);
-        catalog.dropFunction(identifier, false);
+        FunctionChange functionChange = JsonSerdeUtil.fromJson(change, FunctionChange.class);
+        catalog.alterFunction(identifier, ImmutableList.of(functionChange), false);
         return new String[] {"Success"};
     }
 
     @Override
     public String identifier() {
-        return "drop_function";
+        return "alter_function";
     }
 }

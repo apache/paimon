@@ -73,9 +73,7 @@ public class CreateFunctionProcedure extends ProcedureBase {
             Boolean deterministic,
             String comment,
             String options)
-            throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
-                    Catalog.DialectNotExistException, Catalog.FunctionAlreadyExistException,
-                    Catalog.DatabaseNotExistException {
+            throws Catalog.FunctionAlreadyExistException, Catalog.DatabaseNotExistException {
         Identifier identifier = Identifier.fromString(function);
         FunctionImpl functionImpl =
                 new FunctionImpl(

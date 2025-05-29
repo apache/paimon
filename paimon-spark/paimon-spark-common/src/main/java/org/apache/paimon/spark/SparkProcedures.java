@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
@@ -105,6 +106,7 @@ public class SparkProcedures {
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
         procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
+        procedureBuilders.put("alter_function", AlterFunctionProcedure::builder);
         procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
         return procedureBuilders.build();
     }
