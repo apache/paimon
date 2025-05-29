@@ -20,7 +20,6 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
-import okhttp3.MediaType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +50,7 @@ public class DLFAuthProvider implements AuthProvider {
 
     public static final DateTimeFormatter AUTH_DATE_TIME_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
-    protected static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    protected static final String MEDIA_TYPE = "application/json";
 
     @Nullable private final DLFTokenLoader tokenLoader;
     @Nullable protected DLFToken token;
@@ -143,7 +142,7 @@ public class DLFAuthProvider implements AuthProvider {
         signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLF_CONTENT_SHA56_VALUE);
         signHeaders.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
         if (data != null && !data.isEmpty()) {
-            signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
+            signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE);
             signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));
         }
         if (securityToken != null) {

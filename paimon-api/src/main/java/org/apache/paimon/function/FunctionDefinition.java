@@ -46,13 +46,12 @@ import java.util.Objects;
 public interface FunctionDefinition {
 
     static FunctionDefinition file(
-            String fileType,
-            List<String> storagePaths,
+            List<FunctionFileResource> fileResources,
             String language,
             String className,
             String functionName) {
         return new FunctionDefinition.FileFunctionDefinition(
-                fileType, storagePaths, language, className, functionName);
+                fileResources, language, className, functionName);
     }
 
     static FunctionDefinition sql(String definition) {
@@ -67,17 +66,13 @@ public interface FunctionDefinition {
     @JsonIgnoreProperties(ignoreUnknown = true)
     final class FileFunctionDefinition implements FunctionDefinition {
 
-        private static final String FIELD_FILE_TYPE = "fileType";
-        private static final String FIELD_STORAGE_PATHS = "storagePaths";
+        private static final String FIELD_FILE_RESOURCES = "fileResources";
         private static final String FIELD_LANGUAGE = "language";
         private static final String FIELD_CLASS_NAME = "className";
         private static final String FIELD_FUNCTION_NAME = "functionName";
 
-        @JsonProperty(FIELD_FILE_TYPE)
-        private final String fileType;
-
-        @JsonProperty(FIELD_STORAGE_PATHS)
-        private final List<String> storagePaths;
+        @JsonProperty(FIELD_FILE_RESOURCES)
+        private final List<FunctionFileResource> fileResources;
 
         @JsonProperty(FIELD_LANGUAGE)
         private String language;
@@ -89,26 +84,19 @@ public interface FunctionDefinition {
         private String functionName;
 
         public FileFunctionDefinition(
-                @JsonProperty(FIELD_FILE_TYPE) String fileType,
-                @JsonProperty(FIELD_STORAGE_PATHS) List<String> storagePaths,
+                @JsonProperty(FIELD_FILE_RESOURCES) List<FunctionFileResource> fileResources,
                 @JsonProperty(FIELD_LANGUAGE) String language,
                 @JsonProperty(FIELD_CLASS_NAME) String className,
                 @JsonProperty(FIELD_FUNCTION_NAME) String functionName) {
-            this.fileType = fileType;
-            this.storagePaths = storagePaths;
+            this.fileResources = fileResources;
             this.language = language;
             this.className = className;
             this.functionName = functionName;
         }
 
-        @JsonGetter(FIELD_FILE_TYPE)
-        public String fileType() {
-            return fileType;
-        }
-
-        @JsonGetter(FIELD_STORAGE_PATHS)
-        public List<String> storagePaths() {
-            return storagePaths;
+        @JsonGetter(FIELD_FILE_RESOURCES)
+        public List<FunctionFileResource> fileResources() {
+            return fileResources;
         }
 
         @JsonGetter(FIELD_LANGUAGE)
@@ -135,8 +123,7 @@ public interface FunctionDefinition {
                 return false;
             }
             FileFunctionDefinition that = (FileFunctionDefinition) o;
-            return fileType.equals(that.fileType)
-                    && Objects.equals(storagePaths, that.storagePaths)
+            return Objects.equals(fileResources, that.fileResources)
                     && Objects.equals(language, that.language)
                     && Objects.equals(className, that.className)
                     && Objects.equals(functionName, that.functionName);
@@ -144,8 +131,8 @@ public interface FunctionDefinition {
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(fileType, language, className, functionName);
-            result = 31 * result + Objects.hashCode(storagePaths);
+            int result = Objects.hash(language, className, functionName);
+            result = 31 * result + Objects.hashCode(fileResources);
             return result;
         }
     }
@@ -238,5 +225,50 @@ public interface FunctionDefinition {
         public static final String LAMBDA_TYPE = "lambda";
 
         private Types() {}
+    }
+
+    /** Function file resource. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    class FunctionFileResource {
+
+        private static final String FIELD_RESOURCE_TYPE = "resourceType";
+        private static final String FIELD_URI = "uri";
+
+        private final String resourceType;
+        private final String uri;
+
+        public FunctionFileResource(
+                @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
+                @JsonProperty(FIELD_URI) String uri) {
+            this.resourceType = resourceType;
+            this.uri = uri;
+        }
+
+        @JsonGetter(FIELD_RESOURCE_TYPE)
+        public String resourceType() {
+            return resourceType;
+        }
+
+        @JsonGetter(FIELD_URI)
+        public String uri() {
+            return uri;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FunctionFileResource that = (FunctionFileResource) o;
+            return resourceType.equals(that.resourceType) && uri.equals(that.uri);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(resourceType, uri);
+        }
     }
 }

@@ -324,7 +324,11 @@ public class MockRESTMessage {
                 Lists.newArrayList(new DataField(0, "area", DataTypes.DOUBLE()));
         FunctionDefinition flinkFunction =
                 FunctionDefinition.file(
-                        "jar", Lists.newArrayList("/a/b/c.jar"), "java", "className", "eval");
+                        Lists.newArrayList(
+                                new FunctionDefinition.FunctionFileResource("jar", "/a/b/c.jar")),
+                        "java",
+                        "className",
+                        "eval");
         FunctionDefinition sparkFunction =
                 FunctionDefinition.lambda(
                         "(Double length, Double width) -> length * width", "java");

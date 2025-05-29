@@ -59,6 +59,16 @@ public class FunctionImpl implements Function {
         this.options = options;
     }
 
+    public FunctionImpl(Identifier identifier, Map<String, FunctionDefinition> definitions) {
+        this.identifier = identifier;
+        this.inputParams = null;
+        this.returnParams = null;
+        this.deterministic = true;
+        this.definitions = definitions;
+        this.comment = null;
+        this.options = null;
+    }
+
     @Override
     public String name() {
         return identifier.getObjectName();
