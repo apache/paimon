@@ -348,6 +348,128 @@ You can configure the following table option, so that Paimon is forced to perfor
 Note that full compaction is a resource-consuming process, so the value of this table option should not be too small.
 We recommend full compaction to be performed once or twice per hour.
 
+## Deletion Vector Support
+
+[Deletion vectors]({{< ref "concepts/spec/tableindex#deletion-vectors" >}}) in Paimon are used to store deleted records for each file. 
+Under deletion-vector mode, paimon readers can directly filter out unnecessary records during reading phase without merging data.
+Fortunately, Iceberg has supported [deletion vectors](https://iceberg.apache.org/spec/?h=deletion#deletion-vectors) in [Version 3](https://iceberg.apache.org/spec/?h=deletion#version-3).
+This means that if the Iceberg reader can recognize Paimon's deletion vectors, it will be able to read all of Paimon's data, even without the ability to merge data files.
+With Paimon's deletion vectors synchronized to Iceberg, Iceberg reader and Paimon reader can achieve true real-time synchronization.
+
+
+If the following conditions are met, it will construct metadata about Paimon's deletion vectors for Iceberg.
+* '`deletion-vectors.enabled`' and '`deletion-vectors.bitmap64`' should be set to true. Because only 64-bit bitmap implementation of deletion vector in Paimon is compatible with Iceberg.
+* '`metadata.iceberg.format-version`'(default value is 2) should be set to 3. Because Iceberg only supports deletion vector in V3.
+* Version of Iceberg should be 1.8.0+.
+* JDK version should be 11+. Iceberg has stopped supporting JDK 8 since version 1.7.0.
+
+Here is an example:
+{{< tabs "deletion-vector-table" >}}
+
+{{< tab "Flink SQL" >}}
+```sql
+-- flink version: 1.20.1
+
+CREATE CATALOG paimon_catalog WITH (
+    'type' = 'paimon',
+    'warehouse' = '<path-to-warehouse>'
+);
+
+-- Create a paimon table with primary key and enable deletion vector
+CREATE TABLE paimon_catalog.`default`.T
+(
+    pt  INT
+    ,k  INT
+    ,v  INT
+    ,PRIMARY KEY (pt, k) NOT ENFORCED
+)PARTITIONED BY (pt)
+WITH (
+    'metadata.iceberg.storage' = 'hadoop-catalog'
+    ,'metadata.iceberg.format-version' = '3'
+    ,'deletion-vectors.enabled' = 'true'
+    ,'deletion-vectors.bitmap64' = 'true'
+);
+
+INSERT INTO paimon_catalog.`default`.T
+VALUES (1, 9, 90), (1, 10, 100), (1, 11, 110), (2, 20, 200)
+;
+
+-- iceberg version: 1.8.1
+CREATE CATALOG iceberg_catalog WITH (
+    'type' = 'iceberg',
+    'catalog-type' = 'hadoop',
+    'warehouse' = '<path-to-warehouse>/iceberg',
+    'cache-enabled' = 'false' -- disable iceberg catalog caching to quickly see the result
+);
+
+SELECT * FROM iceberg_catalog.`default`.T;
+/*
++------------+------------+------------+
+|         pt |          k |          v |
++------------+------------+------------+
+|          2 |         20 |        200 |
+|          1 |          9 |         90 |
+|          1 |         10 |        100 |
+|          1 |         11 |        110 |
++------------+------------+------------+
+*/
+
+-- insert some data again, this will generate deletion vectors
+INSERT INTO paimon_catalog.`default`.T
+VALUES (1, 10, 101), (2, 20, 201), (1, 12, 121)
+;
+
+-- select deletion-vector index in paimon
+SELECT * FROM paimon_catalog.`default`.`T$table_indexes` WHERE index_type='DELETION_VECTORS';
+/*
++------------+-----------+-------------------+------------------------   -----+------------+------------+--------------------------------+
+|  partition |    bucket |        index_type |                      file_name |  file_size |  row_count |                      dv_ranges |
++------------+-----------+-------------------+------------------------   -----+------------+------------+--------------------------------+
+|        {1} |         0 |  DELETION_VECTORS | index-4ae44c5d-2fc6-40b0-9ff0~ |         43 |          1 | [(data-968fdf3a-2f44-41df-89b~ |
++------------+-----------+-------------------+------------------------   -----+------------+------------+--------------------------------+
+*/
+
+-- select in iceberg, the updates was successfully read by iceberg
+SELECT * FROM iceberg_catalog.`default`.T;
+/*
++------------+------------+------------+
+|         pt |          k |          v |
++------------+------------+------------+
+|          1 |          9 |         90 |
+|          1 |         11 |        110 |
+|          2 |         20 |        201 |
+|          1 |         10 |        101 |
+|          1 |         12 |        121 |
++------------+------------+------------+
+*/
+
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+{{< hint info >}}
+
+note1: Upgrade the implementation of deletion vector to 64-bit bitmap if necessary.
+
+{{< /hint >}}
+
+If your paimon table has already been in deletion-vector mode, but 32-bit bitmap was used for deletion vector. 
+You need to upgrade the implementation of deletion vector to 64-bit bitmap if you want to synchronize deletion-vector metadata to iceberg.
+You can follow the following steps to upgrade to 64-bit deletion-vector:
+1. stop all the writing jobs of your paimon table.
+2. perform a [full compaction]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}}) to your paimon table.
+3. run `ALTER TABLE tableName SET ('deletion-vectors.bitmap64' = 'true')` to upgrade to 64-bit deletion vector.
+4. restart your writing job. If meeting the all the conditions mentioned above, deletion vector metadata will be synchronized to iceberg.
+
+{{< hint info >}}
+
+note2: Upgrade the format version of iceberg to 3 if necessary.
+
+{{< /hint >}}
+You can upgrade the format version of iceberg from 2 to 3 by setting `'metadata.iceberg.format-version' = '3'`. 
+This will recreate the iceberg metadata without using the base metadata.
+
 ## Hive Catalog
 
 When creating Paimon table, set `'metadata.iceberg.storage' = 'hive-catalog'`.
