@@ -606,12 +606,12 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
-        assertThat(fileIO.exists(new Path(tablePath, "pt=3"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=3"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
-        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
@@ -620,11 +620,11 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
-        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
-        assertThat(fileIO.exists(new Path(tablePath, "pt=2"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=2"))).isTrue();
     }
 
     @Test
