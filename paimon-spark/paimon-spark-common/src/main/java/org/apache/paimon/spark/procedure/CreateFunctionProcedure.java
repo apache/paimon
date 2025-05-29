@@ -24,12 +24,9 @@ import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeJsonParser;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -38,7 +35,6 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -97,8 +93,8 @@ public class CreateFunctionProcedure extends BaseProcedure {
         org.apache.spark.sql.connector.catalog.Identifier ident =
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
         Identifier function = CatalogUtils.toIdentifier(ident);
-        List<DataField> inputParams = getParametersFromArguments(1, args);
-        List<DataField> returnParams = getParametersFromArguments(2, args);
+        List<DataField> inputParams = getDataFieldsFromArguments(1, args);
+        List<DataField> returnParams = getDataFieldsFromArguments(2, args);
         boolean deterministic = args.isNullAt(3) ? true : args.getBoolean(3);
         String comment = args.isNullAt(4) ? null : args.getString(4);
         String properties = args.isNullAt(5) ? null : args.getString(5);
@@ -131,21 +127,11 @@ public class CreateFunctionProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "CreateFunctionDefinitionProcedure";
+        return "CreateFunctionProcedure";
     }
 
-    public static List<DataField> getParametersFromArguments(int position, InternalRow args) {
+    public static List<DataField> getDataFieldsFromArguments(int position, InternalRow args) {
         String data = args.isNullAt(position) ? null : args.getString(position);
-        List<DataField> list = new ArrayList<>();
-        if (data != null) {
-            JsonNode jsonArray = JsonSerdeUtil.fromJson(data, JsonNode.class);
-            if (jsonArray.isArray()) {
-                for (JsonNode objNode : jsonArray) {
-                    DataField dataField = DataTypeJsonParser.parseDataField(objNode);
-                    list.add(dataField);
-                }
-            }
-        }
-        return list;
+        return ParameterUtils.parseDataFieldArray(data);
     }
 }

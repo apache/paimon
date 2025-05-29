@@ -92,6 +92,6 @@ public class DropFunctionProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "DropFunctionDefinitionProcedure";
+        return "DropFunctionProcedure";
     }
 }

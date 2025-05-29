@@ -101,6 +101,6 @@ public class AlterFunctionProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "AlterFunctionDefinitionProcedure";
+        return "AlterFunctionProcedure";
     }
 }

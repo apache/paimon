@@ -36,7 +36,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * <pre><code>
  *  -- NOTE: use '' as placeholder for optional arguments
  *
- *  CALL sys.alter_function('function_identifier', [change])
+ *  CALL sys.alter_function('function_identifier', '{"action" : "addDefinition", "name" : "flink", "definition" : {"type" : "file", "fileResources" : [{"resourceType": "JAR", "uri": "oss://mybucket/xxxx.jar"}], "language": "JAVA", "className": "xxxx", "functionName": "functionName" } }')
  *
  * </code></pre>
  */
