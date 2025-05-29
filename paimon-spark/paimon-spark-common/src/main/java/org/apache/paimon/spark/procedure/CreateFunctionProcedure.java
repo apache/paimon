@@ -32,7 +32,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
@@ -40,7 +39,6 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -149,17 +147,5 @@ public class CreateFunctionProcedure extends BaseProcedure {
             }
         }
         return list;
-    }
-
-    public static Map<String, String> mapDataToHashMap(MapData mapData) {
-        HashMap<String, String> map = new HashMap<>();
-        if (mapData != null) {
-            for (int index = 0; index < mapData.numElements(); index++) {
-                map.put(
-                        mapData.keyArray().getUTF8String(index).toString(),
-                        mapData.valueArray().getUTF8String(index).toString());
-            }
-        }
-        return map;
     }
 }

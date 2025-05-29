@@ -28,6 +28,7 @@ import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -104,6 +105,7 @@ public class SparkProcedures {
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
         procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
+        procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
         return procedureBuilders.build();
     }
 }

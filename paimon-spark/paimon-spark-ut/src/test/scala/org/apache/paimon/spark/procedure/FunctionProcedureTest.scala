@@ -23,9 +23,9 @@ import org.apache.paimon.spark.PaimonRestCatalogSparkTestBase
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
-/** Test for [[CreateFunctionProcedure]]. */
-class CreateFunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
-  test(s"test create function procedure") {
+/** Test for Function Procedure. */
+class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
+  test(s"test function procedure") {
     val functionName = "function_test"
     checkAnswer(
       spark.sql(s"CALL sys.create_function('$functionName', " +
@@ -40,5 +40,16 @@ class CreateFunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
         .map(r => r.getString(0))
         .filter(v => v == s"paimon.test.$functionName")
         .size).isEqualTo(1)
+    checkAnswer(
+      spark.sql(s"CALL sys.drop_function('$functionName')"),
+      Row(true)
+    );
+    assertThat(
+      spark
+        .sql("SHOW FUNCTIONS")
+        .collect()
+        .map(r => r.getString(0))
+        .filter(v => v == s"paimon.test.$functionName")
+        .size).isEqualTo(0)
   }
 }

@@ -27,8 +27,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT Case for {@link CreateFunctionProcedure}. */
-public class CreateFunctionITCase extends RESTCatalogITCaseBase {
+/** IT Case for function procedure. */
+public class FunctionProcedureITCase extends RESTCatalogITCaseBase {
 
     @Test
     public void testCreateFunction() {
@@ -42,5 +42,8 @@ public class CreateFunctionITCase extends RESTCatalogITCaseBase {
                                 DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
         assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        result = sql(String.format("CALL sys.drop_function('%s.%s')", DATABASE_NAME, functionName));
+        assertThat(result.toString()).contains("Success");
+        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).doesNotContain(Row.of(functionName));
     }
 }
