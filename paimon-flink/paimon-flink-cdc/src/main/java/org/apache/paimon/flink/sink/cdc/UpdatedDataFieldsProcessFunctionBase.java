@@ -22,14 +22,18 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.schema.NestedSchemaUtils;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.FieldIdentifier;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -98,7 +102,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     protected void applySchemaChange(
-            SchemaManager schemaManager, SchemaChange schemaChange, Identifier identifier)
+            SchemaManager schemaManager,
+            SchemaChange schemaChange,
+            Identifier identifier,
+            CdcSchema actualUpdatedSchema)
             throws Exception {
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
@@ -118,9 +125,6 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
             SchemaChange.UpdateColumnType updateColumnType =
                     (SchemaChange.UpdateColumnType) schemaChange;
-            Preconditions.checkState(
-                    updateColumnType.fieldNames().length == 1,
-                    "Paimon CDC currently does not support nested type schema evolution.");
             TableSchema schema =
                     schemaManager
                             .latest()
@@ -136,6 +140,19 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
+
+            // For complex types, extract the full new type from actualUpdatedSchema
+            // to preserve type context (e.g., ARRAY<BIGINT> instead of just BIGINT)
+            if (actualUpdatedSchema != null) {
+                String fieldName = updateColumnType.fieldNames()[0];
+                for (DataField field : actualUpdatedSchema.fields()) {
+                    if (fieldName.equals(field.name())) {
+                        newType = field.type();
+                        break;
+                    }
+                }
+            }
+
             switch (canConvert(oldType, newType, typeMapping)) {
                 case CONVERT:
                     catalog.alterTable(identifier, schemaChange, false);
@@ -165,7 +182,39 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     public static ConvertAction canConvert(
             DataType oldType, DataType newType, TypeMapping typeMapping) {
         if (oldType.equalsIgnoreNullable(newType)) {
+            if (oldType.isNullable() && !newType.isNullable()) {
+                return ConvertAction.EXCEPTION; // Cannot make nullable field non-nullable
+            }
             return ConvertAction.CONVERT;
+        }
+
+        if (oldType.getTypeRoot() == DataTypeRoot.ARRAY
+                && newType.getTypeRoot() == DataTypeRoot.ARRAY) {
+
+            ArrayType oldArrayType = (ArrayType) oldType;
+            ArrayType newArrayType = (ArrayType) newType;
+            return canConvertArray(oldArrayType, newArrayType, typeMapping);
+        }
+
+        if (oldType.getTypeRoot() == DataTypeRoot.MAP
+                && newType.getTypeRoot() == DataTypeRoot.MAP) {
+            MapType oldMapType = (MapType) oldType;
+            MapType newMapType = (MapType) newType;
+
+            return canConvertMap(oldMapType, newMapType, typeMapping);
+        }
+
+        if (oldType.getTypeRoot() == DataTypeRoot.MULTISET
+                && newType.getTypeRoot() == DataTypeRoot.MULTISET) {
+            MultisetType oldMultisetType = (MultisetType) oldType;
+            MultisetType newMultisetType = (MultisetType) newType;
+
+            return canConvertMultisetType(oldMultisetType, newMultisetType, typeMapping);
+        }
+
+        if (oldType.getTypeRoot() == DataTypeRoot.ROW
+                && newType.getTypeRoot() == DataTypeRoot.ROW) {
+            return canConvertRowType((RowType) oldType, (RowType) newType, typeMapping);
         }
 
         int oldIdx = STRING_TYPES.indexOf(oldType.getTypeRoot());
@@ -223,6 +272,88 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         return ConvertAction.EXCEPTION;
     }
 
+    private static ConvertAction canConvertArray(
+            ArrayType oldArrayType, ArrayType newArrayType, TypeMapping typeMapping) {
+        if (oldArrayType.isNullable() && !newArrayType.isNullable()) {
+            return ConvertAction.EXCEPTION;
+        }
+
+        return canConvert(
+                oldArrayType.getElementType(), newArrayType.getElementType(), typeMapping);
+    }
+
+    private static ConvertAction canConvertMap(
+            MapType oldMapType, MapType newMapType, TypeMapping typeMapping) {
+        if (oldMapType.isNullable() && !newMapType.isNullable()) {
+            return ConvertAction.EXCEPTION;
+        }
+
+        // For map keys, don't allow key type evolution
+        // hashcode will be different even if the value of the key is the same
+        if (!oldMapType.getKeyType().equals(newMapType.getKeyType())) {
+            return ConvertAction.EXCEPTION;
+        }
+
+        return canConvert(oldMapType.getValueType(), newMapType.getValueType(), typeMapping);
+    }
+
+    private static ConvertAction canConvertRowType(
+            RowType oldRowType, RowType newRowType, TypeMapping typeMapping) {
+        Map<String, DataField> oldFieldMap = new HashMap<>();
+        for (DataField field : oldRowType.getFields()) {
+            oldFieldMap.put(field.name(), field);
+        }
+
+        Map<String, DataField> newFieldMap = new HashMap<>();
+        for (DataField field : newRowType.getFields()) {
+            newFieldMap.put(field.name(), field);
+        }
+
+        // Rule 1: Check all non-nullable fields in the old type must exist in the new type
+        for (DataField oldField : oldRowType.getFields()) {
+            if (!oldField.type().isNullable()) {
+                if (!newFieldMap.containsKey(oldField.name())) {
+                    return ConvertAction.EXCEPTION;
+                }
+            }
+        }
+
+        // Rule 2: All fields common to both schemas must have compatible types
+        boolean needsConversion = false;
+        for (DataField newField : newRowType.getFields()) {
+            DataField oldField = oldFieldMap.get(newField.name());
+            if (oldField != null) {
+                ConvertAction fieldAction =
+                        canConvert(oldField.type(), newField.type(), typeMapping);
+                if (fieldAction == ConvertAction.EXCEPTION) {
+                    return ConvertAction.EXCEPTION;
+                }
+                if (fieldAction == ConvertAction.CONVERT) {
+                    needsConversion = true;
+                }
+            } else {
+                // Rule 3: New fields must be nullable
+                if (!newField.type().isNullable()) {
+                    return ConvertAction.EXCEPTION;
+                }
+                needsConversion = true;
+            }
+        }
+
+        return needsConversion ? ConvertAction.CONVERT : ConvertAction.IGNORE;
+    }
+
+    private static ConvertAction canConvertMultisetType(
+            MultisetType oldMultisetType, MultisetType newMultisetType, TypeMapping typeMapping) {
+
+        if (oldMultisetType.isNullable() && !newMultisetType.isNullable()) {
+            return ConvertAction.EXCEPTION;
+        }
+
+        return canConvert(
+                oldMultisetType.getElementType(), newMultisetType.getElementType(), typeMapping);
+    }
+
     protected List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, CdcSchema updatedSchema) {
         TableSchema oldTableSchema = schemaManager.latest().get();
@@ -258,8 +389,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     if (oldField.type().is(DataTypeRoot.DECIMAL) && !allowDecimalTypeChange) {
                         continue;
                     }
-                    // update column type
-                    result.add(SchemaChange.updateColumnType(newFieldName, newField.type()));
+                    // Generate nested column updates if needed
+                    NestedSchemaUtils.generateNestedColumnUpdates(
+                            Arrays.asList(newFieldName), oldField.type(), newField.type(), result);
                     // update column comment
                     if (newField.description() != null) {
                         result.add(
