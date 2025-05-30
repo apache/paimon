@@ -44,7 +44,8 @@ import java.util.Objects;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class IcebergMetadata {
 
-    public static final int CURRENT_FORMAT_VERSION = 2;
+    public static final int FORMAT_VERSION_V2 = 2;
+    public static final int FORMAT_VERSION_V3 = 3;
 
     private static final String FIELD_FORMAT_VERSION = "format-version";
     private static final String FIELD_TABLE_UUID = "table-uuid";
@@ -118,6 +119,7 @@ public class IcebergMetadata {
     private final Map<String, IcebergRef> refs;
 
     public IcebergMetadata(
+            int formatVersion,
             String tableUuid,
             String location,
             long lastSequenceNumber,
@@ -130,7 +132,7 @@ public class IcebergMetadata {
             long currentSnapshotId,
             @Nullable Map<String, IcebergRef> refs) {
         this(
-                CURRENT_FORMAT_VERSION,
+                formatVersion,
                 tableUuid,
                 location,
                 lastSequenceNumber,

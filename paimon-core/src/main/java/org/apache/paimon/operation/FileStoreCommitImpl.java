@@ -1053,7 +1053,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     commitUser,
                     identifier,
                     commitKind.name());
-            commitCallbacks.forEach(callback -> callback.call(deltaFiles, newSnapshot));
+            commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
             return new SuccessResult();
         }
 

@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -179,7 +180,10 @@ public class TableCommitTest {
         }
 
         @Override
-        public void call(List<ManifestEntry> entries, Snapshot snapshot) {
+        public void call(
+                List<ManifestEntry> entries,
+                List<IndexManifestEntry> indexFiles,
+                Snapshot snapshot) {
             commitCallbackResult.get(testId).add(snapshot.commitIdentifier());
         }
 

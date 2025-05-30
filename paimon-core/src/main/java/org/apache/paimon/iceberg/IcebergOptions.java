@@ -44,6 +44,14 @@ public class IcebergOptions {
                     .withDescription(
                             "To store Iceberg metadata in a separate directory or under table location");
 
+    public static final ConfigOption<Integer> FORMAT_VERSION =
+            ConfigOptions.key("metadata.iceberg.format-version")
+                    .intType()
+                    .defaultValue(2)
+                    .withDescription(
+                            "The format version of iceberg table, the value can be 2 or 3. "
+                                    + "Note that only version 3 supports deletion vector.");
+
     public static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
                     .intType()

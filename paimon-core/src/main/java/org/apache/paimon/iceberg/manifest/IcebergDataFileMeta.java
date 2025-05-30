@@ -83,6 +83,10 @@ public class IcebergDataFileMeta {
     private final InternalMap lowerBounds;
     private final InternalMap upperBounds;
 
+    private final String referencedDataFile;
+    private final Long contentOffset;
+    private final Long contentSizeInBytes;
+
     // only used for iceberg migrate
     private long schemaId = 0;
 
@@ -96,6 +100,34 @@ public class IcebergDataFileMeta {
             InternalMap nullValueCounts,
             InternalMap lowerBounds,
             InternalMap upperBounds) {
+        this(
+                content,
+                filePath,
+                fileFormat,
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                nullValueCounts,
+                lowerBounds,
+                upperBounds,
+                null,
+                null,
+                null);
+    }
+
+    IcebergDataFileMeta(
+            Content content,
+            String filePath,
+            String fileFormat,
+            BinaryRow partition,
+            long recordCount,
+            long fileSizeInBytes,
+            InternalMap nullValueCounts,
+            InternalMap lowerBounds,
+            InternalMap upperBounds,
+            String referencedDataFile,
+            Long contentOffset,
+            Long contentSizeInBytes) {
         this.content = content;
         this.filePath = filePath;
         this.fileFormat = fileFormat;
@@ -105,6 +137,10 @@ public class IcebergDataFileMeta {
         this.nullValueCounts = nullValueCounts;
         this.lowerBounds = lowerBounds;
         this.upperBounds = upperBounds;
+
+        this.referencedDataFile = referencedDataFile;
+        this.contentOffset = contentOffset;
+        this.contentSizeInBytes = contentSizeInBytes;
     }
 
     public static IcebergDataFileMeta create(
@@ -168,6 +204,33 @@ public class IcebergDataFileMeta {
                 new GenericMap(upperBounds));
     }
 
+    public static IcebergDataFileMeta createForDeleteFile(
+            Content content,
+            String filePath,
+            String fileFormat,
+            BinaryRow partition,
+            long recordCount,
+            long fileSizeInBytes,
+            String referencedDataFile,
+            Long contentOffset,
+            Long contentSizeInBytes) {
+
+        // reference org.apache.iceberg.deletes.BaseDVFileWriter#createDV
+        return new IcebergDataFileMeta(
+                content,
+                filePath,
+                fileFormat,
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                null,
+                null,
+                null,
+                referencedDataFile,
+                contentOffset,
+                contentSizeInBytes);
+    }
+
     public Content content() {
         return content;
     }
@@ -204,6 +267,18 @@ public class IcebergDataFileMeta {
         return upperBounds;
     }
 
+    public String referencedDataFile() {
+        return referencedDataFile;
+    }
+
+    public Long contentOffset() {
+        return contentOffset;
+    }
+
+    public Long contentSizeInBytes() {
+        return contentSizeInBytes;
+    }
+
     public long schemaId() {
         return schemaId;
     }
@@ -236,6 +311,9 @@ public class IcebergDataFileMeta {
                         128,
                         "upper_bounds",
                         DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BYTES().notNull())));
+        fields.add(new DataField(143, "referenced_data_file", DataTypes.STRING()));
+        fields.add(new DataField(144, "content_offset", DataTypes.BIGINT()));
+        fields.add(new DataField(145, "content_size_in_bytes", DataTypes.BIGINT()));
         return new RowType(false, fields);
     }
 
@@ -256,7 +334,10 @@ public class IcebergDataFileMeta {
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(nullValueCounts, that.nullValueCounts)
                 && Objects.equals(lowerBounds, that.lowerBounds)
-                && Objects.equals(upperBounds, that.upperBounds);
+                && Objects.equals(upperBounds, that.upperBounds)
+                && Objects.equals(referencedDataFile, that.referencedDataFile)
+                && Objects.equals(contentOffset, that.contentOffset)
+                && Objects.equals(contentSizeInBytes, that.contentSizeInBytes);
     }
 
     @Override
@@ -270,6 +351,9 @@ public class IcebergDataFileMeta {
                 fileSizeInBytes,
                 nullValueCounts,
                 lowerBounds,
-                upperBounds);
+                upperBounds,
+                referencedDataFile,
+                contentOffset,
+                contentSizeInBytes);
     }
 }

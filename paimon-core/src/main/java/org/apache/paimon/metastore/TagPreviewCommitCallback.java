@@ -19,6 +19,7 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -39,7 +40,10 @@ public class TagPreviewCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
+    public void call(
+            List<ManifestEntry> committedEntries,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot) {
         long currentMillis = System.currentTimeMillis();
         Optional<String> tagOptional = tagPreview.extractTag(currentMillis, snapshot.watermark());
         tagOptional.ifPresent(tagCallback::notifyCreation);
