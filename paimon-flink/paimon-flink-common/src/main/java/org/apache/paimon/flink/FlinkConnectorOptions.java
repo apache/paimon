@@ -342,6 +342,18 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If true, a tag will be automatically created for the snapshot created by flink savepoint.");
 
+    public static final ConfigOption<Double> SINK_WRITER_CPU =
+            ConfigOptions.key("sink.writer-cpu")
+                    .doubleType()
+                    .defaultValue(1.0)
+                    .withDescription("Sink writer cpu to control cpu cores of writer.");
+
+    public static final ConfigOption<MemorySize> SINK_WRITER_MEMORY =
+            ConfigOptions.key("sink.writer-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription("Sink writer memory to control heap memory of writer.");
+
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
                     .doubleType()
