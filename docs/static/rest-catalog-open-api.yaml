@@ -2395,6 +2395,8 @@ components:
     CommitTableRequest:
       type: object
       properties:
+        tableId:
+          type: string
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:

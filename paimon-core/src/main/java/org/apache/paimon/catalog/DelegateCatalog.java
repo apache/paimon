@@ -212,9 +212,12 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics)
             throws TableNotExistException {
-        return wrapped.commitSnapshot(identifier, snapshot, statistics);
+        return wrapped.commitSnapshot(identifier, tableUuid, snapshot, statistics);
     }
 
     @Override
