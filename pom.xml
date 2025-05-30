@@ -71,7 +71,6 @@ under the License.
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-hudi</module>
         <module>paimon-api</module>
-        <module>paimon-iceberg</module>
     </modules>
 
     <properties>
@@ -453,6 +452,16 @@ under the License.
                 <property>
                     <name>flink2</name>
                 </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>paimon-iceberg</id>
+            <modules>
+                <module>paimon-iceberg</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
             </activation>
         </profile>
     </profiles>
