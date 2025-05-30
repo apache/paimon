@@ -24,8 +24,6 @@ import org.apache.paimon.table.sink.CommitCallback
 
 import org.junit.jupiter.api.Assertions
 
-import java.util
-
 class PaimonCommitTest extends PaimonSparkTestBase {
 
   test("test commit callback parameter compatibility") {
@@ -64,8 +62,8 @@ object PaimonCommitTest {
 case class CustomCommitCallback(testId: String) extends CommitCallback {
 
   override def call(
-      committedEntries: util.List[ManifestEntry],
-      indexFiles: util.List[IndexManifestEntry],
+      committedEntries: java.util.List[ManifestEntry],
+      indexFiles: java.util.List[IndexManifestEntry],
       snapshot: Snapshot): Unit = {
     PaimonCommitTest.id = testId
   }
