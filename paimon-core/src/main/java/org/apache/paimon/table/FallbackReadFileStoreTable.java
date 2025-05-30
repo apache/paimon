@@ -240,6 +240,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return true;
     }
 
+    /** DataSplit for fallback read. */
     public static class FallbackDataSplit extends DataSplit {
 
         private static final long serialVersionUID = 1L;
