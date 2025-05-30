@@ -78,6 +78,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -118,6 +119,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     private final int formatVersion;
 
     private final IndexFileHandler indexFileHandler;
+    private final boolean needAddDvToIceberg;
 
     // -------------------------------------------------------------------------------------
     // Public interface
@@ -157,6 +159,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 formatVersion);
 
         this.indexFileHandler = table.store().newIndexFileHandler();
+        this.needAddDvToIceberg = needAddDvToIceberg();
     }
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
@@ -230,13 +233,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     @Override
     public void retry(ManifestCommittable committable) {
         SnapshotManager snapshotManager = table.snapshotManager();
-        long snapshotId =
+        Snapshot snapshot =
                 snapshotManager
                         .findSnapshotsForIdentifiers(
                                 commitUser, Collections.singletonList(committable.identifier()))
                         .stream()
-                        .mapToLong(Snapshot::id)
-                        .max()
+                        .max(Comparator.comparingLong(Snapshot::id))
                         .orElseThrow(
                                 () ->
                                         new RuntimeException(
@@ -245,7 +247,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                         + " and identifier "
                                                         + committable.identifier()
                                                         + ". This is unexpected."));
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        long snapshotId = snapshot.id();
         createMetadata(
                 snapshot,
                 (removedFiles, addedFiles) ->
@@ -411,7 +413,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             snapshotId,
                             fileMeta));
 
-            if (needAddDvToIceberg()
+            if (needAddDvToIceberg
                     && dataSplit.deletionFiles().isPresent()
                     && dataSplit.deletionFiles().get().get(i) != null) {
                 DeletionFile deletionFile = dataSplit.deletionFiles().get().get(i);
@@ -535,7 +537,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         List<IcebergManifestFileMeta> newDVManifestFileMetas = new ArrayList<>();
-        if (needAddDvToIceberg()) {
+        if (needAddDvToIceberg) {
             if (!indexFiles.isEmpty()) {
                 // reconstruct the dv index
                 newDVManifestFileMetas.addAll(createDvManifestFileMetas(snapshot));
@@ -677,8 +679,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         if (table.primaryKeys().isEmpty()) {
             return true;
         } else {
-            if (needAddDvToIceberg()) {
-                return meta.level() != 0;
+            if (needAddDvToIceberg) {
+                return meta.level() > 0;
             }
             int maxLevel = table.coreOptions().numLevels() - 1;
             return meta.level() == maxLevel;
