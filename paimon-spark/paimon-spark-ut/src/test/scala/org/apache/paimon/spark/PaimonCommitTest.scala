@@ -18,9 +18,10 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.manifest.{IndexManifestEntry, ManifestCommittable, ManifestEntry}
 import org.apache.paimon.table.sink.CommitCallback
-import org.apache.paimon.{CoreOptions, Snapshot}
+
 import org.junit.jupiter.api.Assertions
 
 import java.util
