@@ -477,7 +477,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics) {
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics) {
         throw new UnsupportedOperationException();
     }
 

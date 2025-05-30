@@ -95,7 +95,7 @@ public class CatalogEnvironment implements Serializable {
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit.Factory factory;
         if (catalogLoader != null && supportsVersionManagement) {
-            factory = new CatalogSnapshotCommit.Factory(catalogLoader);
+            factory = new CatalogSnapshotCommit.Factory(catalogLoader, uuid);
         } else {
             factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
         }

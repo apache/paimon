@@ -33,8 +33,12 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitTableRequest implements RESTRequest {
 
+    private static final String FIELD_TABLE_ID = "tableId";
     private static final String FIELD_SNAPSHOT = "snapshot";
     private static final String FIELD_STATISTICS = "statistics";
+
+    @JsonProperty(FIELD_TABLE_ID)
+    private final String tableId;
 
     @JsonProperty(FIELD_SNAPSHOT)
     private final Snapshot snapshot;
@@ -44,10 +48,17 @@ public class CommitTableRequest implements RESTRequest {
 
     @JsonCreator
     public CommitTableRequest(
+            @JsonProperty(FIELD_TABLE_ID) String tableId,
             @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
             @JsonProperty(FIELD_STATISTICS) List<PartitionStatistics> statistics) {
+        this.tableId = tableId;
         this.snapshot = snapshot;
         this.statistics = statistics;
+    }
+
+    @JsonGetter(FIELD_TABLE_ID)
+    public String getTableId() {
+        return tableId;
     }
 
     @JsonGetter(FIELD_SNAPSHOT)

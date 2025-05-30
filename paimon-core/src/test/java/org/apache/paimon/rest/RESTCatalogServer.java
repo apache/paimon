@@ -773,10 +773,11 @@ public class RESTCatalogServer {
         if (!tableMetadataStore.containsKey(identifier.getFullName())) {
             throw new Catalog.TableNotExistException(identifier);
         }
-        boolean success =
-                commitSnapshot(identifier, requestBody.getSnapshot(), requestBody.getStatistics());
-        CommitTableResponse response = new CommitTableResponse(success);
-        return mockResponse(response, 200);
+        return commitSnapshot(
+                identifier,
+                requestBody.getTableId(),
+                requestBody.getSnapshot(),
+                requestBody.getStatistics());
     }
 
     private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
@@ -1864,10 +1865,16 @@ public class RESTCatalogServer {
         return String.format("%s-%d", identifier.getFullName(), snapshotId);
     }
 
-    private boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+    private MockResponse commitSnapshot(
+            Identifier identifier,
+            String tableId,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException {
         FileStoreTable table = getFileTable(identifier);
+        if (!tableId.equals(table.catalogEnvironment().uuid())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = identifier.getBranchName();
@@ -1989,7 +1996,8 @@ public class RESTCatalogServer {
                                                         && partition.recordCount() <= 0);
                                 return partitions.isEmpty();
                             });
-            return success;
+            CommitTableResponse response = new CommitTableResponse(success);
+            return mockResponse(response, 200);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

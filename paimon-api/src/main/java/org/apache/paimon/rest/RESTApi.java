@@ -544,6 +544,7 @@ public class RESTApi {
      * Commit snapshot for table.
      *
      * @param identifier database name and table name.
+     * @param tableUuid Uuid of the table to avoid wrong commit
      * @param snapshot snapshot for committing
      * @param statistics statistics for this snapshot incremental
      * @return true if commit success
@@ -552,8 +553,11 @@ public class RESTApi {
      *     this table
      */
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics) {
-        CommitTableRequest request = new CommitTableRequest(snapshot, statistics);
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics) {
+        CommitTableRequest request = new CommitTableRequest(tableUuid, snapshot, statistics);
         CommitTableResponse response =
                 client.post(
                         resourcePaths.commitTable(

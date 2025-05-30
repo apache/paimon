@@ -39,7 +39,6 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
-import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -331,10 +330,13 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics)
             throws TableNotExistException {
         try {
-            return api.commitSnapshot(identifier, snapshot, statistics);
+            return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -347,7 +349,6 @@ public class RESTCatalog implements Catalog {
     @Override
     public void rollbackTo(Identifier identifier, Instant instant)
             throws Catalog.TableNotExistException {
-        RollbackTableRequest request = new RollbackTableRequest(instant);
         try {
             api.rollbackTo(identifier, instant);
         } catch (NoSuchResourceException e) {

@@ -308,6 +308,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () ->
                         restCatalog.commitSnapshot(
                                 identifier,
+                                "",
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<PartitionStatistics>()));
     }
@@ -1263,10 +1264,21 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () ->
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
+                                "",
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<>()));
 
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                hasSnapshotTableIdentifier,
+                                "unknown_id",
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<>()));
+
         long id = 10086;
         long millis = System.currentTimeMillis();
         updateSnapshotOnRestServer(

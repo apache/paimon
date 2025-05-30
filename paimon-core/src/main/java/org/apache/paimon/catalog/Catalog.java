@@ -617,6 +617,7 @@ public interface Catalog extends AutoCloseable {
      * Commit the {@link Snapshot} for table identified by the given {@link Identifier}.
      *
      * @param identifier Path of the table
+     * @param tableUuid Uuid of the table to avoid wrong commit
      * @param snapshot Snapshot to be committed
      * @param statistics statistics information of this change
      * @return Success or not
@@ -625,7 +626,10 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;
 
     /**
