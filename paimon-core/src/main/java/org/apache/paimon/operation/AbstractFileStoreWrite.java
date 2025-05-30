@@ -433,7 +433,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot previousSnapshot = ignorePreviousFiles ? null : snapshotManager.latestSnapshot();
+        // NOTE: don't use snapshotManager.latestSnapshot() here,
+        // because we don't want to flood the catalog with high concurrency
+        Snapshot previousSnapshot =
+                ignorePreviousFiles ? null : snapshotManager.latestSnapshotFromFileSystem();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         int totalBuckets;
         if (previousSnapshot != null) {

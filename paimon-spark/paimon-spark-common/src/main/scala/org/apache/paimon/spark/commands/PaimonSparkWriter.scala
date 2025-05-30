@@ -209,7 +209,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             numAssigners)
         }
 
-        if (table.snapshotManager().latestSnapshot() == null) {
+        if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
           // bootstrap mode
           // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
           writeWithBucketAssigner(
@@ -287,7 +287,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshot = table.snapshotManager().latestSnapshot()
+    val snapshot = table.snapshotManager().latestSnapshotFromFileSystem()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {

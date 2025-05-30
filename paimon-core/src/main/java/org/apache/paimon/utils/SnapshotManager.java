@@ -172,7 +172,11 @@ public class SnapshotManager implements Serializable {
                 throw new UncheckedIOException(e);
             }
         }
-        Long snapshotId = latestSnapshotId();
+        return latestSnapshotFromFileSystem();
+    }
+
+    public @Nullable Snapshot latestSnapshotFromFileSystem() {
+        Long snapshotId = latestSnapshotIdFromFileSystem();
         return snapshotId == null ? null : snapshot(snapshotId);
     }
 
@@ -184,6 +188,14 @@ public class SnapshotManager implements Serializable {
                 } catch (UnsupportedOperationException ignored) {
                 }
             }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find latest snapshot id", e);
+        }
+        return latestSnapshotIdFromFileSystem();
+    }
+
+    public @Nullable Long latestSnapshotIdFromFileSystem() {
+        try {
             return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
