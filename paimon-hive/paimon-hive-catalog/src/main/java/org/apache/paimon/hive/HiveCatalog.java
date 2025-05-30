@@ -395,9 +395,6 @@ public class HiveCatalog extends AbstractCatalog {
                     tagToPart
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
-            Table hmsTable = getHmsTable(identifier);
-            boolean externalTable = isExternalTable(hmsTable);
-            String dataFilePath = getDataFilePath(identifier, hmsTable);
             for (Map<String, String> part : metaPartitions) {
                 List<String> partitionValues = new ArrayList<>(part.values());
                 try {
@@ -408,21 +405,6 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier.getTableName(),
                                             partitionValues,
                                             false));
-
-                    if (!externalTable) {
-                        Path partitionLocation = new Path(getPartitionLocation(dataFilePath, part));
-                        try {
-                            if (fileIO.exists(partitionLocation)) {
-                                fileIO.deleteDirectoryQuietly(partitionLocation);
-                            }
-                        } catch (Exception ee) {
-                            LOG.error(
-                                    "Delete directory[{}] fail for table {} partition.",
-                                    partitionLocation,
-                                    identifier,
-                                    ee);
-                        }
-                    }
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
                 } catch (Exception e) {
