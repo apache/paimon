@@ -49,7 +49,7 @@ jobs:
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "!paimon-iceberg"
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
 
       - name: Test Others
         timeout-minutes: 60
@@ -58,7 +58,7 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           
-          TEST_MODULES="!paimon-e2e-tests,!paimon-iceberg,"
+          TEST_MODULES="!paimon-e2e-tests,"
           for suffix in 3.5 3.4 3.3 3.2 ut; do
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix},"
           done
