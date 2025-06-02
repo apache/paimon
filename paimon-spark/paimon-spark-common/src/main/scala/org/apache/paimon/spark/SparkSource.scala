@@ -26,6 +26,7 @@ import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.spark.util.OptionUtils.{extractCatalogName, mergeSQLConfWithIdentifier}
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
+import org.apache.paimon.table.FormatTable.Format
 import org.apache.paimon.table.system.AuditLogTable
 
 import org.apache.spark.sql.{DataFrame, SaveMode => SparkSaveMode, SparkSession, SQLContext}
@@ -118,7 +119,7 @@ object SparkSource {
 
   val NAME = "paimon"
 
-  val FORMAT_NAMES: Seq[String] = Seq("csv", "orc", "parquet", "json")
+  val FORMAT_NAMES: Seq[String] = Format.values.map(_.toString.toLowerCase).toSeq
 
   def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {

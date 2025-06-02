@@ -33,6 +33,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   override protected def beforeEach(): Unit = {
     sql(s"USE $paimonHiveCatalogName")
+    sql(s"USE $hiveDbName")
   }
 
   test("Format table: write partitioned table") {
@@ -56,6 +57,22 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         checkAnswer(sql("SELECT id FROM t"), Row(1))
         checkAnswer(sql("SELECT p1 FROM t"), Row(2))
         checkAnswer(sql("SELECT p2 FROM t"), Row(3))
+      }
+    }
+  }
+
+  test("Format table: CTAS with partitioned table") {
+    withTable("t1", "t2") {
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t1 VALUES (1, 2, 3)")
+
+      assertThrows[UnsupportedOperationException] {
+        sql("""
+              |CREATE TABLE t2
+              |USING csv
+              |PARTITIONED BY (p1, p2)
+              |AS SELECT * FROM t1
+              |""".stripMargin)
       }
     }
   }
