@@ -48,7 +48,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
         // check partition in file system
         val table =
-          paimonCatalog.getTable(Identifier.create("default", "t")).asInstanceOf[FormatTable]
+          paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
         val dirs = table.fileIO().listStatus(new Path(table.location())).map(_.getPath.getName)
         assert(dirs.count(_.startsWith("p1=")) == 1)
 
@@ -84,7 +84,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         sql("INSERT INTO compress_t VALUES (1, 2, 3)")
         val table =
           paimonCatalog
-            .getTable(Identifier.create("default", "compress_t"))
+            .getTable(Identifier.create(hiveDbName, "compress_t"))
             .asInstanceOf[FormatTable]
         val fileIO = table.fileIO()
         val file = fileIO
