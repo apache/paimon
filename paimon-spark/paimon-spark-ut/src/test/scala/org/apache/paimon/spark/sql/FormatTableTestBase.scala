@@ -22,12 +22,9 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.utils.{CompressUtils, FileIOUtils, FileUtils}
+import org.apache.paimon.utils.CompressUtils
 
 import org.apache.spark.sql.Row
-
-import java.io.{File, FileInputStream, FileOutputStream}
-import java.util.zip.GZIPOutputStream
 
 abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
