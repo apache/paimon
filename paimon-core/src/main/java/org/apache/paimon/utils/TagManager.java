@@ -122,7 +122,7 @@ public class TagManager {
                 tagName,
                 timeRetained,
                 callbacks.stream()
-                        .filter(callback -> IcebergCommitCallback.class.isInstance(callback))
+                        .filter(callback -> callback instanceof IcebergCommitCallback)
                         .collect(Collectors.toList()));
     }
 
