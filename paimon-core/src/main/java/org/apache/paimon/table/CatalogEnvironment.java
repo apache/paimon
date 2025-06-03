@@ -93,13 +93,15 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
-        SnapshotCommit.Factory factory;
+        SnapshotCommit snapshotCommit;
         if (catalogLoader != null && supportsVersionManagement) {
-            factory = new CatalogSnapshotCommit.Factory(catalogLoader, uuid);
+            snapshotCommit = new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
         } else {
-            factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
+            snapshotCommit =
+                    new RenamingSnapshotCommit(
+                            identifier, snapshotManager, lockFactory, lockContext);
         }
-        return factory.create(identifier, snapshotManager);
+        return snapshotCommit;
     }
 
     @Nullable
