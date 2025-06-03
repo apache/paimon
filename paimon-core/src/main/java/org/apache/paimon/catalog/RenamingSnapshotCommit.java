@@ -25,10 +25,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
@@ -47,20 +44,6 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
         this.snapshotManager = snapshotManager;
         this.fileIO = snapshotManager.fileIO();
         this.lock = lock;
-    }
-
-    public RenamingSnapshotCommit(
-            Identifier identifier,
-            SnapshotManager snapshotManager,
-            @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext) {
-        this.snapshotManager = snapshotManager;
-        this.fileIO = snapshotManager.fileIO();
-        this.lock =
-                Optional.ofNullable(lockFactory)
-                        .map(factory -> factory.createLock(lockContext))
-                        .map(l -> Lock.fromCatalog(l, identifier))
-                        .orElseGet(Lock::empty);
     }
 
     @Override
