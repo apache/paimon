@@ -48,7 +48,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -146,7 +146,7 @@ public class TagManager {
 
         if (callbacks != null) {
             try {
-                callbacks.forEach(callback -> callback.notifyCreation(tagName));
+                callbacks.forEach(callback -> callback.notifyCreation(tagName, snapshot.id()));
             } finally {
                 for (TagCallback tagCallback : callbacks) {
                     IOUtils.closeQuietly(tagCallback);

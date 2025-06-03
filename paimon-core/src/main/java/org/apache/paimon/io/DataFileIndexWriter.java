@@ -60,7 +60,8 @@ public final class DataFileIndexWriter implements Closeable {
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long inManifestThreshold;
 
-    private final Map<String, IndexMaintainer> indexMaintainers = new HashMap<>();
+    // index type, column name -> index maintainer
+    private final Map<String, Map<String, IndexMaintainer>> indexMaintainers = new HashMap<>();
 
     private String resultFileName;
 
@@ -101,7 +102,9 @@ public final class DataFileIndexWriter implements Closeable {
 
             for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
                 String indexType = typeEntry.getKey();
-                IndexMaintainer maintainer = indexMaintainers.get(columnName);
+                Map<String, IndexMaintainer> column2maintainers =
+                        indexMaintainers.computeIfAbsent(indexType, k -> new HashMap<>());
+                IndexMaintainer maintainer = column2maintainers.get(columnName);
                 if (entryColumn.isNestedColumn()) {
                     if (field.type().getTypeRoot() != DataTypeRoot.MAP) {
                         throw new IllegalArgumentException(
@@ -121,7 +124,7 @@ public final class DataFileIndexWriter implements Closeable {
                                         fileIndexOptions.getMapTopLevelOptions(
                                                 columnName, typeEntry.getKey()),
                                         index.get(columnName));
-                        indexMaintainers.put(columnName, mapMaintainer);
+                        column2maintainers.put(columnName, mapMaintainer);
                     }
                     mapMaintainer.add(entryColumn.getNestedColumnName(), typeEntry.getValue());
                 } else {
@@ -137,7 +140,7 @@ public final class DataFileIndexWriter implements Closeable {
                                                 .createWriter(),
                                         InternalRow.createFieldGetter(
                                                 field.type(), index.get(columnName)));
-                        indexMaintainers.put(columnName, maintainer);
+                        column2maintainers.put(columnName, maintainer);
                     }
                 }
             }
@@ -146,7 +149,11 @@ public final class DataFileIndexWriter implements Closeable {
     }
 
     public void write(InternalRow row) {
-        indexMaintainers.values().forEach(index -> index.write(row));
+        indexMaintainers
+                .values()
+                .forEach(
+                        column2maintainers ->
+                                column2maintainers.values().forEach(index -> index.write(row)));
     }
 
     @Override
@@ -170,12 +177,14 @@ public final class DataFileIndexWriter implements Closeable {
 
     public Map<String, Map<String, byte[]>> serializeMaintainers() {
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
-        for (IndexMaintainer indexMaintainer : indexMaintainers.values()) {
-            Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
-            for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
-                indexMaps
-                        .computeIfAbsent(entry.getKey(), k -> new HashMap<>())
-                        .put(indexMaintainer.getIndexType(), entry.getValue());
+        for (Map<String, IndexMaintainer> columnIndexMaintainers : indexMaintainers.values()) {
+            for (IndexMaintainer indexMaintainer : columnIndexMaintainers.values()) {
+                Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
+                for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
+                    indexMaps
+                            .computeIfAbsent(entry.getKey(), k -> new HashMap<>())
+                            .put(indexMaintainer.getIndexType(), entry.getValue());
+                }
             }
         }
         return indexMaps;

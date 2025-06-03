@@ -36,7 +36,9 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
     withSparkSQLConf(
       "spark.sql.sources.v2.bucketing.enabled" -> "true",
-      "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
+      "spark.sql.requireAllClusterKeysForCoPartition" -> "false",
+      "spark.sql.autoBroadcastJoinThreshold" -> "-1"
+    ) {
       val df = spark.sql(query)
       checkAnswer(df, expectedResult.toSeq)
       assert(collect(df.queryExecution.executedPlan) {
@@ -47,6 +49,49 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           case sort: SortExec => sort
         }.size == numSorts)
       }
+    }
+  }
+
+  test("Query on a rescaled bucket table") {
+    assume(gteqSpark3_3)
+
+    withTable("t1", "t2") {
+
+      spark.sql(
+        "CREATE TABLE t1 (id INT, c STRING, dt STRING) partitioned by (dt) TBLPROPERTIES ('bucket'='2', 'bucket-key' = 'id')")
+      spark.sql(
+        "CREATE TABLE t2 (id INT, c STRING, dt STRING) partitioned by (dt) TBLPROPERTIES ('bucket'='3', 'bucket-key' = 'id')")
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1', '20250101'), (3, 'x2', '20250101')")
+      spark.sql("INSERT INTO t2 VALUES (1, 'x1', '20250101'), (4, 'x2', '20250101')")
+      checkAnswerAndShuffleSorts(
+        "SELECT * FROM t1 JOIN t2 on t1.id = t2.id and t1.dt = '20250101' and t2.dt = '20250101'",
+        2,
+        2)
+      spark.sql("ALTER TABLE t1 SET TBLPROPERTIES ('bucket' = '3')")
+      checkAnswerAndShuffleSorts(
+        "SELECT * FROM t1 JOIN t2 on t1.id = t2.id and t1.dt = t2.dt ",
+        2,
+        2)
+    }
+
+    withTable("t1", "t2") {
+
+      spark.sql(
+        "CREATE TABLE t1 (id INT, c STRING, dt STRING) partitioned by (dt) TBLPROPERTIES ('bucket'='2', 'bucket-key' = 'id')")
+      spark.sql(
+        "CREATE TABLE t2 (id INT, c STRING, dt STRING) partitioned by (dt) TBLPROPERTIES ('bucket'='2', 'bucket-key' = 'id')")
+      // TODO if the input partition is not aligned by bucket value, the bucket join will not be applied.
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1', '20250101'), (2, 'x2', '20250101')")
+      spark.sql("INSERT INTO t2 VALUES (1, 'x1', '20250101'), (5, 'x2', '20250101')")
+      checkAnswerAndShuffleSorts(
+        "SELECT * FROM t1 JOIN t2 on t1.id = t2.id and t1.dt = '20250101' and t2.dt = '20250101'",
+        0,
+        2)
+      spark.sql("ALTER TABLE t1 SET TBLPROPERTIES ('bucket' = '3')")
+      checkAnswerAndShuffleSorts(
+        "SELECT * FROM t1 JOIN t2 on t1.id = t2.id and t1.dt = t2.dt ",
+        0,
+        2)
     }
   }
 

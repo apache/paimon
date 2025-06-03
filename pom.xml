@@ -69,7 +69,8 @@ under the License.
         <module>paimon-test-utils</module>
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
-        <module>paimon-open-api</module>
+        <module>paimon-hudi</module>
+        <module>paimon-api</module>
     </modules>
 
     <properties>
@@ -106,6 +107,7 @@ under the License.
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
+        <hudi.version>0.15.0</hudi.version>
         <parquet.version>1.15.1</parquet.version>
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
@@ -122,7 +124,7 @@ under the License.
 
         <!-- spark profile properties-->
         <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
-        <paimon-spark-common.spark.version>3.5.4</paimon-spark-common.spark.version>
+        <paimon-spark-common.spark.version>3.5.6</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
 
@@ -373,7 +375,7 @@ under the License.
             <properties>
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
-                <paimon-spark-common.spark.version>3.5.4</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>3.5.6</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
@@ -450,6 +452,16 @@ under the License.
                 <property>
                     <name>flink2</name>
                 </property>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>paimon-iceberg</id>
+            <modules>
+                <module>paimon-iceberg</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
             </activation>
         </profile>
     </profiles>

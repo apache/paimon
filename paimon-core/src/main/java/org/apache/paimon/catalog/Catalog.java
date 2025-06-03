@@ -21,6 +21,9 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -65,11 +68,18 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned * if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of databases with provided page size in this catalog and next
      *     page token, or a list of the names of all databases if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
+     * @throws UnsupportedOperationException if and does not {@link #supportsListByPattern()} when
+     *     databaseNamePattern is not null
      */
-    PagedList<String> listDatabasesPaged(@Nullable Integer maxResults, @Nullable String pageToken);
+    PagedList<String> listDatabasesPaged(
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String databaseNamePattern);
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
@@ -164,13 +174,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All tables will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of tables with provided page size in this database and next page
      *     token, or a list of the names of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
-     * @throws DatabaseNotExistException if the database does not exist
+     * @throws DatabaseNotExistException if the database does not exist.
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<String> listTablesPaged(
             String databaseName,
@@ -191,13 +201,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All table details will
-     *     be returned if not set or empty. Currently, only prefix matching is supported. Note
-     *     please escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All table details will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<Table> listTableDetailsPaged(
             String databaseName,
@@ -205,6 +215,34 @@ public interface Catalog extends AutoCloseable {
             @Nullable String pageToken,
             @Nullable String tableNamePattern)
             throws DatabaseNotExistException;
+
+    /**
+     * Gets an array of tables for a catalog.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
+     *     if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the tables with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}.
+     */
+    default PagedList<String> listTablesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String tableNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listTablesPagedGlobally");
+    }
 
     /**
      * Drop a table.
@@ -314,7 +352,8 @@ public interface Catalog extends AutoCloseable {
     List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
 
     /**
-     * Get paged partitioned list of the table.
+     * Get paged partition list of the table, the partition list will be returned in descending
+     * order.
      *
      * @param identifier path of the table to list partitions
      * @param maxResults Optional parameter indicating the maximum number of results to include in
@@ -322,13 +361,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param partitionNamePattern A sql LIKE pattern (% and _) for partition names. All partitions
-     *     will be * returned if not set or empty. Currently, only prefix matching is supported.
-     *     Note please * escape the underline if you want to match it exactly.
+     * @param partitionNamePattern A sql LIKE pattern (%) for partition names. All partitions will
+     *     be returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the partitions with provided page size(@param maxResults) in this table and
      *     next page token, or a list of all partitions of the table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
      * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     PagedList<Partition> listPartitionsPaged(
             Identifier identifier,
@@ -398,13 +437,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All views will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     default PagedList<String> listViewsPaged(
             String databaseName,
@@ -425,13 +464,13 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All view details will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All view details will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
      */
     default PagedList<View> listViewDetailsPaged(
             String databaseName,
@@ -440,6 +479,34 @@ public interface Catalog extends AutoCloseable {
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         return new PagedList<>(Collections.emptyList(), null);
+    }
+
+    /**
+     * Gets an array of views for a catalog.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
+     *     not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the views with provided page size under this databaseNamePattern &
+     *     tableNamePattern and next page token
+     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
+     *     not {@link #supportsListByPattern()}}.
+     */
+    default PagedList<String> listViewsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String viewNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listViewsPagedGlobally");
     }
 
     /**
@@ -460,7 +527,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param view identifier of the view to alter
      * @param viewChanges - changes of view
-     * @param ignoreIfNotExists
+     * @param ignoreIfNotExists Flag to specify behavior when the view does not exist
      * @throws ViewNotExistException if the view does not exist
      * @throws DialectAlreadyExistException if the dialect already exists
      * @throws DialectNotExistException if the dialect not exists
@@ -502,7 +569,7 @@ public interface Catalog extends AutoCloseable {
      * String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
-     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
      *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
@@ -517,7 +584,7 @@ public interface Catalog extends AutoCloseable {
      * corresponding methods will throw exception if name pattern provided.
      *
      * <ul>
-     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
      *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
@@ -550,6 +617,7 @@ public interface Catalog extends AutoCloseable {
      * Commit the {@link Snapshot} for table identified by the given {@link Identifier}.
      *
      * @param identifier Path of the table
+     * @param tableUuid Uuid of the table to avoid wrong commit
      * @param snapshot Snapshot to be committed
      * @param statistics statistics information of this change
      * @return Success or not
@@ -558,7 +626,10 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;
 
     /**
@@ -572,6 +643,46 @@ public interface Catalog extends AutoCloseable {
      */
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
+
+    /**
+     * Return the snapshot of table for given version. Version parsing order is:
+     *
+     * <ul>
+     *   <li>1. If it is 'EARLIEST', get the earliest snapshot.
+     *   <li>2. If it is 'LATEST', get the latest snapshot.
+     *   <li>3. If it is a number, get snapshot by snapshot id.
+     *   <li>4. Else try to get snapshot from Tag name.
+     * </ul>
+     *
+     * @param identifier Path of the table
+     * @param version version to snapshot
+     * @return The requested snapshot
+     * @throws Catalog.TableNotExistException if the target does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    Optional<Snapshot> loadSnapshot(Identifier identifier, String version)
+            throws Catalog.TableNotExistException;
+
+    /**
+     * Get paged snapshot list of the table, the snapshot list will be returned in descending order.
+     *
+     * @param identifier path of the table to list partitions
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the snapshots with provided page size(@param maxResults) in this table and
+     *     next page token, or a list of all snapshots of the table if the catalog does not {@link
+     *     #supportsListObjectsPaged()}.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException;
 
     /**
      * rollback table by the given {@link Identifier} and instant.
@@ -666,6 +777,75 @@ public interface Catalog extends AutoCloseable {
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
 
+    /**
+     * Get the names of all functions in this catalog.
+     *
+     * @return a list of the names of all functions
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    List<String> listFunctions(String databaseName) throws DatabaseNotExistException;
+
+    /**
+     * Get function by name.
+     *
+     * @param identifier Path of the function to get
+     * @return The requested function
+     * @throws FunctionNotExistException if the function does not exist
+     */
+    Function getFunction(Identifier identifier) throws FunctionNotExistException;
+
+    /**
+     * Create a new function.
+     *
+     * <p>NOTE: System functions can not be created.
+     *
+     * @param identifier path of the function to be created
+     * @param function the function definition
+     * @param ignoreIfExists flag to specify behavior when a function already exists at the given
+     *     path: if set to false, it throws a FunctionAlreadyExistException, if set to true, do
+     *     nothing.
+     * @throws FunctionAlreadyExistException if function already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     */
+    void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException, DatabaseNotExistException;
+
+    /**
+     * Drop function.
+     *
+     * @param identifier path of the function to be created
+     * @param ignoreIfNotExists Flag to specify behavior when the function does not exist
+     * @throws FunctionNotExistException if the function doesn't exist
+     */
+    void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+            throws FunctionNotExistException;
+
+    /**
+     * Alter function.
+     *
+     * @param identifier path of the function to be created
+     * @param changes the function changes
+     * @param ignoreIfNotExists Flag to specify behavior when the function does not exist
+     * @throws FunctionNotExistException if the function doesn't exist
+     */
+    void alterFunction(
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException;
+
+    // ==================== Table Auth ==========================
+
+    /**
+     * Auth table query select and get the filter for row level access control.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param select selected fields, null if select all
+     * @return additional filter for row level access control
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+            throws TableNotExistException;
+
     // ==================== Catalog Information ==========================
 
     /** Catalog options for re-creating this catalog. */
@@ -679,10 +859,8 @@ public interface Catalog extends AutoCloseable {
 
     // ======================= Constants ===============================
 
-    // constants for system table and database
-    String SYSTEM_TABLE_SPLITTER = "$";
+    // constants for sys database
     String SYSTEM_DATABASE_NAME = "sys";
-    String SYSTEM_BRANCH_PREFIX = "branch_";
 
     // constants for table and database
     String COMMENT_PROP = "comment";
@@ -782,6 +960,7 @@ public interface Catalog extends AutoCloseable {
             this.database = database;
         }
 
+        @VisibleForTesting
         public DatabaseNoPermissionException(String database) {
             this(database, null);
         }
@@ -845,6 +1024,7 @@ public interface Catalog extends AutoCloseable {
             this.identifier = identifier;
         }
 
+        @VisibleForTesting
         public TableNoPermissionException(Identifier identifier) {
             this(identifier, null);
         }
@@ -1083,6 +1263,103 @@ public interface Catalog extends AutoCloseable {
 
         public String dialect() {
             return dialect;
+        }
+    }
+
+    /** Exception for trying to create a function that already exists. */
+    class FunctionAlreadyExistException extends Exception {
+
+        private static final String MSG = "Function %s already exists.";
+
+        private final Identifier identifier;
+
+        public FunctionAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public FunctionAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to get a function that doesn't exist. */
+    class FunctionNotExistException extends Exception {
+
+        private static final String MSG = "Function %s doesn't exist.";
+
+        private final Identifier identifier;
+
+        public FunctionNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public FunctionNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to add a definition that already exists. */
+    class DefinitionAlreadyExistException extends Exception {
+
+        private static final String MSG = "Definition %s in function %s already exists.";
+
+        private final Identifier identifier;
+        private final String name;
+
+        public DefinitionAlreadyExistException(Identifier identifier, String name) {
+            this(identifier, name, null);
+        }
+
+        public DefinitionAlreadyExistException(
+                Identifier identifier, String name, Throwable cause) {
+            super(String.format(MSG, name, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.name = name;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String name() {
+            return name;
+        }
+    }
+
+    /** Exception for trying to update definition that doesn't exist. */
+    class DefinitionNotExistException extends Exception {
+
+        private static final String MSG = "Definition %s in function %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String name;
+
+        public DefinitionNotExistException(Identifier identifier, String name) {
+            this(identifier, name, null);
+        }
+
+        public DefinitionNotExistException(Identifier identifier, String name, Throwable cause) {
+            super(String.format(MSG, name, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.name = name;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String name() {
+            return name;
         }
     }
 }

@@ -204,6 +204,13 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new CdcFixedBucketSink(table).sinkFrom(partitioned);
     }
 
+    private void buildForPostponeBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
+        DataStream<CdcRecord> partitioned =
+                partition(
+                        parsed, new CdcPostponeBucketChannelComputer(table.schema()), parallelism);
+        new CdcFixedBucketSink(table).sinkFrom(partitioned);
+    }
+
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
         // rebalance it to make sure schema change work to avoid infinite loop
         new CdcAppendTableSink(table, parallelism).sinkFrom(parsed.rebalance());
@@ -250,6 +257,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                     break;
                 case HASH_DYNAMIC:
                     new CdcDynamicBucketSink(table).build(converted, parallelism);
+                    break;
+                case POSTPONE_MODE:
+                    buildForPostponeBucket(table, converted);
                     break;
                 case BUCKET_UNAWARE:
                     buildForUnawareBucket(table, converted);

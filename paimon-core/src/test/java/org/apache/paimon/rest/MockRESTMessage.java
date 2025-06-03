@@ -19,17 +19,24 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -51,6 +58,7 @@ import org.apache.paimon.view.ViewSchema;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -112,10 +120,6 @@ public class MockRESTMessage {
         return new ListTablesResponse(Lists.newArrayList("table"));
     }
 
-    public static ListTablesResponse listTablesEmptyResponse() {
-        return new ListTablesResponse(Lists.newArrayList());
-    }
-
     public static CreateTableRequest createTableRequest(String name) {
         Identifier identifier = Identifier.create(databaseName(), name);
         Map<String, String> options = new HashMap<>();
@@ -140,7 +144,7 @@ public class MockRESTMessage {
     }
 
     public static AlterTableRequest alterTableRequest() {
-        return new AlterTableRequest(getChanges());
+        return new AlterTableRequest(getSchemaChanges());
     }
 
     public static ListPartitionsResponse listPartitionsResponse() {
@@ -150,7 +154,7 @@ public class MockRESTMessage {
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
-    public static List<SchemaChange> getChanges() {
+    public static List<SchemaChange> getSchemaChanges() {
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
         // update comment
@@ -279,6 +283,81 @@ public class MockRESTMessage {
         viewChanges.add(ViewChange.updateDialect("dialect", "query"));
         viewChanges.add(ViewChange.dropDialect("dialect"));
         return new AlterViewRequest(viewChanges);
+    }
+
+    public static GetFunctionResponse getFunctionResponse() {
+        Function function = function(Identifier.create(databaseName(), "function"));
+        return new GetFunctionResponse(
+                UUID.randomUUID().toString(),
+                function.name(),
+                function.inputParams().orElse(null),
+                function.returnParams().orElse(null),
+                function.isDeterministic(),
+                function.definitions(),
+                function.comment(),
+                function.options(),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+    public static CreateFunctionRequest createFunctionRequest() {
+        Function function = function(Identifier.create(databaseName(), "function"));
+        return new CreateFunctionRequest(
+                function.name(),
+                function.inputParams().orElse(null),
+                function.returnParams().orElse(null),
+                function.isDeterministic(),
+                function.definitions(),
+                function.comment(),
+                function.options());
+    }
+
+    public static Function function(Identifier identifier) {
+        List<DataField> inputParams =
+                Lists.newArrayList(
+                        new DataField(0, "length", DataTypes.DOUBLE()),
+                        new DataField(1, "width", DataTypes.DOUBLE()));
+        List<DataField> returnParams =
+                Lists.newArrayList(new DataField(0, "area", DataTypes.DOUBLE()));
+        FunctionDefinition flinkFunction =
+                FunctionDefinition.file(
+                        Lists.newArrayList(
+                                new FunctionDefinition.FunctionFileResource("jar", "/a/b/c.jar")),
+                        "java",
+                        "className",
+                        "eval");
+        FunctionDefinition sparkFunction =
+                FunctionDefinition.lambda(
+                        "(Double length, Double width) -> length * width", "java");
+        FunctionDefinition trinoFunction = FunctionDefinition.sql("length * width");
+        Map<String, FunctionDefinition> definitions = Maps.newHashMap();
+        definitions.put("flink", flinkFunction);
+        definitions.put("spark", sparkFunction);
+        definitions.put("trino", trinoFunction);
+        return new FunctionImpl(
+                identifier,
+                inputParams,
+                returnParams,
+                false,
+                definitions,
+                "comment",
+                ImmutableMap.of());
+    }
+
+    public static AlterFunctionRequest alterFunctionRequest() {
+        List<FunctionChange> functionChanges = new ArrayList<>();
+        functionChanges.add(FunctionChange.setOption("key", "value"));
+        functionChanges.add(FunctionChange.removeOption("key"));
+        functionChanges.add(FunctionChange.updateComment("comment"));
+        functionChanges.add(
+                FunctionChange.addDefinition("engine", FunctionDefinition.sql("x * y")));
+        functionChanges.add(
+                FunctionChange.updateDefinition("engine", FunctionDefinition.sql("x * y")));
+        functionChanges.add(FunctionChange.dropDefinition("engine"));
+        return new AlterFunctionRequest(functionChanges);
     }
 
     private static ViewSchema viewSchema() {

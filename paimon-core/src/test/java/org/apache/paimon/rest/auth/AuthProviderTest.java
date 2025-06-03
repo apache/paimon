@@ -37,7 +37,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.rest.RESTCatalog.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_REGION;
@@ -366,9 +366,7 @@ public class AuthProviderTest {
         assertTrue(header.containsKey(DLF_DATE_HEADER_KEY));
         assertEquals(
                 DLFAuthSignature.VERSION, header.get(DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY));
-        assertEquals(
-                DLFAuthProvider.MEDIA_TYPE.toString(),
-                header.get(DLFAuthProvider.DLF_CONTENT_TYPE_KEY));
+        assertEquals(DLFAuthProvider.MEDIA_TYPE, header.get(DLFAuthProvider.DLF_CONTENT_TYPE_KEY));
         assertEquals(
                 DLFAuthSignature.md5(data), header.get(DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY));
         assertEquals(

@@ -210,7 +210,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
             // So when `endInput` is called, we must check if the corresponding snapshot exists.
             // However, if the snapshot does not exist, then append files must be new files. So
             // there is no need to check for duplicated append files.
-            committer.filterAndCommit(committables, false);
+            committer.filterAndCommit(committables, false, true);
         } else {
             committer.commit(committables);
         }

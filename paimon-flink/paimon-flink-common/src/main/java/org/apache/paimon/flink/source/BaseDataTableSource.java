@@ -87,7 +87,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -373,6 +372,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         List<Split> splits =
                 table.newReadBuilder()
                         .dropStats()
+                        .withProjection(new int[0])
                         .withFilter(getPredicateWithScanPartitions())
                         .newScan()
                         .plan()
@@ -413,7 +413,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             List<String> joinKeyFieldNames, List<String> bucketKeyFieldNames) {
         BucketSpec bucketSpec = ((FileStoreTable) table).bucketSpec();
         return bucketSpec.getBucketMode() == BucketMode.HASH_FIXED
-                && bucketSpec.getNumBuckets() != POSTPONE_BUCKET
                 && new HashSet<>(joinKeyFieldNames).containsAll(bucketKeyFieldNames);
     }
 }

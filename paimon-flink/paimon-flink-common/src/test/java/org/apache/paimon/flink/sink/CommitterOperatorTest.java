@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
@@ -548,6 +549,49 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testNotTriggerPartitionMarkDownWhenRecoverFromState() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT.key(), "true");
+                            options.set(
+                                    CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true");
+                            options.set(
+                                    FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE.key(), "1h");
+                        },
+                        Collections.singletonList("b"));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table, false);
+        testHarness.open();
+        OperatorSubtaskState snapshotState =
+                writeAndSnapshot(table, "commitUser", 1, Long.MAX_VALUE, testHarness);
+        testHarness.close();
+
+        testHarness = createRecoverableTestHarness(table, false);
+        try {
+            // commit snapshot from state, fail intentionally
+            testHarness.initializeState(snapshotState);
+            testHarness.open();
+            fail("Expecting intentional exception");
+        } catch (Exception e) {
+            assertThat(e)
+                    .hasMessageContaining(
+                            "This exception is intentionally thrown "
+                                    + "after committing the restored checkpoints. "
+                                    + "By restarting the job we hope that "
+                                    + "writers can start writing based on these new commits.");
+        }
+
+        testHarness.notifyOfCompletedCheckpoint(Long.MAX_VALUE);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+
+        Path successFile = new Path(table.location(), "b=10/_SUCCESS");
+        assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
+    }
+
+    @Test
     public void testEmptyCommitWithProcessTimeTag() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -715,12 +759,20 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     protected OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
+        return createRecoverableTestHarness(table, true);
+    }
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable>
+            createRecoverableTestHarness(
+                    FileStoreTable table, boolean partitionMarkDownRecoverFromState)
+                    throws Exception {
         OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
                 createCommitterOperatorFactory(
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
-                                ManifestCommittableSerializer::new));
+                                ManifestCommittableSerializer::new,
+                                partitionMarkDownRecoverFromState));
         return createTestHarness(operatorFactory);
     }
 

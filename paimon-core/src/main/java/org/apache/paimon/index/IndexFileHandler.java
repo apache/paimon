@@ -117,7 +117,10 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> scan(String indexType) {
-        Snapshot snapshot = snapshotManager.latestSnapshot();
+        return scan(snapshotManager.latestSnapshot(), indexType);
+    }
+
+    public List<IndexManifestEntry> scan(Snapshot snapshot, String indexType) {
         if (snapshot == null) {
             return Collections.emptyList();
         }

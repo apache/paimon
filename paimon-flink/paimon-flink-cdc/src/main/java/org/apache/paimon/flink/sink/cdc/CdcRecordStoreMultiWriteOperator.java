@@ -30,6 +30,7 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.flink.sink.StoreSinkWriteStateImpl;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
@@ -107,7 +108,11 @@ public class CdcRecordStoreMultiWriteOperator
                         context, "commit_user_state", String.class, initialCommitUser);
 
         // TODO: should use CdcRecordMultiChannelComputer to filter
-        state = new StoreSinkWriteStateImpl(context, (tableName, partition, bucket) -> true);
+        state =
+                new StoreSinkWriteStateImpl(
+                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
+                        context,
+                        (tableName, partition, bucket) -> true);
         tables = new HashMap<>();
         writes = new HashMap<>();
         compactExecutor =

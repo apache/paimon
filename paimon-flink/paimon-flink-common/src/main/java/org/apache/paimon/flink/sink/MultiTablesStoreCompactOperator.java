@@ -113,6 +113,7 @@ public class MultiTablesStoreCompactOperator
 
         state =
                 new StoreSinkWriteStateImpl(
+                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                         context,
                         (tableName, partition, bucket) ->
                                 ChannelComputer.select(

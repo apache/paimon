@@ -18,15 +18,18 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
+import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -102,6 +105,9 @@ public class SparkProcedures {
         procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
+        procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
+        procedureBuilders.put("alter_function", AlterFunctionProcedure::builder);
+        procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
         return procedureBuilders.build();
     }
 }

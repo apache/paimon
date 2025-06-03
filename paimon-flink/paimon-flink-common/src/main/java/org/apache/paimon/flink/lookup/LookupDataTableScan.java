@@ -20,8 +20,9 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataTableStreamScan;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
@@ -51,20 +52,24 @@ public class LookupDataTableScan extends DataTableStreamScan {
     private final LookupStreamScanMode lookupScanMode;
 
     public LookupDataTableScan(
+            TableSchema schema,
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
-            DefaultValueAssigner defaultValueAssigner,
-            LookupStreamScanMode lookupScanMode) {
+            LookupStreamScanMode lookupScanMode,
+            TableQueryAuth queryAuth,
+            boolean hasPk) {
         super(
+                schema,
                 options,
                 snapshotReader,
                 snapshotManager,
                 changelogManager,
                 supportStreamingReadOverwrite,
-                defaultValueAssigner);
+                queryAuth,
+                hasPk);
         this.startupMode = options.startupMode();
         this.lookupScanMode = lookupScanMode;
         dropStats();

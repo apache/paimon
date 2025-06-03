@@ -21,8 +21,16 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTToken;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.apache.flink.table.catalog.Catalog;
+import org.apache.flink.table.catalog.CatalogFunction;
+import org.apache.flink.table.catalog.CatalogFunctionImpl;
+import org.apache.flink.table.catalog.FunctionLanguage;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.resource.ResourceType;
+import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -101,5 +109,45 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         DATABASE_NAME, TABLE_NAME));
         assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
+    @Test
+    public void testFunction() throws Exception {
+        Catalog catalog = tEnv.getCatalog("PAIMON").get();
+        String functionName = "test_str2";
+        String identifier = "com.streaming.flink.udf.StrUdf";
+        String jarResourcePath = "xxxx.jar";
+        String jarResourcePath2 = "xxxx-yyyyy.jar";
+        CatalogFunctionImpl function =
+                new CatalogFunctionImpl(
+                        identifier,
+                        FunctionLanguage.JAVA,
+                        ImmutableList.of(
+                                new ResourceUri(ResourceType.JAR, jarResourcePath),
+                                new ResourceUri(ResourceType.JAR, jarResourcePath2)));
+        sql(
+                String.format(
+                        "CREATE FUNCTION %s.%s AS '%s' LANGUAGE %s USING %s '%s', %s '%s'",
+                        DATABASE_NAME,
+                        functionName,
+                        function.getClassName(),
+                        function.getFunctionLanguage(),
+                        ResourceType.JAR,
+                        jarResourcePath,
+                        ResourceType.JAR,
+                        jarResourcePath2));
+        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
+        CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction).isEqualTo(function);
+        identifier = "com.streaming.flink.udf.StrUdf2";
+        sql(
+                String.format(
+                        "ALTER FUNCTION PAIMON.%s.%s AS '%s' LANGUAGE %s",
+                        DATABASE_NAME, functionName, identifier, function.getFunctionLanguage()));
+        getFunction = catalog.getFunction(functionObjectPath);
+        assertThat(getFunction.getClassName()).isEqualTo(identifier);
+        sql(String.format("DROP FUNCTION %s.%s", DATABASE_NAME, functionName));
+        assertThat(catalog.functionExists(functionObjectPath)).isFalse();
     }
 }

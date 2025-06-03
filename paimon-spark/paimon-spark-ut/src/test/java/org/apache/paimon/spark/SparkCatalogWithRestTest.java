@@ -18,6 +18,12 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
@@ -25,16 +31,24 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.connector.catalog.CatalogManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +62,7 @@ public class SparkCatalogWithRestTest {
     private String warehouse;
     @TempDir java.nio.file.Path tempFile;
     private String initToken = "init_token";
+    private SparkSession spark;
 
     @BeforeEach
     public void before() throws IOException {
@@ -65,16 +80,7 @@ public class SparkCatalogWithRestTest {
         restCatalogServer = new RESTCatalogServer(dataPath, authProvider, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
-    }
-
-    @AfterEach()
-    public void after() throws Exception {
-        restCatalogServer.shutdown();
-    }
-
-    @Test
-    public void testTable() {
-        SparkSession spark =
+        spark =
                 SparkSession.builder()
                         .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.paimon.metastore", "rest")
@@ -89,9 +95,18 @@ public class SparkCatalogWithRestTest {
                                 "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
-
         spark.sql("CREATE DATABASE paimon.db2");
         spark.sql("USE paimon.db2");
+    }
+
+    @AfterEach()
+    public void after() throws Exception {
+        restCatalogServer.shutdown();
+        spark.close();
+    }
+
+    @Test
+    public void testTable() {
         spark.sql(
                 "CREATE TABLE t1 (a INT, b INT, c STRING) TBLPROPERTIES"
                         + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro')");
@@ -102,6 +117,141 @@ public class SparkCatalogWithRestTest {
                 .containsExactlyInAnyOrder("t1");
         spark.sql("DROP TABLE t1");
         assertThat(spark.sql("SHOW TABLES").collectAsList().size() == 0);
-        spark.close();
+    }
+
+    @Test
+    public void testFunction() throws Exception {
+        List<DataField> inputParams = new ArrayList<>();
+        Catalog paimonCatalog = getPaimonCatalog();
+        inputParams.add(new DataField(0, "length", DataTypes.INT()));
+        inputParams.add(new DataField(1, "width", DataTypes.INT()));
+        List<DataField> returnParams = new ArrayList<>();
+        returnParams.add(new DataField(0, "area", DataTypes.BIGINT()));
+        String functionName = "area_func";
+        FunctionDefinition definition =
+                FunctionDefinition.lambda(
+                        "(Integer length, Integer width) -> { return (long) length * width; }",
+                        "JAVA");
+        Identifier identifier = Identifier.create("db2", functionName);
+        Function function =
+                new FunctionImpl(
+                        identifier,
+                        inputParams,
+                        returnParams,
+                        false,
+                        ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
+                        null,
+                        null);
+        paimonCatalog.createFunction(identifier, function, false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s(1, 2)", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[2]");
+        definition =
+                FunctionDefinition.lambda(
+                        "(Integer length, Integer width) -> { return length * width + 1L; }",
+                        "JAVA");
+        paimonCatalog.alterFunction(
+                identifier,
+                ImmutableList.of(
+                        FunctionChange.updateDefinition(
+                                SparkCatalog.FUNCTION_DEFINITION_NAME, definition)),
+                false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s(1, 2)", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[3]");
+        paimonCatalog.dropFunction(identifier, false);
+        cleanFunction(functionName);
+    }
+
+    @Test
+    public void testArrayFunction() throws Exception {
+        List<DataField> inputParams = new ArrayList<>();
+        Catalog paimonCatalog = getPaimonCatalog();
+        inputParams.add(new DataField(0, "x", DataTypes.ARRAY(DataTypes.INT())));
+        List<DataField> returnParams = new ArrayList<>();
+        returnParams.add(new DataField(0, "y", DataTypes.INT()));
+        String functionName = "test";
+        Identifier identifier = Identifier.create("db2", functionName);
+        FunctionDefinition definition =
+                FunctionDefinition.lambda(
+                        "(java.util.List<java.util.List<Integer>> x) -> x.size()", "JAVA");
+        Function function =
+                new FunctionImpl(
+                        identifier,
+                        inputParams,
+                        returnParams,
+                        false,
+                        ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
+                        null,
+                        null);
+        paimonCatalog.createFunction(identifier, function, false);
+        assertThat(
+                        spark.sql(
+                                        String.format(
+                                                "select paimon.db2.%s(array(array(1, 2, 3), array(1, 2, 3)))",
+                                                functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[2]");
+        cleanFunction(functionName);
+    }
+
+    @Test
+    public void testMapFunction() throws Exception {
+        List<DataField> inputParams = new ArrayList<>();
+        Catalog paimonCatalog = getPaimonCatalog();
+        inputParams.add(new DataField(0, "x", DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
+        List<DataField> returnParams = new ArrayList<>();
+        returnParams.add(new DataField(0, "y", DataTypes.INT()));
+        String functionName = "test";
+        Identifier identifier = Identifier.create("db2", functionName);
+        FunctionDefinition definition =
+                FunctionDefinition.lambda(
+                        "(java.util.Map<Integer, Integer> x) -> x.size()", "JAVA");
+        Function function =
+                new FunctionImpl(
+                        identifier,
+                        inputParams,
+                        returnParams,
+                        false,
+                        ImmutableMap.of(SparkCatalog.FUNCTION_DEFINITION_NAME, definition),
+                        null,
+                        null);
+        paimonCatalog.createFunction(identifier, function, false);
+        assertThat(
+                        spark.sql(String.format("select paimon.db2.%s(map(1, 2))", functionName))
+                                .collectAsList()
+                                .get(0)
+                                .toString())
+                .isEqualTo("[1]");
+        cleanFunction(functionName);
+    }
+
+    private Catalog getPaimonCatalog() {
+        CatalogManager catalogManager = spark.sessionState().catalogManager();
+        WithPaimonCatalog withPaimonCatalog = (WithPaimonCatalog) catalogManager.currentCatalog();
+        return withPaimonCatalog.paimonCatalog();
+    }
+
+    private void cleanFunction(String functionName) {
+        String functionFilePath =
+                SparkCatalogWithRestTest.class
+                        .getProtectionDomain()
+                        .getCodeSource()
+                        .getLocation()
+                        .getPath()
+                        .toString()
+                        .replaceAll(
+                                "target/test-classes/",
+                                JavaLambdaStringToMethodConverter.getSourceFileName(functionName));
+        File file = new File(functionFilePath);
+        file.delete();
     }
 }

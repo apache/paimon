@@ -170,7 +170,7 @@ length:                        4 bytes int
 
 (Legacy) Bitmap file index format (V1):
 
-You can configure `file-index.bitmap.version` to use legacy bitmap version 1.
+You can configure `file-index.bitmap.<column_name>.version` to use legacy bitmap version 1.
 
 <pre>
 

@@ -18,6 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeJsonParser;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -69,5 +74,19 @@ public class ParameterUtils {
             valueList.add(value);
         }
         mapList.put(kv[0].trim(), valueList);
+    }
+
+    public static List<DataField> parseDataFieldArray(String data) {
+        List<DataField> list = new ArrayList<>();
+        if (data != null) {
+            JsonNode jsonArray = JsonSerdeUtil.fromJson(data, JsonNode.class);
+            if (jsonArray.isArray()) {
+                for (JsonNode objNode : jsonArray) {
+                    DataField dataField = DataTypeJsonParser.parseDataField(objNode);
+                    list.add(dataField);
+                }
+            }
+        }
+        return list;
     }
 }

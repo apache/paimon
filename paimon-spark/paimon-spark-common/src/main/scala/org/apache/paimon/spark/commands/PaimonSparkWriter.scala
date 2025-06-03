@@ -58,12 +58,13 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val bucketMode = table.bucketMode
 
+  private lazy val coreOptions = table.coreOptions()
+
   private lazy val disableReportStats = {
-    val options = table.coreOptions()
-    val config = options.toConfiguration
+    val config = coreOptions.toConfiguration
     config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
     table.partitionKeys.isEmpty ||
-    !options.partitionedTableInMetastore ||
+    !coreOptions.partitionedTableInMetastore ||
     table.catalogEnvironment.partitionHandler() == null
   }
 
@@ -163,7 +164,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       case CROSS_PARTITION =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
         val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
-        val assignerParallelism = Option(table.coreOptions.dynamicBucketAssignerParallelism)
+        val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
           .getOrElse(sparkParallelism)
         val bootstrapped = bootstrapAndRepartitionByKeyHash(
@@ -186,10 +187,17 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         writeWithBucket(repartitioned)
 
       case HASH_DYNAMIC =>
-        val assignerParallelism = Option(table.coreOptions.dynamicBucketAssignerParallelism)
-          .map(_.toInt)
-          .getOrElse(sparkParallelism)
-        val numAssigners = Option(table.coreOptions.dynamicBucketInitialBuckets)
+        val assignerParallelism = {
+          val parallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
+            .map(_.toInt)
+            .getOrElse(sparkParallelism)
+          if (coreOptions.dynamicBucketMaxBuckets() != -1) {
+            Math.min(coreOptions.dynamicBucketMaxBuckets().toInt, parallelism)
+          } else {
+            parallelism
+          }
+        }
+        val numAssigners = Option(coreOptions.dynamicBucketInitialBuckets)
           .map(initialBuckets => Math.min(initialBuckets.toInt, assignerParallelism))
           .getOrElse(assignerParallelism)
 
@@ -201,7 +209,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             numAssigners)
         }
 
-        if (table.snapshotManager().latestSnapshot() == null) {
+        if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
           // bootstrap mode
           // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
           writeWithBucketAssigner(
@@ -212,8 +220,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                 new SimpleHashBucketAssigner(
                   numAssigners,
                   TaskContext.getPartitionId(),
-                  table.coreOptions.dynamicBucketTargetRowNum,
-                  table.coreOptions.dynamicBucketMaxBuckets
+                  coreOptions.dynamicBucketTargetRowNum,
+                  coreOptions.dynamicBucketMaxBuckets
                 )
               row => {
                 val sparkRow = new SparkRow(rowType, row)
@@ -236,16 +244,13 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           )
         }
 
-      case BUCKET_UNAWARE =>
-        // Topology: input ->
+      case BUCKET_UNAWARE | POSTPONE_MODE =>
         writeWithoutBucket(data)
 
       case HASH_FIXED =>
-        if (table.bucketSpec().getNumBuckets == POSTPONE_BUCKET) {
-          writeWithoutBucket(data)
-        } else if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
+        if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
           // Topology: input -> shuffle by partition & bucket
-          val bucketNumber = table.coreOptions().bucket()
+          val bucketNumber = coreOptions.bucket()
           val bucketKeyCol = tableSchema
             .bucketKeys()
             .asScala
@@ -282,7 +287,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshot = table.snapshotManager().latestSnapshot()
+    val snapshot = table.snapshotManager().latestSnapshotFromFileSystem()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
@@ -336,12 +341,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       return
     }
 
-    val options = table.coreOptions()
     val partitionComputer = new InternalRowPartitionComputer(
-      options.partitionDefaultName,
+      coreOptions.partitionDefaultName,
       table.schema.logicalPartitionType,
       table.partitionKeys.toArray(new Array[String](0)),
-      options.legacyPartitionName()
+      coreOptions.legacyPartitionName()
     )
     val hmsReporter = new PartitionStatisticsReporter(
       table,
@@ -407,14 +411,14 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                 row => {
                   val bytes: Array[Byte] =
                     SerializationUtils.serializeBinaryRow(bootstrapSer.toBinaryRow(row))
-                  (Math.abs(keyPartProject(row).hashCode()), (KeyPartOrRow.KEY_PART, bytes))
+                  (keyPartProject(row).hashCode(), (KeyPartOrRow.KEY_PART, bytes))
                 }) ++ iter.map(
               r => {
                 val sparkRow =
                   new SparkRow(rowType, r, SparkRowUtils.getRowKind(r, rowKindColIdx))
                 val bytes: Array[Byte] =
                   SerializationUtils.serializeBinaryRow(rowSer.toBinaryRow(sparkRow))
-                (Math.abs(rowProject(sparkRow).hashCode()), (KeyPartOrRow.ROW, bytes))
+                (rowProject(sparkRow).hashCode(), (KeyPartOrRow.ROW, bytes))
               })
           }
       }
@@ -474,6 +478,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private case class ModPartitioner(partitions: Int) extends Partitioner {
     override def numPartitions: Int = partitions
-    override def getPartition(key: Any): Int = key.asInstanceOf[Int] % numPartitions
+    override def getPartition(key: Any): Int = Math.abs(key.asInstanceOf[Int] % numPartitions)
   }
 }

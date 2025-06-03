@@ -26,7 +26,8 @@ import java.util.List;
 /** The partition listener. */
 public interface PartitionListener extends Closeable {
 
-    void notifyCommittable(List<ManifestCommittable> committables);
+    void notifyCommittable(
+            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState);
 
     void snapshotState() throws Exception;
 }

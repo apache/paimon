@@ -39,9 +39,10 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;
@@ -91,13 +92,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 bucketMode());
     }
 
-    /**
-     * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
-     * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
-     */
     @Override
     public boolean supportStreamingReadOverwrite() {
-        return false;
+        return new CoreOptions(tableSchema.options()).streamingReadAppendOverwrite();
     }
 
     @Override
@@ -130,13 +127,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
-        BaseAppendFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
+        BaseAppendFileStoreWrite writer = store().newWrite(commitUser, manifestFilter, writeId);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,

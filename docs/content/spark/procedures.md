@@ -407,5 +407,64 @@ This section introduce all available spark procedures about paimon.
          CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
       </td>
    </tr>
+      <tr>
+      <td>create_function</td>
+      <td>
+         CALL sys.create_function(<br/>
+                'function_identifier',<br/>
+                '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+                '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+                true, 'comment', 'k1=v1,k2=v2')<br/>
+      </td>
+      <td>
+         To create a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>inputParams: inputParams of the function.</li>
+            <li>returnParams: returnParams of the function.</li>
+            <li>deterministic: Whether the function is deterministic.</li>
+            <li>comment: The comment for the function.</li>
+            <li>options: the additional dynamic options of the function.</li>
+      </td>
+      <td>
+         CALL sys.create_function(`function` => 'function_identifier',<br/>
+              `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+              `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+              `deterministic` => true,<br/>
+              `comment` => 'comment',<br/>
+              `options` => 'k1=v1,k2=v2'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>alter_function</td>
+      <td>
+         CALL sys.alter_function(<br/>
+                'function_identifier',<br/>
+                '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }')<br/>
+      </td>
+      <td>
+         To alter a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>change: change of the function.</li>
+      </td>
+      <td>
+         CALL sys.alter_function(`function` => 'function_identifier',<br/>
+              `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>drop_function</td>
+      <td>
+         CALL [catalog.]sys.drop_function('function_identifier')<br/>
+      </td>
+      <td>
+         To drop a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.drop_function(`function` => 'function_identifier')<br/>
+      </td>
+   </tr>
    </tbody>
 </table>

@@ -33,8 +33,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
-import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -154,16 +152,18 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
-                store().newWrite(commitUser, manifestFilter),
+                store().newWrite(commitUser, manifestFilter, writeId),
                 createRowKeyExtractor(),
                 (record, rowKind) ->
                         kv.replace(
@@ -187,15 +187,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             return null;
         } else {
             return super.newExpireRunnable();
-        }
-    }
-
-    @Override
-    public RowKeyExtractor createRowKeyExtractor() {
-        if (coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-            return new PostponeBucketRowKeyExtractor(schema());
-        } else {
-            return super.createRowKeyExtractor();
         }
     }
 }

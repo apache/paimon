@@ -51,6 +51,8 @@ abstract class PaimonBaseScan(
 
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
+  protected var inputSplits: Array[Split] = _
+
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
@@ -65,14 +67,17 @@ abstract class PaimonBaseScan(
 
   @VisibleForTesting
   def getOriginSplits: Array[Split] = {
-    readBuilder
-      .newScan()
-      .asInstanceOf[InnerTableScan]
-      .withMetricRegistry(paimonMetricsRegistry)
-      .plan()
-      .splits()
-      .asScala
-      .toArray
+    if (inputSplits == null) {
+      inputSplits = readBuilder
+        .newScan()
+        .asInstanceOf[InnerTableScan]
+        .withMetricRegistry(paimonMetricsRegistry)
+        .plan()
+        .splits()
+        .asScala
+        .toArray
+    }
+    inputSplits
   }
 
   final def lazyInputPartitions: Seq[PaimonInputPartition] = {

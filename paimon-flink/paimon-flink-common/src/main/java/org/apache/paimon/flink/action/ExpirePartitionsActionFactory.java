@@ -40,6 +40,7 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
                         params.getRequired(DATABASE),
                         params.getRequired(TABLE),
                         catalogConfigMap(params),
+                        optionalConfigMap(params, TABLE_CONF),
                         params.getRequired(EXPIRATIONTIME),
                         params.getRequired(TIMESTAMPFORMATTER),
                         timestampPattern,

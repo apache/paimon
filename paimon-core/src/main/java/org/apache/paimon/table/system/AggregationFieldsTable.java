@@ -55,7 +55,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing Aggregation of table. */
 public class AggregationFieldsTable implements ReadonlyTable {

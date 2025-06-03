@@ -312,7 +312,7 @@ public class DataSplit implements Split {
         assign(deserialize(new DataInputViewStreamWrapper(in)));
     }
 
-    private void assign(DataSplit other) {
+    protected void assign(DataSplit other) {
         this.snapshotId = other.snapshotId;
         this.partition = other.partition;
         this.bucket = other.bucket;

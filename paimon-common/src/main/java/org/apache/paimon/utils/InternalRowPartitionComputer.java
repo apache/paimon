@@ -31,6 +31,7 @@ import org.apache.paimon.types.VarCharType;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.InternalRowUtils.createNullCheckingFieldGetter;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -122,7 +123,10 @@ public class InternalRowPartitionComputer {
 
     public static String partToSimpleString(
             RowType partitionType, BinaryRow partition, String delimiter, int maxLength) {
-        FieldGetter[] getters = partitionType.fieldGetters();
+        FieldGetter[] getters =
+                IntStream.range(0, partitionType.getFieldCount())
+                        .mapToObj(i -> InternalRow.createFieldGetter(partitionType.getTypeAt(i), i))
+                        .toArray(InternalRow.FieldGetter[]::new);
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < getters.length; i++) {
             Object part = getters[i].getFieldOrNull(partition);
