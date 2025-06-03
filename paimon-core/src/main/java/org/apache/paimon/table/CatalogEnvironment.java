@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
 import org.apache.paimon.utils.SnapshotLoader;
@@ -36,6 +37,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Collections;
+import java.util.Optional;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
@@ -93,13 +95,18 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
-        SnapshotCommit.Factory factory;
+        SnapshotCommit snapshotCommit;
         if (catalogLoader != null && supportsVersionManagement) {
-            factory = new CatalogSnapshotCommit.Factory(catalogLoader, uuid);
+            snapshotCommit = new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
         } else {
-            factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
+            Lock lock =
+                    Optional.ofNullable(lockFactory)
+                            .map(factory -> factory.createLock(lockContext))
+                            .map(l -> Lock.fromCatalog(l, identifier))
+                            .orElseGet(Lock::empty);
+            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, lock);
         }
-        return factory.create(identifier, snapshotManager);
+        return snapshotCommit;
     }
 
     @Nullable

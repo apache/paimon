@@ -20,7 +20,6 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -50,24 +49,5 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     @Override
     public void close() throws Exception {
         catalog.close();
-    }
-
-    /** Factory to create {@link CatalogSnapshotCommit}. */
-    public static class Factory implements SnapshotCommit.Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        private final CatalogLoader catalogLoader;
-        @Nullable private final String uuid;
-
-        public Factory(CatalogLoader catalogLoader, @Nullable String uuid) {
-            this.catalogLoader = catalogLoader;
-            this.uuid = uuid;
-        }
-
-        @Override
-        public SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager) {
-            return new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
-        }
     }
 }

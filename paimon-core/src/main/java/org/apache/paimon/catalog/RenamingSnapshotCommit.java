@@ -19,17 +19,13 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
@@ -79,44 +75,5 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
     @Override
     public void close() throws Exception {
         this.lock.close();
-    }
-
-    /** Factory to create {@link RenamingSnapshotCommit}. */
-    public static class Factory implements SnapshotCommit.Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        @Nullable private final CatalogLockFactory lockFactory;
-        @Nullable private final CatalogLockContext lockContext;
-
-        public Factory(
-                @Nullable CatalogLockFactory lockFactory,
-                @Nullable CatalogLockContext lockContext) {
-            this.lockFactory = lockFactory;
-            this.lockContext = lockContext;
-        }
-
-        @Override
-        public RenamingSnapshotCommit create(
-                Identifier identifier, SnapshotManager snapshotManager) {
-            Lock lock =
-                    Optional.ofNullable(lockFactory)
-                            .map(factory -> factory.createLock(lockContext))
-                            .map(l -> Lock.fromCatalog(l, identifier))
-                            .orElseGet(Lock::empty);
-            return new RenamingSnapshotCommit(snapshotManager, lock);
-        }
-
-        @VisibleForTesting
-        @Nullable
-        public CatalogLockFactory lockFactory() {
-            return lockFactory;
-        }
-
-        @VisibleForTesting
-        @Nullable
-        public CatalogLockContext lockContext() {
-            return lockContext;
-        }
     }
 }
