@@ -1,9 +1,9 @@
 ---
-title: Learn Paimon
-icon: <i class="fa fa-sitemap title maindish" aria-hidden="true"></i>
-bold: true
-bookCollapseSection: true
-weight: 100
+title: "Configurations"
+weight: 7
+type: docs
+aliases:
+- /iceberg/configurations.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,3 +23,9 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# Configurations
+
+Options for Iceberg Compatibility.
+
+{{< generated/iceberg_configuration >}}

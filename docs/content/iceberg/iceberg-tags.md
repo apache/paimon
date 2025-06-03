@@ -1,9 +1,9 @@
 ---
-title: Learn Paimon
-icon: <i class="fa fa-sitemap title maindish" aria-hidden="true"></i>
-bold: true
-bookCollapseSection: true
-weight: 100
+title: "Iceberg Tags"
+weight: 4
+type: docs
+aliases:
+- /iceberg/iceberg-tags.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,3 +23,27 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# Iceberg Tags
+
+When enable iceberg compatibility, Paimon Tags will also be synced to [Iceberg Tags](https://iceberg.apache.org/docs/nightly/branching/#historical-tags).
+
+```sql
+CREATE CATALOG paimon WITH (
+    'type' = 'paimon',
+    'warehouse' = '<path-to-warehouse>'
+);
+
+CREATE CATALOG iceberg WITH (
+    'type' = 'iceberg',
+    'catalog-type' = 'hadoop',
+    'warehouse' = '<path-to-warehouse>/iceberg',
+    'cache-enabled' = 'false' -- disable iceberg catalog caching to quickly see the result
+);
+
+-- create tag for paimon table
+CALL paimon.sys.create_tag('default.T', 'tag1', 1);
+
+-- query tag in iceberg table
+SELECT * FROM iceberg.`default`.T /*+ OPTIONS('tag'='tag1') */;
+```
