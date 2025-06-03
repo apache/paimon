@@ -29,6 +29,8 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 
+import javax.annotation.Nullable;
+
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
         implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
@@ -51,7 +53,7 @@ public abstract class SparkBaseCatalog
         throw new NoSuchProcedureException(identifier);
     }
 
-    public boolean usePaimon(String provider) {
+    public boolean usePaimon(@Nullable String provider) {
         return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
     }
 }

@@ -28,6 +28,7 @@ import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
@@ -90,11 +91,11 @@ import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
-        implements SupportView, FunctionCatalog, SupportsNamespaces {
-
-    public static final String FUNCTION_DEFINITION_NAME = "spark";
+        implements SupportView, FunctionCatalog, SupportsNamespaces, FormatTableCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
+
+    public static final String FUNCTION_DEFINITION_NAME = "spark";
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
     protected Catalog catalog = null;
@@ -400,7 +401,7 @@ public class SparkCatalog extends SparkBaseCatalog
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
-        if (!usePaimon(provider) && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+        if (!usePaimon(provider) && isFormatTable(provider)) {
             normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
             normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
         }
