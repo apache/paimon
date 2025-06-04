@@ -270,6 +270,12 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withTypeMappingModes(
                                 TypeMapping.TypeMappingMode.ALLOW_NON_STRING_TO_STRING
                                         .configString())
+                        .withTableConfig(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("disable-explicit-type-casting", "false");
+                                    }
+                                })
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -291,9 +297,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     private void testSchemaEvolutionMultipleImpl(Statement statement) throws Exception {
         FileStoreTable table = getFileStoreTable();
         statement.executeUpdate("USE " + DATABASE_NAME);
-
-        statement.executeUpdate(
-                "ALTER TABLE schema_evolution_multiple SET ('disable-explicit-type-casting' = 'false')");
 
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES (1, 'one', 10, 'string_1')");
