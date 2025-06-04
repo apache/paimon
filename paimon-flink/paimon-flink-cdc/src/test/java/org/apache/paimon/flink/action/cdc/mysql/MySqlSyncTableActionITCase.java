@@ -280,6 +280,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .column("v1", DataTypes.VARCHAR(10), "v1")
                         .column("v2", DataTypes.INT(), "v2")
                         .column("v3", DataTypes.VARCHAR(10), "v3")
+                        .option("disable-explicit-type-casting", "false")
                         .build();
         checkTableSchema(excepted);
 

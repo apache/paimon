@@ -306,9 +306,6 @@ public class SchemaEvolutionTest {
                         .column("f1", DataTypes.BIGINT())
                         .build();
         schemaManager.createTable(schema);
-        schemaManager.commitChanges(
-                Collections.singletonList(
-                        SchemaChange.setOption("disable-explicit-type-casting", "false")));
 
         TableSchema tableSchema =
                 schemaManager.commitChanges(
@@ -317,6 +314,18 @@ public class SchemaEvolutionTest {
         assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.BIGINT());
         assertThat(tableSchema.fields().get(0).description()).isEqualTo("f0 field");
 
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "f0", DataTypes.STRING()))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "Column type f0[BIGINT] cannot be converted to STRING without loosing information.");
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption("disable-explicit-type-casting", "false")));
         // bigint to string
         tableSchema =
                 schemaManager.commitChanges(
