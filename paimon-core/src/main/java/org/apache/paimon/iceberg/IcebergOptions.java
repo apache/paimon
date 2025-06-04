@@ -141,6 +141,12 @@ public class IcebergOptions {
                     .defaultValue(false)
                     .withDescription("Skip archive for AWS Glue catalog.");
 
+    public static final ConfigOption<Boolean> HIVE_SKIP_UPDATE_STATS =
+            key("metadata.iceberg.hive-skip-update-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Skip updating Hive stats.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
