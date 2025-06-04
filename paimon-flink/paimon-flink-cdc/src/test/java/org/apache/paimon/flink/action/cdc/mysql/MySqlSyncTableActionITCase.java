@@ -280,7 +280,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .column("v1", DataTypes.VARCHAR(10), "v1")
                         .column("v2", DataTypes.INT(), "v2")
                         .column("v3", DataTypes.VARCHAR(10), "v3")
-                        .option("disable-explicit-type-casting", "false")
                         .build();
         checkTableSchema(excepted);
 
@@ -292,6 +291,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     private void testSchemaEvolutionMultipleImpl(Statement statement) throws Exception {
         FileStoreTable table = getFileStoreTable();
         statement.executeUpdate("USE " + DATABASE_NAME);
+
+        statement.executeUpdate(
+                "ALTER TABLE schema_evolution_multiple SET ('disable-explicit-type-casting' = 'false')");
 
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES (1, 'one', 10, 'string_1')");
