@@ -114,6 +114,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
 
         // to lower precision
         sql(ddl, fileFormat);
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES (1, 111.32), (2, 112.33)");
         sql("ALTER TABLE T MODIFY (f INT)");
         assertThat(sql("SELECT * FROM T WHERE f < 112")).containsExactly(Row.of(1, 111));
@@ -224,6 +225,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
                         + "  'file.format' = '%s'"
                         + ");",
                 fileFormat);
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES (1, '1'), (2, '111')");
         sql("ALTER TABLE T MODIFY (f INT)");
         assertThat(sql("SELECT * FROM T WHERE f > 2")).containsExactly(Row.of(2, 111));
