@@ -197,6 +197,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         // decimal and numeric primitive to numeric primitive
         sql(
                 "CREATE TABLE T (a TINYINT COMMENT 'a field', b INT COMMENT 'b field', c FLOAT COMMENT 'c field', d DOUBLE, e DECIMAL(10, 4), f DECIMAL(10, 4), g DOUBLE)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES(cast(1 as TINYINT), 123, 1.23, 3.141592, 3.14156, 3.14159, 1.23)");
 
@@ -252,6 +253,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeBooleanAndNumeric() {
         // boolean To numeric and numeric To boolean
         sql("CREATE TABLE T (a BOOLEAN, b BOOLEAN, c TINYINT, d INT, e BIGINT, f DOUBLE)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES(true, false, cast(0 as TINYINT), 1 , -9223372036854775808, 3.14)");
 
@@ -281,6 +283,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromNumericToString() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b INT, c DECIMAL(10, 3), d FLOAT, e DOUBLE)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES('paimon', 123, 300.123, 400.123, 400.1234)");
 
         sql("ALTER TABLE T MODIFY (b STRING, c VARCHAR(6), d CHAR(3), e CHAR(10))");
@@ -304,6 +307,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testModifyColumnTypeFromBooleanToString() {
         sql("CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b BOOLEAN, c BOOLEAN)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES('paimon', true, false)");
 
         sql("ALTER TABLE T MODIFY (b STRING, c STRING)");
@@ -325,6 +329,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         // timestamp/date/time/timestamp_ltz to string
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), c TIMESTAMP(6), d DATE, f TIME, g TIMESTAMP(3) WITH LOCAL TIME ZONE)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES('paimon', TIMESTAMP '2023-06-06 12:00:00', TIMESTAMP '2023-06-06 08:00:00.123456', DATE '2023-05-31', TIME '14:30:00', TO_TIMESTAMP_LTZ(4001, 3))");
 
@@ -358,6 +363,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testModifyColumnTypeFromStringToString() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d CHAR(5), e CHAR(5))");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES('paimon', '1234567890', '12345', '12345')");
 
         sql("ALTER TABLE T MODIFY (b VARCHAR(5), c CHAR(5), d VARCHAR(5), e CHAR(6))");
@@ -379,6 +385,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testModifyColumnTypeFromStringToBoolean() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d STRING, e CHAR(1))");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES('true', '1', 'yes', 'y')");
         sql("INSERT INTO T VALUES('false', '0', 'no', 'n')");
 
@@ -404,6 +411,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromStringToNumeric() {
         // string to decimal/numeric primitive
         sql("CREATE TABLE T (a VARCHAR(10), b CHAR(1), c VARCHAR(10), d STRING, e STRING)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES('3.14', '1', '123', '3.14', '3.14')");
 
         sql("ALTER TABLE T MODIFY (a DECIMAL(5, 4), b TINYINT, c INT, d DOUBLE, e BIGINT)");
@@ -423,6 +431,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[3.1400, 1, 123, 3.14, 3]", "+I[4.1300, 2, 456, 3.14, 4]");
 
         sql("CREATE TABLE T1 (a STRING, b STRING)");
+        sql("ALTER TABLE T1 SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T1 VALUES('test', '3.14')");
 
         sql("ALTER TABLE T1 MODIFY (a INT, b TINYINT)");
@@ -435,6 +444,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromStringToTimestamp() {
         // string to timestamp/date/time/timestamp_ltz
         sql("CREATE TABLE T (a VARCHAR(30), b CHAR(20), c VARCHAR(20), d STRING, e STRING)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES('2022-12-12 09:30:10', '2022-12-12', '09:30:00', '2022-12-12 09:30:00.123456', '2022-12-12 00:30:00.123456')");
 
@@ -467,6 +477,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testModifyColumnTypeStringToBinary() {
         sql("CREATE TABLE T (a VARCHAR(5), b VARCHAR(10), c VARCHAR(10), d VARCHAR(10))");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES('Apache Paimon', 'Apache Paimon','Apache Paimon','Apache Paimon')");
 
@@ -530,6 +541,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromDateToTimestamp() {
         // date to timestamp/timestamp_ltz
         sql("CREATE TABLE T (a DATE, b DATE)");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES(DATE '2022-12-12', DATE '2022-12-11')");
 
         sql("ALTER TABLE T MODIFY (a TIMESTAMP(6), b TIMESTAMP(6) WITH LOCAL TIME ZONE)");
@@ -557,6 +569,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromTimeToTimestamp() {
         // time to timestamp/timestamp_ltz
         sql("CREATE TABLE T (a TIME, b TIME(2), c TIME(3))");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T VALUES(TIME '09:30:10', TIME '09:30:10.24', TIME '09:30:10.123')");
 
         sql(
@@ -579,6 +592,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeBinaryToBinary() {
         sql(
                 "CREATE TABLE T (a BINARY(5), b BINARY(10), c BINARY(10), d BINARY(10), e VARBINARY(5), f VARBINARY(10), g VARBINARY(10), h VARBINARY(10))");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql(
                 "INSERT INTO T VALUES(X'0123456789', X'0123456789',X'0123456789',X'0123456789',X'0123456789',X'0123456789',X'0123456789',X'0123456789')");
 
@@ -931,6 +945,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testAlterTableSchema() {
         sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         List<String> result =
                 sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
         assertThat(result)
@@ -1347,6 +1362,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         // enable null to not null option
         sql("ALTER TABLE T SET ('alter-column-null-to-not-null.disabled' = 'false')");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("ALTER TABLE T MODIFY v BIGINT NOT NULL");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
@@ -1560,5 +1576,31 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                         "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL"))
                 .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for a.c3.element.value");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testDisableExplicitTypeCasting(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
+                .hasStackTraceContaining(
+                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+        sql("ALTER TABLE T MODIFY v BIGINT");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
+                .hasStackTraceContaining(
+                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+        // disable explicit type casting
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
+        sql("ALTER TABLE T MODIFY v INT");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
     }
 }

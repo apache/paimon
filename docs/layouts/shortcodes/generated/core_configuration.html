@@ -315,6 +315,12 @@ under the License.
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
         </tr>
         <tr>
+            <td><h5>disable-explicit-type-casting</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. Users can disable this option to allow explicit type casting</td>
+        </tr>
+        <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

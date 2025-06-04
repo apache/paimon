@@ -220,11 +220,7 @@ public class SchemaMergingUtils {
 
     private static boolean supportsDataTypesCast(
             DataType sourceType, DataType targetType, boolean allowExplicitCast) {
-        if (allowExplicitCast) {
-            return DataTypeCasts.supportsExplicitCast(sourceType, targetType);
-        } else {
-            return DataTypeCasts.supportsImplicitCast(sourceType, targetType);
-        }
+        return DataTypeCasts.supportsCast(sourceType, targetType, allowExplicitCast);
     }
 
     private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
