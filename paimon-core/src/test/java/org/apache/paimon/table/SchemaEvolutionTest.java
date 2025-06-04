@@ -306,6 +306,9 @@ public class SchemaEvolutionTest {
                         .column("f1", DataTypes.BIGINT())
                         .build();
         schemaManager.createTable(schema);
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption("disable-explicit-type-casting", "false")));
 
         TableSchema tableSchema =
                 schemaManager.commitChanges(
