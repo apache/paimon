@@ -58,16 +58,14 @@ public class NestedSchemaUtils {
             DataType newType,
             List<SchemaChange> schemaChanges) {
 
-        String joinedNames = String.join(".", fieldNames);
-
         if (oldType.getTypeRoot() == DataTypeRoot.ROW) {
-            handleRowTypeUpdate(fieldNames, oldType, newType, schemaChanges, joinedNames);
+            handleRowTypeUpdate(fieldNames, oldType, newType, schemaChanges);
         } else if (oldType.getTypeRoot() == DataTypeRoot.ARRAY) {
-            handleArrayTypeUpdate(fieldNames, oldType, newType, schemaChanges, joinedNames);
+            handleArrayTypeUpdate(fieldNames, oldType, newType, schemaChanges);
         } else if (oldType.getTypeRoot() == DataTypeRoot.MAP) {
-            handleMapTypeUpdate(fieldNames, oldType, newType, schemaChanges, joinedNames);
+            handleMapTypeUpdate(fieldNames, oldType, newType, schemaChanges);
         } else if (oldType.getTypeRoot() == DataTypeRoot.MULTISET) {
-            handleMultisetTypeUpdate(fieldNames, oldType, newType, schemaChanges, joinedNames);
+            handleMultisetTypeUpdate(fieldNames, oldType, newType, schemaChanges);
         } else {
             // For primitive types, update the column type directly
             handlePrimitiveTypeUpdate(fieldNames, oldType, newType, schemaChanges);
@@ -81,8 +79,9 @@ public class NestedSchemaUtils {
             List<String> fieldNames,
             DataType oldType,
             DataType newType,
-            List<SchemaChange> schemaChanges,
-            String joinedNames) {
+            List<SchemaChange> schemaChanges) {
+
+        String joinedNames = String.join(".", fieldNames);
 
         Preconditions.checkArgument(
                 newType.getTypeRoot() == DataTypeRoot.ROW,
@@ -166,9 +165,9 @@ public class NestedSchemaUtils {
             List<String> fieldNames,
             DataType oldType,
             DataType newType,
-            List<SchemaChange> schemaChanges,
-            String joinedNames) {
+            List<SchemaChange> schemaChanges) {
 
+        String joinedNames = String.join(".", fieldNames);
         Preconditions.checkArgument(
                 newType.getTypeRoot() == DataTypeRoot.ARRAY,
                 "Column %s can only be updated to array type, and cannot be updated to %s type",
@@ -190,9 +189,9 @@ public class NestedSchemaUtils {
             List<String> fieldNames,
             DataType oldType,
             DataType newType,
-            List<SchemaChange> schemaChanges,
-            String joinedNames) {
+            List<SchemaChange> schemaChanges) {
 
+        String joinedNames = String.join(".", fieldNames);
         Preconditions.checkArgument(
                 newType.getTypeRoot() == DataTypeRoot.MAP,
                 "Column %s can only be updated to map type, and cannot be updated to %s type",
@@ -224,8 +223,9 @@ public class NestedSchemaUtils {
             List<String> fieldNames,
             DataType oldType,
             DataType newType,
-            List<SchemaChange> schemaChanges,
-            String joinedNames) {
+            List<SchemaChange> schemaChanges) {
+
+        String joinedNames = String.join(".", fieldNames);
 
         Preconditions.checkArgument(
                 newType.getTypeRoot() == DataTypeRoot.MULTISET,
