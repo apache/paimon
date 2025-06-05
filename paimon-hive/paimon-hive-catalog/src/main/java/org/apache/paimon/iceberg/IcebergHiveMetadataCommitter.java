@@ -154,11 +154,16 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                         .collect(Collectors.toList()));
 
         Options options = new Options(table.options());
-        boolean skipAWSGlueArchive = options.get(IcebergOptions.GLUE_SKIP_ARCHIVE);
         EnvironmentContext environmentContext = new EnvironmentContext();
         environmentContext.putToProperties(StatsSetupConst.CASCADE, StatsSetupConst.TRUE);
+
+        boolean skipAWSGlueArchive = options.get(IcebergOptions.GLUE_SKIP_ARCHIVE);
         environmentContext.putToProperties(
                 "skipAWSGlueArchive", Boolean.toString(skipAWSGlueArchive));
+
+        boolean skipHiveUpdateStats = options.get(IcebergOptions.HIVE_SKIP_UPDATE_STATS);
+        environmentContext.putToProperties(
+                StatsSetupConst.DO_NOT_UPDATE_STATS, Boolean.toString(skipHiveUpdateStats));
 
         clients.execute(
                 client ->
@@ -207,7 +212,10 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                         null,
                         "EXTERNAL_TABLE");
 
-        hiveTable.getParameters().put("DO_NOT_UPDATE_STATS", "true");
+        Options options = new Options(table.options());
+        boolean skipHiveUpdateStats = options.get(IcebergOptions.HIVE_SKIP_UPDATE_STATS);
+
+        hiveTable.getParameters().put("DO_NOT_UPDATE_STATS", Boolean.toString(skipHiveUpdateStats));
         hiveTable.getParameters().put("EXTERNAL", "TRUE");
         hiveTable.getParameters().put("table_type", "ICEBERG");
 

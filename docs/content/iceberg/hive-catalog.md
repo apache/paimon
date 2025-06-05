@@ -85,6 +85,12 @@ you also need to set some (or all) of the following table options when creating 
       <td>Boolean</td>
       <td>Skip archive for AWS Glue catalog.</td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.hive-skip-update-stats</h5></td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Skip updating Hive stats.</td>
+    </tr>
     </tbody>
 </table>
 
