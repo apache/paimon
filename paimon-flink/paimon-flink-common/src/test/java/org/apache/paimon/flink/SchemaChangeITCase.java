@@ -423,6 +423,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[3.1400, 1, 123, 3.14, 3]", "+I[4.1300, 2, 456, 3.14, 4]");
 
         sql("CREATE TABLE T1 (a STRING, b STRING)");
+        sql("ALTER TABLE T1 SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T1 VALUES('test', '3.14')");
 
         sql("ALTER TABLE T1 MODIFY (a INT, b TINYINT)");
@@ -1560,5 +1561,32 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                         "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL"))
                 .hasStackTraceContaining(
                         "Cannot update column type from nullable to non nullable for a.c3.element.value");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testDisableExplicitTypeCasting(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'true')");
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
+                .hasStackTraceContaining(
+                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+        sql("ALTER TABLE T MODIFY v BIGINT");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
+                .hasStackTraceContaining(
+                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+        // disable explicit type casting
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
+        sql("ALTER TABLE T MODIFY v INT");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
     }
 }

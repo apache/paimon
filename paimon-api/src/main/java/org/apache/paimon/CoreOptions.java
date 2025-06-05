@@ -1736,6 +1736,14 @@ public class CoreOptions implements Serializable {
                             "If true, it disables altering column type from null to not null. Default is true. "
                                     + "Users can disable this option to explicitly convert null column type to not null.");
 
+    public static final ConfigOption<Boolean> DISABLE_EXPLICIT_TYPE_CASTING =
+            ConfigOptions.key("disable-explicit-type-casting")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. "
+                                    + "Users can enable this option to disable explicit type casting");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2249,6 +2257,10 @@ public class CoreOptions implements Serializable {
 
     public boolean disableNullToNotNull() {
         return options.get(DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL);
+    }
+
+    public boolean disableExplicitTypeCasting() {
+        return options.get(DISABLE_EXPLICIT_TYPE_CASTING);
     }
 
     public LookupStrategy lookupStrategy() {

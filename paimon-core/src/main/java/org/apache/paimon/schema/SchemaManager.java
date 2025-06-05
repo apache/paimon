@@ -308,6 +308,14 @@ public class SchemaManager implements Serializable {
                                 CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL
                                         .defaultValue()
                                         .toString()));
+
+        boolean disableExplicitTypeCasting =
+                Boolean.parseBoolean(
+                        oldOptions.getOrDefault(
+                                CoreOptions.DISABLE_EXPLICIT_TYPE_CASTING.key(),
+                                CoreOptions.DISABLE_EXPLICIT_TYPE_CASTING
+                                        .defaultValue()
+                                        .toString()));
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
@@ -434,8 +442,10 @@ public class SchemaManager implements Serializable {
                                         disableNullToNotNull);
                             }
                             checkState(
-                                    DataTypeCasts.supportsExplicitCast(
-                                                    sourceRootType, targetRootType)
+                                    DataTypeCasts.supportsCast(
+                                                    sourceRootType,
+                                                    targetRootType,
+                                                    !disableExplicitTypeCasting)
                                             && CastExecutors.resolve(sourceRootType, targetRootType)
                                                     != null,
                                     String.format(
