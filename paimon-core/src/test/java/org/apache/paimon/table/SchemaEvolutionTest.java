@@ -314,6 +314,9 @@ public class SchemaEvolutionTest {
         assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.BIGINT());
         assertThat(tableSchema.fields().get(0).description()).isEqualTo("f0 field");
 
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption("disable-explicit-type-casting", "true")));
         assertThatThrownBy(
                         () ->
                                 schemaManager.commitChanges(

@@ -270,12 +270,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withTypeMappingModes(
                                 TypeMapping.TypeMappingMode.ALLOW_NON_STRING_TO_STRING
                                         .configString())
-                        .withTableConfig(
-                                new HashMap<String, String>() {
-                                    {
-                                        put("disable-explicit-type-casting", "false");
-                                    }
-                                })
                         .build();
         runActionWithDefaultEnv(action);
 

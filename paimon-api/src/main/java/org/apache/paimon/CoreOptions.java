@@ -1739,10 +1739,10 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> DISABLE_EXPLICIT_TYPE_CASTING =
             ConfigOptions.key("disable-explicit-type-casting")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
                     .withDescription(
                             "If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. "
-                                    + "Users can disable this option to allow explicit type casting");
+                                    + "Users can enable this option to disable explicit type casting");
 
     private final Options options;
 
