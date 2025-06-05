@@ -196,12 +196,10 @@ public class HttpClientTest {
                         "GET",
                         "");
         String url =
-                HttpClient.getRequestUrl(
-                        "http://a.b.c:8080",
-                        "/api/v1/tables/my_table$schemas",
-                        ImmutableMap.of("pageToken", "dt=20230101"));
-        Assertions.assertThrows(
-                IllegalArgumentException.class, () -> HttpClient.getRequestUrl("a.b.c", "", null));
+                (new HttpClient("http://a.b.c:8080"))
+                        .getRequestUrl(
+                                "/api/v1/tables/my_table$schemas",
+                                ImmutableMap.of("pageToken", "dt=20230101"));
         assertEquals(
                 "http://a.b.c:8080/api/v1/tables/my_table$schemas?pageToken=dt%3D20230101", url);
         Map<String, String> queryParameters = getParameters(url);

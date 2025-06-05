@@ -79,7 +79,7 @@ public class HttpClient implements RESTClient {
                 serverUri = String.format("http://%s", serverUri);
             }
         } else {
-            throw new IllegalArgumentException("uri is empty which must be define");
+            throw new IllegalArgumentException("uri is empty which must be defined.");
         }
         this.uri = serverUri;
         this.errorHandler = DefaultErrorHandler.getInstance();
@@ -96,7 +96,7 @@ public class HttpClient implements RESTClient {
         Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
-                        .url(getRequestUrl(uri, path, null))
+                        .url(getRequestUrl(path, null))
                         .get()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -113,7 +113,7 @@ public class HttpClient implements RESTClient {
                 getHeaders(path, queryParams, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
-                        .url(getRequestUrl(uri, path, queryParams))
+                        .url(getRequestUrl(path, queryParams))
                         .get()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -138,7 +138,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
-                            .url(getRequestUrl(uri, path, null))
+                            .url(getRequestUrl(path, null))
                             .post(requestBody)
                             .headers(Headers.of(authHeaders))
                             .build();
@@ -153,7 +153,7 @@ public class HttpClient implements RESTClient {
         Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
-                        .url(getRequestUrl(uri, path, null))
+                        .url(getRequestUrl(path, null))
                         .delete()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -169,7 +169,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
-                            .url(getRequestUrl(uri, path, null))
+                            .url(getRequestUrl(path, null))
                             .delete(requestBody)
                             .headers(Headers.of(authHeaders))
                             .build();
@@ -180,11 +180,7 @@ public class HttpClient implements RESTClient {
     }
 
     @VisibleForTesting
-    protected static String getRequestUrl(
-            String uri, String path, Map<String, String> queryParams) {
-        if (!uri.startsWith("http://") && !uri.startsWith("https://")) {
-            throw new IllegalArgumentException("uri is not start with http:// or https://");
-        }
+    protected String getRequestUrl(String path, Map<String, String> queryParams) {
         String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
         if (queryParams != null && !queryParams.isEmpty()) {
             HttpUrl httpUrl = HttpUrl.parse(fullPath);
