@@ -82,8 +82,10 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testCreateHttpClientWhenUriNoSchema() {
-        Assertions.assertDoesNotThrow(() -> new HttpClient("localhost"));
+    public void testServerUriSchema() {
+        assertEquals("http://localhost", (new HttpClient("localhost")).uri());
+        assertEquals("http://localhost", (new HttpClient("http://localhost")).uri());
+        assertEquals("https://localhost", (new HttpClient("https://localhost")).uri());
     }
 
     @Test

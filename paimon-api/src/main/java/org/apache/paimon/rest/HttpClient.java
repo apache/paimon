@@ -195,6 +195,11 @@ public class HttpClient implements RESTClient {
         return fullPath;
     }
 
+    @VisibleForTesting
+    public String uri() {
+        return uri;
+    }
+
     private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
         try (Response response = HTTP_CLIENT.newCall(request).execute()) {
             String responseBodyStr = response.body() != null ? response.body().string() : null;
