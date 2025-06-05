@@ -147,6 +147,12 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                     .put("previous_metadata_location", baseMetadataPath.toString());
         }
 
+        StorageDescriptor sd = hiveTable.getSd();
+        sd.setCols(
+                table.schema().fields().stream()
+                        .map(this::convertToFieldSchema)
+                        .collect(Collectors.toList()));
+
         Options options = new Options(table.options());
         boolean skipAWSGlueArchive = options.get(IcebergOptions.GLUE_SKIP_ARCHIVE);
         EnvironmentContext environmentContext = new EnvironmentContext();

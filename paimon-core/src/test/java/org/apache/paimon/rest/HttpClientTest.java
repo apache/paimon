@@ -82,6 +82,13 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testServerUriSchema() {
+        assertEquals("http://localhost", (new HttpClient("localhost")).uri());
+        assertEquals("http://localhost", (new HttpClient("http://localhost")).uri());
+        assertEquals("https://localhost", (new HttpClient("https://localhost")).uri());
+    }
+
+    @Test
     public void testGetSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
@@ -189,10 +196,10 @@ public class HttpClientTest {
                         "GET",
                         "");
         String url =
-                HttpClient.getRequestUrl(
-                        "http://a.b.c:8080",
-                        "/api/v1/tables/my_table$schemas",
-                        ImmutableMap.of("pageToken", "dt=20230101"));
+                (new HttpClient("http://a.b.c:8080"))
+                        .getRequestUrl(
+                                "/api/v1/tables/my_table$schemas",
+                                ImmutableMap.of("pageToken", "dt=20230101"));
         assertEquals(
                 "http://a.b.c:8080/api/v1/tables/my_table$schemas?pageToken=dt%3D20230101", url);
         Map<String, String> queryParameters = getParameters(url);
