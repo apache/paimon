@@ -82,6 +82,11 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testCreateHttpClientWhenUriNoSchema() {
+        Assertions.assertDoesNotThrow(() -> new HttpClient("localhost"));
+    }
+
+    @Test
     public void testGetSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
@@ -193,6 +198,8 @@ public class HttpClientTest {
                         "http://a.b.c:8080",
                         "/api/v1/tables/my_table$schemas",
                         ImmutableMap.of("pageToken", "dt=20230101"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> HttpClient.getRequestUrl("a.b.c", "", null));
         assertEquals(
                 "http://a.b.c:8080/api/v1/tables/my_table$schemas?pageToken=dt%3D20230101", url);
         Map<String, String> queryParameters = getParameters(url);

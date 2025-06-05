@@ -68,11 +68,20 @@ public class HttpClient implements RESTClient {
     private ErrorHandler errorHandler;
 
     public HttpClient(String uri) {
-        if (uri != null && uri.endsWith("/")) {
-            this.uri = uri.substring(0, uri.length() - 1);
+        String serverUri;
+        if (StringUtils.isNotEmpty(uri)) {
+            if (uri.endsWith("/")) {
+                serverUri = uri.substring(0, uri.length() - 1);
+            } else {
+                serverUri = uri;
+            }
+            if (!uri.startsWith("http://") && !uri.startsWith("https://")) {
+                serverUri = String.format("http://%s", serverUri);
+            }
         } else {
-            this.uri = uri;
+            throw new IllegalArgumentException("uri is empty which must be define");
         }
+        this.uri = serverUri;
         this.errorHandler = DefaultErrorHandler.getInstance();
     }
 
@@ -173,6 +182,9 @@ public class HttpClient implements RESTClient {
     @VisibleForTesting
     protected static String getRequestUrl(
             String uri, String path, Map<String, String> queryParams) {
+        if (!uri.startsWith("http://") && !uri.startsWith("https://")) {
+            throw new IllegalArgumentException("uri is not start with http:// or https://");
+        }
         String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
         if (queryParams != null && !queryParams.isEmpty()) {
             HttpUrl httpUrl = HttpUrl.parse(fullPath);
