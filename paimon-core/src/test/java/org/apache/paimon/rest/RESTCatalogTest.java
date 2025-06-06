@@ -31,6 +31,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionNameValidator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1573,8 +1574,38 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testFunction() throws Exception {
-        Identifier identifier = new Identifier("rest_catalog_db", "function");
-        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Identifier identifierWithSlash = new Identifier("rest_catalog_db", "function/");
+        catalog.createDatabase(identifierWithSlash.getDatabaseName(), false);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createFunction(
+                                identifierWithSlash,
+                                MockRESTMessage.function(identifierWithSlash),
+                                false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithSlash));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithSlash, true));
+
+        Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createFunction(
+                                identifierWithoutAlphabet,
+                                MockRESTMessage.function(identifierWithoutAlphabet),
+                                false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithoutAlphabet));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithoutAlphabet, true));
+
+        Identifier identifier = new Identifier("rest_catalog_db", "function.na_me-01");
         Function function = MockRESTMessage.function(identifier);
 
         catalog.createFunction(identifier, function, true);
@@ -1672,6 +1703,23 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.DefinitionNotExistException.class,
                 () -> catalog.alterFunction(identifier, ImmutableList.of(dropDefinition), false));
+    }
+
+    @Test
+    public void testValidateFunctionName() throws Exception {
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a1_"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c.1"));
+
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a\\/b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a$?b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a@b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a*b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("123"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("_-"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(""));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(null));
     }
 
     @Test
