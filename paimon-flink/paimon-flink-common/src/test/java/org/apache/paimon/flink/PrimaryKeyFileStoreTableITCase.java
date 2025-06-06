@@ -352,6 +352,77 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testDropTableWithAlterExternalPaths() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths = TraceableFileIO.SCHEME + "://" + externalPath1;
+        String externalPath2s = LocalFileIOLoader.SCHEME + "://" + externalPath2;
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '1',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'round-robin'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (1, 'A')").await();
+        // read initial data
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]");
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (2, 'B')").await();
+
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+
+        // alter table external path
+        sEnv.executeSql(
+                "ALTER TABLE T2 SET ( "
+                        + "'data-file.external-paths' = '"
+                        + externalPath2s
+                        + "'"
+                        + ")");
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (3, 'C')").await();
+
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        assertThat(fileIO.exists(new Path(externalPath1))).isTrue();
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+
+        // drop table
+        sEnv.executeSql("DROP TABLE T2");
+
+        assertThat(fileIO.exists(new Path(path + "/warehouse" + "/default.db" + "/T2"))).isFalse();
+        assertThat(fileIO.exists(new Path(externalPath1))).isFalse();
+        assertThat(fileIO.exists(new Path(externalPath2))).isFalse();
+    }
+
+    @Test
     public void testTableReadWriteWithExternalPathSpecificFS() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
