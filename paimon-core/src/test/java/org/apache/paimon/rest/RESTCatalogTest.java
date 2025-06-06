@@ -1573,7 +1573,29 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testFunction() throws Exception {
-        Identifier identifier = new Identifier("rest_catalog_db", "function");
+        Identifier identifierWithSlash = new Identifier("rest_catalog_db", "function/");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.createFunction(identifierWithSlash, null, false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithSlash));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithSlash, true));
+
+        Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.createFunction(identifierWithoutAlphabet, null, false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithoutAlphabet));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithoutAlphabet, true));
+
+        Identifier identifier = new Identifier("rest_catalog_db", "function.na_me-01");
         catalog.createDatabase(identifier.getDatabaseName(), false);
         Function function = MockRESTMessage.function(identifier);
 
@@ -1672,6 +1694,23 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.DefinitionNotExistException.class,
                 () -> catalog.alterFunction(identifier, ImmutableList.of(dropDefinition), false));
+    }
+
+    @Test
+    public void testValidateFunctionName() throws Exception {
+        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a"));
+        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a1_"));
+        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a-b_c"));
+        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a-b_c.1"));
+
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a\\/b"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a$?b"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a@b"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a*b"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("123"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("_-"));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName(""));
+        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName(null));
     }
 
     @Test
