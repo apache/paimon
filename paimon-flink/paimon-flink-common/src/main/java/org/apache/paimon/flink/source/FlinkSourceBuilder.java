@@ -82,7 +82,7 @@ public class FlinkSourceBuilder {
 
     private final Table table;
     private final Options conf;
-    private final BucketMode bucketMode;
+    private final boolean unawareBucket;
     private String sourceName;
     private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
@@ -96,10 +96,9 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
-        this.bucketMode =
+        this.unawareBucket =
                 table instanceof FileStoreTable
-                        ? ((FileStoreTable) table).bucketMode()
-                        : BucketMode.HASH_FIXED;
+                        && ((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
     }
@@ -204,7 +203,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        bucketMode,
+                        unawareBucket,
                         outerProject()));
     }
 
@@ -215,7 +214,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        bucketMode,
+                        unawareBucket,
                         outerProject()));
     }
 
@@ -349,7 +348,7 @@ public class FlinkSourceBuilder {
                         watermarkStrategy == null,
                         conf.get(
                                 FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                        bucketMode,
+                        unawareBucket,
                         outerProject());
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);

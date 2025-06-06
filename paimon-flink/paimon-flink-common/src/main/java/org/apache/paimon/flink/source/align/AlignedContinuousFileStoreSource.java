@@ -27,7 +27,6 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 
@@ -51,9 +50,9 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            BucketMode bucketMode,
+            boolean unawareBucket,
             @Nullable NestedProjectedRowData rowData) {
-        super(readBuilder, options, limit, bucketMode, rowData);
+        super(readBuilder, options, limit, unawareBucket, rowData);
     }
 
     @Override
@@ -82,7 +81,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 nextSnapshotId,
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
-                bucketMode,
+                unawareBucket,
                 options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
