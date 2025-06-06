@@ -87,6 +87,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1012,6 +1013,28 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testCommitManifestWithProperties() throws Exception {
+        TestFileStore store = createStore(false);
+        // create a ManifestCommittable with properties
+        ManifestCommittable manifestCommittable = new ManifestCommittable(0);
+        manifestCommittable.addProperty("k1", "v1");
+        manifestCommittable.addProperty("k2", "v2");
+
+        try (FileStoreCommit fileStoreCommit = store.newCommit()) {
+            fileStoreCommit.ignoreEmptyCommit(false);
+            fileStoreCommit.commit(manifestCommittable, Collections.emptyMap());
+        }
+
+        Snapshot snapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        Map<String, String> expectedProps = new HashMap<>();
+        expectedProps.put("k1", "v1");
+        expectedProps.put("k2", "v2");
+        Map<String, String> snapshotProps = snapshot.properties();
+        assertThat(snapshotProps).isNotNull();
+        assertThat(snapshotProps).isEqualTo(expectedProps);
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)

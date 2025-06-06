@@ -929,6 +929,7 @@ public class FileDeletionTest {
                     commitIdentifier++,
                     null,
                     Collections.emptyMap(),
+                    Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
                     store.snapshotManager().latestSnapshot(),
                     mustConflictCheck(),
