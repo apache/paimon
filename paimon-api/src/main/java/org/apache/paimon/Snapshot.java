@@ -197,7 +197,7 @@ public class Snapshot implements Serializable {
     protected final String statistics;
 
     // properties
-    // null for paimon <= 1.1
+    // null for paimon <= 1.1 or empty properties
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_PROPERTIES)
     @Nullable
@@ -223,7 +223,7 @@ public class Snapshot implements Serializable {
             @Nullable Long changelogRecordCount,
             @Nullable Long watermark,
             @Nullable String statistics,
-            Map<String, String> properties) {
+            @Nullable Map<String, String> properties) {
         this(
                 CURRENT_VERSION,
                 id,

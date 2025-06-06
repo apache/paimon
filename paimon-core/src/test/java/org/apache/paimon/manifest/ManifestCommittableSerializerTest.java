@@ -46,7 +46,8 @@ public class ManifestCommittableSerializerTest {
         ManifestCommittableSerializer serializer = serializer();
         ManifestCommittable committable = create();
         byte[] serialized = serializer.serialize(committable);
-        assertThat(serializer.deserialize(2, serialized)).isEqualTo(committable);
+        assertThat(serializer.deserialize(serializer.getVersion(), serialized))
+                .isEqualTo(committable);
     }
 
     public static ManifestCommittableSerializer serializer() {
