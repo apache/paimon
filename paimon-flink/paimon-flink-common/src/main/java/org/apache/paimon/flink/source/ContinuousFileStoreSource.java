@@ -23,7 +23,6 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -45,22 +44,22 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 4L;
 
     protected final Map<String, String> options;
-    protected final BucketMode bucketMode;
+    protected final boolean unawareBucket;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
-        this(readBuilder, options, limit, BucketMode.HASH_FIXED, null);
+        this(readBuilder, options, limit, false, null);
     }
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            BucketMode bucketMode,
+            boolean unawareBucket,
             @Nullable NestedProjectedRowData rowData) {
         super(readBuilder, limit, rowData);
         this.options = options;
-        this.bucketMode = bucketMode;
+        this.unawareBucket = unawareBucket;
     }
 
     @Override
@@ -110,7 +109,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 nextSnapshotId,
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
-                bucketMode,
+                unawareBucket,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
                 options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));

@@ -23,7 +23,6 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
 import org.apache.paimon.flink.source.assigners.AlignedSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
@@ -92,7 +91,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             StreamTableScan scan,
-            BucketMode bucketMode,
+            boolean unawareBucket,
             long alignTimeout,
             int splitPerTaskMax,
             boolean shuffleBucketWithPartition,
@@ -103,7 +102,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
                 nextSnapshotId,
                 discoveryInterval,
                 scan,
-                bucketMode,
+                unawareBucket,
                 splitPerTaskMax,
                 shuffleBucketWithPartition,
                 maxSnapshotCount);
@@ -267,7 +266,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     }
 
     @Override
-    protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
+    protected SplitAssigner createSplitAssigner(boolean unawareBucket) {
         return new AlignedSplitAssigner();
     }
 }

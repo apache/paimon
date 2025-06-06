@@ -24,7 +24,6 @@ import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -54,8 +53,6 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
-
-import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -211,7 +208,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean shuffleBucketWithPartition,
-            BucketMode bucketMode,
+            boolean unawareBucket,
             NestedProjectedRowData nestedProjectedRowData) {
         SingleOutputStreamOperator<Split> singleOutputStreamOperator =
                 env.fromSource(
@@ -223,7 +220,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                         .forceNonParallel();
 
         DataStream<Split> sourceDataStream =
-                bucketMode == BUCKET_UNAWARE
+                unawareBucket
                         ? shuffleUnawareBucket(singleOutputStreamOperator)
                         : shuffleNonUnawareBucket(
                                 singleOutputStreamOperator, shuffleBucketWithPartition);

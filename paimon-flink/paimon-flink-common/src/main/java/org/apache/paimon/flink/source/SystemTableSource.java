@@ -24,7 +24,6 @@ import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -98,7 +97,7 @@ public class SystemTableSource extends FlinkTableSource {
         if (unbounded && table instanceof DataTable) {
             source =
                     new ContinuousFileStoreSource(
-                            readBuilder, table.options(), limit, BucketMode.HASH_FIXED, rowData);
+                            readBuilder, table.options(), limit, false, rowData);
         } else {
             source =
                     new StaticFileStoreSource(
