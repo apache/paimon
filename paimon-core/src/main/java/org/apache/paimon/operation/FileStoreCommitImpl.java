@@ -1054,7 +1054,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             recordCount(changelogFiles),
                             currentWatermark,
                             statsFileName,
-                            properties);
+                            // if empty properties, just set to null
+                            properties.isEmpty() ? null : properties);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             if (retryResult != null) {
@@ -1203,7 +1204,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         0L,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        Collections.emptyMap());
+                        latestSnapshot.properties());
 
         if (!commitSnapshotImpl(newSnapshot, emptyList())) {
             return new ManifestCompactResult(
