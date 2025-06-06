@@ -25,13 +25,13 @@ public class FunctionNameValidator {
     private static final Pattern FUNCTION_NAME_PATTERN =
             Pattern.compile("^(?=.*[A-Za-z])[A-Za-z0-9._-]+$");
 
-    public static boolean validate(String name) {
+    public static boolean isValidName(String name) {
         return org.apache.paimon.utils.StringUtils.isNotEmpty(name)
                 && FUNCTION_NAME_PATTERN.matcher(name).matches();
     }
 
-    public static void checkValidName(String name) {
-        boolean isValid = validate(name);
+    public static void check(String name) {
+        boolean isValid = isValidName(name);
         if (!isValid) {
             throw new IllegalArgumentException("Invalid function name: " + name);
         }

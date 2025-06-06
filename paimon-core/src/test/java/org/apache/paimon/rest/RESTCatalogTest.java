@@ -1707,28 +1707,19 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     public void testValidateFunctionName() throws Exception {
-        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a"));
-        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a1_"));
-        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a-b_c"));
-        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a-b_c.1"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a1_"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c"));
+        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c.1"));
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> FunctionNameValidator.checkValidName("a\\/b"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a$?b"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a@b"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a*b"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("123"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("_-"));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName(""));
-        assertThrows(
-                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName(null));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a\\/b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a$?b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a@b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a*b"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("123"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("_-"));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(""));
+        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(null));
     }
 
     @Test
