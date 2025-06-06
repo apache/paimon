@@ -151,6 +151,12 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
+    public static final ConfigOption<Boolean> EXTERNAL_COMPACT =
+            key("external.compact")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to execute full compaction to external paths.");
+
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
             key("path")
@@ -2455,6 +2461,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String externalSpecificFS() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
+    }
+
+    public Boolean externalCompact() {
+        return options.get(EXTERNAL_COMPACT);
     }
 
     public String partitionTimestampFormatter() {
