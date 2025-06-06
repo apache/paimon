@@ -60,7 +60,13 @@ under the License.
             <td><h5>bucket-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
+            <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key by default.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>bucket-strategy</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the strategy to assign data to each bucket.<br />Currently, only 'truncate[W]' is supported, where: <ul><li>'W' must be a positive integer (e.g., 'truncate[10]').</li><li>The bucket is calculated as: `bucket = (bucket_key_value - (bucket_key_value % W)) % total_buckets`.</li></ul>Note: This strategy requires 'bucket-key' to be a single INT column.</td>
         </tr>
         <tr>
             <td><h5>cache-page-size</h5></td>

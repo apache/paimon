@@ -32,6 +32,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -68,6 +69,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final Projection partitionFromPk;
     private final Projection bucketKeyFromPk;
+    @Nullable private final StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor;
 
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
@@ -114,6 +116,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                                     .toArray());
         }
         this.trimmedKeyRearrange = trimmedKeyRearrange;
+        this.strategyBasedBucketIdExtractor =
+                schema.bucketStrategy() == null
+                        ? null
+                        : new StrategyBasedBucketIdExtractor(
+                                schema.bucketStrategy(), schema.logicalBucketKeyType());
     }
 
     @VisibleForTesting
@@ -162,8 +169,10 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private int bucket(int numBuckets, InternalRow primaryKey) {
         BinaryRow bucketKey = bucketKeyFromPk.apply(primaryKey);
-        return KeyAndBucketExtractor.bucket(
-                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+        return strategyBasedBucketIdExtractor == null
+                ? KeyAndBucketExtractor.bucket(
+                        KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets)
+                : strategyBasedBucketIdExtractor.extractBucket(bucketKey);
     }
 
     @Override

@@ -106,6 +106,39 @@ public class CdcRecordKeyAndBucketExtractorTest {
     }
 
     @Test
+    public void testExtractBucketWithBucketStrategy() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket-key", "c2");
+        options.put("bucket", "100");
+        options.put("bucket-strategy", "truncate[1]");
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
+                        new Schema(
+                                RowType.of(
+                                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                                new String[] {"c1", "c2"})
+                                        .getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options,
+                                ""));
+        RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
+        CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema);
+        for (int i = 0; i < 100; i++) {
+            GenericRowData rowData = GenericRowData.of(i, i);
+            expected.setRecord(rowData);
+
+            Map<String, String> data = new HashMap<>();
+            data.put("c1", String.valueOf(i));
+            data.put("c2", String.valueOf(i));
+
+            actual.setRecord(new CdcRecord(RowKind.INSERT, data));
+            assertThat(actual.bucket()).isEqualTo(expected.bucket());
+        }
+    }
+
+    @Test
     public void testNullPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
@@ -186,6 +219,17 @@ public class CdcRecordKeyAndBucketExtractorTest {
                         Arrays.asList("pt1", "pt2"),
                         Arrays.asList("pt1", "pt2", "k1", "k2"),
                         Collections.singletonMap("bucket", "1"),
+                        ""));
+    }
+
+    private TableSchema createTableSchema(int bucketNum) throws Exception {
+        return SchemaUtils.forceCommit(
+                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
+                new Schema(
+                        ROW_TYPE.getFields(),
+                        Arrays.asList("pt1", "pt2"),
+                        Arrays.asList("pt1", "pt2", "k1", "k2"),
+                        Collections.singletonMap("bucket", String.valueOf(bucketNum)),
                         ""));
     }
 }

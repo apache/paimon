@@ -24,10 +24,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.data.RowData;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.HashSet;
@@ -52,6 +55,8 @@ public class BucketIdExtractor implements Serializable {
 
     private Projection bucketKeyProjection;
 
+    private final @Nullable StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor;
+
     public BucketIdExtractor(
             int numBuckets,
             TableSchema tableSchema,
@@ -65,6 +70,11 @@ public class BucketIdExtractor implements Serializable {
         this.joinKeyFieldNames = joinKeyFieldNames;
         this.bucketKeyFieldNames = bucketKeyFieldNames;
         this.tableSchema = tableSchema;
+        this.strategyBasedBucketIdExtractor =
+                tableSchema.bucketStrategy() == null
+                        ? null
+                        : new StrategyBasedBucketIdExtractor(
+                                tableSchema.bucketStrategy(), tableSchema.logicalBucketKeyType());
     }
 
     public int extractBucketId(RowData joinKeyRow) {
@@ -75,8 +85,13 @@ public class BucketIdExtractor implements Serializable {
         FlinkRowWrapper internalRow = new FlinkRowWrapper(joinKeyRow);
         BinaryRow bucketKey = bucketKeyProjection.apply(internalRow);
         int bucket =
-                KeyAndBucketExtractor.bucket(
-                        KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                strategyBasedBucketIdExtractor == null
+                        ?
+                        // default hash way
+                        KeyAndBucketExtractor.bucket(
+                                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets)
+                        : strategyBasedBucketIdExtractor.extractBucket(bucketKey);
+
         checkState(bucket < numBuckets);
         return bucket;
     }

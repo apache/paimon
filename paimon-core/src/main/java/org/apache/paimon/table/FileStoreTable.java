@@ -76,7 +76,11 @@ public interface FileStoreTable extends DataTable {
     }
 
     default BucketSpec bucketSpec() {
-        return new BucketSpec(bucketMode(), schema().bucketKeys(), schema().numBuckets());
+        return new BucketSpec(
+                bucketMode(),
+                schema().bucketKeys(),
+                schema().numBuckets(),
+                schema().bucketStrategy());
     }
 
     default BucketMode bucketMode() {

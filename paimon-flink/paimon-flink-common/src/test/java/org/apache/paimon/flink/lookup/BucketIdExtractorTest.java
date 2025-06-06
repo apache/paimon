@@ -30,6 +30,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -61,6 +63,24 @@ public class BucketIdExtractorTest extends CatalogITCaseBase {
                         table,
                         bucketId,
                         createBucketKeyGetter(Collections.singletonList(bucketKeyIndex)));
+        List<String> joinKeyNames = Collections.singletonList(bucketKeyName);
+        List<RowData> joinKeyRows =
+                generateJoinKeyRows(
+                        bucketKeyRows, bucketKeyRow -> GenericRowData.of(bucketKeyRow.get(0)));
+        BucketIdExtractor bucketIdExtractor =
+                new BucketIdExtractor(BUCKET_NUMBER, table.schema(), joinKeyNames, joinKeyNames);
+        checkCorrectness(bucketIdExtractor, bucketId, joinKeyRows);
+    }
+
+    @Test
+    public void testJoinKeyEqualToSingleBucketKeyWithBucketStrategy() throws Exception {
+        String bucketKeyName = "col1";
+        Random seed = new Random();
+        int bucketId = seed.nextInt(COL_NUMBER);
+        FileStoreTable table = createTestTable("col1", "truncate[1]");
+        List<List<Object>> bucketKeyRows =
+                getGroundTruthBucketKeyRows(
+                        table, bucketId, createBucketKeyGetter(Collections.singletonList(0)));
         List<String> joinKeyNames = Collections.singletonList(bucketKeyName);
         List<RowData> joinKeyRows =
                 generateJoinKeyRows(
@@ -165,12 +185,20 @@ public class BucketIdExtractorTest extends CatalogITCaseBase {
     }
 
     private FileStoreTable createTestTable(String bucketKey) throws Exception {
+        return createTestTable(bucketKey, null);
+    }
+
+    private FileStoreTable createTestTable(String bucketKey, @Nullable String bucketStrategy)
+            throws Exception {
         String tableName = "Test";
         String ddl =
                 String.format(
                         "CREATE TABLE %s (col1 INT, col2 STRING, col3 FLOAT, col4 INT, col5 BOOLEAN ) WITH"
                                 + " ('bucket'='%s'",
                         tableName, BUCKET_NUMBER);
+        if (bucketStrategy != null) {
+            ddl += ", 'bucket-strategy'='" + bucketStrategy + "'";
+        }
         if (bucketKey != null) {
             ddl += ", 'bucket-key' = '" + bucketKey + "')";
         }

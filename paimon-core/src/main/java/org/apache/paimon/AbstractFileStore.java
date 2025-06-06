@@ -57,6 +57,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
@@ -96,6 +97,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CoreOptions options;
     protected final RowType partitionType;
     protected final CatalogEnvironment catalogEnvironment;
+    @Nullable protected StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor;
 
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
@@ -119,6 +121,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.writeManifestCache =
                 SegmentsCache.create(
                         options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
+        this.strategyBasedBucketIdExtractor =
+                schema.bucketStrategy() == null
+                        ? null
+                        : new StrategyBasedBucketIdExtractor(
+                                schema.bucketStrategy(), schema.logicalBucketKeyType());
     }
 
     @Override

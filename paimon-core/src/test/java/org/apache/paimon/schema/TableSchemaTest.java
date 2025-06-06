@@ -19,6 +19,8 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.transform.BucketStrategy;
+import org.apache.paimon.transform.Truncate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -35,6 +37,8 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.BUCKET_STRATEGY;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
@@ -215,6 +219,72 @@ public class TableSchemaTest {
         options.put(BUCKET.key(), "-10");
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("The number of buckets needs to be greater than 0.");
+    }
+
+    @Test
+    public void testBucketStrategy() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BIGINT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "100");
+        options.put(BUCKET_KEY.key(), "f0");
+        options.put(BUCKET_STRATEGY.key(), "truncate[1]");
+
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        fields,
+                        10,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        //noinspection unchecked
+        BucketStrategy<Integer> bucketStrategy = (BucketStrategy<Integer>) schema.bucketStrategy();
+        assertThat(bucketStrategy).isNotNull();
+        assertThat(schema.bucketStrategy()).isInstanceOf(Truncate.class);
+        for (int i = 0; i < 100; i++) {
+            assertThat(bucketStrategy.apply(i)).isEqualTo(i);
+        }
+
+        // check non bucket strategy
+        assertThat(schema.copy(Collections.emptyMap()).bucketStrategy()).isNull();
+
+        // check invalid strategy
+        options.put(BUCKET_STRATEGY.key(), "unknown[1]");
+        assertThatThrownBy(() -> schema.copy(options))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Unknown bucket strategy: " + "unknown[1]");
+
+        // not fixed bucket num
+        Map<String, String> newOptions = new HashMap<>();
+        newOptions.put(BUCKET_KEY.key(), "f0");
+        newOptions.put(BUCKET_STRATEGY.key(), "truncate[1]");
+        assertThatThrownBy(() -> schema.copy(newOptions))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("numBuckets must be greater than 0");
+
+        // bucket columns are more then 1
+        Map<String, String> newOptions1 = new HashMap<>();
+        newOptions1.put(BUCKET.key(), "100");
+        newOptions1.put(BUCKET_KEY.key(), "f0,f1");
+        newOptions1.put(BUCKET_STRATEGY.key(), "truncate[1]");
+        assertThatThrownBy(() -> schema.copy(newOptions1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "bucket key columns must contain exactly one column for truncate bucket strategy.");
+
+        // bucket column is not integer
+        Map<String, String> newOptions2 = new HashMap<>();
+        newOptions2.put(BUCKET.key(), "100");
+        newOptions2.put(BUCKET_KEY.key(), "f2");
+        newOptions2.put(BUCKET_STRATEGY.key(), "truncate[1]");
+        assertThatThrownBy(() -> schema.copy(newOptions2))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Cannot truncate type: BIGINT");
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {

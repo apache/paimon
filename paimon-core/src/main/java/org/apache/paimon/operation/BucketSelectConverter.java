@@ -27,11 +27,13 @@ import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.ArrayList;
@@ -56,6 +58,13 @@ public interface BucketSelectConverter {
 
     static Optional<BiFilter<Integer, Integer>> create(
             Predicate bucketPredicate, RowType bucketKeyType) {
+        return create(bucketPredicate, bucketKeyType, null);
+    }
+
+    static Optional<BiFilter<Integer, Integer>> create(
+            Predicate bucketPredicate,
+            RowType bucketKeyType,
+            @Nullable StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
@@ -108,7 +117,19 @@ public interface BucketSelectConverter {
         List<Integer> hashCodes = new ArrayList<>();
         assembleRows(
                 bucketValues,
-                columns -> hashCodes.add(hash(columns, serializer)),
+                columns -> {
+                    if (strategyBasedBucketIdExtractor == null) {
+                        hashCodes.add(hash(columns, serializer));
+                    } else {
+                        BinaryRow bucketRow =
+                                serializer.toBinaryRow(GenericRow.of(columns.toArray()));
+                        // we use the already calculated bucket id as hashCodes in here, don't
+                        // worry,
+                        // since we will use hashCode % numBuckets to get real bucket then, it still
+                        // be same with the calculated bucket id
+                        hashCodes.add(strategyBasedBucketIdExtractor.extractBucket(bucketRow));
+                    }
+                },
                 new ArrayList<>(),
                 0);
 

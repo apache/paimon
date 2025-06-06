@@ -248,7 +248,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         writeWithoutBucket(data)
 
       case HASH_FIXED =>
-        if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
+        if (
+          paimonExtensionEnabled &&
+          // default bucket strategy can use Bucket
+          tableSchema.bucketStrategy() == null && BucketFunction.supportsTable(table)
+        ) {
           // Topology: input -> shuffle by partition & bucket
           val bucketNumber = coreOptions.bucket()
           val bucketKeyCol = tableSchema

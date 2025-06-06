@@ -24,8 +24,11 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.stream.IntStream;
@@ -51,6 +54,8 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     private BinaryRow bucketKey;
     private Integer bucket;
 
+    @Nullable private final StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor;
+
     public CdcRecordKeyAndBucketExtractor(TableSchema schema) {
         numBuckets = new CoreOptions(schema.options()).bucket();
 
@@ -71,6 +76,11 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
                 CodeGenUtils.newProjection(
                         new RowType(trimmedPKFields),
                         IntStream.range(0, trimmedPKFields.size()).toArray());
+        this.strategyBasedBucketIdExtractor =
+                schema.bucketStrategy() == null
+                        ? null
+                        : new StrategyBasedBucketIdExtractor(
+                                schema.bucketStrategy(), bucketKeyType);
     }
 
     @Override
@@ -98,8 +108,10 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
         }
         if (bucket == null) {
             bucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                    strategyBasedBucketIdExtractor == null
+                            ? KeyAndBucketExtractor.bucket(
+                                    KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets)
+                            : strategyBasedBucketIdExtractor.extractBucket(bucketKey);
         }
         return bucket;
     }

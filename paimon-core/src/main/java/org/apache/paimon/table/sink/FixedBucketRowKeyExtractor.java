@@ -25,12 +25,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 
+import javax.annotation.Nullable;
+
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
 public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
     private final int numBuckets;
     private final boolean sameBucketKeyAndTrimmedPrimaryKey;
     private final Projection bucketKeyProjection;
+    private final @Nullable StrategyBasedBucketIdExtractor strategyBasedBucketIdExtractor;
 
     private BinaryRow reuseBucketKey;
     private Integer reuseBucket;
@@ -39,6 +42,11 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
         super(schema);
         numBuckets = new CoreOptions(schema.options()).bucket();
         sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
+        this.strategyBasedBucketIdExtractor =
+                schema.bucketStrategy() == null
+                        ? null
+                        : new StrategyBasedBucketIdExtractor(
+                                schema.bucketStrategy(), schema.logicalBucketKeyType());
         bucketKeyProjection =
                 CodeGenUtils.newProjection(
                         schema.logicalRowType(), schema.projection(schema.bucketKeys()));
@@ -67,8 +75,14 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
         BinaryRow bucketKey = bucketKey();
         if (reuseBucket == null) {
             reuseBucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                    strategyBasedBucketIdExtractor == null
+                            ?
+                            // use default hash bucket
+                            KeyAndBucketExtractor.bucket(
+                                    KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets)
+                            :
+                            // use strategy based extractor
+                            strategyBasedBucketIdExtractor.extractBucket(bucketKey);
         }
         return reuseBucket;
     }
