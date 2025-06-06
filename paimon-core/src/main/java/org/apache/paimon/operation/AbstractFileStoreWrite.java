@@ -280,7 +280,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     String commitUser, SnapshotManager snapshotManager) {
         long latestCommittedIdentifier =
                 snapshotManager
-                        .latestSnapshotOfUser(commitUser)
+                        .latestSnapshotOfUserFromFilesystem(commitUser)
                         .map(Snapshot::commitIdentifier)
                         .orElse(Long.MIN_VALUE);
         if (LOG.isDebugEnabled()) {

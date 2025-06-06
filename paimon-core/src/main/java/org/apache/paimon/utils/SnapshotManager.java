@@ -578,7 +578,14 @@ public class SnapshotManager implements Serializable {
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
-        Long latestId = latestSnapshotId();
+        return latestSnapshotOfUser(user, latestSnapshotId());
+    }
+
+    public Optional<Snapshot> latestSnapshotOfUserFromFilesystem(String user) {
+        return latestSnapshotOfUser(user, latestSnapshotIdFromFileSystem());
+    }
+
+    private Optional<Snapshot> latestSnapshotOfUser(String user, Long latestId) {
         if (latestId == null) {
             return Optional.empty();
         }
