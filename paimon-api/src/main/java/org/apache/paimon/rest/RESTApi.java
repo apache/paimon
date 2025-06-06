@@ -52,6 +52,7 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -852,11 +853,17 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to access the function
      */
     public GetFunctionResponse getFunction(Identifier identifier) {
-        FunctionNameValidator.check(identifier.getObjectName());
-        return client.get(
-                resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
-                GetFunctionResponse.class,
-                restAuthFunction);
+        if (FunctionNameValidator.isValidName(identifier.getObjectName())) {
+            return client.get(
+                    resourcePaths.function(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
+                    GetFunctionResponse.class,
+                    restAuthFunction);
+        }
+        throw new NoSuchResourceException(
+                ErrorResponse.RESOURCE_TYPE_FUNCTION,
+                identifier.getObjectName(),
+                "Invalid function name: " + identifier.getObjectName());
     }
 
     /**

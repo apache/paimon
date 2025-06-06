@@ -669,7 +669,7 @@ public class RESTCatalog implements Catalog {
         try {
             GetFunctionResponse response = api.getFunction(identifier);
             return response.toFunction(identifier);
-        } catch (NoSuchResourceException | IllegalArgumentException e) {
+        } catch (NoSuchResourceException e) {
             throw new FunctionNotExistException(identifier, e);
         }
     }
