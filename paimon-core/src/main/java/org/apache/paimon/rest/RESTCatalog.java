@@ -71,7 +71,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
@@ -90,9 +89,6 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
-
-    private static final Pattern FUNCTION_NAME_PATTERN =
-            Pattern.compile("^(?=.*[A-Za-z])[A-Za-z0-9._-]+$");
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -671,7 +667,6 @@ public class RESTCatalog implements Catalog {
     public org.apache.paimon.function.Function getFunction(Identifier identifier)
             throws FunctionNotExistException {
         try {
-            checkFunctionName(identifier.getObjectName());
             GetFunctionResponse response = api.getFunction(identifier);
             return response.toFunction(identifier);
         } catch (NoSuchResourceException | IllegalArgumentException e) {
@@ -686,7 +681,6 @@ public class RESTCatalog implements Catalog {
             boolean ignoreIfExists)
             throws FunctionAlreadyExistException, DatabaseNotExistException {
         try {
-            checkFunctionName(identifier.getObjectName());
             api.createFunction(identifier, function);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
@@ -702,7 +696,6 @@ public class RESTCatalog implements Catalog {
     public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         try {
-            checkFunctionName(identifier.getObjectName());
             api.dropFunction(identifier);
         } catch (NoSuchResourceException e) {
             if (ignoreIfNotExists) {
@@ -718,7 +711,6 @@ public class RESTCatalog implements Catalog {
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
         try {
-            checkFunctionName(identifier.getObjectName());
             api.alterFunction(identifier, changes);
         } catch (AlreadyExistsException e) {
             throw new DefinitionAlreadyExistException(identifier, e.resourceName());
@@ -894,15 +886,6 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     RESTApi api() {
         return api;
-    }
-
-    protected static void checkFunctionName(String name) throws IllegalArgumentException {
-        boolean isValid =
-                org.apache.paimon.utils.StringUtils.isNotEmpty(name)
-                        && FUNCTION_NAME_PATTERN.matcher(name).matches();
-        if (!isValid) {
-            throw new IllegalArgumentException("Invalid function name: " + name);
-        }
     }
 
     protected GetTableTokenResponse loadTableToken(Identifier identifier)

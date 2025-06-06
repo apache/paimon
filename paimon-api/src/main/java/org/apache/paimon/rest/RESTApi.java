@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.function.FunctionNameValidator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -851,6 +852,7 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to access the function
      */
     public GetFunctionResponse getFunction(Identifier identifier) {
+        FunctionNameValidator.checkValidName(identifier.getObjectName());
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetFunctionResponse.class,
@@ -868,6 +870,7 @@ public class RESTApi {
      */
     public void createFunction(
             Identifier identifier, org.apache.paimon.function.Function function) {
+        FunctionNameValidator.checkValidName(identifier.getObjectName());
         client.post(
                 resourcePaths.functions(identifier.getDatabaseName()),
                 new CreateFunctionRequest(function),
@@ -883,6 +886,7 @@ public class RESTApi {
      *     this function
      */
     public void dropFunction(Identifier identifier) {
+        FunctionNameValidator.checkValidName(identifier.getObjectName());
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
@@ -897,6 +901,7 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to modify the function
      */
     public void alterFunction(Identifier identifier, List<FunctionChange> changes) {
+        FunctionNameValidator.checkValidName(identifier.getObjectName());
         client.post(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 new AlterFunctionRequest(changes),

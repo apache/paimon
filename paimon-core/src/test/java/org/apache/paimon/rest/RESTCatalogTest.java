@@ -31,6 +31,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionNameValidator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1574,9 +1575,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testFunction() throws Exception {
         Identifier identifierWithSlash = new Identifier("rest_catalog_db", "function/");
+        catalog.createDatabase(identifierWithSlash.getDatabaseName(), false);
         assertThrows(
                 IllegalArgumentException.class,
-                () -> catalog.createFunction(identifierWithSlash, null, false));
+                () ->
+                        catalog.createFunction(
+                                identifierWithSlash,
+                                MockRESTMessage.function(identifierWithSlash),
+                                false));
         assertThrows(
                 Catalog.FunctionNotExistException.class,
                 () -> catalog.getFunction(identifierWithSlash));
@@ -1587,7 +1593,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
         assertThrows(
                 IllegalArgumentException.class,
-                () -> catalog.createFunction(identifierWithoutAlphabet, null, false));
+                () ->
+                        catalog.createFunction(
+                                identifierWithoutAlphabet,
+                                MockRESTMessage.function(identifierWithoutAlphabet),
+                                false));
         assertThrows(
                 Catalog.FunctionNotExistException.class,
                 () -> catalog.getFunction(identifierWithoutAlphabet));
@@ -1596,7 +1606,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> catalog.dropFunction(identifierWithoutAlphabet, true));
 
         Identifier identifier = new Identifier("rest_catalog_db", "function.na_me-01");
-        catalog.createDatabase(identifier.getDatabaseName(), false);
         Function function = MockRESTMessage.function(identifier);
 
         catalog.createFunction(identifier, function, true);
@@ -1698,19 +1707,28 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     public void testValidateFunctionName() throws Exception {
-        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a"));
-        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a1_"));
-        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a-b_c"));
-        assertDoesNotThrow(() -> restCatalog.checkFunctionName("a-b_c.1"));
+        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a"));
+        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a1_"));
+        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a-b_c"));
+        assertDoesNotThrow(() -> FunctionNameValidator.checkValidName("a-b_c.1"));
 
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a\\/b"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a$?b"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a@b"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("a*b"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("123"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName("_-"));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName(""));
-        assertThrows(IllegalArgumentException.class, () -> restCatalog.checkFunctionName(null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> FunctionNameValidator.checkValidName("a\\/b"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a$?b"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a@b"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("a*b"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("123"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName("_-"));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName(""));
+        assertThrows(
+                IllegalArgumentException.class, () -> FunctionNameValidator.checkValidName(null));
     }
 
     @Test
