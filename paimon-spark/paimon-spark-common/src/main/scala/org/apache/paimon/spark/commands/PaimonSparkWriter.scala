@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.WRITE_ONLY
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
@@ -33,42 +32,30 @@ import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
+import org.apache.paimon.spark.write.WriteHelper
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
-import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, SerializationUtils}
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
-import org.slf4j.LoggerFactory
 
 import java.io.IOException
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
-case class PaimonSparkWriter(table: FileStoreTable) {
+case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
 
   private lazy val tableSchema = table.schema
 
   private lazy val rowType = table.rowType()
 
   private lazy val bucketMode = table.bucketMode
-
-  private lazy val coreOptions = table.coreOptions()
-
-  private lazy val disableReportStats = {
-    val config = coreOptions.toConfiguration
-    config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
-    table.partitionKeys.isEmpty ||
-    !coreOptions.partitionedTableInMetastore ||
-    table.catalogEnvironment.partitionHandler() == null
-  }
-
-  private lazy val log = LoggerFactory.getLogger(classOf[PaimonSparkWriter])
 
   @transient private lazy val serializer = new CommitMessageSerializer
 
@@ -336,40 +323,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .map(deserializeCommitMessage(serializer, _))
   }
 
-  private def reportToHms(messages: Seq[CommitMessage]): Unit = {
-    if (disableReportStats) {
-      return
-    }
-
-    val partitionComputer = new InternalRowPartitionComputer(
-      coreOptions.partitionDefaultName,
-      table.schema.logicalPartitionType,
-      table.partitionKeys.toArray(new Array[String](0)),
-      coreOptions.legacyPartitionName()
-    )
-    val hmsReporter = new PartitionStatisticsReporter(
-      table,
-      table.catalogEnvironment.partitionHandler()
-    )
-
-    val partitions = messages.map(_.partition()).distinct
-    val currentTime = System.currentTimeMillis()
-    try {
-      partitions.foreach {
-        partition =>
-          val partitionPath = PartitionPathUtils.generatePartitionPath(
-            partitionComputer.generatePartValues(partition))
-          hmsReporter.report(partitionPath, currentTime)
-      }
-    } catch {
-      case e: Throwable =>
-        log.warn("Failed to report to hms", e)
-
-    } finally {
-      hmsReporter.close()
-    }
-  }
-
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     val tableCommit = writeBuilder.newCommit()
     try {
@@ -379,8 +332,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     } finally {
       tableCommit.close()
     }
-
-    reportToHms(commitMessages)
+    postCommit(commitMessages)
   }
 
   /** Boostrap and repartition for cross partition mode. */

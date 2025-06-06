@@ -610,7 +610,7 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon Insert: dynamic insert into table with partition columns contain primary key") {
-    withSQLConf("spark.sql.shuffle.partitions" -> "10") {
+    withSparkSQLConf("spark.sql.shuffle.partitions" -> "10") {
       withTable("pk_pt") {
         sql("""
               |create table pk_pt (c1 int) partitioned by(p1 string, p2 string)
