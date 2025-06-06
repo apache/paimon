@@ -345,6 +345,12 @@ public class BinaryStringUtils {
             default:
                 throw new RuntimeException("Unsupported precision: " + precision);
         }
+
+        if (nanosOfMillis < 0) {
+            nanosOfMillis = 1000000 + nanosOfMillis;
+            millis -= 1;
+        }
+
         return Timestamp.fromEpochMillis(millis, nanosOfMillis);
     }
 
