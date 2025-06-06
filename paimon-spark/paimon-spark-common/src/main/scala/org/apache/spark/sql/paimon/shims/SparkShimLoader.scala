@@ -27,7 +27,7 @@ object SparkShimLoader {
 
   private lazy val sparkShim: SparkShim = loadSparkShim()
 
-  def getSparkShim: SparkShim = {
+  def shim: SparkShim = {
     sparkShim
   }
 

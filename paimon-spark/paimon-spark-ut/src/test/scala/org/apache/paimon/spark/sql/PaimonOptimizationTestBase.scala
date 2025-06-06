@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan,
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.paimon.Utils
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.immutable

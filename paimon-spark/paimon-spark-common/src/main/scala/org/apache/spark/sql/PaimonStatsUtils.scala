@@ -21,6 +21,7 @@ package org.apache.spark.sql
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types._
 
 /**
@@ -34,7 +35,7 @@ object PaimonStatsUtils {
       sparkSession: SparkSession,
       relation: LogicalPlan,
       columns: Seq[Attribute]): (Long, Map[Attribute, ColumnStat]) = {
-    CommandUtils.computeColumnStats(sparkSession, relation, columns)
+    SparkShimLoader.shim.classicApi.computeColumnStats(sparkSession, relation, columns)
   }
 
   /** [[IntegralType]] is private in spark, therefore we need add it here. */

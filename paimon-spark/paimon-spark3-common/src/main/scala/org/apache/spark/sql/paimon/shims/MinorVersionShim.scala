@@ -16,28 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.paimon
+package org.apache.spark.sql.paimon.shims
 
-import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.util.{Utils => SparkUtils}
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-import java.io.File
+object MinorVersionShim {
 
-/**
- * A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package.
- */
-object Utils {
-
-  def createTempDir: File = SparkUtils.createTempDir(System.getProperty("java.io.tmpdir"), "spark")
-
-  def waitUntilEventEmpty(spark: SparkSession): Unit = {
-    spark.sparkContext.listenerBus.waitUntilEmpty()
-  }
-
-  def createDataFrame(sparkSession: SparkSession, plan: LogicalPlan): DataFrame = {
-    SparkShimLoader.shim.classicApi.createDataset(sparkSession, plan)
-  }
-
+  def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output, isStreaming)
 }

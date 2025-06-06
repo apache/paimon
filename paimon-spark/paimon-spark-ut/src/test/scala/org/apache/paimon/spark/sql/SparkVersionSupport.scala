@@ -21,13 +21,26 @@ package org.apache.paimon.spark.sql
 import org.apache.spark.SPARK_VERSION
 
 trait SparkVersionSupport {
-  lazy val sparkVersion: String = SPARK_VERSION
 
-  lazy val gteqSpark3_3: Boolean = sparkVersion >= "3.3"
+  lazy val gteqSpark3_3: Boolean = SparkVersionSupport.gteqSpark3_3
 
-  lazy val gteqSpark3_4: Boolean = sparkVersion >= "3.4"
+  lazy val gteqSpark3_4: Boolean = SparkVersionSupport.gteqSpark3_4
 
-  lazy val gteqSpark3_5: Boolean = sparkVersion >= "3.5"
+  lazy val gteqSpark3_5: Boolean = SparkVersionSupport.gteqSpark3_5
 
-  lazy val gteqSpark4_0: Boolean = sparkVersion >= "4.0"
+  lazy val gteqSpark4_0: Boolean = SparkVersionSupport.gteqSpark4_0
+}
+
+object SparkVersionSupport {
+
+  val sparkVersion: String = SPARK_VERSION
+
+  val gteqSpark3_3: Boolean = sparkVersion >= "3.3"
+
+  val gteqSpark3_4: Boolean = sparkVersion >= "3.4"
+
+  val gteqSpark3_5: Boolean = sparkVersion >= "3.5"
+
+  val gteqSpark4_0: Boolean = sparkVersion >= "4.0"
+
 }

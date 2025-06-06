@@ -22,6 +22,7 @@ import org.apache.paimon.spark.SparkTable;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
@@ -30,8 +31,8 @@ import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.execution.CacheManager;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 
 import java.util.function.Function;
 
@@ -44,7 +45,7 @@ abstract class BaseProcedure implements Procedure {
     private final TableCatalog tableCatalog;
 
     protected BaseProcedure(TableCatalog tableCatalog) {
-        this.spark = SparkSession.active();
+        this.spark = PaimonSparkSession$.MODULE$.active();
         this.tableCatalog = tableCatalog;
     }
 
@@ -114,10 +115,9 @@ abstract class BaseProcedure implements Procedure {
     }
 
     protected void refreshSparkCache(Identifier ident, Table table) {
-        CacheManager cacheManager = spark.sharedState().cacheManager();
         DataSourceV2Relation relation =
                 DataSourceV2Relation.create(table, Option.apply(tableCatalog), Option.apply(ident));
-        cacheManager.recacheByPlan(spark, relation);
+        SparkShimLoader.shim().classicApi().recacheByPlan(spark, relation);
     }
 
     protected InternalRow newInternalRow(Object... values) {
