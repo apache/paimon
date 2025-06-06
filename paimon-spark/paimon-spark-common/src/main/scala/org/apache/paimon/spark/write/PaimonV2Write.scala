@@ -32,7 +32,7 @@ import org.apache.spark.sql.types.StructType
 
 import java.io.{IOException, UncheckedIOException}
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.util.{Failure, Success, Try}
 
 class PaimonV2Write(
