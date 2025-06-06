@@ -23,19 +23,19 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
 
-import org.apache.spark.sql.{SparkSession, Strategy}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.ResolvedNamespace
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.{SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
 import scala.collection.JavaConverters._
 
 case class PaimonStrategy(spark: SparkSession)
-  extends Strategy
+  extends SparkStrategy
   with PredicateHelper
   with PaimonLookupCatalog {
 
