@@ -32,7 +32,7 @@ import org.apache.spark.sql.types.StructType
 
 import java.io.{IOException, UncheckedIOException}
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 import scala.util.{Failure, Success, Try}
 
 class PaimonV2Write(
@@ -52,12 +52,6 @@ class PaimonV2Write(
     storeTable.copy(
       Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString).asJava)
 
-  private val batchWriteBuilder = {
-    val builder = table.newBatchWriteBuilder()
-    overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
-    builder
-  }
-
   private val writeRequirement = PaimonWriteRequirement(table)
 
   override def requiredDistribution(): Distribution = {
@@ -72,7 +66,7 @@ class PaimonV2Write(
     ordering
   }
 
-  override def toBatch: BatchWrite = new PaimonBatchWrite
+  override def toBatch: BatchWrite = PaimonBatchWrite(table, writeSchema, overwritePartitions)
 
   override def toString: String = {
     val overwriteDynamicStr = if (overwriteDynamic) {
@@ -87,35 +81,51 @@ class PaimonV2Write(
     }
     s"PaimonWrite(table=${table.fullName()}$overwriteDynamicStr$overwritePartitionsStr)"
   }
+}
 
-  private class PaimonBatchWrite extends BatchWrite {
-    override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-      WriterFactory(writeSchema, batchWriteBuilder)
+private case class PaimonBatchWrite(
+    table: FileStoreTable,
+    writeSchema: StructType,
+    overwritePartitions: Option[Map[String, String]])
+  extends BatchWrite
+  with WriteHelper {
 
-    override def useCommitCoordinator(): Boolean = false
+  private val batchWriteBuilder = {
+    val builder = table.newBatchWriteBuilder()
+    overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
+    builder
+  }
 
-    override def commit(messages: Array[WriterCommitMessage]): Unit = {
-      logInfo(s"Committing to table ${table.name()}")
-      val batchTableCommit = batchWriteBuilder.newCommit()
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
+    WriterFactory(writeSchema, batchWriteBuilder)
 
-      val commitMessages = messages.collect {
+  override def useCommitCoordinator(): Boolean = false
+
+  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+    logInfo(s"Committing to table ${table.name()}")
+    val batchTableCommit = batchWriteBuilder.newCommit()
+
+    val commitMessages = messages
+      .collect {
         case taskCommit: TaskCommit => taskCommit.commitMessages()
         case other =>
           throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
-      }.flatten
-
-      try {
-        val start = System.currentTimeMillis()
-        batchTableCommit.commit(commitMessages.toList.asJava)
-        logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
-      } finally {
-        batchTableCommit.close()
       }
-    }
+      .flatten
+      .toSeq
 
-    override def abort(messages: Array[WriterCommitMessage]): Unit = {
-      // TODO clean uncommitted files
+    try {
+      val start = System.currentTimeMillis()
+      batchTableCommit.commit(commitMessages.asJava)
+      logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
+    } finally {
+      batchTableCommit.close()
     }
+    postCommit(commitMessages)
+  }
+
+  override def abort(messages: Array[WriterCommitMessage]): Unit = {
+    // TODO clean uncommitted files
   }
 }
 
