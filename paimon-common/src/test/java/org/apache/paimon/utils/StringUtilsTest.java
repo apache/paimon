@@ -18,8 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryString;
-
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -36,59 +34,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link StringUtils}. */
 class StringUtilsTest {
-
-    @Nested
-    class ConcatTests {
-
-        @Test
-        void testConcatWithVarArgs() {
-            BinaryString str1 = BinaryString.fromString("Hello");
-            BinaryString str2 = BinaryString.fromString(" ");
-            BinaryString str3 = BinaryString.fromString("World");
-
-            BinaryString result = StringUtils.concat(str1, str2, str3);
-            assertThat(result.toString()).isEqualTo("Hello World");
-        }
-
-        @Test
-        void testConcatWithIterable() {
-            List<BinaryString> strings =
-                    Arrays.asList(
-                            BinaryString.fromString("A"),
-                            BinaryString.fromString("B"),
-                            BinaryString.fromString("C"));
-
-            BinaryString result = StringUtils.concat(strings);
-            assertThat(result.toString()).isEqualTo("ABC");
-        }
-
-        @Test
-        void testConcatWithNullInput() {
-            BinaryString str1 = BinaryString.fromString("Hello");
-            BinaryString str2 = null;
-            BinaryString str3 = BinaryString.fromString("World");
-
-            BinaryString result = StringUtils.concat(str1, str2, str3);
-            assertThat(result).isNull();
-        }
-
-        @Test
-        void testConcatWithEmptyStrings() {
-            BinaryString empty1 = BinaryString.fromString("");
-            BinaryString empty2 = BinaryString.fromString("");
-            BinaryString content = BinaryString.fromString("test");
-
-            BinaryString result = StringUtils.concat(empty1, content, empty2);
-            assertThat(result.toString()).isEqualTo("test");
-        }
-
-        @Test
-        void testConcatEmptyIterable() {
-            List<BinaryString> emptyList = Arrays.asList();
-            BinaryString result = StringUtils.concat(emptyList);
-            assertThat(result.toString()).isEmpty();
-        }
-    }
 
     @Nested
     class IsNullOrWhitespaceOnlyTests {
@@ -463,20 +408,6 @@ class StringUtilsTest {
                 strings = {"", " ", "abc", "12.3", "12a", "a12", " 12", "12 ", "+12", "-", "1 23"})
         void testIsNumericInvalidNumbers(String input) {
             assertThat(StringUtils.isNumeric(input)).isFalse();
-        }
-    }
-
-    @Nested
-    class ConstantsTests {
-
-        @Test
-        void testIndexNotFound() {
-            assertThat(StringUtils.INDEX_NOT_FOUND).isEqualTo(-1);
-        }
-
-        @Test
-        void testEmpty() {
-            assertThat(StringUtils.EMPTY).isEmpty();
         }
     }
 

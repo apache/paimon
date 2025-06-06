@@ -346,6 +346,9 @@ public class BinaryStringUtils {
                 throw new RuntimeException("Unsupported precision: " + precision);
         }
 
+        // If nanoseconds is negative, remove a millisecond
+        // and calculate the nanosecond offset forwards instead
+        // as nanoseconds should always be a positive offset on top of the milliseconds.
         if (nanosOfMillis < 0) {
             nanosOfMillis = 1000000 + nanosOfMillis;
             millis -= 1;
