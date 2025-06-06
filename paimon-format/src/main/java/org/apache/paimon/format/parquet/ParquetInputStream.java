@@ -18,11 +18,19 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
+import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.io.DelegatingSeekableInputStream;
+import org.apache.parquet.io.ParquetFileRange;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /** A {@link SeekableInputStream} for paimon. */
 public class ParquetInputStream extends DelegatingSeekableInputStream {
@@ -46,5 +54,26 @@ public class ParquetInputStream extends DelegatingSeekableInputStream {
     @Override
     public void seek(long newPos) throws IOException {
         in.seek(newPos);
+    }
+
+    @Override
+    public void readVectored(List<ParquetFileRange> ranges, ByteBufferAllocator allocator)
+            throws IOException {
+        if (!(in instanceof VectoredReadable)) {
+            throw new UnsupportedOperationException("Vectored IO is not supported for " + this);
+        }
+        List<FileRange> adaptedRanges = new ArrayList<>(ranges.size());
+        for (ParquetFileRange parquetRange : ranges) {
+            adaptedRanges.add(
+                    FileRange.createFileRange(parquetRange.getOffset(), parquetRange.getLength()));
+        }
+        ((VectoredReadable) in).readVectored(adaptedRanges);
+        for (int i = 0; i < adaptedRanges.size(); i++) {
+            FileRange fileRange = adaptedRanges.get(i);
+            ParquetFileRange parquetRange = ranges.get(i);
+            CompletableFuture<ByteBuffer> byteBufferFuture =
+                    fileRange.getData().thenApply(bytes -> ByteBuffer.wrap(bytes));
+            parquetRange.setDataReadFuture(byteBufferFuture);
+        }
     }
 }
