@@ -34,7 +34,7 @@ import java.util.Map;
 /** {@link VersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 4;
 
     private final CommitMessageSerializer commitMessageSerializer;
 
@@ -62,6 +62,7 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             view.writeLong(watermark);
         }
         serializeOffsets(view, obj.logOffsets());
+        serializeProperties(view, obj.properties());
         view.writeInt(commitMessageSerializer.getVersion());
         commitMessageSerializer.serializeList(obj.fileCommittables(), view);
         return out.toByteArray();
@@ -73,6 +74,15 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         for (Map.Entry<Integer, Long> entry : offsets.entrySet()) {
             view.writeInt(entry.getKey());
             view.writeLong(entry.getValue());
+        }
+    }
+
+    private void serializeProperties(
+            DataOutputViewStreamWrapper view, Map<String, String> properties) throws IOException {
+        view.writeInt(properties.size());
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            view.writeUTF(entry.getKey());
+            view.writeUTF(entry.getValue());
         }
     }
 
@@ -91,6 +101,8 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         long identifier = view.readLong();
         Long watermark = view.readBoolean() ? null : view.readLong();
         Map<Integer, Long> offsets = deserializeOffsets(view);
+        Map<String, String> properties =
+                version == CURRENT_VERSION ? deserializeProperties(view) : new HashMap<>();
         int fileCommittableSerializerVersion = view.readInt();
         List<CommitMessage> fileCommittables;
         try {
@@ -116,7 +128,8 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             fileCommittables = legacyV2CommitMessageSerializer.deserializeList(view);
         }
 
-        return new ManifestCommittable(identifier, watermark, offsets, fileCommittables);
+        return new ManifestCommittable(
+                identifier, watermark, offsets, fileCommittables, properties);
     }
 
     private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {
@@ -126,5 +139,15 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             offsets.put(view.readInt(), view.readLong());
         }
         return offsets;
+    }
+
+    private Map<String, String> deserializeProperties(DataInputDeserializer view)
+            throws IOException {
+        int size = view.readInt();
+        Map<String, String> properties = new HashMap<>(size);
+        for (int i = 0; i < size; i++) {
+            properties.put(view.readUTF(), view.readUTF());
+        }
+        return properties;
     }
 }

@@ -62,7 +62,8 @@ public class Changelog extends Snapshot {
                 snapshot.deltaRecordCount(),
                 snapshot.changelogRecordCount(),
                 snapshot.watermark(),
-                snapshot.statistics());
+                snapshot.statistics(),
+                snapshot.properties);
     }
 
     @JsonCreator
@@ -87,7 +88,8 @@ public class Changelog extends Snapshot {
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
-            @JsonProperty(FIELD_STATISTICS) @Nullable String statistics) {
+            @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
+            @JsonProperty(FIELD_PROPERTIES) Map<String, String> properties) {
         super(
                 version,
                 id,
@@ -108,7 +110,8 @@ public class Changelog extends Snapshot {
                 deltaRecordCount,
                 changelogRecordCount,
                 watermark,
-                statistics);
+                statistics,
+                properties);
     }
 
     public static Changelog fromJson(String json) {
