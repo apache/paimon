@@ -55,7 +55,8 @@ public interface CompactStrategy {
             int numLevels,
             List<LevelSortedRun> runs,
             @Nullable RecordLevelExpire recordLevelExpire,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            boolean externalCompact) {
         int maxLevel = numLevels - 1;
         if (runs.isEmpty()) {
             // no sorted run, no need to compact
@@ -64,7 +65,10 @@ public interface CompactStrategy {
             List<DataFileMeta> filesToBeCompacted = new ArrayList<>();
 
             for (DataFileMeta file : runs.get(0).run().files()) {
-                if (recordLevelExpire != null && recordLevelExpire.isExpireFile(file)) {
+                if (externalCompact) {
+                    // add all files when it is an external compaction
+                    filesToBeCompacted.add(file);
+                } else if (recordLevelExpire != null && recordLevelExpire.isExpireFile(file)) {
                     // check record level expire for large files
                     filesToBeCompacted.add(file);
                 } else if (dvMaintainer != null
