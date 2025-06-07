@@ -29,7 +29,7 @@ import org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX
 import org.apache.paimon.utils.SerializableConsumer
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{functions, Dataset, SparkSession}
+import org.apache.spark.sql.{functions, Dataset, PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
 import java.util
@@ -199,7 +199,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
       olderThanMillis: Long,
       parallelismOpt: Integer,
       dryRun: Boolean): CleanOrphanFilesResult = {
-    val spark = SparkSession.active
+    val spark = PaimonSparkSession.active
     val parallelism = if (parallelismOpt == null) {
       Math.max(spark.sparkContext.defaultParallelism, conf.numShufflePartitions)
     } else {

@@ -23,14 +23,14 @@ import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonSparkSession, SparkSession}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 trait ScanHelper extends Logging {
 
-  private val spark = SparkSession.active
+  private val spark = PaimonSparkSession.active
 
   val coreOptions: CoreOptions
 

@@ -221,7 +221,7 @@ public class SparkTypeUtils {
 
         @Override
         public DataType visit(VariantType variantType) {
-            return SparkShimLoader.getSparkShim().SparkVariantType();
+            return SparkShimLoader.shim().SparkVariantType();
         }
 
         @Override
@@ -365,12 +365,12 @@ public class SparkTypeUtils {
                 return new FloatType();
             } else if (atomic instanceof org.apache.spark.sql.types.DoubleType) {
                 return new DoubleType();
-            } else if (atomic instanceof org.apache.spark.sql.types.StringType) {
-                return new VarCharType(VarCharType.MAX_LENGTH);
             } else if (atomic instanceof org.apache.spark.sql.types.VarcharType) {
                 return new VarCharType(((org.apache.spark.sql.types.VarcharType) atomic).length());
             } else if (atomic instanceof org.apache.spark.sql.types.CharType) {
                 return new CharType(((org.apache.spark.sql.types.CharType) atomic).length());
+            } else if (atomic instanceof org.apache.spark.sql.types.StringType) {
+                return new VarCharType(VarCharType.MAX_LENGTH);
             } else if (atomic instanceof org.apache.spark.sql.types.DateType) {
                 return new DateType();
             } else if (atomic instanceof org.apache.spark.sql.types.TimestampType) {
@@ -388,7 +388,7 @@ public class SparkTypeUtils {
             } else if (atomic instanceof org.apache.spark.sql.types.TimestampNTZType) {
                 // Move TimestampNTZType to the end for compatibility with spark3.3 and below
                 return new TimestampType();
-            } else if (SparkShimLoader.getSparkShim().isSparkVariantType(atomic)) {
+            } else if (SparkShimLoader.shim().isSparkVariantType(atomic)) {
                 return new VariantType();
             }
 

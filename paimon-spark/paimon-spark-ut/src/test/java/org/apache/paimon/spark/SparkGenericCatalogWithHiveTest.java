@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -48,7 +49,7 @@ public class SparkGenericCatalogWithHiveTest {
     }
 
     @Test
-    public void testBuildWithHive(@TempDir java.nio.file.Path tempDir) {
+    public void testBuildWithHive(@TempDir java.nio.file.Path tempDir) throws IOException {
         // firstly, we use hive metastore to create table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
@@ -105,7 +106,7 @@ public class SparkGenericCatalogWithHiveTest {
     }
 
     @Test
-    public void testHiveCatalogOptions(@TempDir java.nio.file.Path tempDir) {
+    public void testHiveCatalogOptions(@TempDir java.nio.file.Path tempDir) throws IOException {
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()

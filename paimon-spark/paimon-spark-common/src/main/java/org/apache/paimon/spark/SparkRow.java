@@ -147,7 +147,7 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public Variant getVariant(int i) {
-        return SparkShimLoader.getSparkShim().toPaimonVariant(row.getAs(i));
+        return SparkShimLoader.shim().toPaimonVariant(row.getAs(i));
     }
 
     @Override
@@ -309,7 +309,7 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public Variant getVariant(int i) {
-            return SparkShimLoader.getSparkShim().toPaimonVariant(getAs(i));
+            return SparkShimLoader.shim().toPaimonVariant(getAs(i));
         }
 
         @Override

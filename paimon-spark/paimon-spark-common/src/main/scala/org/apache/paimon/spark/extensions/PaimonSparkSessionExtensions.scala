@@ -33,16 +33,13 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
   override def apply(extensions: SparkSessionExtensions): Unit = {
     // parser extensions
-    extensions.injectParser {
-      case (_, parser) => SparkShimLoader.getSparkShim.createSparkParser(parser)
-    }
+    extensions.injectParser { case (_, parser) => SparkShimLoader.shim.createSparkParser(parser) }
 
     // analyzer extensions
     extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
     extensions.injectResolutionRule(spark => PaimonViewResolver(spark))
-    extensions.injectResolutionRule(
-      spark => SparkShimLoader.getSparkShim.createCustomResolution(spark))
+    extensions.injectResolutionRule(spark => SparkShimLoader.shim.createCustomResolution(spark))
     extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
 
     extensions.injectPostHocResolutionRule(spark => ReplacePaimonFunctions(spark))

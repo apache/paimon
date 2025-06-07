@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,8 +57,9 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreateFormatTable() {
-        try (SparkSession spark = createSessionBuilder().getOrCreate()) {
+    public void testCreateFormatTable() throws IOException {
+        SparkSession spark = createSessionBuilder().getOrCreate();
+        {
             spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
             spark.sql("USE spark_catalog.my_db1");
 
@@ -110,7 +112,7 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testSpecifyHiveConfDirInGenericCatalog() {
+    public void testSpecifyHiveConfDirInGenericCatalog() throws IOException {
         try (SparkSession spark =
                 createSessionBuilder()
                         .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
@@ -126,7 +128,7 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreateExternalTable() {
+    public void testCreateExternalTable() throws IOException {
         try (SparkSession spark = createSessionBuilder().getOrCreate()) {
             String warehousePath = spark.sparkContext().conf().get("spark.sql.warehouse.dir");
             spark.sql("CREATE DATABASE IF NOT EXISTS test_db");

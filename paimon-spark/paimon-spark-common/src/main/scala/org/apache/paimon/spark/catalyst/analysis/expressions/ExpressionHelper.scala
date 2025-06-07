@@ -108,11 +108,11 @@ trait ExpressionHelperBase extends PredicateHelper {
   }
 
   def toColumn(expr: Expression): Column = {
-    SparkShimLoader.getSparkShim.column(expr)
+    SparkShimLoader.shim.classicApi.column(expr)
   }
 
   def toExpression(spark: SparkSession, col: Column): Expression = {
-    SparkShimLoader.getSparkShim.convertToExpression(spark, col)
+    SparkShimLoader.shim.classicApi.expression(spark, col)
   }
 
   protected def resolveExpression(

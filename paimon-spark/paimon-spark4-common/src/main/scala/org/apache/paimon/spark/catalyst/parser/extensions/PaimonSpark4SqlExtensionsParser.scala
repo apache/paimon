@@ -18,11 +18,12 @@
 
 package org.apache.paimon.spark.catalyst.parser.extensions
 
-import org.apache.spark.sql.catalyst.parser.{CompoundBody, ParserInterface}
+import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.AbstractPaimonSparkSqlExtensionsParser
+import org.apache.spark.sql.types.StructType
 
 class PaimonSpark4SqlExtensionsParser(override val delegate: ParserInterface)
   extends AbstractPaimonSparkSqlExtensionsParser(delegate) {
 
-  def parseScript(sqlScriptText: String): CompoundBody = delegate.parseScript(sqlScriptText)
+  override def parseRoutineParam(sqlText: String): StructType = delegate.parseRoutineParam(sqlText)
 }

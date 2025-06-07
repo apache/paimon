@@ -50,6 +50,10 @@ under the License.
             <version>${spark.version}</version>
             <exclusions>
                 <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>log4j</groupId>
                     <artifactId>log4j</artifactId>
                 </exclusion>

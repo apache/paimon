@@ -152,7 +152,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public Variant getVariant(int pos) {
-        return SparkShimLoader.getSparkShim().toPaimonVariant(internalRow, pos);
+        return SparkShimLoader.shim().toPaimonVariant(internalRow, pos);
     }
 
     @Override
@@ -307,7 +307,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Variant getVariant(int pos) {
-            return SparkShimLoader.getSparkShim().toPaimonVariant(arrayData, pos);
+            return SparkShimLoader.shim().toPaimonVariant(arrayData, pos);
         }
 
         @Override

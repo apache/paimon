@@ -30,7 +30,7 @@ abstract class SparkInternalRow extends InternalRow {
 object SparkInternalRow {
 
   def create(rowType: RowType): SparkInternalRow = {
-    SparkShimLoader.getSparkShim.createSparkInternalRow(rowType)
+    SparkShimLoader.shim.createSparkInternalRow(rowType)
   }
 
 }

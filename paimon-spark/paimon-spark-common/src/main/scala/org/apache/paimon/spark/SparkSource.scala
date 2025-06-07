@@ -29,7 +29,7 @@ import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory
 import org.apache.paimon.table.FormatTable.Format
 import org.apache.paimon.table.system.AuditLogTable
 
-import org.apache.spark.sql.{DataFrame, SaveMode => SparkSaveMode, SparkSession, SQLContext}
+import org.apache.spark.sql.{DataFrame, PaimonSparkSession, SaveMode => SparkSaveMode, SparkSession, SQLContext}
 import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.streaming.Sink
@@ -90,7 +90,7 @@ class SparkSource
           options,
           extractCatalogName().getOrElse(NAME),
           Identifier.create(CatalogUtils.database(path), CatalogUtils.table(path)))),
-      SparkSession.active.sessionState.newHadoopConf()
+      PaimonSparkSession.active.sessionState.newHadoopConf()
     )
     val table = FileStoreTableFactory.create(catalogContext)
     if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
