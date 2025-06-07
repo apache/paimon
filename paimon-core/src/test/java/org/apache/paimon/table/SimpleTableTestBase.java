@@ -1740,7 +1740,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
     }
 
-    private void assertRollbackTo(
+    protected void assertRollbackTo(
             FileStoreTable table,
             List<Long> expectedSnapshots,
             long expectedEarliest,
