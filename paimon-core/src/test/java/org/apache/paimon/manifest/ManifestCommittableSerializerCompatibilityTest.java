@@ -104,7 +104,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] oldBytes =
@@ -176,7 +176,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] oldBytes =
@@ -248,7 +248,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
         byte[] oldBytes =
                 IOUtils.readFully(
@@ -319,7 +319,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] v2Bytes =
@@ -391,7 +391,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] oldBytes =
@@ -463,7 +463,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(3, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] v2Bytes =
@@ -532,7 +532,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(2, bytes);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
 
         byte[] v2Bytes =
