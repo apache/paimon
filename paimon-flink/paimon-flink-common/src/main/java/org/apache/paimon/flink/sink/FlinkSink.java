@@ -67,6 +67,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERA
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_CPU;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
@@ -242,6 +244,9 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
+        configureSlotSharingGroup(
+                written, options.get(SINK_WRITER_CPU), options.get(SINK_WRITER_MEMORY));
+
         if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
             SingleOutputStreamOperator<Committable> newWritten =
                     written.transform(
@@ -318,13 +323,13 @@ public abstract class FlinkSink<T> implements Serializable {
         if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
             committed = committed.startNewChain();
         }
-        configureGlobalCommitter(
+        configureSlotSharingGroup(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
-    public static void configureGlobalCommitter(
-            SingleOutputStreamOperator<?> committed,
+    public static void configureSlotSharingGroup(
+            SingleOutputStreamOperator<?> operator,
             double cpuCores,
             @Nullable MemorySize heapMemory) {
         if (heapMemory == null) {
@@ -332,13 +337,13 @@ public abstract class FlinkSink<T> implements Serializable {
         }
 
         SlotSharingGroup slotSharingGroup =
-                SlotSharingGroup.newBuilder(committed.getName())
+                SlotSharingGroup.newBuilder(operator.getName())
                         .setCpuCores(cpuCores)
                         .setTaskHeapMemory(
                                 new org.apache.flink.configuration.MemorySize(
                                         heapMemory.getBytes()))
                         .build();
-        committed.slotSharingGroup(slotSharingGroup);
+        operator.slotSharingGroup(slotSharingGroup);
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
