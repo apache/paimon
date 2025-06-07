@@ -46,6 +46,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RepairTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -1123,6 +1124,20 @@ public class RESTApi {
         AlterViewRequest request = new AlterViewRequest(viewChanges);
         client.post(
                 resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
+     * Repair table with options.
+     *
+     * @param identifier database name and view name.
+     * @param repairOptions repair options
+     */
+    public void repairTable(Identifier identifier, Map<String, String> repairOptions) {
+        RepairTableRequest request = new RepairTableRequest(identifier, repairOptions);
+        client.post(
+                resourcePaths.repairTable(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
     }
