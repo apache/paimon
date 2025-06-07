@@ -71,6 +71,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -99,6 +100,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_FORMAT;
@@ -2245,15 +2247,10 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         table.rollbackTo("test1");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(19);
-        // rollback snapshot case testRollbackToSnapshotCase0 plus 4:
-        // table-path/tag/tag-test1
-        // table-path/changelog
-        // table-path/changelog/LATEST
-        // table-path/changelog/EARLIEST
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test1"));
+        ChangelogManager changelogManager = table.changelogManager();
+        assertThat(changelogManager.earliestLongLivedChangelogId()).isNull();
+        assertThat(changelogManager.latestLongLivedChangelogId()).isNull();
     }
 
     @ParameterizedTest

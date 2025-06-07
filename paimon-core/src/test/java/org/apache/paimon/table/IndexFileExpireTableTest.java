@@ -149,23 +149,15 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         table.rollbackTo(5);
         checkIndexFiles(5);
-        assertThat(indexFileSize()).isEqualTo(indexFileSize - 2);
-        assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 2);
 
         table.rollbackTo(3);
         checkIndexFiles(3);
-        assertThat(indexFileSize()).isEqualTo(indexFileSize - 3);
-        assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 3);
 
         table.rollbackTo(2);
         checkIndexFiles(2);
-        assertThat(indexFileSize()).isEqualTo(indexFileSize - 3);
-        assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 3);
 
         table.rollbackTo(1);
         checkIndexFiles(1);
-        assertThat(indexFileSize()).isEqualTo(3);
-        assertThat(indexManifestSize()).isEqualTo(1);
     }
 
     @Test
@@ -181,13 +173,9 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         table.rollbackTo(5);
         checkIndexFiles(5);
-        assertThat(indexFileSize()).isEqualTo(indexFileSize - 2);
-        assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 2);
 
         table.rollbackTo("tag1");
         checkIndexFiles(1);
-        assertThat(indexFileSize()).isEqualTo(3);
-        assertThat(indexManifestSize()).isEqualTo(1);
     }
 
     protected void prepareExpireTable() throws Exception {

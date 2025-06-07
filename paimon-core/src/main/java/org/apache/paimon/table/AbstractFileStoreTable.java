@@ -68,8 +68,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -80,7 +79,6 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -504,11 +502,27 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
         } catch (UnsupportedOperationException e) {
-            checkArgument(
-                    snapshotManager.snapshotExists(snapshotId),
-                    "Rollback snapshot '%s' doesn't exist.",
-                    snapshotId);
-            rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
+            Snapshot snapshot;
+            try {
+                snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+            } catch (FileNotFoundException ex) {
+                throw new IllegalArgumentException(
+                        String.format("Rollback snapshot '%s' doesn't exist.", snapshotId), ex);
+            }
+            rollbackHelper().cleanLargerThan(snapshot);
+        }
+    }
+
+    @Override
+    public void rollbackTo(String tagName) {
+        SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(Instant.tag(tagName));
+        } catch (UnsupportedOperationException e) {
+            Snapshot taggedSnapshot = tagManager().getOrThrow(tagName).trimToSnapshot();
+            RollbackHelper rollbackHelper = rollbackHelper();
+            rollbackHelper.cleanLargerThan(taggedSnapshot);
+            rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
         }
     }
 
@@ -645,38 +659,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void rollbackTo(String tagName) {
-        SnapshotManager snapshotManager = snapshotManager();
-        try {
-            snapshotManager.rollback(Instant.tag(tagName));
-            return;
-        } catch (UnsupportedOperationException ignore) {
-
-        }
-        TagManager tagManager = tagManager();
-        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
-
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        rollbackHelper().updateLatestAndCleanLargerThan(taggedSnapshot);
-
-        try {
-            // it is possible that the earliest snapshot is later than the rollback tag because of
-            // snapshot expiration, in this case the `cleanLargerThan` method will delete all
-            // snapshots, so we should write the tag file to snapshot directory and modify the
-            // earliest hint
-            if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-                fileIO.writeFile(
-                        snapshotManager().snapshotPath(taggedSnapshot.id()),
-                        fileIO.readFileUtf8(tagManager.tagPath(tagName)),
-                        false);
-                snapshotManager.commitEarliestHint(taggedSnapshot.id());
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    @Override
     public TagManager tagManager() {
         return new TagManager(fileIO, path, currentBranch());
     }
@@ -713,14 +695,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private RollbackHelper rollbackHelper() {
-        return new RollbackHelper(
-                snapshotManager(),
-                changelogManager(),
-                tagManager(),
-                fileIO,
-                store().newSnapshotDeletion(),
-                store().newChangelogDeletion(),
-                store().newTagDeletion());
+        return new RollbackHelper(snapshotManager(), changelogManager(), tagManager(), fileIO);
     }
 
     protected RowKindGenerator rowKindGenerator() {

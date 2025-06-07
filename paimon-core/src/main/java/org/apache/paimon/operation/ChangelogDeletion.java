@@ -87,6 +87,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
         // the index and statics manifest list should handle by snapshot deletion.
     }
 
+    @Override
     public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
         Set<String> skippingSet = new HashSet<>();
 
