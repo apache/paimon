@@ -58,7 +58,14 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
         List<FileStoreSourceSplit> sourceSplits = innerAssigner.getNext(subtask, hostname);
         while (!sourceSplits.isEmpty()) {
             List<FileStoreSourceSplit> filtered =
-                    sourceSplits.stream().filter(this::filter).collect(Collectors.toList());
+                    sourceSplits.stream()
+                            .filter(
+                                    sourceSplit ->
+                                            filter(
+                                                    sourceSplit,
+                                                    partitionRowProjection,
+                                                    dynamicFilteringData))
+                            .collect(Collectors.toList());
             if (!filtered.isEmpty()) {
                 return filtered;
             }
@@ -70,7 +77,7 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
 
     @Override
     public void addSplit(int suggestedTask, FileStoreSourceSplit splits) {
-        if (filter(splits)) {
+        if (filter(splits, partitionRowProjection, dynamicFilteringData)) {
             innerAssigner.addSplit(suggestedTask, splits);
         }
     }
@@ -83,7 +90,9 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
     @Override
     public Collection<FileStoreSourceSplit> remainingSplits() {
         return innerAssigner.remainingSplits().stream()
-                .filter(this::filter)
+                .filter(
+                        sourceSplit ->
+                                filter(sourceSplit, partitionRowProjection, dynamicFilteringData))
                 .collect(Collectors.toList());
     }
 
@@ -114,7 +123,10 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
         return innerAssigner.numberOfRemainingSplits();
     }
 
-    private boolean filter(FileStoreSourceSplit sourceSplit) {
+    public static boolean filter(
+            FileStoreSourceSplit sourceSplit,
+            Projection partitionRowProjection,
+            DynamicFilteringData dynamicFilteringData) {
         DataSplit dataSplit = (DataSplit) sourceSplit.split();
         BinaryRow partition = dataSplit.partition();
         FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));

@@ -48,7 +48,7 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
     @Test
     public void testDynamicPartitionFilteringAfterStarted() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                getSplitEnumeratorContext(1);
+                getSplitEnumeratorContext(getParallelism());
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -83,6 +83,15 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
         // request one split and check
         enumerator.handleSplitRequest(0, "test-host");
 
+        assertResultOftestDynamicPartitionFilteringAfterStarted(
+                assignments, initialSplits, enumerator);
+    }
+
+    public void assertResultOftestDynamicPartitionFilteringAfterStarted(
+            Map<Integer, TestingSplitEnumeratorContext.SplitAssignmentState<FileStoreSourceSplit>>
+                    assignments,
+            List<FileStoreSourceSplit> initialSplits,
+            StaticFileStoreSplitEnumerator enumerator) {
         assertThat(assignments.get(0).getAssignedSplits()).containsExactly(initialSplits.get(3));
         assertThat(enumerator.getSplitAssigner().remainingSplits()).isEmpty();
     }
@@ -90,7 +99,7 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
     @Test
     public void testDynamicPartitionFilteringWithProjection() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                getSplitEnumeratorContext(1);
+                getSplitEnumeratorContext(getParallelism());
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -118,6 +127,15 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
         enumerator.handleSplitRequest(0, "test-host");
 
         // check
+        assertResultOfTestDynamicPartitionFilteringWithProjection(
+                assignments, initialSplits, enumerator);
+    }
+
+    public void assertResultOfTestDynamicPartitionFilteringWithProjection(
+            Map<Integer, TestingSplitEnumeratorContext.SplitAssignmentState<FileStoreSourceSplit>>
+                    assignments,
+            List<FileStoreSourceSplit> initialSplits,
+            StaticFileStoreSplitEnumerator enumerator) {
         assertThat(assignments.get(0).getAssignedSplits())
                 .containsExactly(initialSplits.get(0), initialSplits.get(1));
         assertThat(enumerator.getSplitAssigner().remainingSplits()).isEmpty();
@@ -130,7 +148,7 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
                 context, null, createSplitAssigner(context, 10, splitAssignMode(), splits));
     }
 
-    private StaticFileStoreSplitEnumerator getSplitEnumerator(
+    protected StaticFileStoreSplitEnumerator getSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             List<FileStoreSourceSplit> splits,
             RowType partitionRowProjection,
@@ -148,7 +166,12 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
 
     protected abstract FlinkConnectorOptions.SplitAssignMode splitAssignMode();
 
-    private static class MockDynamicFilteringData extends DynamicFilteringData {
+    public int getParallelism() {
+        return 1;
+    }
+
+    /** Mock {@link DynamicFilteringData} for UT case. */
+    public static class MockDynamicFilteringData extends DynamicFilteringData {
 
         private final org.apache.flink.table.types.logical.RowType rowType;
         private final RowData[] neededPartitions;

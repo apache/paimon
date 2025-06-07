@@ -22,6 +22,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
+import org.apache.paimon.flink.source.assigners.ShardReadSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -87,7 +88,7 @@ public class StaticFileStoreSource extends FlinkSource {
                 context, null, splitAssigner, dynamicPartitionFilteringInfo);
     }
 
-    private List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
+    public List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
         TableScan scan = readBuilder.newScan();
         // register scan metrics
@@ -108,6 +109,8 @@ public class StaticFileStoreSource extends FlinkSource {
                 return new PreAssignSplitAssigner(splitBatchSize, context, splits);
             case PREEMPTIVE:
                 return new FIFOSplitAssigner(splits);
+            case SHARD_READ:
+                return new ShardReadSplitAssigner(splitBatchSize, context, splits);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported assign mode " + splitAssignMode);

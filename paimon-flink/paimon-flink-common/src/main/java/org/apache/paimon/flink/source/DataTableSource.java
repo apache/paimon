@@ -156,7 +156,6 @@ public class DataTableSource extends BaseDataTableSource
                 !table.partitionKeys().isEmpty(),
                 "Cannot apply dynamic filtering to non-partitioned Paimon table '%s'.",
                 table.name());
-
         this.dynamicPartitionFilteringFields = candidateFilterFields;
     }
 

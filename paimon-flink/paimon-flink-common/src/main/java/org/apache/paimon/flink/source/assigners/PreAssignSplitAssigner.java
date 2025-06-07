@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.source.assigners;
 
 import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -42,6 +39,7 @@ import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.source.assigners.DynamicPartitionPruningAssigner.filter;
 import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 
 /**
@@ -51,14 +49,19 @@ import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 public class PreAssignSplitAssigner implements SplitAssigner {
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
-    private final int splitBatchSize;
+    protected final int splitBatchSize;
 
-    private final int parallelism;
+    protected final int parallelism;
 
-    private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
+    protected final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
-    private final AtomicInteger numberOfPendingSplits;
-    private final Collection<FileStoreSourceSplit> splits;
+    protected final AtomicInteger numberOfPendingSplits;
+
+    protected final Collection<FileStoreSourceSplit> splits;
+
+    protected Projection partitionRowProjection;
+
+    protected DynamicFilteringData dynamicFilteringData;
 
     public PreAssignSplitAssigner(
             int splitBatchSize,
@@ -67,7 +70,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         this(splitBatchSize, context.currentParallelism(), splits);
     }
 
-    public PreAssignSplitAssigner(
+    private PreAssignSplitAssigner(
             int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
@@ -77,12 +80,27 @@ public class PreAssignSplitAssigner implements SplitAssigner {
                 splitBatchSize,
                 parallelism,
                 splits.stream()
-                        .filter(s -> filter(partitionRowProjection, dynamicFilteringData, s))
+                        .filter(s -> filter(s, partitionRowProjection, dynamicFilteringData))
                         .collect(Collectors.toList()));
     }
 
-    public PreAssignSplitAssigner(
+    private PreAssignSplitAssigner(
             int splitBatchSize, int parallelism, Collection<FileStoreSourceSplit> splits) {
+        this.splitBatchSize = splitBatchSize;
+        this.parallelism = parallelism;
+        this.splits = splits;
+        this.pendingSplitAssignment = createBatchFairSplitAssignment(splits, parallelism);
+        this.numberOfPendingSplits = new AtomicInteger(splits.size());
+    }
+
+    public PreAssignSplitAssigner(
+            Projection partitionRowProjection,
+            DynamicFilteringData dynamicFilteringData,
+            int splitBatchSize,
+            int parallelism,
+            Collection<FileStoreSourceSplit> splits) {
+        this.partitionRowProjection = partitionRowProjection;
+        this.dynamicFilteringData = dynamicFilteringData;
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
         this.splits = splits;
@@ -132,7 +150,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
      * this method only reload restore for batch execute, because in streaming mode, we need to
      * assign certain bucket to certain task.
      */
-    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
+    public Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =
                 BinPacking.packForFixedBinNumber(
@@ -161,15 +179,5 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
         return new PreAssignSplitAssigner(
                 splitBatchSize, parallelism, splits, partitionRowProjection, dynamicFilteringData);
-    }
-
-    private static boolean filter(
-            Projection partitionRowProjection,
-            DynamicFilteringData dynamicFilteringData,
-            FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
-        BinaryRow partition = dataSplit.partition();
-        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
-        return dynamicFilteringData.contains(projected);
     }
 }
