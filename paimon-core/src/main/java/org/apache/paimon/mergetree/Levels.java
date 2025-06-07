@@ -86,8 +86,8 @@ public class Levels {
                 "Number of files stored in Levels does not equal to the size of inputFiles. This is unexpected.");
     }
 
-    public TreeSet<DataFileMeta> level0() {
-        return level0;
+    public synchronized TreeSet<DataFileMeta> level0() {
+        return new TreeSet<>(level0);
     }
 
     public void addDropFileCallback(DropFileCallback callback) {
@@ -99,9 +99,9 @@ public class Levels {
         level0.add(file);
     }
 
-    public SortedRun runOfLevel(int level) {
+    public synchronized SortedRun runOfLevel(int level) {
         checkArgument(level > 0, "Level0 does not have one single sorted run.");
-        return levels.get(level - 1);
+        return SortedRun.fromSorted(levels.get(level - 1).files());
     }
 
     public int numberOfLevels() {
@@ -159,7 +159,7 @@ public class Levels {
         return runs;
     }
 
-    public void update(List<DataFileMeta> before, List<DataFileMeta> after) {
+    public synchronized void update(List<DataFileMeta> before, List<DataFileMeta> after) {
         Map<Integer, List<DataFileMeta>> groupedBefore = groupByLevel(before);
         Map<Integer, List<DataFileMeta>> groupedAfter = groupByLevel(after);
         for (int i = 0; i < numberOfLevels(); i++) {

@@ -63,6 +63,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -169,6 +170,87 @@ public class LookupLevelsTest {
         for (int key : notContains) {
             KeyValue kv = lookupLevels.lookup(row(key), 1);
             assertThat(kv).isNull();
+        }
+
+        lookupLevels.close();
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
+    }
+
+    @Test
+    public void testRefreshFiles() throws IOException {
+        DataFileMeta l1File1 = newFile(1, kv(1, 11), kv(2, 22));
+        DataFileMeta l1File2 = newFile(1, kv(3, 33), kv(6, 66));
+        DataFileMeta l1File3 = newFile(1, kv(7, 77), kv(9, 99));
+        DataFileMeta l1File4 = newFile(1, kv(15, 1515), kv(16, 1616));
+
+        DataFileMeta l2File1 = newFile(2, kv(4, 44), kv(5, 55));
+        DataFileMeta l2File2 = newFile(2, kv(8, 88), kv(12, 1212));
+
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(l1File1, l1File2, l1File3, l1File4, l2File1, l2File2),
+                        3);
+
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        Map<Integer, Integer> contains =
+                new HashMap<Integer, Integer>() {
+                    {
+                        this.put(1, 11);
+                        this.put(2, 22);
+                        this.put(3, 33);
+                        this.put(4, 44);
+                        this.put(5, 55);
+                        this.put(6, 66);
+                        this.put(7, 77);
+                        this.put(8, 88);
+                        this.put(9, 99);
+                        this.put(12, 1212);
+                        this.put(15, 1515);
+                        this.put(16, 1616);
+                    }
+                };
+
+        for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
+            KeyValue kv = lookupLevels.lookup(row(entry.getKey()), 1);
+            assertThat(kv).isNotNull();
+            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+            assertThat(kv.value().getInt(1)).isEqualTo(entry.getValue());
+        }
+        assertThat(lookupLevels.cachedFiles()).hasSize(6);
+
+        DataFileMeta afterFile1 = newFile(1, kv(3, 33), kv(4, 44));
+        DataFileMeta afterFile2 = newFile(1, kv(5, 55), kv(6, 66));
+        DataFileMeta afterFile3 = newFile(1, kv(7, 77), kv(8, 88), kv(9, 99), kv(10, 1010));
+        DataFileMeta afterFile4 = newFile(2, kv(2, 22), kv(6, 66), kv(7, 77));
+        DataFileMeta afterFile5 = newFile(2, kv(17, 1717));
+
+        lookupLevels.refreshFiles(
+                Arrays.asList(l1File2, l1File3, l2File1),
+                Arrays.asList(afterFile1, afterFile2, afterFile3, afterFile4, afterFile5));
+
+        Set<String> cachedFiles = lookupLevels.cachedFiles();
+        assertThat(cachedFiles).hasSize(6);
+        assertThat(cachedFiles)
+                .contains(afterFile1.fileName(), afterFile2.fileName(), afterFile4.fileName());
+        // afterFiles3 is not cached because of exceeded file size, afterFile5 is not cached because
+        // of non-overlapped key range.
+        assertThat(cachedFiles).doesNotContain(afterFile3.fileName(), afterFile5.fileName());
+
+        contains =
+                new HashMap<Integer, Integer>() {
+                    {
+                        this.put(10, 1010);
+                        this.put(17, 1717);
+                    }
+                };
+        for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
+            KeyValue kv = lookupLevels.lookup(row(entry.getKey()), 1);
+            assertThat(kv).isNotNull();
+            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+            assertThat(kv.value().getInt(1)).isEqualTo(entry.getValue());
         }
 
         lookupLevels.close();
