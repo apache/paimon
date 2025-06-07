@@ -74,7 +74,7 @@ public class UpdatedDataFieldsProcessFunction
                         updatedSchema.primaryKeys(),
                         updatedSchema.comment());
         for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
-            applySchemaChange(schemaManager, schemaChange, identifier);
+            applySchemaChange(schemaManager, schemaChange, identifier, actualUpdatedSchema);
         }
         /*
          * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
