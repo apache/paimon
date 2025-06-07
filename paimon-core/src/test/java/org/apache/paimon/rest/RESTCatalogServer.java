@@ -2100,7 +2100,7 @@ public class RESTCatalogServer {
         } else if (entity instanceof GetViewResponse) {
             return ((GetViewResponse) entity).getName();
         } else if (entity instanceof Partition) {
-            return ((Partition) entity).spec().toString().replace("{", "").replace("}", "");
+            return RESTUtil.buildPartitionName(((Partition) entity).spec());
         } else {
             return entity.toString();
         }
