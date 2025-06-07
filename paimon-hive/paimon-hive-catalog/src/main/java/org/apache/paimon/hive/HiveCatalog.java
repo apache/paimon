@@ -44,6 +44,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogTableOwnerType;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -74,6 +75,7 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -121,6 +123,7 @@ import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
+import static org.apache.paimon.options.CatalogOptions.TABLE_OWNER_TYPE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
@@ -1364,12 +1367,25 @@ public class HiveCatalog extends AbstractCatalog {
             @Nullable FormatTable.Format provider,
             boolean externalTable) {
         long currentTimeMillis = System.currentTimeMillis();
+
+        CatalogTableOwnerType ownerType = options.get(TABLE_OWNER_TYPE);
+        String user;
+        if (ownerType == CatalogTableOwnerType.UGI) {
+            try {
+                UserGroupInformation currentUGI = UserGroupInformation.getCurrentUser();
+                user = currentUGI.getShortUserName();
+            } catch (Exception e) {
+                user = System.getProperty("user.name");
+            }
+        } else {
+            user = System.getProperty("user.name");
+        }
+
         Table table =
                 new Table(
                         identifier.getTableName(),
                         identifier.getDatabaseName(),
-                        // current linux user
-                        System.getProperty("user.name"),
+                        user,
                         (int) (currentTimeMillis / 1000),
                         (int) (currentTimeMillis / 1000),
                         Integer.MAX_VALUE,
