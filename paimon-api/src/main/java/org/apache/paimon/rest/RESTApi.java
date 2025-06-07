@@ -24,7 +24,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.FunctionChange;
-import org.apache.paimon.function.FunctionNameValidator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -96,6 +95,8 @@ import java.util.function.Function;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.rest.RESTFunctionValidator.checkFunctionName;
+import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 
@@ -853,17 +854,16 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to access the function
      */
     public GetFunctionResponse getFunction(Identifier identifier) {
-        if (FunctionNameValidator.isValidName(identifier.getObjectName())) {
-            return client.get(
-                    resourcePaths.function(
-                            identifier.getDatabaseName(), identifier.getObjectName()),
-                    GetFunctionResponse.class,
-                    restAuthFunction);
+        if (!isValidFunctionName(identifier.getObjectName())) {
+            throw new NoSuchResourceException(
+                    ErrorResponse.RESOURCE_TYPE_FUNCTION,
+                    identifier.getObjectName(),
+                    "Invalid function name: " + identifier.getObjectName());
         }
-        throw new NoSuchResourceException(
-                ErrorResponse.RESOURCE_TYPE_FUNCTION,
-                identifier.getObjectName(),
-                "Invalid function name: " + identifier.getObjectName());
+        return client.get(
+                resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetFunctionResponse.class,
+                restAuthFunction);
     }
 
     /**
@@ -877,7 +877,7 @@ public class RESTApi {
      */
     public void createFunction(
             Identifier identifier, org.apache.paimon.function.Function function) {
-        FunctionNameValidator.check(identifier.getObjectName());
+        checkFunctionName(identifier.getObjectName());
         client.post(
                 resourcePaths.functions(identifier.getDatabaseName()),
                 new CreateFunctionRequest(function),
@@ -893,7 +893,7 @@ public class RESTApi {
      *     this function
      */
     public void dropFunction(Identifier identifier) {
-        FunctionNameValidator.check(identifier.getObjectName());
+        checkFunctionName(identifier.getObjectName());
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
@@ -908,7 +908,7 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to modify the function
      */
     public void alterFunction(Identifier identifier, List<FunctionChange> changes) {
-        FunctionNameValidator.check(identifier.getObjectName());
+        checkFunctionName(identifier.getObjectName());
         client.post(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 new AlterFunctionRequest(changes),

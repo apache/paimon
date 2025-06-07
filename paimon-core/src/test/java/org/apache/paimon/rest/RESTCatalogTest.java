@@ -31,7 +31,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
-import org.apache.paimon.function.FunctionNameValidator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1707,19 +1706,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     public void testValidateFunctionName() throws Exception {
-        assertDoesNotThrow(() -> FunctionNameValidator.check("a"));
-        assertDoesNotThrow(() -> FunctionNameValidator.check("a1_"));
-        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c"));
-        assertDoesNotThrow(() -> FunctionNameValidator.check("a-b_c.1"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a1_"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a-b_c"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a-b_c.1"));
 
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a\\/b"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a$?b"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a@b"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("a*b"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("123"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check("_-"));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(""));
-        assertThrows(IllegalArgumentException.class, () -> FunctionNameValidator.check(null));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a\\/b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a$?b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a@b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a*b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("123"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("_-"));
+        assertThrows(
+                IllegalArgumentException.class, () -> RESTFunctionValidator.checkFunctionName(""));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName(null));
     }
 
     @Test

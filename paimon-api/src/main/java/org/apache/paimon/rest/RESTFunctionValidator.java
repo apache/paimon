@@ -16,22 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.function;
+package org.apache.paimon.rest;
 
 import java.util.regex.Pattern;
 
 /** Validator for function name. */
-public class FunctionNameValidator {
+public class RESTFunctionValidator {
+
     private static final Pattern FUNCTION_NAME_PATTERN =
             Pattern.compile("^(?=.*[A-Za-z])[A-Za-z0-9._-]+$");
 
-    public static boolean isValidName(String name) {
+    public static boolean isValidFunctionName(String name) {
         return org.apache.paimon.utils.StringUtils.isNotEmpty(name)
                 && FUNCTION_NAME_PATTERN.matcher(name).matches();
     }
 
-    public static void check(String name) {
-        boolean isValid = isValidName(name);
+    public static void checkFunctionName(String name) {
+        boolean isValid = isValidFunctionName(name);
         if (!isValid) {
             throw new IllegalArgumentException("Invalid function name: " + name);
         }

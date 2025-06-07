@@ -503,14 +503,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
-            return;
-        } catch (UnsupportedOperationException ignore) {
+        } catch (UnsupportedOperationException e) {
+            checkArgument(
+                    snapshotManager.snapshotExists(snapshotId),
+                    "Rollback snapshot '%s' doesn't exist.",
+                    snapshotId);
+            rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
         }
-        checkArgument(
-                snapshotManager.snapshotExists(snapshotId),
-                "Rollback snapshot '%s' doesn't exist.",
-                snapshotId);
-        rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
