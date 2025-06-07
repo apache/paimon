@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParseException
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -31,8 +32,13 @@ abstract class ProcedureTestBase extends PaimonSparkTestBase {
                  |CREATE TABLE T (id INT, name STRING, dt STRING)
                  |""".stripMargin)
 
-    assertThatThrownBy(() => spark.sql("CALL sys.unknown_procedure(table => 'test.T')"))
-      .isInstanceOf(classOf[ParseException])
+    if (gteqSpark4_0) {
+      assertThatThrownBy(() => spark.sql("CALL sys.unknown_procedure(table => 'test.T')"))
+        .isInstanceOf(classOf[AnalysisException])
+    } else {
+      assertThatThrownBy(() => spark.sql("CALL sys.unknown_procedure(table => 'test.T')"))
+        .isInstanceOf(classOf[ParseException])
+    }
   }
 
   test(s"test parse exception") {
