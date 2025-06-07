@@ -88,7 +88,11 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
     protected Schema retrieveSchema() throws Exception {
         this.postgresSchemasInfo =
                 PostgresActionUtils.getPostgresTableInfos(
-                        cdcSourceConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
+                        cdcSourceConfig,
+                        monitorTablePredication(),
+                        new ArrayList<>(),
+                        typeMapping,
+                        compositePrimaryKey);
         validatePostgresTableInfos(postgresSchemasInfo);
         JdbcTableInfo tableInfo = postgresSchemasInfo.mergeAll();
         return tableInfo.schema();
