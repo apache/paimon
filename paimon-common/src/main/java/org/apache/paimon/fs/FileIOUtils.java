@@ -44,4 +44,17 @@ public class FileIOUtils {
         io.exists(path);
         return fileIO;
     }
+
+    /**
+     * Get MetricsFileIO instance, avoiding multiple wrapping.
+     *
+     * @param fileIO the original FileIO instance
+     * @return MetricsFileIO instance (existing or new)
+     */
+    public static MetricsFileIO getMetricsFileIO(FileIO fileIO) {
+        if (fileIO instanceof MetricsFileIO) {
+            return (MetricsFileIO) fileIO;
+        }
+        return new MetricsFileIO(fileIO);
+    }
 }

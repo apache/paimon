@@ -18,7 +18,7 @@
 
 package org.apache.paimon.metrics;
 
-/** A simple low-overhead {@link org.apache.paimon.metrics.Counter}. */
+/** A simple low-overhead {@link Counter}. */
 public class SimpleCounter implements Counter {
 
     /** the current count. */

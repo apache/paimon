@@ -24,7 +24,6 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -78,11 +77,10 @@ public class ContinuousFileStoreSource extends FlinkSource {
             nextSnapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
-        StreamTableScan scan = readBuilder.newStreamScan();
         if (metricGroup(context) != null) {
-            ((StreamDataTableScan) scan)
-                    .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
+            readBuilder.withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
+        StreamTableScan scan = readBuilder.newStreamScan();
         scan.restore(nextSnapshotId);
         return buildEnumerator(context, splits, nextSnapshotId, scan);
     }

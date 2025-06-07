@@ -31,7 +31,7 @@ import java.util.Map;
 public interface MetricGroup {
 
     /**
-     * Creates and registers a new {@link org.apache.paimon.metrics.Counter} with Paimon.
+     * Creates and registers a new {@link Counter} with Paimon.
      *
      * @param name name of the counter
      * @return the created counter
@@ -39,7 +39,7 @@ public interface MetricGroup {
     Counter counter(String name);
 
     /**
-     * Registers a new {@link org.apache.paimon.metrics.Gauge} with Paimon.
+     * Registers a new {@link Gauge} with Paimon.
      *
      * @param name name of the gauge
      * @param gauge gauge to register
