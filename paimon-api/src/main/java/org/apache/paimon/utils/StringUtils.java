@@ -515,7 +515,17 @@ public class StringUtils {
             return false;
         }
         final int sz = cs.length();
-        for (int i = 0; i < sz; i++) {
+        int startIndex = 0;
+
+        // Handle negative sign
+        if (sz > 0 && cs.charAt(0) == '-') {
+            if (sz == 1) {
+                return false; // Just a minus sign is not numeric
+            }
+            startIndex = 1;
+        }
+
+        for (int i = startIndex; i < sz; i++) {
             if (!Character.isDigit(cs.charAt(i))) {
                 return false;
             }
