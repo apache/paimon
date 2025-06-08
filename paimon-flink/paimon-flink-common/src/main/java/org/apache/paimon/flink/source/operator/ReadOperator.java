@@ -36,6 +36,8 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -46,6 +48,8 @@ import javax.annotation.Nullable;
  */
 public class ReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Split, RowData> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ReadOperator.class);
 
     private static final long serialVersionUID = 2L;
 
@@ -64,12 +68,15 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient long emitEventTimeLag = FileStoreSourceReaderMetrics.UNDEFINED;
     private transient long idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
     private transient Counter numRecordsIn;
+    @Nullable private final Long limit;
 
     public ReadOperator(
             SerializableSupplier<TableRead> readSupplier,
-            @Nullable NestedProjectedRowData nestedProjectedRowData) {
+            @Nullable NestedProjectedRowData nestedProjectedRowData,
+            @Nullable Long limit) {
         this.readSupplier = readSupplier;
         this.nestedProjectedRowData = nestedProjectedRowData;
+        this.limit = limit;
     }
 
     @Override
@@ -98,6 +105,10 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
     @Override
     public void processElement(StreamRecord<Split> record) throws Exception {
+        if (reachLimit()) {
+            return;
+        }
+
         Split split = record.getValue();
         // update metric when reading a new split
         long eventTime =
@@ -122,6 +133,10 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                     numRecordsIn.inc();
                 }
 
+                if (reachLimit()) {
+                    return;
+                }
+
                 reuseRow.replace(iterator.next());
                 if (nestedProjectedRowData == null) {
                     reuseRecord.replace(reuseRow);
@@ -142,6 +157,14 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         if (ioManager != null) {
             ioManager.close();
         }
+    }
+
+    private boolean reachLimit() {
+        if (limit != null && numRecordsIn.getCount() > limit) {
+            LOG.info("Reader {} reach the limit record {}.", this, limit);
+            return true;
+        }
+        return false;
     }
 
     private void idlingStarted() {

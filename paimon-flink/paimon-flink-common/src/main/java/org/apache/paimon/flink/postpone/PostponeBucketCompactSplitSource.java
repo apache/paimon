@@ -155,7 +155,7 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                                         table.fullName(), partitionSpec),
                                 InternalTypeInfo.of(
                                         LogicalTypeConversion.toLogicalType(table.rowType())),
-                                new ReadOperator(table::newRead, null)),
+                                new ReadOperator(table::newRead, null, null)),
                 source.forward()
                         .transform(
                                 "Remove new files",

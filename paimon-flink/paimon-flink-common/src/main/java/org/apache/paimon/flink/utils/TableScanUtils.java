@@ -30,12 +30,14 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION;
+
 /** Utility methods for {@link TableScan}, such as validating. */
 public class TableScanUtils {
 
     public static void streamingReadingValidate(Table table) {
-        CoreOptions options = CoreOptions.fromMap(table.options());
-        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
+        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+        CoreOptions.MergeEngine mergeEngine = coreOptions.mergeEngine();
         HashMap<CoreOptions.MergeEngine, String> mergeEngineDesc =
                 new HashMap<CoreOptions.MergeEngine, String>() {
                     {
@@ -45,13 +47,21 @@ public class TableScanUtils {
                     }
                 };
         if (table.primaryKeys().size() > 0 && mergeEngineDesc.containsKey(mergeEngine)) {
-            if (options.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
+            if (coreOptions.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
                 throw new RuntimeException(
                         mergeEngineDesc.get(mergeEngine)
                                 + " streaming reading is not supported. You can use "
                                 + "'lookup' or 'full-compaction' changelog producer to support streaming reading. "
                                 + "('input' changelog producer is also supported, but only returns input records.)");
             }
+        }
+
+        Options options = Options.fromMap(table.options());
+        if (options.get(SCAN_DEDICATED_SPLIT_GENERATION)) {
+            throw new RuntimeException(
+                    "The option "
+                            + SCAN_DEDICATED_SPLIT_GENERATION.key()
+                            + " can only used in batch mode.");
         }
     }
 
