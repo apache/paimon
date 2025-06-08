@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -103,9 +104,23 @@ public class FileStoreTableFactory {
             Optional<TableSchema> schema =
                     new SchemaManager(fileIO, tablePath, fallbackBranch).latest();
             if (schema.isPresent()) {
+                Identifier identifier = catalogEnvironment.identifier();
+                CatalogEnvironment fallbackCatalogEnvironment = catalogEnvironment;
+                if (identifier != null) {
+                    fallbackCatalogEnvironment =
+                            catalogEnvironment.copy(
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName(),
+                                            fallbackBranch));
+                }
                 FileStoreTable fallbackTable =
                         createWithoutFallbackBranch(
-                                fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
+                                fileIO,
+                                tablePath,
+                                schema.get(),
+                                branchOptions,
+                                fallbackCatalogEnvironment);
                 table = new FallbackReadFileStoreTable(table, fallbackTable);
             } else {
                 LOG.error("Fallback branch {} not found for table {}", fallbackBranch, tablePath);
