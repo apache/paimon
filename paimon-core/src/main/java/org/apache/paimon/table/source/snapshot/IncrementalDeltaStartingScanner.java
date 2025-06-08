@@ -129,6 +129,10 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
                                     entry.getValue().stream()
                                             .map(ManifestEntry::file)
                                             .collect(Collectors.toList()))) {
+                 List<DataFileMeta> files = splitGroup.files;
+                //  Sort the files by creation time from smallest to largest.
+                files= files.stream().sorted(Comparator.comparingLong(DataFileMeta::creationTimeEpochMillis))
+                        .collect(Collectors.toList());
                 DataSplit.Builder dataSplitBuilder =
                         DataSplit.builder()
                                 .isStreaming(true)
@@ -136,7 +140,7 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withTotalBuckets(entry.getValue().get(0).totalBuckets())
-                                .withDataFiles(splitGroup.files)
+                                .withDataFiles(files)
                                 .rawConvertible(splitGroup.rawConvertible)
                                 .withBucketPath(bucketPath);
                 result.add(dataSplitBuilder.build());
