@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -35,6 +36,10 @@ import java.util.Optional;
 
 /** Inner table for implementation, provide newScan, newRead ... directly. */
 public interface InnerTable extends Table {
+
+    default InnerTable withMetricRegistry(MetricRegistry metricRegistry) {
+        return this;
+    }
 
     InnerTableScan newScan();
 

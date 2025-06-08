@@ -204,6 +204,12 @@ under the License.
             <scope>test</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+
         <!-- for the HDFS mini cluster test suite -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>

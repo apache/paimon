@@ -21,7 +21,9 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -357,6 +359,29 @@ public class StartupModeTest extends ScannerTestBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "The specified scan snapshotId 1 is out of available snapshotId range [2, 3]."));
+    }
+
+    @Test
+    public void testMetricsFileIOEnable() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.METRICS_FILE_IO_ENABLED.key(), "true");
+
+        initializeTable(StartupMode.LATEST, properties);
+        initializeTestData();
+        table.withMetricRegistry(new TestMetricRegistry());
+        assertThat(table.fileIO() instanceof MetricsFileIO);
+        assertThat(((MetricsFileIO) table.fileIO()).isMetricsEnabled());
+    }
+
+    @Test
+    public void testMetricsFileIODisable() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.METRICS_FILE_IO_ENABLED.key(), "false");
+
+        initializeTable(StartupMode.LATEST, properties);
+        initializeTestData();
+        table.withMetricRegistry(new TestMetricRegistry());
+        assertThat(!(table.fileIO() instanceof MetricsFileIO));
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {
