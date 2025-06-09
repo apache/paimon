@@ -119,6 +119,10 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    public TableSchema latestOrThrow(String message) {
+        return latest().orElseThrow(() -> new RuntimeException(message));
+    }
+
     public long earliestCreationTime() {
         try {
             long earliest = 0;
