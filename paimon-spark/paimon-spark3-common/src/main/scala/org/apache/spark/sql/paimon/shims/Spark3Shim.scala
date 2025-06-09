@@ -28,7 +28,7 @@ import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
@@ -69,6 +69,13 @@ class Spark3Shim extends SparkShim {
       properties: JMap[String, String]): Table = {
     tableCatalog.createTable(ident, schema, partitions, properties)
   }
+
+  override def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef =
+    MinorVersionShim.createCTERelationRef(cteId, resolved, output, isStreaming)
 
   override def column(expr: Expression): Column = new Column(expr)
 
