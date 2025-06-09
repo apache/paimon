@@ -101,7 +101,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                         updatedSchema.f1.comment());
 
         for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
-            applySchemaChange(schemaManager, schemaChange, tableId);
+            applySchemaChange(schemaManager, schemaChange, tableId, actualUpdatedSchema);
         }
         /*
          * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
