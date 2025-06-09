@@ -35,7 +35,6 @@ import org.apache.paimon.types.FieldIdentifier;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.OpenContext;
@@ -46,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,13 +54,15 @@ import java.util.stream.Collectors;
 
 /** Base class for update data fields process function. */
 public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends ProcessFunction<I, O> {
+
     private static final Logger LOG =
             LoggerFactory.getLogger(UpdatedDataFieldsProcessFunctionBase.class);
 
     protected final CatalogLoader catalogLoader;
+    private final TypeMapping typeMapping;
+
     protected Catalog catalog;
     private boolean caseSensitive;
-    private TypeMapping typeMapping;
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
@@ -105,7 +107,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             SchemaManager schemaManager,
             SchemaChange schemaChange,
             Identifier identifier,
-            CdcSchema actualUpdatedSchema)
+            CdcSchema newSchema)
             throws Exception {
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
@@ -125,35 +127,17 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
             SchemaChange.UpdateColumnType updateColumnType =
                     (SchemaChange.UpdateColumnType) schemaChange;
-            TableSchema schema =
-                    schemaManager
-                            .latest()
-                            .orElseThrow(
-                                    () ->
-                                            new RuntimeException(
-                                                    "Table does not exist. This is unexpected."));
-            int idx = schema.fieldNames().indexOf(updateColumnType.fieldNames()[0]);
-            Preconditions.checkState(
-                    idx >= 0,
-                    "Field name "
-                            + updateColumnType.fieldNames()[0]
-                            + " does not exist in table. This is unexpected.");
-            DataType oldType = schema.fields().get(idx).type();
-            DataType newType = updateColumnType.newDataType();
+            String topLevelFieldName = updateColumnType.fieldNames()[0];
+            TableSchema oldSchema =
+                    schemaManager.latestOrThrow("Table does not exist. This is unexpected.");
+            DataType oldTopLevelFieldType =
+                    new RowType(oldSchema.fields()).getField(topLevelFieldName).type();
+            DataType newTopLevelFieldType =
+                    new RowType(newSchema.fields()).getField(topLevelFieldName).type();
 
-            // For complex types, extract the full new type from actualUpdatedSchema
-            // to preserve type context (e.g., ARRAY<BIGINT> instead of just BIGINT)
-            if (actualUpdatedSchema != null) {
-                String fieldName = updateColumnType.fieldNames()[0];
-                for (DataField field : actualUpdatedSchema.fields()) {
-                    if (fieldName.equals(field.name())) {
-                        newType = field.type();
-                        break;
-                    }
-                }
-            }
-
-            switch (canConvert(oldType, newType, typeMapping)) {
+            // For complex types, extract the top level type to check type context (e.g.,
+            // ARRAY<BIGINT> instead of just BIGINT)
+            switch (canConvert(oldTopLevelFieldType, newTopLevelFieldType, typeMapping)) {
                 case CONVERT:
                     catalog.alterTable(identifier, schemaChange, false);
                     break;
@@ -161,9 +145,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     throw new UnsupportedOperationException(
                             String.format(
                                     "Cannot convert field %s from type %s to %s of Paimon table %s.",
-                                    updateColumnType.fieldNames()[0],
-                                    oldType,
-                                    newType,
+                                    topLevelFieldName,
+                                    oldTopLevelFieldType,
+                                    newTopLevelFieldType,
                                     identifier.getFullName()));
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
@@ -391,7 +375,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     }
                     // Generate nested column updates if needed
                     NestedSchemaUtils.generateNestedColumnUpdates(
-                            Arrays.asList(newFieldName), oldField.type(), newField.type(), result);
+                            Collections.singletonList(newFieldName),
+                            oldField.type(),
+                            newField.type(),
+                            result);
                     // update column comment
                     if (newField.description() != null) {
                         result.add(

@@ -669,7 +669,6 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.paimon.types.DataType oldType,
             org.apache.paimon.types.DataType newType,
             List<SchemaChange> schemaChanges) {
-
         NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
     }
 

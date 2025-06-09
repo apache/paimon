@@ -99,7 +99,6 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                         actualUpdatedDataFields,
                         updatedSchema.f1.primaryKeys(),
                         updatedSchema.f1.comment());
-
         for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
             applySchemaChange(schemaManager, schemaChange, tableId, actualUpdatedSchema);
         }
