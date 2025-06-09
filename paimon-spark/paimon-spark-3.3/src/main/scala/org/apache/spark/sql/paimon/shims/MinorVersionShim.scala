@@ -16,22 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.spark.sql.paimon.shims
 
-import org.apache.spark.sql.catalyst.dsl.expressions._
-import org.apache.spark.sql.catalyst.expressions.{Attribute, GetStructField, NamedExpression, ScalarSubquery}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
-class PaimonOptimizationTest extends PaimonOptimizationTestBase {
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-  override def extractorExpression(
-      cteIndex: Int,
+object MinorVersionShim {
+
+  def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
       output: Seq[Attribute],
-      fieldIndex: Int): NamedExpression = {
-    GetStructField(
-      ScalarSubquery(
-        SparkShimLoader.getSparkShim
-          .createCTERelationRef(cteIndex, resolved = true, output.toSeq, isStreaming = false)),
-      fieldIndex)
-      .as("scalarsubquery()")
-  }
+      isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output)
 }

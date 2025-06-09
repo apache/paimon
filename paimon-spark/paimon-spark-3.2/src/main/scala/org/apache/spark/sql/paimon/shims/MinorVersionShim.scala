@@ -16,37 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.util
+package org.apache.spark.sql.paimon.shims
 
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-object CTERelationRefUtils {
-
-  private val (ctorm, hasStreamingField) = init()
-
-  private def init() = {
-    val ru = scala.reflect.runtime.universe
-    val m = ru.runtimeMirror(getClass.getClassLoader)
-    val classC = ru.typeOf[CTERelationRef].typeSymbol.asClass
-    val cm = m.reflectClass(classC)
-    val ctorC = ru.typeOf[CTERelationRef].decl(ru.termNames.CONSTRUCTOR).asMethod
-    val ctorm = cm.reflectConstructor(ctorC)
-    // SPARK-46062 add isStreaming param
-    val hasStreamingField =
-      ctorC.paramLists.head.exists(_.name.encodedName.toString == "isStreaming")
-    (ctorm, hasStreamingField)
-  }
+object MinorVersionShim {
 
   def createCTERelationRef(
       cteId: Long,
-      _resolved: Boolean,
-      output: Seq[Attribute]): CTERelationRef = {
-    val value = if (hasStreamingField) {
-      ctorm(cteId, _resolved, output, false, None)
-    } else {
-      ctorm(cteId, _resolved, output, None)
-    }
-    value.asInstanceOf[CTERelationRef]
-  }
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output)
 }

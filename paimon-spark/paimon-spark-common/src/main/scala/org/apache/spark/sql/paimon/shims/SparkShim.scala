@@ -26,7 +26,7 @@ import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
@@ -60,6 +60,12 @@ trait SparkShim {
       schema: StructType,
       partitions: Array[Transform],
       properties: JMap[String, String]): Table
+
+  def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef
 
   def column(expr: Expression): Column
 
