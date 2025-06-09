@@ -106,9 +106,6 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     public void sync() throws Exception {}
 
     @Override
-    public void withInsertOnly(boolean insertOnly) {}
-
-    @Override
     public void close() throws Exception {
         if (writer != null) {
             writer.abort();

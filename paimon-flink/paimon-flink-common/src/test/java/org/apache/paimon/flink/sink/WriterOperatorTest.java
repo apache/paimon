@@ -55,7 +55,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -369,15 +368,6 @@ public class WriterOperatorTest {
 
     @Test
     public void testChangelog() throws Exception {
-        testChangelog(false);
-    }
-
-    @Test
-    public void testChangelogWithInsertOnly() throws Exception {
-        testChangelog(true);
-    }
-
-    private void testChangelog(boolean insertOnly) throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
@@ -401,13 +391,6 @@ public class WriterOperatorTest {
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         harness.setup(serializer);
         harness.open();
-
-        if (insertOnly) {
-            Field field = TableWriteOperator.class.getDeclaredField("write");
-            field.setAccessible(true);
-            StoreSinkWrite write = (StoreSinkWrite) field.get(harness.getOneInputOperator());
-            write.withInsertOnly(true);
-        }
 
         // write basic records
         harness.processElement(GenericRow.ofKind(RowKind.INSERT, 1, 10, 100), 1);
@@ -437,13 +420,8 @@ public class WriterOperatorTest {
                                         row.getInt(0),
                                         row.getInt(1),
                                         row.getInt(2))));
-        if (insertOnly) {
-            assertThat(actual).containsExactlyInAnyOrder("+I[1, 10, 300]");
-        } else {
-            assertThat(actual)
-                    .containsExactlyInAnyOrder(
-                            "+I[1, 10, 100]", "-D[1, 10, 200]", "+I[1, 10, 300]");
-        }
+        assertThat(actual)
+                .containsExactlyInAnyOrder("+I[1, 10, 100]", "-D[1, 10, 200]", "+I[1, 10, 300]");
     }
 
     @Test

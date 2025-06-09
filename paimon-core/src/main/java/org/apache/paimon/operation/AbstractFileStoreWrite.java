@@ -89,7 +89,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
-    private boolean isInsertOnly;
     private final boolean legacyPartitionName;
 
     protected AbstractFileStoreWrite(
@@ -143,16 +142,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
-    }
-
-    @Override
-    public void withInsertOnly(boolean insertOnly) {
-        this.isInsertOnly = insertOnly;
-        for (Map<Integer, WriterContainer<T>> containerMap : writers.values()) {
-            for (WriterContainer<T> container : containerMap.values()) {
-                container.writer.withInsertOnly(insertOnly);
-            }
-        }
     }
 
     @Override
@@ -462,7 +451,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         null,
                         compactExecutor(),
                         deletionVectorsMaintainer);
-        writer.withInsertOnly(isInsertOnly);
         notifyNewWriter(writer);
         return new WriterContainer<>(
                 writer,

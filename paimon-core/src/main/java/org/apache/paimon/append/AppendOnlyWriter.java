@@ -232,9 +232,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     @Override
-    public void withInsertOnly(boolean insertOnly) {}
-
-    @Override
     public void close() throws Exception {
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
