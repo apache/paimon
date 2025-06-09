@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -93,10 +94,15 @@ public class SimpleStats {
     }
 
     public static SimpleStats fromRow(InternalRow row) {
-        return new SimpleStats(
-                deserializeBinaryRow(row.getBinary(0)),
-                deserializeBinaryRow(row.getBinary(1)),
-                BinaryArray.fromLongArray(row.getArray(2)));
+        BinaryRow minValues = deserializeBinaryRow(row.getBinary(0));
+        BinaryRow maxValues = deserializeBinaryRow(row.getBinary(1));
+        InternalArray nullCounts = row.getArray(2);
+        if (minValues.getFieldCount() == 0
+                && maxValues.getFieldCount() == 0
+                && nullCounts.size() == 0) {
+            return EMPTY_STATS;
+        }
+        return new SimpleStats(minValues, maxValues, BinaryArray.fromLongArray(nullCounts));
     }
 
     @Override
