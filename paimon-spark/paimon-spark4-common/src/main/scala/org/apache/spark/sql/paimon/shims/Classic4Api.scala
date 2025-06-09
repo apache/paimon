@@ -21,70 +21,43 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
-import org.apache.spark.sql.classic.{DataFrame => ClassicDataFrame, Dataset => ClassicDataset, ExpressionUtils, SparkSession => ClassicSparkSession, SQLContext => ClassicSQLContext}
+import org.apache.spark.sql.classic.{ClassicConversions, Dataset => ClassicDataset, ExpressionUtils}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
 
-class Classic4Api extends ClassicApi {
+/**
+ * This class is used to implement the conversion from sql-api to classic one. Make sure this is the
+ * only class that implements [[org.apache.spark.sql.classic.ClassicConversions]] in Paimon-Spark.
+ */
+class Classic4Api extends ClassicApi with ClassicConversions {
 
   override def column(expression: Expression): Column = ExpressionUtils.column(expression)
 
   override def expression(spark: SparkSession, column: Column): Expression = {
-    spark match {
-      case classicSpark: ClassicSparkSession =>
-        classicSpark.expression(column)
-      case _ =>
-        throw new RuntimeException(s"This doesn't belong to classic family: $spark")
-    }
+    spark.expression(column)
   }
 
   override def createDataset(data: DataFrame): DataFrame = {
-    data match {
-      case classicDataFrame: ClassicDataFrame =>
-        classicDataFrame.sqlContext
-          .asInstanceOf[ClassicSQLContext]
-          .internalCreateDataFrame(data.queryExecution.toRdd, data.schema)
-      case _ =>
-        throw new RuntimeException(s"This doesn't belong to classic family: $data")
-    }
+    data.sqlContext
+      .internalCreateDataFrame(data.queryExecution.toRdd, data.schema)
   }
 
   override def createDataset(spark: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
-    spark match {
-      case classicSpark: ClassicSparkSession =>
-        ClassicDataset.ofRows(classicSpark, logicalPlan)
-      case _ =>
-        throw new RuntimeException(s"This doesn't belong to classic family: $spark")
-    }
+    ClassicDataset.ofRows(spark, logicalPlan)
   }
 
   override def recacheByPlan(spark: SparkSession, plan: LogicalPlan): Unit = {
-    spark match {
-      case classicSpark: ClassicSparkSession =>
-        classicSpark.sharedState.cacheManager.recacheByPlan(classicSpark, plan)
-      case _ =>
-        throw new RuntimeException(s"This doesn't belong to classic family: $spark")
-    }
+    spark.sharedState.cacheManager.recacheByPlan(spark, plan)
   }
 
   override def prepareExecutedPlan(spark: SparkSession, logicalPlan: LogicalPlan): SparkPlan = {
-    spark match {
-      case classicSpark: ClassicSparkSession =>
-        QueryExecution.prepareExecutedPlan(classicSpark, logicalPlan)
-      case _ =>
-        throw new RuntimeException(s"This doesn't belong to classic family: $spark")
-    }
+    QueryExecution.prepareExecutedPlan(spark, logicalPlan)
   }
 
   override def computeColumnStats(
-      sparkSession: SparkSession,
+      spark: SparkSession,
       relation: LogicalPlan,
       columns: Seq[Attribute]): (Long, Map[Attribute, ColumnStat]) = {
-    sparkSession match {
-      case classicSpark: ClassicSparkSession =>
-        CommandUtils.computeColumnStats(classicSpark, relation, columns.toSeq)
-      case _ =>
-        throw new RuntimeException("This SparkSession instance is not classic.SparkSession.")
-    }
+    CommandUtils.computeColumnStats(spark, relation, columns.toSeq)
   }
 }
