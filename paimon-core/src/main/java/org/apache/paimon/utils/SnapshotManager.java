@@ -49,6 +49,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -473,21 +474,25 @@ public class SnapshotManager implements Serializable {
     }
 
     public long snapshotCount() throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
+        return snapshotIdStream().count();
     }
 
     public Iterator<Snapshot> snapshots() throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+        return snapshotIdStream()
                 .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
     }
 
     public List<Path> snapshotPaths(Predicate<Long> predicate) throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+        return snapshotIdStream()
                 .filter(predicate)
                 .map(this::snapshotPath)
                 .collect(Collectors.toList());
+    }
+
+    public Stream<Long> snapshotIdStream() throws IOException {
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX);
     }
 
     public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
@@ -543,10 +548,7 @@ public class SnapshotManager implements Serializable {
      * be deleted by other processes, so just skip this snapshot.
      */
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
-        List<Path> paths =
-                listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                        .map(this::snapshotPath)
-                        .collect(Collectors.toList());
+        List<Path> paths = snapshotIdStream().map(this::snapshotPath).collect(Collectors.toList());
 
         List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>(paths.size()));
         collectSnapshots(
