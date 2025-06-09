@@ -186,6 +186,11 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     }
 
     private SimpleColStats toTimestampStats(Statistics<?> stats, int precision) {
+        // the typed statistics class for Int96 is BinaryStatistics
+        if (stats instanceof BinaryStatistics) {
+            return new SimpleColStats(null, null, stats.getNumNulls());
+        }
+
         if (precision <= 3) {
             LongStatistics longStats = (LongStatistics) stats;
             return new SimpleColStats(
