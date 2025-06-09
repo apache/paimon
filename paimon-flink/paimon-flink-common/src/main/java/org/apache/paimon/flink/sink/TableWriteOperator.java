@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
@@ -30,7 +29,6 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
 import java.io.IOException;
 import java.util.List;
@@ -104,12 +102,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         }
 
         return commitUser;
-    }
-
-    @Override
-    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
-        ProcessRecordAttributesUtil.processWithWrite(recordAttributes, write);
-        super.processRecordAttributes(recordAttributes);
     }
 
     protected abstract boolean containLogSystem();
