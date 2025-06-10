@@ -130,10 +130,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             String topLevelFieldName = updateColumnType.fieldNames()[0];
             TableSchema oldSchema =
                     schemaManager.latestOrThrow("Table does not exist. This is unexpected.");
-            DataType oldTopLevelFieldType =
-                    new RowType(oldSchema.fields()).getField(topLevelFieldName).type();
-            DataType newTopLevelFieldType =
-                    new RowType(newSchema.fields()).getField(topLevelFieldName).type();
+            DataType oldTopLevelFieldType = findTopLevelType(oldSchema.fields(), topLevelFieldName);
+            DataType newTopLevelFieldType = findTopLevelType(newSchema.fields(), topLevelFieldName);
 
             // For complex types, extract the top level type to check type context (e.g.,
             // ARRAY<BIGINT> instead of just BIGINT)
@@ -161,6 +159,15 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             + ", content "
                             + schemaChange);
         }
+    }
+
+    private DataType findTopLevelType(List<DataField> fields, String name) {
+        for (DataField field : fields) {
+            if (caseSensitive ? name.equals(field.name()) : name.equalsIgnoreCase(field.name())) {
+                return field.type();
+            }
+        }
+        throw new RuntimeException("Cannot find top level type " + name);
     }
 
     public static ConvertAction canConvert(
