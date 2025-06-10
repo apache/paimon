@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -257,5 +258,59 @@ public class TableCommitTest {
                 .hasMessageContaining(
                         "Cannot recover from this checkpoint because some files in the"
                                 + " snapshot that need to be resubmitted have been deleted");
+    }
+
+    @Test
+    public void testGiveUpCommitWhenTotalBucketsChanged() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(0, 0L));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        options = new Options(table.options());
+        options.set(CoreOptions.BUCKET, 2);
+        table = table.copy(tableSchema.copy(options.toMap()));
+
+        commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.getWrite().withIgnoreNumBucketCheck(true);
+            for (int i = 1; i < 10; i++) {
+                write.write(GenericRow.of(i, (long) i));
+            }
+            for (int i = 0; i < 2; i++) {
+                write.compact(BinaryRow.EMPTY_ROW, i, true);
+            }
+            assertThatThrownBy(() -> commit.commit(1, write.prepareCommit(true, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("changed from 1 to 2 without overwrite");
+        }
     }
 }
