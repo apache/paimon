@@ -319,7 +319,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             readAllEntriesFromChangedPartitions(
                                     latestSnapshot, appendTableFiles, compactTableFiles));
                     noConflictsOrFail(
-                            latestSnapshot.commitUser(), baseEntries, appendSimpleEntries);
+                            latestSnapshot.commitUser(),
+                            baseEntries,
+                            appendSimpleEntries,
+                            Snapshot.CommitKind.APPEND);
                     safeLatestSnapshotId = latestSnapshot.id();
                 }
 
@@ -352,7 +355,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     noConflictsOrFail(
                             latestSnapshot.commitUser(),
                             baseEntries,
-                            SimpleFileEntry.from(compactTableFiles));
+                            SimpleFileEntry.from(compactTableFiles),
+                            Snapshot.CommitKind.COMPACT);
                     // assume this compact commit follows just after the append commit created above
                     safeLatestSnapshotId += 1;
                 }
@@ -904,7 +908,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 noConflictsOrFail(
                         latestSnapshot.commitUser(),
                         baseDataFiles,
-                        SimpleFileEntry.from(deltaFiles));
+                        SimpleFileEntry.from(deltaFiles),
+                        commitKind);
             } catch (Exception e) {
                 if (retryResult != null) {
                     retryResult.cleanAll();
@@ -1252,9 +1257,46 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private void noConflictsOrFail(
             String baseCommitUser,
             List<SimpleFileEntry> baseEntries,
-            List<SimpleFileEntry> changes) {
+            List<SimpleFileEntry> changes,
+            Snapshot.CommitKind commitKind) {
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(changes);
+
+        if (commitKind != Snapshot.CommitKind.OVERWRITE) {
+            // total buckets within the same partition should remain the same
+            Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
+            for (SimpleFileEntry entry : allEntries) {
+                if (entry.totalBuckets() <= 0) {
+                    continue;
+                }
+
+                if (!totalBuckets.containsKey(entry.partition())) {
+                    totalBuckets.put(entry.partition(), entry.totalBuckets());
+                    continue;
+                }
+
+                int old = totalBuckets.get(entry.partition());
+                if (old == entry.totalBuckets()) {
+                    continue;
+                }
+
+                Pair<RuntimeException, RuntimeException> conflictException =
+                        createConflictException(
+                                "Total buckets of partition "
+                                        + entry.partition()
+                                        + " changed from "
+                                        + old
+                                        + " to "
+                                        + entry.totalBuckets()
+                                        + " without overwrite. Give up committing.",
+                                baseCommitUser,
+                                baseEntries,
+                                changes,
+                                null);
+                LOG.warn("", conflictException.getLeft());
+                throw conflictException.getRight();
+            }
+        }
 
         java.util.function.Consumer<Throwable> conflictHandler =
                 e -> {

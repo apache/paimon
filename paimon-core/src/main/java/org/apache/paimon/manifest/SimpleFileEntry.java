@@ -32,6 +32,7 @@ public class SimpleFileEntry implements FileEntry {
     private final FileKind kind;
     private final BinaryRow partition;
     private final int bucket;
+    private final int totalBuckets;
     private final int level;
     private final String fileName;
     private final List<String> extraFiles;
@@ -44,6 +45,7 @@ public class SimpleFileEntry implements FileEntry {
             FileKind kind,
             BinaryRow partition,
             int bucket,
+            int totalBuckets,
             int level,
             String fileName,
             List<String> extraFiles,
@@ -54,6 +56,7 @@ public class SimpleFileEntry implements FileEntry {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
+        this.totalBuckets = totalBuckets;
         this.level = level;
         this.fileName = fileName;
         this.extraFiles = extraFiles;
@@ -68,6 +71,7 @@ public class SimpleFileEntry implements FileEntry {
                 entry.kind(),
                 entry.partition(),
                 entry.bucket(),
+                entry.totalBuckets(),
                 entry.level(),
                 entry.fileName(),
                 entry.file().extraFiles(),
@@ -94,6 +98,11 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public int bucket() {
         return bucket;
+    }
+
+    @Override
+    public int totalBuckets() {
+        return totalBuckets;
     }
 
     @Override
@@ -143,6 +152,7 @@ public class SimpleFileEntry implements FileEntry {
         }
         SimpleFileEntry that = (SimpleFileEntry) o;
         return bucket == that.bucket
+                && totalBuckets == that.totalBuckets
                 && level == that.level
                 && kind == that.kind
                 && Objects.equals(partition, that.partition)
@@ -156,7 +166,16 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public int hashCode() {
         return Objects.hash(
-                kind, partition, bucket, level, fileName, extraFiles, minKey, maxKey, externalPath);
+                kind,
+                partition,
+                bucket,
+                totalBuckets,
+                level,
+                fileName,
+                extraFiles,
+                minKey,
+                maxKey,
+                externalPath);
     }
 
     @Override
@@ -168,6 +187,8 @@ public class SimpleFileEntry implements FileEntry {
                 + partition
                 + ", bucket="
                 + bucket
+                + ", totalBuckets="
+                + totalBuckets
                 + ", level="
                 + level
                 + ", fileName="
