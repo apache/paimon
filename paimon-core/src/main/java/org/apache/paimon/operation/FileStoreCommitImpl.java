@@ -334,6 +334,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
+                                committable.properties(),
                                 Snapshot.CommitKind.APPEND,
                                 noConflictCheck(),
                                 null);
@@ -369,6 +370,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
+                                committable.properties(),
                                 Snapshot.CommitKind.COMPACT,
                                 hasConflictChecked(safeLatestSnapshotId),
                                 null);
@@ -506,7 +508,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 appendHashIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.logOffsets());
+                                committable.logOffsets(),
+                                committable.properties());
                 generatedSnapshot += 1;
             }
 
@@ -519,6 +522,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
+                                committable.properties(),
                                 Snapshot.CommitKind.COMPACT,
                                 mustConflictCheck(),
                                 null);
@@ -572,12 +576,25 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwrite(
-                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                partitionFilter,
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>(),
+                new HashMap<>());
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
-        tryOverwrite(null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+        tryOverwrite(
+                null,
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>(),
+                new HashMap<>());
     }
 
     @Override
@@ -613,6 +630,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 emptyList(),
                 commitIdentifier,
                 null,
+                Collections.emptyMap(),
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
                 noConflictCheck(),
@@ -756,6 +774,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
+            Map<String, String> properties,
             Snapshot.CommitKind commitKind,
             ConflictCheck conflictCheck,
             @Nullable String statsFileName) {
@@ -773,6 +792,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             identifier,
                             watermark,
                             logOffsets,
+                            properties,
                             commitKind,
                             latestSnapshot,
                             conflictCheck,
@@ -804,7 +824,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets) {
+            Map<Integer, Long> logOffsets,
+            Map<String, String> properties) {
         // collect all files with overwrite
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
@@ -849,6 +870,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 identifier,
                 watermark,
                 logOffsets,
+                properties,
                 Snapshot.CommitKind.OVERWRITE,
                 mustConflictCheck(),
                 null);
@@ -863,6 +885,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
+            Map<String, String> properties,
             Snapshot.CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
             ConflictCheck conflictCheck,
@@ -1035,7 +1058,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             deltaRecordCount,
                             recordCount(changelogFiles),
                             currentWatermark,
-                            statsFileName);
+                            statsFileName,
+                            // if empty properties, just set to null
+                            properties.isEmpty() ? null : properties);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             if (retryResult != null) {
@@ -1183,7 +1208,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         0L,
                         0L,
                         latestSnapshot.watermark(),
-                        latestSnapshot.statistics());
+                        latestSnapshot.statistics(),
+                        latestSnapshot.properties());
 
         if (!commitSnapshotImpl(newSnapshot, emptyList())) {
             return new ManifestCompactResult(
