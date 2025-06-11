@@ -313,6 +313,10 @@ The sort parallelism is the same as the sink parallelism, you can dynamically sp
 
 {{< /tabs >}}
 
+{{< hint info >}}
+Sort Compact currently supports only bucket=-1 and batch mode.
+{{< /hint >}}
+
 ## Historical Partition Compact
 
 You can run the following command to submit a compaction job for partition which has not received any new data for
