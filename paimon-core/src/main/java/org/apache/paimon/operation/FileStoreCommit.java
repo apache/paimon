@@ -39,14 +39,8 @@ public interface FileStoreCommit extends AutoCloseable {
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 
-    /** Commit from manifest committable. */
-    void commit(ManifestCommittable committable, Map<String, String> properties);
-
     /** Commit from manifest committable with checkAppendFiles. */
-    void commit(
-            ManifestCommittable committable,
-            Map<String, String> properties,
-            boolean checkAppendFiles);
+    void commit(ManifestCommittable committable, boolean checkAppendFiles);
 
     /**
      * Overwrite from manifest committable and partition.

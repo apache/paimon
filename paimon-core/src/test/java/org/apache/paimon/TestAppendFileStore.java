@@ -101,7 +101,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);
         }
-        newCommit().commit(committable, Collections.emptyMap());
+        newCommit().commit(committable, false);
     }
 
     public CommitMessage removeIndexFiles(
