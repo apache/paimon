@@ -80,7 +80,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
-import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for REST. */
@@ -426,7 +426,7 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateAutoCreateClose(schema.options());
+            validateCreateTable(schema);
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {

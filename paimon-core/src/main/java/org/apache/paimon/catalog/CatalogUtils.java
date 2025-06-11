@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -48,9 +49,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 
+import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGCY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -127,15 +130,21 @@ public class CatalogUtils {
         }
     }
 
-    public static void validateAutoCreateClose(Map<String, String> options) {
+    public static void validateCreateTable(Schema schema) {
+        Options options = Options.fromMap(schema.options());
         checkArgument(
-                !Boolean.parseBoolean(
-                        options.getOrDefault(
-                                CoreOptions.AUTO_CREATE.key(),
-                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
-                String.format(
-                        "The value of %s property should be %s.",
-                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+                !options.get(AUTO_CREATE),
+                "The value of %s property should be %s.",
+                AUTO_CREATE.key(),
+                Boolean.FALSE);
+
+        TableType tableType = options.get(CoreOptions.TYPE);
+        if (tableType.equals(TableType.FORMAT_TABLE)) {
+            checkArgument(
+                    options.get(PRIMARY_KEY) == null,
+                    "Cannot define %s for format table.",
+                    PRIMARY_KEY.key());
+        }
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
