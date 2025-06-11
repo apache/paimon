@@ -122,6 +122,12 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                             hadoopOptions.get(key));
                 }
             }
+            // Add extended user agent if user-agent is configured
+            if ("header.user-agent".equals(key.toLowerCase())) {
+                String value = context.options().get(key);
+                LOG.debug("Adding config entry for fs.oss.user.agent.extended as {} to Hadoop config", value);
+                hadoopOptions.set("fs.oss.user.agent.extended", value);
+            }
         }
     }
 
