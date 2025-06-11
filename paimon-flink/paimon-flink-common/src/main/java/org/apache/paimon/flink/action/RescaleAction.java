@@ -93,7 +93,6 @@ public class RescaleAction extends TableActionBase {
         // If someone commits while the rescale job is running, this commit will be lost.
         // So we use strict mode to make sure nothing is lost.
         Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMMIT_STRICT_MODE.key(), "true");
         dynamicOptions.put(
                 CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
                 String.valueOf(snapshot.id()));

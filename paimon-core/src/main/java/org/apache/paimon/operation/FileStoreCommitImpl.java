@@ -141,8 +141,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final BucketMode bucketMode;
     private final long commitTimeout;
     private final int commitMaxRetries;
-    private final boolean strictMode;
-    private long strictModeLastSafeSnapshot;
+    @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
 
     private boolean ignoreEmptyCommit;
@@ -177,8 +176,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
             long commitTimeout,
-            boolean strictMode,
-            long strictModeLastSafeSnapshot) {
+            @Nullable Long strictModeLastSafeSnapshot) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -207,7 +205,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
         this.commitTimeout = commitTimeout;
-        this.strictMode = strictMode;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
         this.partitionComputer =
                 new InternalRowPartitionComputer(
@@ -877,7 +874,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
 
-        if (strictMode && strictModeLastSafeSnapshot >= 0) {
+        if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
                 Snapshot snapshot = snapshotManager.snapshot(id);
                 if ((snapshot.commitKind() == Snapshot.CommitKind.COMPACT
@@ -893,7 +890,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     snapshot.commitKind().name(),
                                     id,
                                     snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE.key()));
+                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
                 }
             }
             strictModeLastSafeSnapshot = newSnapshotId - 1;
@@ -1089,7 +1086,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     commitUser,
                     identifier,
                     commitKind.name());
-            strictModeLastSafeSnapshot = newSnapshot.id();
+            if (strictModeLastSafeSnapshot != null) {
+                strictModeLastSafeSnapshot = newSnapshot.id();
+            }
             commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
             return new SuccessResult();
         }

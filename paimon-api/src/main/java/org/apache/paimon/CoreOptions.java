@@ -1744,22 +1744,13 @@ public class CoreOptions implements Serializable {
                             "If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. "
                                     + "Users can enable this option to disable explicit type casting");
 
-    public static final ConfigOption<Boolean> COMMIT_STRICT_MODE =
-            ConfigOptions.key("commit.strict-mode")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "If true, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot "
-                                    + "between its last and current commit. If found, commit will be aborted.");
-
-    public static final ConfigOption<Integer> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
+    public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
             ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
-                    .intType()
-                    .defaultValue(-1)
+                    .longType()
+                    .noDefaultValue()
                     .withDescription(
-                            "When "
-                                    + COMMIT_STRICT_MODE.key()
-                                    + " is set to true, starting checking from the snapshot after this one. "
+                            "If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, "
+                                    + "starting from the snapshot after this one. If found, commit will be aborted. "
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
     private final Options options;
@@ -2735,12 +2726,8 @@ public class CoreOptions implements Serializable {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
-    public boolean commitStrictMode() {
-        return options.get(COMMIT_STRICT_MODE);
-    }
-
-    public int commitStrictModeLastSafeSnapshot() {
-        return options.get(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+    public Optional<Long> commitStrictModeLastSafeSnapshot() {
+        return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
     }
 
     /** Specifies the merge engine for table with primary key. */
