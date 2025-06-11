@@ -629,6 +629,40 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 .containsExactlyInAnyOrder("+I[1, 40]");
     }
 
+    @Test
+    public void testAvroUnsupportedTypes() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v TIMESTAMP(9),\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T VALUES (1, TIMESTAMP '2025-06-11 16:35:45.123456789'), (2, CAST(NULL AS TIMESTAMP(9)))")
+                .await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 2025-06-11T16:35:45.123456789]", "+I[2, null]");
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
