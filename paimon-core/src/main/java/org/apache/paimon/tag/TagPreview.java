@@ -20,7 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.DataTable;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -67,7 +67,7 @@ public class TagPreview {
         return Optional.of(tag);
     }
 
-    public Map<String, String> timeTravel(FileStoreTable table, String tag) {
+    public Map<String, String> timeTravel(DataTable table, String tag) {
         TagManager tagManager = table.tagManager();
         if (tagManager.tagExists(tag)) {
             return singletonMap(SCAN_TAG_NAME.key(), tag);
