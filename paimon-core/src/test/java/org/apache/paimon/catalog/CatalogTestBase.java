@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
@@ -437,6 +438,17 @@ public abstract class CatalogTestBase {
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("The value of auto-create property should be false.");
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
+
+        // Create table throws Exception when type = format-table.
+        if (supportsFormatTable()) {
+            schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+            schema.options().put(CoreOptions.PRIMARY_KEY.key(), "a");
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> catalog.createTable(identifier, schema, false))
+                    .withMessage("Cannot define primary-key for format table.");
+            schema.options().remove(CoreOptions.TYPE.key());
+            schema.options().remove(CoreOptions.PRIMARY_KEY.key());
+        }
 
         // Create table and check the schema
         schema.options().put("k1", "v1");
