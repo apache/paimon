@@ -97,8 +97,8 @@ import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleS
  * <p>This class provides an atomic commit method to the user.
  *
  * <ol>
- *   <li>Before calling {@link #commit(ManifestCommittable, Map)}, if user cannot determine if this
- *       commit is done before, user should first call {@link #filterCommitted}.
+ *   <li>Before calling {@link #commit}, if user cannot determine if this commit is done before,
+ *       user should first call {@link #filterCommitted}.
  *   <li>Before committing, it will first check for conflicts by checking if all files to be removed
  *       currently exists, and if modified files have overlapping key ranges with existing files.
  *   <li>After that it use the external {@link SnapshotCommit} (if provided) or the atomic rename of
@@ -260,21 +260,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void commit(ManifestCommittable committable, Map<String, String> properties) {
-        commit(committable, properties, false);
-    }
-
-    @Override
-    public void commit(
-            ManifestCommittable committable,
-            Map<String, String> properties,
-            boolean checkAppendFiles) {
+    public void commit(ManifestCommittable committable, boolean checkAppendFiles) {
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
                 committable.fileCommittables().size());
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Ready to commit\n{}", committable.toString());
+            LOG.debug("Ready to commit\n{}", committable);
         }
 
         long started = System.nanoTime();
