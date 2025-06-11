@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.avro.AvroSchemaConverter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -40,6 +41,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -71,8 +73,13 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
         super(snapshotManager, scan, null, null, tableName, options, partitionType);
 
         Options newOptions = new Options(options.toMap());
-        // use avro for postpone bucket
-        newOptions.set(CoreOptions.FILE_FORMAT, "avro");
+        try {
+            // use avro for postpone bucket
+            AvroSchemaConverter.convertToSchema(schema.logicalRowType(), new HashMap<>());
+            newOptions.set(CoreOptions.FILE_FORMAT, "avro");
+        } catch (Exception e) {
+            // ignored, avro does not support certain types in schema
+        }
         newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
         // Each writer should have its unique prefix, so files from the same writer can be consumed
         // by the same compaction reader to keep the input order.
