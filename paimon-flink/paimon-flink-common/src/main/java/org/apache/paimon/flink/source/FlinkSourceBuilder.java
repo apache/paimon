@@ -78,6 +78,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @since 0.8
  */
 public class FlinkSourceBuilder {
+
     private static final String SOURCE_NAME = "Source";
 
     private final Table table;
@@ -295,7 +296,7 @@ public class FlinkSourceBuilder {
 
         if (sourceBounded) {
             if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
-                return buildContinuousStreamOperator(true);
+                return buildDedicatedSplitGenSource(true);
             }
             return buildStaticFileSource();
         }
@@ -328,14 +329,14 @@ public class FlinkSourceBuilder {
             } else if (conf.contains(CoreOptions.CONSUMER_ID)
                     && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
                             == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
-                return buildContinuousStreamOperator(false);
+                return buildDedicatedSplitGenSource(false);
             } else {
                 return buildContinuousFileSource();
             }
         }
     }
 
-    private DataStream<RowData> buildContinuousStreamOperator(boolean isBounded) {
+    private DataStream<RowData> buildDedicatedSplitGenSource(boolean isBounded) {
         DataStream<RowData> dataStream;
         if (limit != null && !isBounded) {
             throw new IllegalArgumentException(

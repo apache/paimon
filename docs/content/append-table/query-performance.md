@@ -75,14 +75,3 @@ we use the procedure, you should config appropriate configurations in target tab
 `file-index.<filter-type>.columns` to the table.
 
 How to invoke: see [flink procedures]({{< ref "flink/procedures#procedures" >}}) 
-
-## Dedicated Split Generation
-When Paimon table snapshots contain large amount of source splits, Flink jobs reading from this table might endure long initialization time or even OOM in JobManagers. In this case, you can configure `'scan.dedicated-split-generation' = 'true'` to avoid such problem. This option would enable executing the source split generation process in a dedicated subtask that runs on TaskManager, instead of in the source coordinator on the JobManager.
-
-Note that this feature could have some side effects on your Flink jobs. For example:
-
-1. It will change the DAG of the flink job, thus breaking checkpoint compatibility if enabled on an existing job.
-2. It may lead to the Flink AdaptiveBatchScheduler inferring a small parallelism for the source reader operator. you can configure `scan.infer-parallelism` to avoid this possible drawback.
-3. The failover strategy of the Flink job would be forced into global failover instead of regional failover, given that the dedicated source split generation task would be connected to all downstream subtasks.
-
-So please make sure these side effects are acceptable to you before enabling it.
