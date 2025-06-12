@@ -77,10 +77,10 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             // use avro for postpone bucket
             AvroSchemaConverter.convertToSchema(schema.logicalRowType(), new HashMap<>());
             newOptions.set(CoreOptions.FILE_FORMAT, "avro");
+            newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
         } catch (Exception e) {
             // ignored, avro does not support certain types in schema
         }
-        newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
         // Each writer should have its unique prefix, so files from the same writer can be consumed
         // by the same compaction reader to keep the input order.
         // Also note that, for Paimon CDC, this object might be created multiple times in the same
