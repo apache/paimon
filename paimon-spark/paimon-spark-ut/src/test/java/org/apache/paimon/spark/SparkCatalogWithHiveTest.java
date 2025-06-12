@@ -109,6 +109,7 @@ public class SparkCatalogWithHiveTest {
                                     .collect(Collectors.toList()))
                     .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
         }
+        spark.stop();
     }
 
     @Test
