@@ -112,7 +112,7 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     public void execute(Runnable command) {
         try {
             this.queueingPermits.acquire();
-        } catch (InterruptedException var3) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
 
@@ -135,11 +135,11 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     public String toString() {
         return "SemaphoredDelegatingExecutor{"
                 + "permitCount="
-                + this.getPermitCount()
+                + getPermitCount()
                 + ", available="
-                + this.getAvailablePermits()
+                + getAvailablePermits()
                 + ", waiting="
-                + this.getWaitingCount()
+                + getWaitingCount()
                 + '}';
     }
 
