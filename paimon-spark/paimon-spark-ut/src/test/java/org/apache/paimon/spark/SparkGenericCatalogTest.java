@@ -28,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,7 +83,7 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testSparkSessionReload() {
+    public void testSparkSessionReload() throws IOException {
         spark.sql("CREATE DATABASE my_db");
         spark.close();
 

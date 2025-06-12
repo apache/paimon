@@ -38,6 +38,7 @@ import org.apache.paimon.table.FormatTableOptions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -110,7 +111,7 @@ public class SparkCatalog extends SparkBaseCatalog
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options),
-                        SparkSession.active().sessionState().newHadoopConf());
+                        PaimonSparkSession$.MODULE$.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
@@ -475,6 +476,7 @@ public class SparkCatalog extends SparkBaseCatalog
     }
 
     private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+        SparkSession spark = PaimonSparkSession$.MODULE$.active();
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
         StructType partitionSchema =
                 SparkTypeUtils.fromPaimonRowType(
@@ -488,7 +490,7 @@ public class SparkCatalog extends SparkBaseCatalog
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -497,7 +499,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.ORC) {
             return new PartitionedOrcTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -506,7 +508,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.PARQUET) {
             return new PartitionedParquetTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -515,7 +517,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.JSON) {
             return new PartitionedJsonTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),

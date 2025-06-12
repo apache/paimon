@@ -22,9 +22,10 @@ import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -42,6 +43,8 @@ import java.util.{Map => JMap}
  */
 trait SparkShim {
 
+  def classicApi: ClassicApi
+
   def createSparkParser(delegate: ParserInterface): ParserInterface
 
   def createCustomResolution(spark: SparkSession): Rule[LogicalPlan]
@@ -49,10 +52,6 @@ trait SparkShim {
   def createSparkInternalRow(rowType: RowType): SparkInternalRow
 
   def createSparkArrayData(elementType: DataType): SparkArrayData
-
-  def supportsHashAggregate(
-      aggregateBufferAttributes: Seq[Attribute],
-      groupingExpression: Seq[Expression]): Boolean
 
   def createTable(
       tableCatalog: TableCatalog,
@@ -67,9 +66,13 @@ trait SparkShim {
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef
 
-  def column(expr: Expression): Column
+  def supportsHashAggregate(
+      aggregateBufferAttributes: Seq[Attribute],
+      groupingExpression: Seq[Expression]): Boolean
 
-  def convertToExpression(spark: SparkSession, column: Column): Expression
+  def supportsObjectHashAggregate(
+      aggregateExpressions: Seq[AggregateExpression],
+      groupByExpressions: Seq[Expression]): Boolean
 
   // for variant
   def toPaimonVariant(o: Object): Variant
