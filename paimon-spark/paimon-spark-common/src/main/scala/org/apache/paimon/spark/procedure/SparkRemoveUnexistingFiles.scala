@@ -27,7 +27,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, CommitMessageSerializer}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
 import java.util
@@ -110,7 +110,7 @@ object SparkRemoveUnexistingFiles extends SQLConfHelper {
       tableName: String,
       dryRun: Boolean,
       parallelismOpt: Integer): Array[String] = {
-    val spark = SparkSession.active
+    val spark = PaimonSparkSession.active
     val parallelism = if (parallelismOpt == null) {
       Math.max(spark.sparkContext.defaultParallelism, conf.numShufflePartitions)
     } else {

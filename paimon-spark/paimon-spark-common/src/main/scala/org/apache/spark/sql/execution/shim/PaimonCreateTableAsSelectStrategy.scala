@@ -22,17 +22,17 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.FormatTableCatalog
 
-import org.apache.spark.sql.{SparkSession, Strategy}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog
-import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan}
+import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
 
 import scala.collection.JavaConverters._
 
 case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
-  extends Strategy
+  extends SparkStrategy
   with PaimonStrategyHelper {
 
   import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._

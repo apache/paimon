@@ -20,7 +20,7 @@ package org.apache.spark.sql.connector.catalog
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalog
 import org.apache.spark.sql.connector.catalog.CatalogV2Util
 import org.apache.spark.sql.internal.StaticSQLConf.CATALOG_IMPLEMENTATION
@@ -30,7 +30,7 @@ object PaimonCatalogUtils {
 
   def buildExternalCatalog(conf: SparkConf, hadoopConf: Configuration): ExternalCatalog = {
     val externalCatalogClassName =
-      if (SparkSession.active.conf.get(CATALOG_IMPLEMENTATION.key).equals("hive")) {
+      if (PaimonSparkSession.active.conf.get(CATALOG_IMPLEMENTATION.key).equals("hive")) {
         "org.apache.spark.sql.hive.HiveExternalCatalog"
       } else {
         "org.apache.spark.sql.catalyst.catalog.InMemoryCatalog"

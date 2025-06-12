@@ -113,6 +113,6 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
 
 object SparkArrayData {
   def create(elementType: PaimonDataType): SparkArrayData = {
-    SparkShimLoader.getSparkShim.createSparkArrayData(elementType)
+    SparkShimLoader.shim.createSparkArrayData(elementType)
   }
 }

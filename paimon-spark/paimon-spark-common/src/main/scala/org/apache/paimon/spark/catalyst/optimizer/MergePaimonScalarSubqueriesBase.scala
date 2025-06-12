@@ -282,7 +282,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
         Some(scan2)
       } else {
         val mergedRequiredSchema = StructType(
-          (scan2.requiredSchema.fields.toSet ++ scan1.requiredSchema.fields.toSet).toSeq)
+          (scan2.requiredSchema.fields.toSet ++ scan1.requiredSchema.fields.toSet).toArray)
         Some(scan2.copy(requiredSchema = mergedRequiredSchema))
       }
     } else {
@@ -334,7 +334,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
 
   // Only allow aggregates of the same implementation because merging different implementations
   // could cause performance regression.
-  private def supportedAggregateMerge(newPlan: Aggregate, cachedPlan: Aggregate) = {
+  private def supportedAggregateMerge(newPlan: Aggregate, cachedPlan: Aggregate): Boolean = {
     val aggregateExpressionsSeq = Seq(newPlan, cachedPlan).map {
       plan => plan.aggregateExpressions.flatMap(_.collect { case a: AggregateExpression => a })
     }
@@ -343,7 +343,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     val Seq(newPlanSupportsHashAggregate, cachedPlanSupportsHashAggregate) =
       aggregateExpressionsSeq.zip(groupByExpressionSeq).map {
         case (aggregateExpressions, groupByExpressions) =>
-          SparkShimLoader.getSparkShim.supportsHashAggregate(
+          SparkShimLoader.shim.supportsHashAggregate(
             aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes),
             groupByExpressions)
       }
@@ -351,8 +351,11 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     newPlanSupportsHashAggregate && cachedPlanSupportsHashAggregate ||
     newPlanSupportsHashAggregate == cachedPlanSupportsHashAggregate && {
       val Seq(newPlanSupportsObjectHashAggregate, cachedPlanSupportsObjectHashAggregate) =
-        aggregateExpressionsSeq.map(
-          aggregateExpressions => Aggregate.supportsObjectHashAggregate(aggregateExpressions))
+        aggregateExpressionsSeq.zip(groupByExpressionSeq).map {
+          case (aggregateExpressions, groupByExpressions: Seq[Expression]) =>
+            SparkShimLoader.shim
+              .supportsObjectHashAggregate(aggregateExpressions, groupByExpressions)
+        }
       newPlanSupportsObjectHashAggregate && cachedPlanSupportsObjectHashAggregate ||
       newPlanSupportsObjectHashAggregate == cachedPlanSupportsObjectHashAggregate
     }
@@ -371,7 +374,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
               val subqueryCTE = header.plan.asInstanceOf[CTERelationDef]
               GetStructField(
                 createScalarSubquery(
-                  SparkShimLoader.getSparkShim.createCTERelationRef(
+                  SparkShimLoader.shim.createCTERelationRef(
                     subqueryCTE.id,
                     resolved = true,
                     subqueryCTE.output,

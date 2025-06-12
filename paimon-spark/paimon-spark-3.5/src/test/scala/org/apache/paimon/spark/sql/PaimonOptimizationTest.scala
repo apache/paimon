@@ -30,7 +30,7 @@ class PaimonOptimizationTest extends PaimonOptimizationTestBase {
       fieldIndex: Int): NamedExpression = {
     GetStructField(
       ScalarSubquery(
-        SparkShimLoader.getSparkShim
+        SparkShimLoader.shim
           .createCTERelationRef(cteIndex, resolved = true, output.toSeq, isStreaming = false)),
       fieldIndex)
       .as("scalarsubquery()")
