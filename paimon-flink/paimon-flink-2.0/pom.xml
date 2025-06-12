@@ -45,6 +45,12 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink2-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-streaming-java</artifactId>
             <version>${flink.version}</version>
@@ -75,6 +81,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-flink-common</include>
+                                    <include>org.apache.paimon:paimon-flink2-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
