@@ -56,6 +56,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -188,6 +189,11 @@ public class BucketFunctionTest {
     @AfterEach
     public void after() {
         spark.sql(String.format("DROP TABLE IF EXISTS %s", TABLE_NAME));
+    }
+
+    @AfterAll
+    public static void tearDown() {
+        spark.stop();
     }
 
     public static void setupTable(String... bucketColumns) {
