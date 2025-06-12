@@ -60,12 +60,15 @@ public class SparkGenericCatalogWithHiveTest {
                         .config(
                                 "spark.sql.catalog.spark_catalog",
                                 SparkGenericCatalog.class.getName())
+                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
                         .config(
                                 "spark.sql.extensions",
                                 "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
 
+        spark.sql("USE spark_catalog");
         spark.sql("CREATE DATABASE my_db");
         spark.sql("USE my_db");
         spark.sql(
@@ -80,29 +83,22 @@ public class SparkGenericCatalogWithHiveTest {
                                 .map(s -> s.get(1))
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
-        spark.close();
 
-        // secondly, we close catalog with hive metastore, and start a filesystem metastore to check
-        // the result.
-        SparkSession spark2 =
-                SparkSession.builder()
-                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
-                        .config("spark.sql.catalogImplementation", "in-memory")
-                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]")
-                        .getOrCreate();
-        spark2.sql("USE paimon");
-        spark2.sql("USE my_db");
-        assertThat(spark2.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
+        // secondly, use filesystem metastore to check the result.
+        spark.sql("USE paimon");
+        spark.sql("USE my_db");
+        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
                 .containsExactlyInAnyOrder("[default]", "[my_db]");
         assertThat(
-                        spark2.sql("SHOW TABLES").collectAsList().stream()
+                        spark.sql("SHOW TABLES").collectAsList().stream()
                                 .map(s -> s.get(1))
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
+
+        spark.sql("USE spark_catalog");
+        spark.sql("DROP TABLE my_db.t1");
+        spark.sql("DROP DATABASE my_db");
+        spark.close();
     }
 
     @Test
