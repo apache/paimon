@@ -815,4 +815,42 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT rowkind, b FROM `test_table$binlog`"))
                 .containsExactly(Row.of("+I", new String[] {"A"}));
     }
+
+    @Test
+    public void testBatchReadSourceWithSnapshot() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333), (4, 44, 444)");
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1', 'scan.dedicated-split-generation'='true') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+
+        batchSql("INSERT INTO T VALUES (5, 55, 555), (6, 66, 666)");
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */ limit 2"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testBatchReadSourceWithoutSnapshot() {
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
+                .hasSize(0);
+    }
 }
