@@ -44,7 +44,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogTableOwnerType;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -123,7 +122,6 @@ import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
-import static org.apache.paimon.options.CatalogOptions.TABLE_OWNER_TYPE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
@@ -1361,31 +1359,33 @@ public class HiveCatalog extends AbstractCatalog {
         return table != null && TableType.EXTERNAL_TABLE.name().equals(table.getTableType());
     }
 
+    private static String currentUser() {
+        String username = null;
+        try {
+            username = UserGroupInformation.getCurrentUser().getShortUserName();
+        } catch (IOException e) {
+            LOG.warn("Failed to get Hadoop user", e);
+        }
+
+        if (username != null) {
+            return username;
+        } else {
+            LOG.warn("Hadoop user is null, defaulting to user.name");
+            return System.getProperty("user.name");
+        }
+    }
+
     private Table newHmsTable(
             Identifier identifier,
             Map<String, String> tableParameters,
             @Nullable FormatTable.Format provider,
             boolean externalTable) {
         long currentTimeMillis = System.currentTimeMillis();
-
-        CatalogTableOwnerType ownerType = options.get(TABLE_OWNER_TYPE);
-        String user;
-        if (ownerType == CatalogTableOwnerType.UGI) {
-            try {
-                UserGroupInformation currentUGI = UserGroupInformation.getCurrentUser();
-                user = currentUGI.getShortUserName();
-            } catch (Exception e) {
-                user = System.getProperty("user.name");
-            }
-        } else {
-            user = System.getProperty("user.name");
-        }
-
         Table table =
                 new Table(
                         identifier.getTableName(),
                         identifier.getDatabaseName(),
-                        user,
+                        currentUser(),
                         (int) (currentTimeMillis / 1000),
                         (int) (currentTimeMillis / 1000),
                         Integer.MAX_VALUE,
