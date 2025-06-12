@@ -74,6 +74,7 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1358,6 +1359,22 @@ public class HiveCatalog extends AbstractCatalog {
         return table != null && TableType.EXTERNAL_TABLE.name().equals(table.getTableType());
     }
 
+    private static String currentUser() {
+        String username = null;
+        try {
+            username = UserGroupInformation.getCurrentUser().getShortUserName();
+        } catch (IOException e) {
+            LOG.warn("Failed to get Hadoop user", e);
+        }
+
+        if (username != null) {
+            return username;
+        } else {
+            LOG.warn("Hadoop user is null, defaulting to user.name");
+            return System.getProperty("user.name");
+        }
+    }
+
     private Table newHmsTable(
             Identifier identifier,
             Map<String, String> tableParameters,
@@ -1368,8 +1385,7 @@ public class HiveCatalog extends AbstractCatalog {
                 new Table(
                         identifier.getTableName(),
                         identifier.getDatabaseName(),
-                        // current linux user
-                        System.getProperty("user.name"),
+                        currentUser(),
                         (int) (currentTimeMillis / 1000),
                         (int) (currentTimeMillis / 1000),
                         Integer.MAX_VALUE,
