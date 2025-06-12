@@ -224,12 +224,12 @@ public class FlinkConnectorOptions {
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
                                     + " is used to calculate aggregation and the input is not complete changelog.");
 
-    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION =
-            key("streaming-read.shuffle-bucket-with-partition")
+    public static final ConfigOption<Boolean> READ_SHUFFLE_BUCKET_WITH_PARTITION =
+            key("read.shuffle-bucket-with-partition")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription(
-                            "Whether shuffle by partition and bucket when streaming read.");
+                    .withFallbackKeys("streaming-read.shuffle-bucket-with-partition")
+                    .withDescription("Whether shuffle by partition and bucket when read.");
 
     /**
      * Weight of writer buffer in managed memory, Flink will compute the memory size for writer
@@ -507,6 +507,13 @@ public class FlinkConnectorOptions {
                     .defaultValue(1)
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
+
+    public static final ConfigOption<Boolean> SCAN_DEDICATED_SPLIT_GENERATION =
+            key("scan.dedicated-split-generation")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, the split generation process would be performed during runtime on a Flink task, instead of on the JobManager during initialization phase.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

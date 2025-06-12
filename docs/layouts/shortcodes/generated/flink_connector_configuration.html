@@ -123,10 +123,22 @@ under the License.
             <td>If true, it will add a compact coordinator and worker operator after the writer operator,in order to compact several changelog files (for primary key tables) or newly created data files (for unaware bucket tables) from the same partition into large ones, which can decrease the number of small files.</td>
         </tr>
         <tr>
+            <td><h5>read.shuffle-bucket-with-partition</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether shuffle by partition and bucket when read.</td>
+        </tr>
+        <tr>
             <td><h5>scan.bounded</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Bounded mode for Paimon consumer. By default, Paimon automatically selects bounded mode based on the mode of the Flink job.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.dedicated-split-generation</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the split generation process would be performed during runtime on a Flink task, instead of on the JobManager during initialization phase.</td>
         </tr>
         <tr>
             <td><h5>scan.infer-parallelism</h5></td>
@@ -313,12 +325,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Set the uid suffix for the source operators. After setting, the uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
-        </tr>
-        <tr>
-            <td><h5>streaming-read.shuffle-bucket-with-partition</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether shuffle by partition and bucket when streaming read.</td>
         </tr>
         <tr>
             <td><h5>unaware-bucket.compaction.parallelism</h5></td>

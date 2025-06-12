@@ -294,6 +294,9 @@ public class FlinkSourceBuilder {
         }
 
         if (sourceBounded) {
+            if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
+                return buildContinuousStreamOperator(true);
+            }
             return buildStaticFileSource();
         }
         TableScanUtils.streamingReadingValidate(table);
@@ -325,16 +328,16 @@ public class FlinkSourceBuilder {
             } else if (conf.contains(CoreOptions.CONSUMER_ID)
                     && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
                             == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
-                return buildContinuousStreamOperator();
+                return buildContinuousStreamOperator(false);
             } else {
                 return buildContinuousFileSource();
             }
         }
     }
 
-    private DataStream<RowData> buildContinuousStreamOperator() {
+    private DataStream<RowData> buildContinuousStreamOperator(boolean isBounded) {
         DataStream<RowData> dataStream;
-        if (limit != null) {
+        if (limit != null && !isBounded) {
             throw new IllegalArgumentException(
                     "Cannot limit streaming source, please use batch execution mode.");
         }
@@ -346,10 +349,11 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
-                        conf.get(
-                                FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
+                        conf.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
                         unawareBucket,
-                        outerProject());
+                        outerProject(),
+                        isBounded,
+                        limit);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

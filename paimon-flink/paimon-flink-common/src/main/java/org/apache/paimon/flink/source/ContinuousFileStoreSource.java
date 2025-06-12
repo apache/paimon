@@ -111,7 +111,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 scan,
                 unawareBucket,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
-                options.get(FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
+                options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
                 options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
     }
 }
