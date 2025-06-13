@@ -32,16 +32,12 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** Util for REST. */
 public class RESTUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTUtil.class);
-
-    private static final String EMPTY_PARTITION_NAME = "";
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
@@ -135,17 +131,5 @@ public class RESTUtil {
                 }
             }
         }
-    }
-
-    public static String buildPartitionName(Map<String, String> partitionSpec) {
-
-        if (partitionSpec.isEmpty()) {
-            return EMPTY_PARTITION_NAME;
-        }
-        List<String> partitionName =
-                partitionSpec.keySet().stream()
-                        .map(key -> key + "=" + partitionSpec.get(key))
-                        .collect(Collectors.toList());
-        return String.join("/", partitionName);
     }
 }
