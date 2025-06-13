@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,7 +76,15 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 values.add(String.format("(%d, %d, %d)", i, j, i * numKeys + j));
             }
         }
-        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (random.nextBoolean()) {
+            tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        } else {
+            tEnv.executeSql(
+                            "INSERT INTO T /*+ OPTIONS('partition.sink-strategy'='hash') */ VALUES "
+                                    + String.join(", ", values))
+                    .await();
+        }
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
 
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
