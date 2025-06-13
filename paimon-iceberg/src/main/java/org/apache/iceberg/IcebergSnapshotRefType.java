@@ -16,21 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.iceberg;
 
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+/** doc. */
+public class IcebergSnapshotRefType {
+    public static SnapshotRefType branchType() {
+        return SnapshotRefType.BRANCH;
+    }
 
-import javax.annotation.Nullable;
-
-/**
- * Commit Iceberg metadata to metastore. Each kind of Iceberg catalog should have its own
- * implementation.
- */
-public interface IcebergMetadataCommitter {
-
-    void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath);
-
-    void commitMetadata(
-            IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata);
+    public static SnapshotRefType tagType() {
+        return SnapshotRefType.TAG;
+    }
 }

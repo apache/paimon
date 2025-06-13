@@ -208,6 +208,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 return IcebergOptions.StorageLocation.TABLE_LOCATION;
             case HIVE_CATALOG:
             case HADOOP_CATALOG:
+            case REST_CATALOG:
                 return IcebergOptions.StorageLocation.CATALOG_STORAGE;
             default:
                 throw new UnsupportedOperationException(
@@ -380,6 +381,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         if (metadataCommitter != null) {
             metadataCommitter.commitMetadata(metadataPath, null);
+            metadataCommitter.commitMetadata(metadata, null);
         }
     }
 
@@ -620,6 +622,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         if (metadataCommitter != null) {
             metadataCommitter.commitMetadata(metadataPath, baseMetadataPath);
+            metadataCommitter.commitMetadata(metadata, null);
         }
     }
 

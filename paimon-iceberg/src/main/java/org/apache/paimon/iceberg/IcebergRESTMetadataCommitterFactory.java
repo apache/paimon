@@ -18,19 +18,17 @@
 
 package org.apache.paimon.iceberg;
 
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.table.FileStoreTable;
 
-import javax.annotation.Nullable;
+/** doc. */
+public class IcebergRESTMetadataCommitterFactory implements IcebergMetadataCommitterFactory {
+    @Override
+    public String identifier() {
+        return IcebergOptions.StorageType.REST_CATALOG.toString();
+    }
 
-/**
- * Commit Iceberg metadata to metastore. Each kind of Iceberg catalog should have its own
- * implementation.
- */
-public interface IcebergMetadataCommitter {
-
-    void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath);
-
-    void commitMetadata(
-            IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata);
+    @Override
+    public IcebergMetadataCommitter create(FileStoreTable table) {
+        return new IcebergRestMetadataCommitter(table);
+    }
 }
