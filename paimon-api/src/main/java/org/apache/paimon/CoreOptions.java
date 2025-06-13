@@ -1325,7 +1325,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text(
-                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                            "This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance."
                                                     + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
                                     .list(
                                             text(

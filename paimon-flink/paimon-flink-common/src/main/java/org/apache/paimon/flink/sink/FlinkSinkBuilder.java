@@ -30,6 +30,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -291,8 +292,14 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        DataStream<InternalRow> partitioned =
-                partition(input, new PostponeBucketChannelComputer(table.schema()), parallelism);
+        ChannelComputer<InternalRow> channelComputer;
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        } else {
+            channelComputer = new PostponeBucketChannelComputer(table.schema());
+        }
+        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
         FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, null);
         return sink.sinkFrom(partitioned);
     }
