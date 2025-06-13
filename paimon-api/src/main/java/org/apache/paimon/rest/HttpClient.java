@@ -59,6 +59,7 @@ public class HttpClient implements RESTClient {
                     .addInterceptor(new LoggingInterceptor())
                     .connectTimeout(Duration.ofMinutes(3))
                     .readTimeout(Duration.ofMinutes(3))
+                    .writeTimeout(Duration.ofMinutes(3))
                     .build();
 
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
