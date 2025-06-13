@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.transform.BucketStrategy;
+
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
@@ -32,11 +36,18 @@ public class BucketSpec {
     private final BucketMode bucketMode;
     private final List<String> bucketKeys;
     private final int numBuckets;
+    // null if bucket strategy is not defined
+    @Nullable private final BucketStrategy<?> bucketStrategy;
 
-    public BucketSpec(BucketMode bucketMode, List<String> bucketKeys, int numBuckets) {
+    public BucketSpec(
+            BucketMode bucketMode,
+            List<String> bucketKeys,
+            int numBuckets,
+            @Nullable BucketStrategy<?> bucketStrategy) {
         this.bucketMode = bucketMode;
         this.bucketKeys = bucketKeys;
         this.numBuckets = numBuckets;
+        this.bucketStrategy = bucketStrategy;
     }
 
     public BucketMode getBucketMode() {
@@ -60,6 +71,7 @@ public class BucketSpec {
                 + bucketKeys
                 + ", numBuckets="
                 + numBuckets
+                + (bucketStrategy == null ? "" : ", bucketStrategy=")
                 + '}';
     }
 }

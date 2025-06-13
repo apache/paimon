@@ -21,6 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.operation.BucketSelectConverter.Selector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.sink.StrategyBasedBucketIdExtractor;
+import org.apache.paimon.transform.Truncate;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
@@ -150,7 +152,30 @@ public class BucketSelectConverterTest {
         assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
+    @Test
+    public void testNormalWithStrategyBased() {
+        // use truncate int to test
+        RowType bucketKeyType = RowType.of(new IntType());
+        Predicate predicate = or(builder.equal(0, 0), builder.equal(0, 5), builder.equal(0, 7));
+
+        StrategyBasedBucketIdExtractor bucketIdExtractor =
+                new StrategyBasedBucketIdExtractor(
+                        Truncate.fromString("truncate[1]", bucketKeyType.getFields(), 20),
+                        bucketKeyType);
+        Selector selector = newSelector(predicate, bucketKeyType, bucketIdExtractor).get();
+
+        assertThat(selector.hashCodes()).containsExactly(0, 5, 7);
+        assertThat(selector.createBucketSet(20)).containsExactly(0, 5, 7);
+    }
+
     private Optional<Selector> newSelector(Predicate predicate) {
         return (Optional) BucketSelectConverter.create(predicate, rowType);
+    }
+
+    private Optional<Selector> newSelector(
+            Predicate predicate,
+            RowType rowType,
+            StrategyBasedBucketIdExtractor bucketIdExtractor) {
+        return (Optional) BucketSelectConverter.create(predicate, rowType, bucketIdExtractor);
     }
 }

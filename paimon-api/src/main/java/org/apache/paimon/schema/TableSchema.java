@@ -19,6 +19,8 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.transform.BucketStrategy;
+import org.apache.paimon.transform.Truncate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -37,6 +39,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.BUCKET_STRATEGY;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId
@@ -73,6 +76,8 @@ public class TableSchema implements Serializable {
     private final @Nullable String comment;
 
     private final long timeMillis;
+
+    private final @Nullable BucketStrategy<?> bucketStrategy;
 
     public TableSchema(
             long id,
@@ -124,6 +129,7 @@ public class TableSchema implements Serializable {
         }
         bucketKeys = tmpBucketKeys;
         numBucket = CoreOptions.fromMap(options).bucket();
+        bucketStrategy = getBucketStrategy();
     }
 
     public int version() {
@@ -186,6 +192,11 @@ public class TableSchema implements Serializable {
         return bucketKeys;
     }
 
+    @Nullable
+    public BucketStrategy<?> bucketStrategy() {
+        return bucketStrategy;
+    }
+
     public boolean crossPartitionUpdate() {
         if (primaryKeys.isEmpty() || partitionKeys.isEmpty()) {
             return false;
@@ -222,6 +233,25 @@ public class TableSchema implements Serializable {
             }
         }
         return bucketKeys;
+    }
+
+    @Nullable
+    private BucketStrategy<?> getBucketStrategy() {
+        String bucketStrategyValue = options.get(BUCKET_STRATEGY.key());
+        if (StringUtils.isNullOrWhitespaceOnly(bucketStrategyValue)) {
+            return null;
+        }
+
+        // try to match truncate strategy since one truncate is supported
+        BucketStrategy<?> bucketStrategy =
+                Truncate.fromString(
+                        bucketStrategyValue, this.projectedDataFields(bucketKeys), numBucket);
+        // no match truncate strategy, throw exception
+        if (bucketStrategy == null) {
+            throw new RuntimeException("Unknown bucket strategy: " + bucketStrategyValue);
+        }
+
+        return bucketStrategy;
     }
 
     private boolean containsAll(List<String> all, List<String> contains) {

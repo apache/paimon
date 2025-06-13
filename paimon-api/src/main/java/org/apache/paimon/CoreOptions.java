@@ -116,13 +116,32 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "Specify the paimon distribution policy. Data is assigned"
-                                                    + " to each bucket according to the hash value of bucket-key.")
+                                                    + " to each bucket according to the hash value of bucket-key by default.")
                                     .linebreak()
                                     .text("If you specify multiple fields, delimiter is ','.")
                                     .linebreak()
                                     .text(
                                             "If not specified, the primary key will be used; "
                                                     + "if there is no primary key, the full row will be used.")
+                                    .build());
+
+    @Immutable
+    public static final ConfigOption<String> BUCKET_STRATEGY =
+            key("bucket-strategy")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text("Specify the strategy to assign data to each bucket.")
+                                    .linebreak()
+                                    .text("Currently, only 'truncate[W]' is supported, where: ")
+                                    .list(
+                                            text(
+                                                    "'W' must be a positive integer (e.g., 'truncate[10]')."),
+                                            text(
+                                                    "The bucket is calculated as: `bucket = (bucket_key_value - (bucket_key_value % W)) % total_buckets`."))
+                                    .text(
+                                            "Note: This strategy requires 'bucket-key' to be a single INT column.")
                                     .build());
 
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
