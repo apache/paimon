@@ -37,10 +37,13 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -244,16 +247,7 @@ public class SparkWriteITCase {
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         spark.sql("INSERT INTO T VALUES (3, 3, 'cc')");
 
-        List<Row> data = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(data.toString()).isEqualTo("[[1,1,aa], [2,2,bb], [3,3,cc]]");
-
-        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
-        List<String> fileNames =
-                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
-        for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("data-"));
-        }
+        validateFileNames("T", fileName -> fileName.startsWith("data-"));
     }
 
     @Test
@@ -268,13 +262,7 @@ public class SparkWriteITCase {
         List<Row> data = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(data.toString()).isEqualTo("[[1,1,aa], [2,2,bb], [3,3,cc]]");
 
-        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
-        List<String> fileNames =
-                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
-        for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("test-"));
-        }
+        validateFileNames("T", fileName -> fileName.startsWith("test-"));
     }
 
     @Test
@@ -289,13 +277,7 @@ public class SparkWriteITCase {
         List<Row> data = spark.sql("SELECT * FROM T order by a").collectAsList();
         assertThat(data.toString()).isEqualTo("[[1,3,cc], [2,2,bb]]");
 
-        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
-        List<String> fileNames =
-                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
-        for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("test-"));
-        }
+        validateFileNames("T", fileName -> fileName.startsWith("test-"));
 
         // reset config, it will affect other tests
         spark.conf().unset("spark.paimon.data-file.prefix");
@@ -440,5 +422,14 @@ public class SparkWriteITCase {
         return Arrays.stream(files)
                 .filter(f -> f.getPath().getName().startsWith(filePrefix))
                 .count();
+    }
+
+    private void validateFileNames(String tableName, Predicate<String> validation) {
+        Stream<String> fileNames =
+                spark.sql(String.format("select file_path from `%s$files`", tableName))
+                        .collectAsList().stream()
+                        .map(x -> Paths.get(x.getString(0)).getFileName().toString());
+
+        org.assertj.core.api.Assertions.assertThat(fileNames).allMatch(validation);
     }
 }
