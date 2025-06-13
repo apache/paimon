@@ -24,26 +24,24 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
-/** An {@link AppendTableSink} which handles {@link InternalRow}. */
-public class RowAppendTableSink extends AppendTableSink<InternalRow> {
+/** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
+public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    public RowAppendTableSink(
-            FileStoreTable table,
-            Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
-            Integer parallelism) {
-        super(table, overwritePartitions, logSinkFunction, parallelism);
+    public PostponeBucketSink(
+            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+        super(table, overwritePartition);
     }
 
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createNoStateRowWriteOperatorFactory(
-                table, logSinkFunction, writeProvider, commitUser);
+        return createNoStateRowWriteOperatorFactory(table, null, writeProvider, commitUser);
     }
 
     @Override
