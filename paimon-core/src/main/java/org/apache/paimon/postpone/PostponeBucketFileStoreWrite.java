@@ -153,7 +153,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         }
         forceBufferSpill = true;
         LOG.info(
-                "Force buffer spill for append-only file store write, writer number is: {}",
+                "Force buffer spill for postpone file store write, writer number is: {}",
                 writers.size());
         for (Map<Integer, WriterContainer<KeyValue>> bucketWriters : writers.values()) {
             for (WriterContainer<KeyValue> writerContainer : bucketWriters.values()) {
