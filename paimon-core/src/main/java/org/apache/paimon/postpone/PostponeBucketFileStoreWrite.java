@@ -26,11 +26,15 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroSchemaConverter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
-import org.apache.paimon.operation.AbstractFileStoreWrite;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.MemoryFileStoreWrite;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.ReaderSupplier;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
@@ -39,10 +43,17 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
@@ -52,25 +63,37 @@ import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
-public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
+public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PostponeBucketFileStoreWrite.class);
 
     private final CoreOptions options;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
+    private final FileIO fileIO;
+    private final FileStorePathFactory pathFactory;
+    private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
+
+    private boolean forceBufferSpill = false;
 
     public PostponeBucketFileStoreWrite(
             FileIO fileIO,
+            FileStorePathFactory pathFactory,
             TableSchema schema,
             String commitUser,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
             BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory,
+            KeyValueFileReaderFactory.Builder readerFactoryBuilder,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
             String tableName,
             @Nullable Integer writeId) {
-        super(snapshotManager, scan, null, null, tableName, options, partitionType);
+        super(snapshotManager, scan, options, partitionType, null, null, tableName);
+        this.fileIO = fileIO;
+        this.pathFactory = pathFactory;
+        this.readerFactoryBuilder = readerFactoryBuilder;
 
         Options newOptions = new Options(options.toMap());
         try {
@@ -121,6 +144,25 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
     }
 
     @Override
+    protected void forceBufferSpill() throws Exception {
+        if (ioManager == null) {
+            return;
+        }
+        if (forceBufferSpill) {
+            return;
+        }
+        forceBufferSpill = true;
+        LOG.info(
+                "Force buffer spill for append-only file store write, writer number is: {}",
+                writers.size());
+        for (Map<Integer, WriterContainer<KeyValue>> bucketWriters : writers.values()) {
+            for (WriterContainer<KeyValue> writerContainer : bucketWriters.values()) {
+                ((PostponeBucketWriter) writerContainer.writer).toBufferedWriter();
+            }
+        }
+    }
+
+    @Override
     public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // see comments in constructor
         super.withIgnorePreviousFiles(true);
@@ -141,7 +183,28 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
                 "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(writerFactory, restoreIncrement);
+        return new PostponeBucketWriter(
+                fileIO,
+                pathFactory.createDataFilePathFactory(partition, bucket),
+                options.spillCompressOptions(),
+                options.writeBufferSpillDiskSize(),
+                ioManager,
+                writerFactory,
+                files -> newFileRead(partition, bucket, files),
+                forceBufferSpill,
+                forceBufferSpill,
+                restoreIncrement);
+    }
+
+    private RecordReaderIterator<KeyValue> newFileRead(
+            BinaryRow partition, int bucket, List<DataFileMeta> files) throws IOException {
+        KeyValueFileReaderFactory readerFactory =
+                readerFactoryBuilder.build(partition, bucket, name -> Optional.empty());
+        List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            suppliers.add(() -> readerFactory.createRecordReader(file));
+        }
+        return new RecordReaderIterator<>(ConcatRecordReader.create(suppliers));
     }
 
     @Override

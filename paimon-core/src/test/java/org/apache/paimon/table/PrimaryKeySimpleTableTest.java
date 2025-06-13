@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LookupLocalFileType;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -34,9 +35,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
+import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -54,6 +58,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -135,6 +140,39 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testPostponeBucketWithManyPartitions() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(new IOManagerImpl(tempDir.toString()));
+            for (int i = 0; i < 100; i++) {
+                write.write(rowData(i, i, (long) i));
+            }
+
+            for (Map<Integer, AbstractFileStoreWrite.WriterContainer<KeyValue>> bucketWriters :
+                    ((PostponeBucketFileStoreWrite) ((TableWriteImpl<?>) write).getWrite())
+                            .writers()
+                            .values()) {
+                for (AbstractFileStoreWrite.WriterContainer<KeyValue> writerContainer :
+                        bucketWriters.values()) {
+                    PostponeBucketWriter writer = (PostponeBucketWriter) writerContainer.writer;
+                    assertThat(writer.useBufferedSinkWriter()).isTrue();
+                }
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        ManifestFileMeta manifest =
+                table.manifestListReader().read(snapshot.deltaManifestList()).get(0);
+        List<ManifestEntry> entries = table.manifestFileReader().read(manifest.fileName());
+        assertThat(entries.size()).isEqualTo(100);
+    }
 
     @Test
     public void testPostponeBucket() throws Exception {
