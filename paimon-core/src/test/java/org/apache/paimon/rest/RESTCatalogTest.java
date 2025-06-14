@@ -1206,6 +1206,60 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsPagedWithMultiLevel() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_paged_db";
+        Map<String, String> partitionSpec =
+                new HashMap<String, String>() {
+                    {
+                        put("dt", "20250101");
+                        put("col", "0");
+                    }
+                };
+
+        Map<String, String> partitionSpec2 =
+                new HashMap<String, String>() {
+                    {
+                        put("dt", "20250102");
+                        put("col", "0");
+                    }
+                };
+        List<Map<String, String>> partitionSpecs = Arrays.asList(partitionSpec, partitionSpec2);
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt", "col")
+                        .build(),
+                true);
+
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partition : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partition.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        PagedList<Partition> pagedPartitions =
+                catalog.listPartitionsPaged(identifier, null, null, "dt=20250101/col=0");
+        assertPagedPartitions(pagedPartitions, 1, partitionSpecs.get(0));
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, null, null, "dt=20250102%");
+        assertPagedPartitions(pagedPartitions, 1, partitionSpecs.get(1));
+    }
+
+    @Test
     void testRefreshFileIO() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =

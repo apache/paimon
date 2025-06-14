@@ -29,9 +29,13 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Utils to fetch partition map information from data schema and row type. */
 public class PartitionUtils {
+
+    private static final String EMPTY_PARTITION_NAME = "";
 
     public static Pair<Pair<int[], RowType>, List<DataField>> constructPartitionMapping(
             TableSchema dataSchema, List<DataField> dataFields) {
@@ -68,5 +72,16 @@ public class PartitionUtils {
 
     public static PartitionInfo create(@Nullable Pair<int[], RowType> pair, BinaryRow binaryRow) {
         return pair == null ? null : new PartitionInfo(pair.getLeft(), pair.getRight(), binaryRow);
+    }
+
+    public static String buildPartitionName(Map<String, String> partitionSpec) {
+        if (partitionSpec.isEmpty()) {
+            return EMPTY_PARTITION_NAME;
+        }
+        List<String> partitionName =
+                partitionSpec.keySet().stream()
+                        .map(key -> key + "=" + partitionSpec.get(key))
+                        .collect(Collectors.toList());
+        return String.join("/", partitionName);
     }
 }
