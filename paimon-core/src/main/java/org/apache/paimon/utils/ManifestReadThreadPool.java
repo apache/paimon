@@ -22,6 +22,7 @@ import javax.annotation.Nullable;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
 
@@ -35,28 +36,38 @@ public class ManifestReadThreadPool {
     private static ThreadPoolExecutor executorService =
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
-    public static synchronized ThreadPoolExecutor getExecutorService(@Nullable Integer threadNum) {
-        if (threadNum == null || threadNum <= executorService.getMaximumPoolSize()) {
+    public static synchronized ExecutorService getExecutorService(@Nullable Integer threadNum) {
+        if (threadNum == null || threadNum == executorService.getMaximumPoolSize()) {
             return executorService;
         }
-        // we don't need to close previous pool
-        // it is just cached pool
-        executorService = createCachedThreadPool(threadNum, THREAD_NAME);
+        if (threadNum < executorService.getMaximumPoolSize()) {
+            return new SemaphoredDelegatingExecutor(executorService, threadNum, false);
+        } else {
+            // we don't need to close previous pool
+            // it is just cached pool
+            executorService = createCachedThreadPool(threadNum, THREAD_NAME);
 
-        return executorService;
+            return executorService;
+        }
     }
 
     /** This method aims to parallel process tasks with memory control and sequentially. */
     public static <T, U> Iterable<T> sequentialBatchedExecute(
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
-        ThreadPoolExecutor executor = getExecutorService(threadNum);
+        ExecutorService executor = getExecutorService(threadNum);
+        if (threadNum == null) {
+            threadNum =
+                    executor instanceof ThreadPoolExecutor
+                            ? ((ThreadPoolExecutor) executor).getMaximumPoolSize()
+                            : ((SemaphoredDelegatingExecutor) executor).getPermitCount();
+        }
         return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
     }
 
     /** This method aims to parallel process tasks with randomly but return values sequentially. */
     public static <T, U> Iterator<T> randomlyExecuteSequentialReturn(
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
-        ThreadPoolExecutor executor = getExecutorService(threadNum);
+        ExecutorService executor = getExecutorService(threadNum);
         return ThreadPoolUtils.randomlyExecuteSequentialReturn(executor, processor, input);
     }
 }
