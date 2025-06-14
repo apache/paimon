@@ -25,8 +25,10 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.lookup.StateFactory;
+import org.apache.paimon.lookup.memory.InMemoryStateFactory;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.lookup.rocksdb.RocksDBState;
+import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -64,8 +66,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
 
 /** Lookup table of full cache. */
 public abstract class FullCacheLookupTable implements LookupTable {
@@ -144,9 +148,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     protected void init() throws Exception {
-        this.stateFactory =
-                StateFactory.create(
-                        context.tempPath.toString(), context.table.coreOptions().toConfiguration());
+        this.stateFactory = createStateFactory();
         this.refreshExecutor =
                 this.refreshAsync
                         ? Executors.newSingleThreadExecutor(
@@ -155,6 +157,16 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
                         : null;
+    }
+
+    private StateFactory createStateFactory() throws IOException {
+        String diskDir = context.tempPath.toString();
+        Options options = context.table.coreOptions().toConfiguration();
+        if (options.get(LOOKUP_CACHE_MODE) == MEMORY) {
+            return new InMemoryStateFactory();
+        } else {
+            return new RocksDBStateFactory(diskDir, options, null);
+        }
     }
 
     protected void bootstrap() throws Exception {

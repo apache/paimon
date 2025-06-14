@@ -19,14 +19,9 @@
 package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.lookup.memory.InMemoryStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
-import org.apache.paimon.options.Options;
 
 import java.io.Closeable;
 import java.io.IOException;
-
-import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_IN_MEMORY;
 
 /** State factory to create {@link State}. */
 public interface StateFactory extends Closeable {
@@ -53,12 +48,4 @@ public interface StateFactory extends Closeable {
             throws IOException;
 
     boolean preferBulkLoad();
-
-    static StateFactory create(String diskDir, Options options) throws IOException {
-        if (options.get(LOOKUP_CACHE_IN_MEMORY)) {
-            return new InMemoryStateFactory();
-        } else {
-            return new RocksDBStateFactory(diskDir, options, null);
-        }
-    }
 }

@@ -1010,13 +1010,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Max disk size for lookup cache, you can use this option to limit the use of local disks.");
 
-    public static final ConfigOption<Boolean> LOOKUP_CACHE_IN_MEMORY =
-            key("lookup.cache-in-memory")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to use in memory caching when using Flink look join.");
-
     public static final ConfigOption<String> LOOKUP_CACHE_SPILL_COMPRESSION =
             key("lookup.cache-spill-compression")
                     .stringType()

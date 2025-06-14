@@ -82,9 +82,6 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
-The cache defaults to using a local disk (such as RocksDB). If your dimension table is not large,
-you can consider using in-memory mode. (`'lookup.cache-in-memory' = 'true'`)
-
 ## Retry Lookup
 
 If the records of `orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
