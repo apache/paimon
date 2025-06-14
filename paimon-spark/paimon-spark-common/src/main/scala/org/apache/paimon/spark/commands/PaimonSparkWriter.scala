@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.WRITE_ONLY
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
@@ -244,7 +245,9 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
             .map(tableSchema.fieldNames().indexOf(_))
             .map(x => col(data.schema.fieldNames(x)))
             .toSeq
-          val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
+          val args = Seq(
+            lit(new CoreOptions(tableSchema.options()).bucketFunctionType().toString),
+            lit(bucketNumber)) ++ bucketKeyCol
           val repartitioned =
             repartitionByPartitionsAndBucket(
               data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))

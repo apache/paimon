@@ -34,9 +34,23 @@ under the License.
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>
         <jackson.version>2.15.2</jackson.version>
+        <janino.test.version>3.1.9</janino.test.version>
     </properties>
 
     <dependencies>
+
+        <dependency>
+            <groupId>org.codehaus.janino</groupId>
+            <artifactId>janino</artifactId>
+            <version>${janino.test.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>${paimon-sparkx-common}</artifactId>

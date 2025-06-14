@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.bucket.PaimonBucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -41,7 +42,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
-import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -91,13 +91,13 @@ public class FixedBucketRowKeyExtractorTest {
                                 new DataField(3, "k", new IntType())));
 
         String[] bucketColsToTest = {"d", "ltz", "ntz"};
+        PaimonBucketFunction bucketFunction = new PaimonBucketFunction();
         for (String bucketCol : bucketColsToTest) {
             FixedBucketRowKeyExtractor extractor = extractor(rowType, "", bucketCol, "", bucketNum);
             BinaryRow binaryRow =
                     new InternalRowSerializer(rowType.project(bucketCol)).toBinaryRow(row);
             assertThat(bucket(extractor, row))
-                    .isEqualTo(
-                            KeyAndBucketExtractor.bucket(bucketKeyHashCode(binaryRow), bucketNum));
+                    .isEqualTo(bucketFunction.bucket(binaryRow, bucketNum));
         }
     }
 
