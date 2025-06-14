@@ -25,6 +25,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** A {@link PluginLoader} to load cosn. */
 public class COSNLoader implements FileIOLoader {
     private static final String COSN_JAR = "paimon-plugin-cosn";
@@ -43,6 +46,15 @@ public class COSNLoader implements FileIOLoader {
     @Override
     public String getScheme() {
         return "cosn";
+    }
+
+    @Override
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"fs.cosn.bucket.region"});
+        options.add(new String[] {"fs.cosn.userinfo.secretId"});
+        options.add(new String[] {"fs.cosn.userinfo.secretKey"});
+        return options;
     }
 
     @Override
