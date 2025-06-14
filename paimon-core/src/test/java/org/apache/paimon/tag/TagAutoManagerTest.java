@@ -20,6 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.CoreOptions.TagCreationPeriod;
+import org.apache.paimon.CoreOptions.TagExpireStrategy;
 import org.apache.paimon.CoreOptions.TagPeriodFormatter;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
@@ -45,6 +46,7 @@ import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
 import static org.apache.paimon.CoreOptions.TAG_DEFAULT_TIME_RETAINED;
+import static org.apache.paimon.CoreOptions.TAG_EXPIRATION_STRATEGY;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -229,6 +231,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_EXPIRATION_STRATEGY, TagExpireStrategy.RETAIN_TIME);
         options.set(TAG_NUM_RETAINED_MAX, 3);
         FileStoreTable table;
         TableCommitImpl commit;
@@ -313,6 +316,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_EXPIRATION_STRATEGY, TagExpireStrategy.RETAIN_TIME);
         options.set(TAG_NUM_RETAINED_MAX, 1);
         FileStoreTable table = this.table.copy(options.toMap());
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
