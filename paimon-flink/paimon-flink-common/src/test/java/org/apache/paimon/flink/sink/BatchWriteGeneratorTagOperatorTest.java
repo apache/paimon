@@ -67,7 +67,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                         table,
                         initialCommitUser,
                         new RestoreAndFailCommittableStateManager<>(
-                                ManifestCommittableSerializer::new));
+                                ManifestCommittableSerializer::new, true));
 
         OneInputStreamOperator<Committable, Committable> committerOperator =
                 committerOperatorFactory.createStreamOperator(
@@ -143,7 +143,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                         table,
                         initialCommitUser,
                         new RestoreAndFailCommittableStateManager<>(
-                                ManifestCommittableSerializer::new));
+                                ManifestCommittableSerializer::new, true));
 
         OneInputStreamOperator<Committable, Committable> committerOperator =
                 committerOperatorFactory.createStreamOperator(
