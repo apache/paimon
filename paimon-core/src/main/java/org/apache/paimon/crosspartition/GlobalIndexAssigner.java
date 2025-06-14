@@ -28,11 +28,11 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBOptions;
-import org.apache.paimon.lookup.RocksDBState;
-import org.apache.paimon.lookup.RocksDBStateFactory;
-import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
+import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
+import org.apache.paimon.lookup.rocksdb.RocksDBState;
+import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
+import org.apache.paimon.lookup.rocksdb.RocksDBValueState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -71,7 +71,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.BLOCK_CACHE_SIZE;
 import static org.apache.paimon.utils.ListUtils.pickRandomly;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -210,14 +210,14 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         bootstrapRecords.complete();
         boolean isEmpty = true;
         if (bootstrapKeys.size() > 0) {
-            BulkLoader bulkLoader = keyIndex.createBulkLoader();
+            RocksDBBulkLoader bulkLoader = keyIndex.createBulkLoader();
             MutableObjectIterator<BinaryRow> keyIterator = bootstrapKeys.sortedIterator();
             BinaryRow row = new BinaryRow(2);
             try {
                 while ((row = keyIterator.next(row)) != null) {
                     bulkLoader.write(row.getBinary(0), row.getBinary(1));
                 }
-            } catch (BulkLoader.WriteException e) {
+            } catch (RocksDBBulkLoader.WriteException e) {
                 throw new RuntimeException(
                         "Exception in bulkLoad, the most suspicious reason is that "
                                 + "your data contains duplicates, please check your sink table. "

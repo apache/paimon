@@ -508,6 +508,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>The cached files retention time for lookup. After the file expires, if there is a need for access, it will be re-read from the DFS to build an index on the local disk.</td>
         </tr>
         <tr>
+            <td><h5>lookup.cache-in-memory</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to use in memory caching when using Flink look join.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.cache-max-disk-size</h5></td>
             <td style="word-wrap: break-word;">infinite</td>
             <td>MemorySize</td>

@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.lookup.ListState;
 import org.apache.paimon.utils.ListDelimitedSerializer;
 
 import org.rocksdb.ColumnFamilyHandle;
@@ -29,7 +30,7 @@ import java.util.Collections;
 import java.util.List;
 
 /** RocksDB state for key -> List of value. */
-public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
+public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> implements ListState<K, V> {
 
     private final ListDelimitedSerializer listSerializer = new ListDelimitedSerializer();
 
@@ -42,6 +43,7 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
         super(stateFactory, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
+    @Override
     public void add(K key, V value) throws IOException {
         byte[] keyBytes = serializeKey(key);
         byte[] valueBytes = serializeValue(value);
@@ -53,6 +55,7 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
         cache.invalidate(wrap(keyBytes));
     }
 
+    @Override
     public List<V> get(K key) throws IOException {
         byte[] keyBytes = serializeKey(key);
         return cache.get(
@@ -70,15 +73,5 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
                     }
                     return rows;
                 });
-    }
-
-    public byte[] serializeValue(V value) throws IOException {
-        valueOutputView.clear();
-        valueSerializer.serialize(value, valueOutputView);
-        return valueOutputView.getCopyOfBuffer();
-    }
-
-    public byte[] serializeList(List<byte[]> valueList) throws IOException {
-        return listSerializer.serializeList(valueList);
     }
 }

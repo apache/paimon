@@ -20,8 +20,9 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.lookup.ValueBulkLoader;
+import org.apache.paimon.lookup.ValueState;
+import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
@@ -44,7 +45,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Nullable private final ProjectedRow keyRearrange;
 
-    protected RocksDBValueState<InternalRow, InternalRow> tableState;
+    protected ValueState<InternalRow, InternalRow> tableState;
 
     public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey) {
         super(context);
@@ -129,12 +130,12 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public TableBulkLoader createBulkLoader() {
-        BulkLoader bulkLoader = tableState.createBulkLoader();
+        ValueBulkLoader bulkLoader = tableState.createBulkLoader();
         return new TableBulkLoader() {
 
             @Override
             public void write(byte[] key, byte[] value)
-                    throws BulkLoader.WriteException, IOException {
+                    throws RocksDBBulkLoader.WriteException, IOException {
                 bulkLoader.write(key, value);
                 bulkLoadWritePlus(key, value);
             }

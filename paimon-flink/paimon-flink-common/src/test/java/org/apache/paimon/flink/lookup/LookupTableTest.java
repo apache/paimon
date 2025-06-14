@@ -42,6 +42,8 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -50,15 +52,15 @@ import org.apache.paimon.utils.SortUtil;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -76,15 +78,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LookupTable}. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class LookupTableTest extends TableTestBase {
 
+    private final boolean inMemory;
+
     @TempDir Path tempDir;
-
     private RowType rowType;
-
     private IOManager ioManager;
-
     private FullCacheLookupTable table;
+
+    public LookupTableTest(boolean inMemory) {
+        this.inMemory = inMemory;
+    }
+
+    @SuppressWarnings("unused")
+    @Parameters(name = "{0}")
+    public static List<Boolean> getVarSeg() {
+        return Arrays.asList(true, false);
+    }
 
     @BeforeEach
     public void before() throws IOException {
@@ -100,6 +112,7 @@ public class LookupTableTest extends TableTestBase {
     }
 
     private FileStoreTable createTable(List<String> primaryKeys, Options options) throws Exception {
+        options.set(CoreOptions.LOOKUP_CACHE_IN_MEMORY, inMemory);
         Identifier identifier = new Identifier("default", "t");
         Schema schema =
                 new Schema(
@@ -112,7 +125,7 @@ public class LookupTableTest extends TableTestBase {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTable() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -132,7 +145,7 @@ public class LookupTableTest extends TableTestBase {
         table.open();
 
         // test bulk load error
-        {
+        if (!inMemory) {
             TableBulkLoader bulkLoader = table.createBulkLoader();
             bulkLoader.write(new byte[] {1}, new byte[] {1});
             assertThatThrownBy(() -> bulkLoader.write(new byte[] {1}, new byte[] {2}))
@@ -172,7 +185,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(table.get(row(3))).hasSize(0);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTableWithSequenceField() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SEQUENCE_FIELD, "f1");
@@ -223,7 +236,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 1, 22, 222);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTableWithSequenceFieldProjection() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SEQUENCE_FIELD, "f2");
@@ -263,7 +276,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 1, 22);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTablePkFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -299,7 +312,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(table.get(row(3))).hasSize(0);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTableNonPkFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -328,7 +341,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result).hasSize(0);
     }
 
-    @Test
+    @TestTemplate
     public void testSecKeyTable() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -376,7 +389,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
 
-    @Test
+    @TestTemplate
     public void testSecKeyTableWithSequenceField() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SEQUENCE_FIELD, "f1");
@@ -431,7 +444,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result.stream().map(row -> row.getInt(2))).doesNotContain(333);
     }
 
-    @Test
+    @TestTemplate
     public void testSecKeyTablePkFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -476,7 +489,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(table.get(row(33))).hasSize(0);
     }
 
-    @Test
+    @TestTemplate
     public void testNoPrimaryKeyTable() throws Exception {
         FileStoreTable storeTable = createTable(emptyList(), new Options());
         FullCacheLookupTable.Context context =
@@ -524,7 +537,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
 
-    @Test
+    @TestTemplate
     public void testNoPrimaryKeyTableFilter() throws Exception {
         FileStoreTable storeTable = createTable(emptyList(), new Options());
         FullCacheLookupTable.Context context =
@@ -559,7 +572,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(1), 1, 11, 111);
     }
 
-    @Test
+    @TestTemplate
     public void testPkTableWithCacheRowFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         writeWithBucketAssigner(
@@ -600,7 +613,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(res).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testRefreshExecutorRebuildAfterReopen() throws Exception {
         Options options = new Options();
         options.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, true);
@@ -635,7 +648,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(res.get(0), 1, 22, 222);
     }
 
-    @Test
+    @TestTemplate
     public void testNoPkTableWithCacheRowFilter() throws Exception {
         FileStoreTable storeTable = createTable(emptyList(), new Options());
         writeWithBucketAssigner(
@@ -676,7 +689,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(res).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testSecKeyTableWithCacheRowFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         writeWithBucketAssigner(
@@ -717,7 +730,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(res).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testPartialLookupTable() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
@@ -750,7 +763,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result).hasSize(0);
     }
 
-    @Test
+    @TestTemplate
     public void testPartialLookupTableWithRowFilter() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET.key(), "2");
@@ -771,7 +784,7 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testPartialLookupTableWithProjection() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
@@ -803,7 +816,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 22, -2);
     }
 
-    @Test
+    @TestTemplate
     public void testPartialLookupTableJoinKeyOrder() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
@@ -835,9 +848,17 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 22, -2);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testPKLookupTableRefreshAsync(boolean refreshAsync) throws Exception {
+    @TestTemplate
+    public void testPKLookupTableNotRefreshAsync() throws Exception {
+        innerTestPKLookupTableRefreshAsync(false);
+    }
+
+    @TestTemplate
+    public void testPKLookupTableRefreshAsync() throws Exception {
+        innerTestPKLookupTableRefreshAsync(true);
+    }
+
+    private void innerTestPKLookupTableRefreshAsync(boolean refreshAsync) throws Exception {
         Options options = new Options();
         options.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
         FileStoreTable storeTable = createTable(singletonList("f0"), options);
@@ -902,7 +923,7 @@ public class LookupTableTest extends TableTestBase {
         table.close();
     }
 
-    @Test
+    @TestTemplate
     public void testFullCacheLookupTableWithForceLookup() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
@@ -964,7 +985,7 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 1, 22, 222); // new value
     }
 
-    @Test
+    @TestTemplate
     public void testPartialLookupTableWithForceLookup() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
