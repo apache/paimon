@@ -44,6 +44,7 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Tencent Cloud Object Storage | cosn://    | Y         |                                                                        |
 | Microsoft Azure Storage      | abfs://    | Y         |                                                                        |
 | Huawei OBS                   | obs://     | Y         |                                                                        |
+| Google Cloud Storage         | gs://      | Y         |                                                                        |
 
 ## Dependency
 
@@ -405,7 +406,7 @@ Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots
 {{< tab "Flink" >}}
 
 {{< hint info >}}
-If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
+If you have already configured [gcs access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
 here you can skip the following configuration.
 {{< /hint >}}
 
@@ -414,7 +415,7 @@ Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'oss://<bucket>/<path>',
+    'warehouse' = 'gs://<bucket>/<path>',
     'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
     'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
 );
