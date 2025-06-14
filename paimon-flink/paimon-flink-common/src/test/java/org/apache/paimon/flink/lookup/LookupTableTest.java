@@ -74,6 +74,7 @@ import java.util.concurrent.TimeoutException;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -931,7 +932,7 @@ public class LookupTableTest extends TableTestBase {
     public void testFullCacheLookupTableWithForceLookup() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        options.set(LOOKUP_CACHE_MODE, FlinkConnectorOptions.LookupCacheMode.FULL);
+        options.set(LOOKUP_CACHE_MODE, inMemory ? MEMORY : FULL);
         options.set(CoreOptions.WRITE_ONLY, true);
         options.set(CoreOptions.FORCE_LOOKUP, true);
         options.set(CoreOptions.BUCKET, 1);
