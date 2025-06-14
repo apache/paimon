@@ -290,7 +290,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     dvMaintainer,
                     options.prepareCommitWaitCompaction(),
                     options.needLookup(),
-                    recordLevelExpire);
+                    recordLevelExpire,
+                    options.forceCompactAllFiles());
         }
     }
 

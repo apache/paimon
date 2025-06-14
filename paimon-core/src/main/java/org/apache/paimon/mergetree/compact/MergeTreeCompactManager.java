@@ -65,6 +65,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
+    private final boolean forceCompactAllFiles;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -80,7 +81,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             boolean needLookup,
-            @Nullable RecordLevelExpire recordLevelExpire) {
+            @Nullable RecordLevelExpire recordLevelExpire,
+            boolean forceCompactAllFiles) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -93,6 +95,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.lazyGenDeletionFile = lazyGenDeletionFile;
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
+        this.forceCompactAllFiles = forceCompactAllFiles;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -135,7 +138,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             }
             optionalUnit =
                     CompactStrategy.pickFullCompaction(
-                            levels.numberOfLevels(), runs, recordLevelExpire, dvMaintainer);
+                            levels.numberOfLevels(),
+                            runs,
+                            recordLevelExpire,
+                            dvMaintainer,
+                            forceCompactAllFiles);
         } else {
             if (taskFuture != null) {
                 return;
@@ -210,7 +217,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         metricsReporter,
                         compactDfSupplier,
                         dvMaintainer,
-                        recordLevelExpire);
+                        recordLevelExpire,
+                        forceCompactAllFiles);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",
