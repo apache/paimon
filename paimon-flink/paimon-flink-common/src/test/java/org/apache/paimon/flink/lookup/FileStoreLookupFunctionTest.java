@@ -26,7 +26,7 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
-import org.apache.paimon.lookup.RocksDBOptions;
+import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;

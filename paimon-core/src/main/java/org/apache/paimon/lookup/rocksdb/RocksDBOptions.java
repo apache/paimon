@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.options.ConfigOption;

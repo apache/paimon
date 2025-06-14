@@ -16,9 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.lookup.ByteArray;
+import org.apache.paimon.lookup.SetState;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDBException;
@@ -32,7 +34,8 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> Set values. */
-public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
+public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>>
+        implements SetState<K, V> {
 
     private static final byte[] EMPTY = new byte[0];
 
@@ -45,6 +48,7 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
         super(stateFactory, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
+    @Override
     public List<V> get(K key) throws IOException {
         ByteArray keyBytes = wrap(serializeKey(key));
         List<byte[]> valueBytes = cache.getIfPresent(keyBytes);
@@ -73,6 +77,7 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
         return values;
     }
 
+    @Override
     public void retract(K key, V value) throws IOException {
         try {
             byte[] bytes = invalidKeyAndGetKVBytes(key, value);
@@ -84,6 +89,7 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
         }
     }
 
+    @Override
     public void add(K key, V value) throws IOException {
         try {
             byte[] bytes = invalidKeyAndGetKVBytes(key, value);

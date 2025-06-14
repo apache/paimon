@@ -18,15 +18,8 @@
 
 package org.apache.paimon.lookup;
 
-/** Bulk loader for {@link State}, incoming keys must be sorted, and there must be no repetition. */
-public interface BulkLoader {
+/** Value bulk loader to load key values, incoming keys must be sorted. */
+public interface ValueBulkLoader extends BulkLoader {
 
-    void finish();
-
-    /** Exception during writing. */
-    class WriteException extends Exception {
-        public WriteException(Throwable cause) {
-            super(cause);
-        }
-    }
+    void write(byte[] key, byte[] value) throws WriteException;
 }

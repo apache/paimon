@@ -16,13 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.lookup.ByteArray;
+import org.apache.paimon.lookup.State;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -37,10 +39,9 @@ import org.rocksdb.WriteOptions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 
 /** Rocksdb state for key value. */
-public abstract class RocksDBState<K, V, CacheV> {
+public abstract class RocksDBState<K, V, CacheV> implements State<K, V> {
 
     protected final RocksDBStateFactory stateFactory;
 
@@ -85,10 +86,24 @@ public abstract class RocksDBState<K, V, CacheV> {
                         .build();
     }
 
+    @Override
     public byte[] serializeKey(K key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();
+    }
+
+    @Override
+    public byte[] serializeValue(V value) throws IOException {
+        valueOutputView.clear();
+        valueSerializer.serialize(value, valueOutputView);
+        return valueOutputView.getCopyOfBuffer();
+    }
+
+    @Override
+    public V deserializeValue(byte[] valueBytes) throws IOException {
+        valueInputView.setBuffer(valueBytes);
+        return valueSerializer.deserialize(valueInputView);
     }
 
     protected ByteArray wrap(byte[] bytes) {
@@ -99,8 +114,8 @@ public abstract class RocksDBState<K, V, CacheV> {
         return new Reference(bytes);
     }
 
-    public BulkLoader createBulkLoader() {
-        return new BulkLoader(db, stateFactory.options(), columnFamily, stateFactory.path());
+    public RocksDBBulkLoader createBulkLoader() {
+        return new RocksDBBulkLoader(db, stateFactory.options(), columnFamily, stateFactory.path());
     }
 
     public static BinaryExternalSortBuffer createBulkLoadSorter(
@@ -115,33 +130,6 @@ public abstract class RocksDBState<K, V, CacheV> {
                 options.spillCompressOptions(),
                 options.writeBufferSpillDiskSize(),
                 options.sequenceFieldSortOrderIsAscending());
-    }
-
-    /** A class wraps byte[] to implement equals and hashCode. */
-    protected static class ByteArray {
-
-        protected final byte[] bytes;
-
-        protected ByteArray(byte[] bytes) {
-            this.bytes = bytes;
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(bytes);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ByteArray byteArray = (ByteArray) o;
-            return Arrays.equals(bytes, byteArray.bytes);
-        }
     }
 
     /** A class wraps byte[] to indicate contain or not contain. */

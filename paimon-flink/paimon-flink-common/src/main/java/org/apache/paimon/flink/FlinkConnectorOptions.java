@@ -541,7 +541,10 @@ public class FlinkConnectorOptions {
         AUTO,
 
         /** Use full caching mode. */
-        FULL
+        FULL,
+
+        /** Use in-memory caching mode. */
+        MEMORY
     }
 
     /** Watermark emit strategy for scan. */
