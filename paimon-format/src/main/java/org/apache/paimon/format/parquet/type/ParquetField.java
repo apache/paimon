@@ -28,6 +28,7 @@ public abstract class ParquetField {
     private final int definitionLevel;
     private final boolean required;
     private final String[] path;
+    private boolean isShreddedVariant;
 
     public ParquetField(
             DataType type,
@@ -40,6 +41,7 @@ public abstract class ParquetField {
         this.definitionLevel = definitionLevel;
         this.required = required;
         this.path = path;
+        this.isShreddedVariant = false;
     }
 
     public DataType getType() {
@@ -60,6 +62,15 @@ public abstract class ParquetField {
 
     public String[] path() {
         return path;
+    }
+
+    public ParquetField asShreddedVariant() {
+        this.isShreddedVariant = true;
+        return this;
+    }
+
+    public boolean isShreddedVariant() {
+        return isShreddedVariant;
     }
 
     public abstract boolean isPrimitive();

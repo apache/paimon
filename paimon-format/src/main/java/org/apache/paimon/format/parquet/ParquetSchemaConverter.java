@@ -31,6 +31,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.schema.ConversionPatterns;
@@ -216,6 +217,15 @@ public class ParquetSchemaConverter {
                 return new GroupType(repetition, name, convertToParquetTypes(rowType))
                         .withId(fieldId);
             case VARIANT:
+                VariantType variantType = (VariantType) type;
+                if (variantType.shreddingSchema() != null) {
+                    return new GroupType(
+                                    repetition,
+                                    name,
+                                    convertToParquetTypes(variantType.shreddingSchema()))
+                            .withId(fieldId);
+                }
+
                 return Types.buildGroup(repetition)
                         .addField(
                                 Types.primitive(

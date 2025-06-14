@@ -86,6 +86,8 @@ public class CoreOptions implements Serializable {
 
     public static final String FILE_INDEX = "file-index";
 
+    public static final String SHREDDING_SCHEMA = "shredding-schema";
+
     public static final String COLUMNS = "columns";
 
     public static final ConfigOption<TableType> TYPE =
@@ -2084,6 +2086,20 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
                         .stringType()
                         .defaultValue(","));
+    }
+
+    public boolean containsShreddingSchema() {
+        return options.keySet().stream()
+                .anyMatch(k -> k.startsWith(FIELDS_PREFIX) && k.endsWith(SHREDDING_SCHEMA));
+    }
+
+    @Nullable
+    public String shreddingSchema(String fieldName) {
+        // todo: add type checker
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + SHREDDING_SCHEMA)
+                        .stringType()
+                        .noDefaultValue());
     }
 
     @Nullable

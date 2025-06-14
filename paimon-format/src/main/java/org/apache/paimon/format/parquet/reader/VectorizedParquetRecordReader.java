@@ -27,6 +27,7 @@ import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.Path;
@@ -133,6 +134,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                                         .map(ParquetField::getType)
                                         .collect(Collectors.toList()),
                                 vectors));
+        columnarBatch.setVariantSchema(VariantUtils.extractVariantSchemas(fields));
         columnVectors = new ParquetColumnVector[fields.size()];
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =
