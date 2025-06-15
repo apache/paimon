@@ -151,8 +151,8 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
-    public static final ConfigOption<Boolean> COMPACTION_FORCE_COMPACT_ALL_FILES =
-            key("compaction.force-compact-all-files")
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
+            key("compaction.force-rewrite-all-files")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -2473,8 +2473,8 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
     }
 
-    public Boolean forceCompactAllFiles() {
-        return options.get(COMPACTION_FORCE_COMPACT_ALL_FILES);
+    public Boolean forceRewriteAllFiles() {
+        return options.get(COMPACTION_FORCE_REWRITE_ALL_FILES);
     }
 
     public String partitionTimestampFormatter() {

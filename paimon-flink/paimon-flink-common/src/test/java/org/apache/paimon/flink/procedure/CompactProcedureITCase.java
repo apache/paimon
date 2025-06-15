@@ -222,7 +222,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql(
                 "CALL sys.compact(`table` => 'default.Tpk',"
-                        + " options => 'compaction.force-compact-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
+                        + " options => 'compaction.force-rewrite-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
                 tmpPath);
         List<DataSplit> splits = pkTable.newSnapshotReader().read().dataSplits();
         for (DataSplit split : splits) {
@@ -253,7 +253,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql(
                 "CALL sys.compact(`table` => 'default.Tap',"
-                        + " options => 'compaction.force-compact-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
+                        + " options => 'compaction.force-rewrite-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
                 tmpPath);
         splits = apTable.newSnapshotReader().read().dataSplits();
         for (DataSplit split : splits) {

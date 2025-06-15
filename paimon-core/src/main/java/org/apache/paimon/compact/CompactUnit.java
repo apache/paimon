@@ -25,31 +25,40 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** A files unit for compaction. */
-public interface CompactUnit {
+public class CompactUnit {
 
-    int outputLevel();
+    private final int outputLevel;
+    private final List<DataFileMeta> files;
+    private final boolean fileRewrite;
 
-    List<DataFileMeta> files();
+    public CompactUnit(int outputLevel, List<DataFileMeta> files, boolean fileRewrite) {
+        this.outputLevel = outputLevel;
+        this.files = files;
+        this.fileRewrite = fileRewrite;
+    }
 
-    static CompactUnit fromLevelRuns(int outputLevel, List<LevelSortedRun> runs) {
+    public int outputLevel() {
+        return outputLevel;
+    }
+
+    public List<DataFileMeta> files() {
+        return files;
+    }
+
+    public boolean fileRewrite() {
+        return fileRewrite;
+    }
+
+    public static CompactUnit fromLevelRuns(int outputLevel, List<LevelSortedRun> runs) {
         List<DataFileMeta> files = new ArrayList<>();
         for (LevelSortedRun run : runs) {
             files.addAll(run.run().files());
         }
-        return fromFiles(outputLevel, files);
+        return fromFiles(outputLevel, files, false);
     }
 
-    static CompactUnit fromFiles(int outputLevel, List<DataFileMeta> files) {
-        return new CompactUnit() {
-            @Override
-            public int outputLevel() {
-                return outputLevel;
-            }
-
-            @Override
-            public List<DataFileMeta> files() {
-                return files;
-            }
-        };
+    public static CompactUnit fromFiles(
+            int outputLevel, List<DataFileMeta> files, boolean fileRewrite) {
+        return new CompactUnit(outputLevel, files, fileRewrite);
     }
 }
