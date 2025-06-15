@@ -55,6 +55,7 @@ public class MergeTreeCompactTask extends CompactTask {
     private int upgradeFilesNum;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
+    private final boolean forceCompactAllFiles;
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
 
     public MergeTreeCompactTask(
@@ -67,7 +68,8 @@ public class MergeTreeCompactTask extends CompactTask {
             @Nullable CompactionMetrics.Reporter metricsReporter,
             Supplier<CompactDeletionFile> compactDfSupplier,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
-            @Nullable RecordLevelExpire recordLevelExpire) {
+            @Nullable RecordLevelExpire recordLevelExpire,
+            boolean forceCompactAllFiles) {
         super(metricsReporter);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
@@ -78,6 +80,7 @@ public class MergeTreeCompactTask extends CompactTask {
         this.dropDelete = dropDelete;
         this.maxLevel = maxLevel;
         this.recordLevelExpire = recordLevelExpire;
+        this.forceCompactAllFiles = forceCompactAllFiles;
 
         this.upgradeFilesNum = 0;
     }
@@ -126,12 +129,14 @@ public class MergeTreeCompactTask extends CompactTask {
 
     private void upgrade(DataFileMeta file, CompactResult toUpdate) throws Exception {
         if (file.level() == outputLevel) {
-            if (isContainExpiredRecords(file)
+            if (forceCompactAllFiles
+                    || isContainExpiredRecords(file)
                     || (dvMaintainer != null
                             && dvMaintainer.deletionVectorOf(file.fileName()).isPresent())) {
                 /*
-                 * 1. if the large file in maxLevel has expired records, we need to rewrite it.
-                 * 2. if the large file in maxLevel has corresponding deletion vector, we need to rewrite it.
+                 * 1. if files are force picked, we need to rewrite all files.
+                 * 2. if the large file in maxLevel has expired records, we need to rewrite it.
+                 * 3. if the large file in maxLevel has corresponding deletion vector, we need to rewrite it.
                  */
                 rewriteFile(file, toUpdate);
             }
@@ -139,9 +144,9 @@ public class MergeTreeCompactTask extends CompactTask {
         }
 
         if (outputLevel != maxLevel || file.deleteRowCount().map(d -> d == 0).orElse(false)) {
-            if (isContainExpiredRecords(file)) {
-                // if the file which could be directly upgraded has expired records, we need to
-                // rewrite it
+            if (forceCompactAllFiles || isContainExpiredRecords(file)) {
+                // if all files are force picked, or the file which could be directly upgraded has
+                // expired records, we need to rewrite it
                 rewriteFile(file, toUpdate);
             } else {
                 CompactResult upgradeResult = rewriter.upgrade(outputLevel, file);
