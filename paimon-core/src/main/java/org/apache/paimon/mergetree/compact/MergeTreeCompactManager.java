@@ -220,7 +220,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             dropDelete,
                             levels.maxLevel(),
                             metricsReporter,
-                            compactDfSupplier);
+                            compactDfSupplier,
+                            recordLevelExpire,
+                            forceRewriteAllFiles);
         }
 
         if (LOG.isDebugEnabled()) {
