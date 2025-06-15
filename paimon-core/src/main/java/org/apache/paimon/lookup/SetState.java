@@ -18,15 +18,18 @@
 
 package org.apache.paimon.lookup;
 
-/** Bulk loader for {@link State}, incoming keys must be sorted, and there must be no repetition. */
-public interface BulkLoader {
+import java.io.IOException;
+import java.util.List;
 
-    void finish();
+/**
+ * {@link State} interface for set state in Operations, the values must be sorted by byte array to
+ * be returned.
+ */
+public interface SetState<K, V> extends State<K, V> {
 
-    /** Exception during writing. */
-    class WriteException extends Exception {
-        public WriteException(Throwable cause) {
-            super(cause);
-        }
-    }
+    List<V> get(K key) throws IOException;
+
+    void retract(K key, V value) throws IOException;
+
+    void add(K key, V value) throws IOException;
 }
