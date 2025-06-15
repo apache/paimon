@@ -300,7 +300,7 @@ public class FlinkSinkBuilder {
             channelComputer = new PostponeBucketChannelComputer(table.schema());
         }
         DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, null);
+        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }
 

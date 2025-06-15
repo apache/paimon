@@ -652,7 +652,7 @@ class StoreMultiCommitterTest {
                         initialCommitUser,
                         context -> new StoreMultiCommitter(catalogLoader, context),
                         new RestoreAndFailCommittableStateManager<>(
-                                WrappedManifestCommittableSerializer::new));
+                                WrappedManifestCommittableSerializer::new, true));
         return createTestHarness(operator);
     }
 

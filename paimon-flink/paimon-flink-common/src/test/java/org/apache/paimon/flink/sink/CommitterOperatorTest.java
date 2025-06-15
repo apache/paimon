@@ -665,7 +665,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
-                                ManifestCommittableSerializer::new));
+                                ManifestCommittableSerializer::new, true));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operatorFactory);
         testHarness.open();
