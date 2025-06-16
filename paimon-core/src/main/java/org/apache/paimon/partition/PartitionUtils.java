@@ -35,8 +35,6 @@ import java.util.stream.Collectors;
 /** Utils to fetch partition map information from data schema and row type. */
 public class PartitionUtils {
 
-    private static final String EMPTY_PARTITION_NAME = "";
-
     public static Pair<Pair<int[], RowType>, List<DataField>> constructPartitionMapping(
             TableSchema dataSchema, List<DataField> dataFields) {
         if (dataSchema.partitionKeys().isEmpty()) {
@@ -76,7 +74,7 @@ public class PartitionUtils {
 
     public static String buildPartitionName(Map<String, String> partitionSpec) {
         if (partitionSpec.isEmpty()) {
-            return EMPTY_PARTITION_NAME;
+            return "";
         }
         List<String> partitionName =
                 partitionSpec.keySet().stream()

@@ -24,9 +24,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.UncheckedIOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -36,8 +33,6 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
-
-    private static final Logger LOG = LoggerFactory.getLogger(RESTUtil.class);
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
