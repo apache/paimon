@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for spark writer. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -78,7 +79,38 @@ public class SparkWriteITCase {
 
     @AfterEach
     public void afterEach() {
-        spark.sql("DROP TABLE T");
+        spark.sql("DROP TABLE IF EXISTS T");
+    }
+
+    @Test
+    public void testWriteWithDefaultValue() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT DEFAULT 2, c STRING DEFAULT 'my_value') TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
+        assertThat(show.toString())
+                .contains("a INT,\n" + "  b INT DEFAULT 2,\n" + "  c STRING DEFAULT 'my_value'");
+
+        spark.sql("INSERT INTO T (a) VALUES (1), (2)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value]]");
+
+        spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value]]");
+
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE T ADD COLUMN d INT DEFAULT 5"))
+                .hasMessageContaining(
+                        "Unsupported table change: Cannot add column [d] with default value");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE T ALTER COLUMN a SET DEFAULT 3"))
+                .hasMessageContaining("Change is not supported");
+
+        spark.sql("ALTER TABLE T ALTER COLUMN b TYPE STRING").collectAsList();
+        spark.sql("INSERT INTO T (a) VALUES (4)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString())
+                .isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value]]");
     }
 
     @Test

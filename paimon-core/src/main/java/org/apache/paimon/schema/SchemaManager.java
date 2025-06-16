@@ -404,7 +404,8 @@ public class SchemaManager implements Serializable {
                                             field.id(),
                                             rename.newName(),
                                             field.type(),
-                                            field.description());
+                                            field.description(),
+                                            field.defaultValue());
                             newFields.set(i, newField);
                             return;
                         }
@@ -463,7 +464,8 @@ public class SchemaManager implements Serializable {
                                             targetRootType,
                                             depth,
                                             update.fieldNames().length),
-                                    field.description());
+                                    field.description(),
+                                    field.defaultValue());
                         });
             } else if (change instanceof UpdateColumnNullability) {
                 UpdateColumnNullability update = (UpdateColumnNullability) change;
@@ -494,7 +496,8 @@ public class SchemaManager implements Serializable {
                                             sourceRootType,
                                             depth,
                                             update.fieldNames().length),
-                                    field.description());
+                                    field.description(),
+                                    field.defaultValue());
                         });
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
@@ -506,7 +509,8 @@ public class SchemaManager implements Serializable {
                                         field.id(),
                                         field.name(),
                                         field.type(),
-                                        update.newDescription()));
+                                        update.newDescription(),
+                                        field.defaultValue()));
             } else if (change instanceof UpdateColumnPosition) {
                 UpdateColumnPosition update = (UpdateColumnPosition) change;
                 SchemaChange.Move move = update.move();
@@ -793,7 +797,8 @@ public class SchemaManager implements Serializable {
                                 field.id(),
                                 field.name(),
                                 wrapNewRowType(field.type(), nestedFields),
-                                field.description()));
+                                field.description(),
+                                field.defaultValue()));
                 return;
             }
 

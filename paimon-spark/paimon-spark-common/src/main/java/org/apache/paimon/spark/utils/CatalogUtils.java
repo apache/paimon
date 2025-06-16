@@ -27,7 +27,9 @@ import org.apache.paimon.types.MultisetType;
 
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.GenericArrayData;
+import org.apache.spark.sql.connector.catalog.ColumnDefaultValue;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.types.BooleanType;
 import org.apache.spark.sql.types.ByteType;
 import org.apache.spark.sql.types.DataTypes;
@@ -247,5 +249,18 @@ public class CatalogUtils {
         }
 
         throw new IllegalArgumentException("Unsupported Spark data type: " + sparkType);
+    }
+
+    public static void checkNoDefaultValue(TableChange.AddColumn addColumn) {
+        try {
+            ColumnDefaultValue defaultValue = addColumn.defaultValue();
+            if (defaultValue != null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot add column %s with default value %s.",
+                                Arrays.toString(addColumn.fieldNames()), defaultValue));
+            }
+        } catch (NoClassDefFoundError ignored) {
+        }
     }
 }

@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -63,6 +64,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private BucketMode bucketMode;
 
     private final int[] notNullFieldIndex;
+    private final @Nullable DefaultValueRow defaultValueRow;
 
     public TableWriteImpl(
             RowType rowType,
@@ -84,6 +86,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                         .map(DataField::name)
                         .collect(Collectors.toList());
         this.notNullFieldIndex = rowType.getFieldIndices(notNullColumnNames);
+        this.defaultValueRow = DefaultValueRow.create(rowType);
     }
 
     @Override
@@ -162,6 +165,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Nullable
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
         checkNullability(row);
+        row = wrapDefaultValue(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
         if (ignoreDelete && rowKind.isRetract()) {
             return null;
@@ -191,6 +195,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                         String.format("Cannot write null to non-null column(%s)", columnName));
             }
         }
+    }
+
+    private InternalRow wrapDefaultValue(InternalRow row) {
+        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {

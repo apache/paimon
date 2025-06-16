@@ -119,7 +119,8 @@ public class SchemaMergingUtils {
                                                     baseField.id(),
                                                     baseField.name(),
                                                     updatedDataType,
-                                                    baseField.description());
+                                                    baseField.description(),
+                                                    baseField.defaultValue());
                                         } else {
                                             return baseField;
                                         }
@@ -226,6 +227,10 @@ public class SchemaMergingUtils {
     private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
         DataType dataType = ReassignFieldId.reassign(field.type(), highestFieldId);
         return new DataField(
-                highestFieldId.incrementAndGet(), field.name(), dataType, field.description());
+                highestFieldId.incrementAndGet(),
+                field.name(),
+                dataType,
+                field.description(),
+                field.defaultValue());
     }
 }

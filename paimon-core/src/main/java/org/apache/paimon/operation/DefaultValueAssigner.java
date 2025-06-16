@@ -69,10 +69,6 @@ public class DefaultValueAssigner {
         return this;
     }
 
-    public boolean needToAssign() {
-        return needToAssign;
-    }
-
     /** assign default value for column which value is null. */
     public RecordReader<InternalRow> assignFieldsDefaultValue(RecordReader<InternalRow> reader) {
         if (!needToAssign) {

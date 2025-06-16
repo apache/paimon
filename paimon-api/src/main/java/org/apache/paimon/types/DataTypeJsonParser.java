@@ -58,7 +58,12 @@ public final class DataTypeJsonParser {
         if (descriptionNode != null) {
             description = descriptionNode.asText();
         }
-        return new DataField(id, name, type, description);
+        JsonNode defaultValueNode = json.get("defaultValue");
+        String defaultValue = null;
+        if (defaultValueNode != null) {
+            defaultValue = defaultValueNode.asText();
+        }
+        return new DataField(id, name, type, description, defaultValue);
     }
 
     public static DataType parseDataType(JsonNode json) {
