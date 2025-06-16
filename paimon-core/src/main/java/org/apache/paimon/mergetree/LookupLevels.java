@@ -36,17 +36,23 @@ import org.apache.paimon.utils.IOFunction;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
@@ -54,6 +60,8 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LookupLevels.class);
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
@@ -127,22 +135,24 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     @Nullable
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
-
-        boolean newCreatedLookupFile = false;
-        if (lookupFile == null) {
-            lookupFile = createLookupFile(file);
-            newCreatedLookupFile = true;
-        }
-
         byte[] valueBytes;
-        try {
-            byte[] keyBytes = keySerializer.serializeToBytes(key);
-            valueBytes = lookupFile.get(keyBytes);
-        } finally {
-            if (newCreatedLookupFile) {
-                lookupFileCache.put(file.fileName(), lookupFile);
+
+        while (true) {
+            if (lookupFile == null || lookupFile.isClosed()) {
+                lookupFile = createLookupFile(file);
+            }
+
+            synchronized (lookupFile) {
+                if (lookupFile.isClosed()) {
+                    continue;
+                }
+
+                byte[] keyBytes = keySerializer.serializeToBytes(key);
+                valueBytes = lookupFile.get(keyBytes);
+                break;
             }
         }
+
         if (valueBytes == null) {
             return null;
         }
@@ -151,7 +161,86 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
     }
 
-    private LookupFile createLookupFile(DataFileMeta file) throws IOException {
+    public void refreshFiles(List<DataFileMeta> before, List<DataFileMeta> after) {
+        // 1, Identify expired local files to evict
+        List<DataFileMeta> localFilesToEvict =
+                before.stream()
+                        .filter(beforeFile -> cachedFiles().contains(beforeFile.fileName()))
+                        .collect(Collectors.toList());
+
+        // 2, Identify new files that are overlapped with expired local files
+        List<DataFileMeta> rebuildFiles = pickRebuildFiles(localFilesToEvict, after);
+
+        // 3, Update dataFileMetas in Levels, expired local files will be evicted
+        getLevels().update(before, after);
+
+        // 4, rebuild new files to local cache
+        for (DataFileMeta file : rebuildFiles) {
+            try {
+                LookupFile lookupFile = createLookupFile(file);
+                lookupFileCache.put(file.fileName(), lookupFile);
+            } catch (IOException e) {
+                // Errors in the asynchronously builds of local files will not affect lookup
+                // process. No need to throw RuntimeException here.
+                LOG.warn("Rebuild local lookup file {} failed.", file.fileName(), e);
+            }
+        }
+    }
+
+    private List<DataFileMeta> pickRebuildFiles(
+            List<DataFileMeta> localFilesToEvict, List<DataFileMeta> after) {
+        long totalSize = localFilesToEvict.stream().mapToLong(DataFileMeta::fileSize).sum();
+
+        List<DataFileMeta> overlappedFiles =
+                after.stream()
+                        .filter(
+                                afterFile ->
+                                        localFilesToEvict.stream()
+                                                .anyMatch(
+                                                        localFile ->
+                                                                isOverLapped(localFile, afterFile)))
+                        // Sort files by ascending order
+                        .sorted((o1, o2) -> (int) (o1.fileSize() - o2.fileSize()))
+                        .collect(Collectors.toList());
+
+        // The total size of rebuild files should not greatly exceed the total size of evicted files
+        List<DataFileMeta> rebuildFiles = new ArrayList<>();
+        for (DataFileMeta file : overlappedFiles) {
+            rebuildFiles.add(file);
+            totalSize -= file.fileSize();
+            if (totalSize <= 0) {
+                break;
+            }
+        }
+
+        return rebuildFiles;
+    }
+
+    private boolean isOverLapped(DataFileMeta localFile, DataFileMeta afterFile) {
+        if (localFile.level() != afterFile.level()) {
+            return false;
+        }
+
+        if (keyComparator.compare(localFile.minKey(), afterFile.minKey()) <= 0
+                && keyComparator.compare(localFile.maxKey(), afterFile.minKey()) >= 0) {
+            return true;
+        }
+
+        if (keyComparator.compare(localFile.minKey(), afterFile.maxKey()) <= 0
+                && keyComparator.compare(localFile.maxKey(), afterFile.minKey()) >= 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    // Lookup thread and refresh thread should access this method synchronously.
+    private synchronized LookupFile createLookupFile(DataFileMeta file) throws IOException {
+        LookupFile lookupFile = lookupFileCache.getIfPresent(file);
+        if (lookupFile != null && !lookupFile.isClosed()) {
+            return lookupFile;
+        }
+
         File localFile = localFileFactory.apply(file.fileName());
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
@@ -190,12 +279,17 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             context = kvWriter.close();
         }
 
+        lookupFile =
+                new LookupFile(
+                        localFile,
+                        file,
+                        lookupStoreFactory.createReader(localFile, context),
+                        () -> ownCachedFiles.remove(file.fileName()));
+
         ownCachedFiles.add(file.fileName());
-        return new LookupFile(
-                localFile,
-                file,
-                lookupStoreFactory.createReader(localFile, context),
-                () -> ownCachedFiles.remove(file.fileName()));
+        lookupFileCache.put(file.fileName(), lookupFile);
+
+        return lookupFile;
     }
 
     @Override

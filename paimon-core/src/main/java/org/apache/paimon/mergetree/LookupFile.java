@@ -117,10 +117,12 @@ public class LookupFile {
 
     private static void removalCallback(String file, LookupFile lookupFile, RemovalCause cause) {
         if (lookupFile != null) {
-            try {
-                lookupFile.close(cause);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            synchronized (file) {
+                try {
+                    lookupFile.close(cause);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
         }
     }
