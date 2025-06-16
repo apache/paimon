@@ -124,8 +124,8 @@ public class MergeTreeCompactTask extends CompactTask {
         if ((outputLevel == maxLevel && containsDeleteRecords(file))
                 || forceRewriteAllFiles
                 || containsExpiredRecords(file)) {
-            List<List<SortedRun>> candidate =
-                    singletonList(singletonList(SortedRun.fromSingle(file)));
+            List<List<SortedRun>> candidate = new ArrayList<>();
+            candidate.add(singletonList(SortedRun.fromSingle(file)));
             rewriteImpl(candidate, toUpdate);
             return;
         }
