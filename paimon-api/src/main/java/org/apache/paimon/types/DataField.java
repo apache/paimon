@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
@@ -121,7 +122,7 @@ public final class DataField implements Serializable {
     public String asSQLString() {
         StringBuilder sb = new StringBuilder();
         sb.append(escapeIdentifier(name)).append(" ").append(type.asSQLString());
-        if (description != null) {
+        if (StringUtils.isNotEmpty(description)) {
             sb.append(" COMMENT '").append(escapeSingleQuotes(description)).append("'");
         }
         if (defaultValue != null) {

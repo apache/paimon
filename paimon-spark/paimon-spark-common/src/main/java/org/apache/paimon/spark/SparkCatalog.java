@@ -92,8 +92,10 @@ import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfiguratio
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNoDefaultValue;
+import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
+import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultValue;
 import static org.apache.spark.sql.connector.catalog.TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -390,6 +392,8 @@ public class SparkCatalog extends SparkBaseCatalog
             TableChange.UpdateColumnPosition update = (TableChange.UpdateColumnPosition) change;
             SchemaChange.Move move = getMove(update.position(), update.fieldNames());
             return SchemaChange.updateColumnPosition(move);
+        } else if (isUpdateColumnDefaultValue(change)) {
+            return toUpdateColumnDefaultValue(change);
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());

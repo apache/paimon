@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.utils;
 
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -262,5 +263,19 @@ public class CatalogUtils {
             }
         } catch (NoClassDefFoundError ignored) {
         }
+    }
+
+    public static boolean isUpdateColumnDefaultValue(TableChange tableChange) {
+        try {
+            return tableChange instanceof TableChange.UpdateColumnDefaultValue;
+        } catch (NoClassDefFoundError ignored) {
+            return false;
+        }
+    }
+
+    public static SchemaChange toUpdateColumnDefaultValue(TableChange tableChange) {
+        TableChange.UpdateColumnDefaultValue update =
+                (TableChange.UpdateColumnDefaultValue) tableChange;
+        return SchemaChange.updateColumnDefaultValue(update.fieldNames(), update.newDefaultValue());
     }
 }

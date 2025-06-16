@@ -46,9 +46,26 @@ CREATE TABLE my_table (
 For SQL commands that execute table writes, such as the `INSERT`, `UPDATE`, and `MERGE` commands, the `DEFAULT` keyword
 or `NULL` value is parsed into the default value specified for the corresponding column.
 
+## Alter Default Value
+
+Paimon supports alter column default value.
+
+For example:
+
+```sql
+CREATE TABLE T (a INT, b INT DEFAULT 2);
+
+INSERT INTO T (a) VALUES (1);
+-- result: [[1, 2]]
+
+ALTER TABLE T ALTER COLUMN b SET DEFAULT 3;
+
+INSERT INTO T (a) VALUES (2);
+-- result: [[1, 2], [2, 3]]
+```
+
+The default value of `'b'` column has been changed to 3 from 2.
+
 ## Limitation
 
-Currently, only specifying default values when creating tables is supported, and the following usage is not supported:
-
-1. Not support alter table add column with default value, for example: `ALTER TABLE T ADD COLUMN d INT DEFAULT 5;`.
-2. Not support alter table alter column set default value, for example: `ALTER TABLE T ALTER COLUMN d SET DEFAULT 5;`.
+Not support alter table add column with default value, for example: `ALTER TABLE T ADD COLUMN d INT DEFAULT 5;`.

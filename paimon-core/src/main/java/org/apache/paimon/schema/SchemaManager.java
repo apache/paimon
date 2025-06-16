@@ -31,6 +31,7 @@ import org.apache.paimon.schema.SchemaChange.RemoveOption;
 import org.apache.paimon.schema.SchemaChange.RenameColumn;
 import org.apache.paimon.schema.SchemaChange.SetOption;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnComment;
+import org.apache.paimon.schema.SchemaChange.UpdateColumnDefaultValue;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
@@ -515,6 +516,18 @@ public class SchemaManager implements Serializable {
                 UpdateColumnPosition update = (UpdateColumnPosition) change;
                 SchemaChange.Move move = update.move();
                 applyMove(newFields, move);
+            } else if (change instanceof UpdateColumnDefaultValue) {
+                UpdateColumnDefaultValue update = (UpdateColumnDefaultValue) change;
+                updateNestedColumn(
+                        newFields,
+                        update.fieldNames(),
+                        (field, depth) ->
+                                new DataField(
+                                        field.id(),
+                                        field.name(),
+                                        field.type(),
+                                        field.description(),
+                                        update.newDefaultValue()));
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
             }

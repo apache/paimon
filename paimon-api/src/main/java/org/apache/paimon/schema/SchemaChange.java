@@ -73,6 +73,9 @@ import java.util.Objects;
             value = SchemaChange.UpdateColumnComment.class,
             name = SchemaChange.Actions.UPDATE_COLUMN_COMMENT_ACTION),
     @JsonSubTypes.Type(
+            value = SchemaChange.UpdateColumnDefaultValue.class,
+            name = SchemaChange.Actions.UPDATE_COLUMN_DEFAULT_VALUE_ACTION),
+    @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnPosition.class,
             name = SchemaChange.Actions.UPDATE_COLUMN_POSITION_ACTION),
 })
@@ -151,6 +154,10 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange updateColumnComment(String[] fieldNames, String comment) {
         return new UpdateColumnComment(fieldNames, comment);
+    }
+
+    static SchemaChange updateColumnDefaultValue(String[] fieldNames, String defaultValue) {
+        return new UpdateColumnDefaultValue(fieldNames, defaultValue);
     }
 
     static SchemaChange updateColumnPosition(Move move) {
@@ -751,6 +758,58 @@ public interface SchemaChange extends Serializable {
         }
     }
 
+    /** A SchemaChange to update the default value. */
+    final class UpdateColumnDefaultValue implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_FILED_NAMES = "fieldNames";
+        private static final String FIELD_NEW_DEFAULT_VALUE = "newDefaultValue";
+
+        @JsonProperty(FIELD_FILED_NAMES)
+        private final String[] fieldNames;
+
+        @JsonProperty(FIELD_NEW_DEFAULT_VALUE)
+        private final String newDefaultValue;
+
+        @JsonCreator
+        private UpdateColumnDefaultValue(
+                @JsonProperty(FIELD_FILED_NAMES) String[] fieldNames,
+                @JsonProperty(FIELD_NEW_DEFAULT_VALUE) String newDefaultValue) {
+            this.fieldNames = fieldNames;
+            this.newDefaultValue = newDefaultValue;
+        }
+
+        @JsonGetter(FIELD_FILED_NAMES)
+        public String[] fieldNames() {
+            return fieldNames;
+        }
+
+        @JsonGetter(FIELD_NEW_DEFAULT_VALUE)
+        public String newDefaultValue() {
+            return newDefaultValue;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            UpdateColumnDefaultValue that = (UpdateColumnDefaultValue) o;
+            return Arrays.equals(fieldNames, that.fieldNames)
+                    && newDefaultValue.equals(that.newDefaultValue);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Objects.hash(newDefaultValue);
+            result = 31 * result + Objects.hashCode(fieldNames);
+            return result;
+        }
+    }
+
     /** Actions for schema changes： identify for schema change. */
     class Actions {
         public static final String FIELD_ACTION = "action";
@@ -763,6 +822,7 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_TYPE_ACTION = "updateColumnType";
         public static final String UPDATE_COLUMN_NULLABILITY_ACTION = "updateColumnNullability";
         public static final String UPDATE_COLUMN_COMMENT_ACTION = "updateColumnComment";
+        public static final String UPDATE_COLUMN_DEFAULT_VALUE_ACTION = "updateColumnDefaultValue";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
 
         private Actions() {}
