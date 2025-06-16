@@ -24,9 +24,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBState;
-import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.lookup.StateFactory;
+import org.apache.paimon.lookup.memory.InMemoryStateFactory;
+import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
+import org.apache.paimon.lookup.rocksdb.RocksDBState;
+import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -64,11 +66,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
 
 /** Lookup table of full cache. */
 public abstract class FullCacheLookupTable implements LookupTable {
+
     private static final Logger LOG = LoggerFactory.getLogger(FullCacheLookupTable.class);
 
     protected final Object lock = new Object();
@@ -79,7 +84,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
 
-    protected RocksDBStateFactory stateFactory;
+    protected StateFactory stateFactory;
     @Nullable private ExecutorService refreshExecutor;
     private final AtomicReference<Exception> cachedException;
     private final int maxPendingSnapshotCount;
@@ -143,11 +148,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     protected void init() throws Exception {
-        this.stateFactory =
-                new RocksDBStateFactory(
-                        context.tempPath.toString(),
-                        context.table.coreOptions().toConfiguration(),
-                        null);
+        this.stateFactory = createStateFactory();
         this.refreshExecutor =
                 this.refreshAsync
                         ? Executors.newSingleThreadExecutor(
@@ -156,6 +157,16 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
                         : null;
+    }
+
+    private StateFactory createStateFactory() throws IOException {
+        String diskDir = context.tempPath.toString();
+        Options options = context.table.coreOptions().toConfiguration();
+        if (options.get(LOOKUP_CACHE_MODE) == MEMORY) {
+            return new InMemoryStateFactory();
+        } else {
+            return new RocksDBStateFactory(diskDir, options, null);
+        }
     }
 
     protected void bootstrap() throws Exception {
@@ -168,6 +179,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         scanPredicate,
                         context.requiredCachedBucketIds,
                         cacheRowFilter);
+        if (!stateFactory.preferBulkLoad()) {
+            doRefresh();
+            return;
+        }
+
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -189,7 +205,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
             while ((row = keyIterator.next(row)) != null) {
                 bulkLoader.write(row.getBinary(0), row.getBinary(1));
             }
-        } catch (BulkLoader.WriteException e) {
+        } catch (RocksDBBulkLoader.WriteException e) {
             throw new RuntimeException(
                     "Exception in bulkLoad, the most suspicious reason is that "
                             + "your data contains duplicates, please check your lookup table. ",
@@ -331,7 +347,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     /** Bulk loader for the table. */
     public interface TableBulkLoader {
 
-        void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
+        void write(byte[] key, byte[] value) throws RocksDBBulkLoader.WriteException, IOException;
 
         void finish() throws IOException;
     }

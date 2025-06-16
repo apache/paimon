@@ -16,9 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.lookup.ByteArray;
+import org.apache.paimon.lookup.ValueState;
 
 import org.rocksdb.ColumnFamilyHandle;
 
@@ -29,7 +31,8 @@ import java.io.IOException;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> a single value. */
-public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Reference> {
+public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Reference>
+        implements ValueState<K, V> {
 
     public RocksDBValueState(
             RocksDBStateFactory stateFactory,
@@ -41,6 +44,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
     }
 
     @Nullable
+    @Override
     public V get(K key) throws IOException {
         try {
             Reference valueRef = get(wrap(serializeKey(key)));
@@ -60,6 +64,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
         return valueRef;
     }
 
+    @Override
     public void put(K key, V value) throws IOException {
         checkArgument(value != null);
 
@@ -73,6 +78,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
         }
     }
 
+    @Override
     public void delete(K key) throws IOException {
         try {
             byte[] keyBytes = serializeKey(key);
@@ -84,16 +90,5 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
         } catch (Exception e) {
             throw new IOException(e);
         }
-    }
-
-    public V deserializeValue(byte[] valueBytes) throws IOException {
-        valueInputView.setBuffer(valueBytes);
-        return valueSerializer.deserialize(valueInputView);
-    }
-
-    public byte[] serializeValue(V value) throws IOException {
-        valueOutputView.clear();
-        valueSerializer.serialize(value, valueOutputView);
-        return valueOutputView.getCopyOfBuffer();
     }
 }

@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.lookup.rocksdb;
 
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.lookup.StateFactory;
 
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
@@ -31,13 +32,12 @@ import org.rocksdb.TtlDB;
 
 import javax.annotation.Nullable;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /** Factory to create state. */
-public class RocksDBStateFactory implements Closeable {
+public class RocksDBStateFactory implements StateFactory {
 
     public static final String MERGE_OPERATOR_NAME = "stringappendtest";
 
@@ -85,6 +85,7 @@ public class RocksDBStateFactory implements Closeable {
         return path;
     }
 
+    @Override
     public <K, V> RocksDBValueState<K, V> valueState(
             String name,
             Serializer<K> keySerializer,
@@ -95,6 +96,7 @@ public class RocksDBStateFactory implements Closeable {
                 this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
+    @Override
     public <K, V> RocksDBSetState<K, V> setState(
             String name,
             Serializer<K> keySerializer,
@@ -105,6 +107,7 @@ public class RocksDBStateFactory implements Closeable {
                 this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
+    @Override
     public <K, V> RocksDBListState<K, V> listState(
             String name,
             Serializer<K> keySerializer,
@@ -114,6 +117,11 @@ public class RocksDBStateFactory implements Closeable {
 
         return new RocksDBListState<>(
                 this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+    }
+
+    @Override
+    public boolean preferBulkLoad() {
+        return true;
     }
 
     private ColumnFamilyHandle createColumnFamily(String name) throws IOException {

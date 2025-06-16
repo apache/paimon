@@ -18,15 +18,15 @@
 
 package org.apache.paimon.lookup;
 
-/** Bulk loader for {@link State}, incoming keys must be sorted, and there must be no repetition. */
-public interface BulkLoader {
+import java.io.IOException;
+import java.util.List;
 
-    void finish();
+/** {@link State} interface for list state in Operations. */
+public interface ListState<K, V> extends State<K, V> {
 
-    /** Exception during writing. */
-    class WriteException extends Exception {
-        public WriteException(Throwable cause) {
-            super(cause);
-        }
-    }
+    void add(K key, V value) throws IOException;
+
+    List<V> get(K key) throws IOException;
+
+    ListBulkLoader createBulkLoader();
 }

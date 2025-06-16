@@ -20,8 +20,9 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBListState;
+import org.apache.paimon.lookup.ListBulkLoader;
+import org.apache.paimon.lookup.ListState;
+import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -40,7 +41,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     private final KeyProjectedRow joinKeyRow;
 
-    private RocksDBListState<InternalRow, InternalRow> state;
+    private ListState<InternalRow, InternalRow> state;
 
     public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) {
         super(context);
@@ -105,7 +106,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public TableBulkLoader createBulkLoader() {
-        BulkLoader bulkLoader = state.createBulkLoader();
+        ListBulkLoader bulkLoader = state.createBulkLoader();
         return new TableBulkLoader() {
 
             private final List<byte[]> values = new ArrayList<>();
@@ -113,7 +114,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
             private byte[] currentKey;
 
             @Override
-            public void write(byte[] key, byte[] value) throws IOException {
+            public void write(byte[] key, byte[] value) {
                 if (currentKey != null && !Arrays.equals(key, currentKey)) {
                     flush();
                 }
@@ -122,16 +123,16 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
             }
 
             @Override
-            public void finish() throws IOException {
+            public void finish() {
                 flush();
                 bulkLoader.finish();
             }
 
-            private void flush() throws IOException {
+            private void flush() {
                 if (currentKey != null && values.size() > 0) {
                     try {
-                        bulkLoader.write(currentKey, state.serializeList(values));
-                    } catch (BulkLoader.WriteException e) {
+                        bulkLoader.write(currentKey, values);
+                    } catch (RocksDBBulkLoader.WriteException e) {
                         throw new RuntimeException(e);
                     }
                 }
