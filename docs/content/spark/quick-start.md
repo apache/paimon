@@ -28,7 +28,9 @@ under the License.
 
 ## Preparation
 
-Paimon currently supports Spark 3.5, 3.4, 3.3, and 3.2. We recommend the latest Spark version for a better experience.
+Paimon currently supports Spark versions 4.x (including 4.0) and 3.x (including 3.5, 3.4, 3.3, and 3.2). We recommend using the latest Spark version for a better experience.
+
+Note: For Spark 4.x, use Java 17 and Scala 2.13; for Spark 3.x, use Java 8 and Scala 2.12.
 
 Download the jar file with corresponding version.
 
@@ -36,6 +38,7 @@ Download the jar file with corresponding version.
 
 | Version   | Jar                                                                                                                                                                  |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 4.0 | [paimon-spark-4.0-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-4.0/{{< version >}}/paimon-spark-4.0-{{< version >}}.jar) |
 | Spark 3.5 | [paimon-spark-3.5-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5/{{< version >}}/paimon-spark-3.5-{{< version >}}.jar) |
 | Spark 3.4 | [paimon-spark-3.4-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.4/{{< version >}}/paimon-spark-3.4-{{< version >}}.jar) |
 | Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3/{{< version >}}/paimon-spark-3.3-{{< version >}}.jar) |
@@ -47,6 +50,7 @@ Download the jar file with corresponding version.
 
 | Version   | Jar                                                                                                                                 |
 |-----------|-------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 4.0 | [paimon-spark-4.0-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-4.0/{{< version >}}/) |
 | Spark 3.5 | [paimon-spark-3.5-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5/{{< version >}}/) |
 | Spark 3.4 | [paimon-spark-3.4-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.4/{{< version >}}/) |
 | Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3/{{< version >}}/) |
