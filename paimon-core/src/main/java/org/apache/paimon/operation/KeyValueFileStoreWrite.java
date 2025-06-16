@@ -291,7 +291,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     options.prepareCommitWaitCompaction(),
                     options.needLookup(),
                     recordLevelExpire,
-                    options.forceCompactAllFiles());
+                    options.forceRewriteAllFiles());
         }
     }
 
