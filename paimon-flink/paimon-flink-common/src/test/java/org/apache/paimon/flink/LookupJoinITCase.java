@@ -57,8 +57,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
 
         String fullOption = ", 'lookup.cache' = 'full'";
-
         String lruOption = ", 'changelog-producer'='lookup'";
+        String memoryOption = ", 'lookup.cache' = 'memory'";
 
         switch (cacheMode) {
             case FULL:
@@ -68,6 +68,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
             case AUTO:
                 tEnv.executeSql(String.format(dim, lruOption));
                 tEnv.executeSql(String.format(partitioned, lruOption));
+                break;
+            case MEMORY:
+                tEnv.executeSql(String.format(dim, memoryOption));
+                tEnv.executeSql(String.format(partitioned, memoryOption));
                 break;
             default:
                 throw new UnsupportedOperationException();

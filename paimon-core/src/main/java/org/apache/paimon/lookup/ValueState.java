@@ -18,15 +18,19 @@
 
 package org.apache.paimon.lookup;
 
-/** Bulk loader for {@link State}, incoming keys must be sorted, and there must be no repetition. */
-public interface BulkLoader {
+import javax.annotation.Nullable;
 
-    void finish();
+import java.io.IOException;
 
-    /** Exception during writing. */
-    class WriteException extends Exception {
-        public WriteException(Throwable cause) {
-            super(cause);
-        }
-    }
+/** {@link State} interface for single-value state. The value can be deleted or updated. */
+public interface ValueState<K, V> extends State<K, V> {
+
+    @Nullable
+    V get(K key) throws IOException;
+
+    void put(K key, V value) throws IOException;
+
+    void delete(K key) throws IOException;
+
+    ValueBulkLoader createBulkLoader();
 }
