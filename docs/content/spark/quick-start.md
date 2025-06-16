@@ -30,7 +30,7 @@ under the License.
 
 Paimon currently supports Spark versions 4.x (including 4.0) and 3.x (including 3.5, 3.4, 3.3, and 3.2). We recommend using the latest Spark version for a better experience.
 
-Note: For Spark 4.x, use Java 17 and Scala 2.13; for Spark 3.x, use Java 8 and Scala 2.12.
+Note that Spark 4.x is pre-built with Java 17 and Scala 2.13. Spark 3.x is pre-built with Java 8 and Scala 2.12.
 
 Download the jar file with corresponding version.
 
