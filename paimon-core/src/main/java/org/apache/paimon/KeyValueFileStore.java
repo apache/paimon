@@ -177,12 +177,14 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
+                    pathFactory(),
                     schema,
                     commitUser,
                     partitionType,
                     keyType,
                     valueType,
                     this::pathFactory,
+                    newReaderFactoryBuilder(),
                     snapshotManager(),
                     newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
