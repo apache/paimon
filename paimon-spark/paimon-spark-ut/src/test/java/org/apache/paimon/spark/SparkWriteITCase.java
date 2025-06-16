@@ -88,24 +88,29 @@ public class SparkWriteITCase {
                 "CREATE TABLE T (a INT, b INT DEFAULT 2, c STRING DEFAULT 'my_value') TBLPROPERTIES"
                         + " ('file.format'='avro')");
 
+        // test show create table
         List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
         assertThat(show.toString())
                 .contains("a INT,\n" + "  b INT DEFAULT 2,\n" + "  c STRING DEFAULT 'my_value'");
 
+        // test partial write
         spark.sql("INSERT INTO T (a) VALUES (1), (2)").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value]]");
 
+        // test write with DEFAULT
         spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value]]");
 
+        // test alter with DEFAULT not support
         assertThatThrownBy(() -> spark.sql("ALTER TABLE T ADD COLUMN d INT DEFAULT 5"))
                 .hasMessageContaining(
                         "Unsupported table change: Cannot add column [d] with default value");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE T ALTER COLUMN a SET DEFAULT 3"))
                 .hasMessageContaining("Change is not supported");
 
+        // test alter type to default column
         spark.sql("ALTER TABLE T ALTER COLUMN b TYPE STRING").collectAsList();
         spark.sql("INSERT INTO T (a) VALUES (4)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
