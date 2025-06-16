@@ -41,6 +41,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
@@ -2100,7 +2101,7 @@ public class RESTCatalogServer {
         } else if (entity instanceof GetViewResponse) {
             return ((GetViewResponse) entity).getName();
         } else if (entity instanceof Partition) {
-            return ((Partition) entity).spec().toString().replace("{", "").replace("}", "");
+            return PartitionUtils.buildPartitionName(((Partition) entity).spec());
         } else {
             return entity.toString();
         }
