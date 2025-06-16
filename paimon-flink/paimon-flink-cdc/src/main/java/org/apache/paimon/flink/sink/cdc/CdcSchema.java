@@ -28,9 +28,12 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /** A schema change message from the CDC source. */
 public class CdcSchema implements Serializable {
@@ -100,7 +103,7 @@ public class CdcSchema implements Serializable {
     /** A builder for constructing an immutable but still unresolved {@link CdcSchema}. */
     public static final class Builder {
 
-        private final List<DataField> columns = new ArrayList<>();
+        private final Map<String, DataField> columns = new LinkedHashMap<>();
 
         private List<String> primaryKeys = new ArrayList<>();
 
@@ -121,7 +124,7 @@ public class CdcSchema implements Serializable {
             Preconditions.checkNotNull(dataField, "Data field must not be null.");
             Preconditions.checkNotNull(dataField.name(), "Column name must not be null.");
             Preconditions.checkNotNull(dataField.type(), "Data type must not be null.");
-            columns.add(dataField);
+            columns.put(dataField.name(), dataField);
             return this;
         }
 
@@ -148,7 +151,7 @@ public class CdcSchema implements Serializable {
 
             int id = highestFieldId.incrementAndGet();
             DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
-            columns.add(new DataField(id, columnName, reassignDataType, description));
+            columns.put(columnName, new DataField(id, columnName, reassignDataType, description));
             return this;
         }
 
@@ -179,9 +182,19 @@ public class CdcSchema implements Serializable {
             return this;
         }
 
+        /** Returns the data type of the specified field. */
+        public DataType getFieldType(String fieldName) {
+            DataField field = columns.get(fieldName);
+            if (field == null) {
+                throw new IllegalArgumentException("Field " + fieldName + " not found in schema.");
+            }
+            return field.type();
+        }
+
         /** Returns an instance of an unresolved {@link CdcSchema}. */
         public CdcSchema build() {
-            return new CdcSchema(columns, primaryKeys, comment);
+            List<DataField> fields = columns.values().stream().collect(Collectors.toList());
+            return new CdcSchema(fields, primaryKeys, comment);
         }
     }
 }
