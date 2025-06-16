@@ -16,43 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.cdc;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.CommittableStateManager;
-import org.apache.paimon.flink.sink.FlinkWriteSink;
-import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
 
-/**
- * CDC Sink for unaware bucket table. It should not add compaction node, because the compaction may
- * have old schema.
- */
-public class CdcAppendTableSink extends FlinkWriteSink<CdcRecord> {
+import java.util.Map;
 
-    private final Integer parallelism;
+/** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
+public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
 
-    public CdcAppendTableSink(FileStoreTable table, Integer parallelism) {
-        super(table, null);
-        this.parallelism = parallelism;
+    private static final long serialVersionUID = 1L;
+
+    public PostponeBucketSink(
+            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+        super(table, overwritePartition);
     }
 
     @Override
-    protected OneInputStreamOperatorFactory<CdcRecord, Committable> createWriteOperatorFactory(
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcAppendTableWriteOperator.Factory(table, writeProvider, commitUser);
-    }
-
-    @Override
-    public DataStream<Committable> doWrite(
-            DataStream<CdcRecord> input, String initialCommitUser, @Nullable Integer parallelism) {
-        return super.doWrite(input, initialCommitUser, this.parallelism);
+        return createNoStateRowWriteOperatorFactory(table, null, writeProvider, commitUser);
     }
 
     @Override

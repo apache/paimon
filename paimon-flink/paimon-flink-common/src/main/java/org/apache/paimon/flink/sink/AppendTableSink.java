@@ -48,6 +48,8 @@ import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
  */
 public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
 
+    private static final long serialVersionUID = 1L;
+
     protected final FileStoreTable table;
     protected final LogSinkFunction logSinkFunction;
 
