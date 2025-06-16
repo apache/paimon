@@ -178,7 +178,7 @@ public class DataTypesTest {
                                         new DataField(1, "b`", new TimestampType()))))
                 .satisfies(
                         baseAssertions(
-                                "ROW<`a` VARCHAR(1) 'Someone''s desc.', `b``` TIMESTAMP(6)>",
+                                "ROW<`a` VARCHAR(1) COMMENT 'Someone''s desc.', `b``` TIMESTAMP(6)>",
                                 new RowType(
                                         Arrays.asList(
                                                 new DataField(

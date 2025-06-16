@@ -28,7 +28,6 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
 
-import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 import static org.apache.paimon.utils.EncodingUtils.escapeIdentifier;
 import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
 
@@ -123,15 +122,10 @@ public final class DataField implements Serializable {
         StringBuilder sb = new StringBuilder();
         sb.append(escapeIdentifier(name)).append(" ").append(type.asSQLString());
         if (description != null) {
-            sb.append(" COMMENT ").append(escapeSingleQuotes(description));
+            sb.append(" COMMENT '").append(escapeSingleQuotes(description)).append("'");
         }
         if (defaultValue != null) {
-            sb.append(" DEFAULT ");
-            if (type.getTypeRoot().getFamilies().contains(CHARACTER_STRING)) {
-                sb.append(escapeSingleQuotes(defaultValue));
-            } else {
-                sb.append(defaultValue);
-            }
+            sb.append(" DEFAULT ").append(defaultValue);
         }
         return sb.toString();
     }
