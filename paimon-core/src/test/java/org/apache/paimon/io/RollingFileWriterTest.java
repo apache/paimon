@@ -65,7 +65,8 @@ public class RollingFileWriterTest {
     }
 
     public void initialize(String identifier, boolean statsDenseStore) {
-        FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
+        FileFormat fileFormat =
+                FileFormat.fromIdentifier(identifier, Options.EMPTY_OPTIONS, new Options());
         rollingFileWriter =
                 new RollingFileWriter<>(
                         () ->

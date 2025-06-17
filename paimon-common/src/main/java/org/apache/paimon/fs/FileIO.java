@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
+import static org.apache.paimon.options.Options.EMPTY_OPTIONS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -378,6 +380,12 @@ public interface FileIO extends Serializable, Closeable {
             Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
             copyFile(file, targetPath, overwrite);
         }
+    }
+
+    default Options storageOptions() {
+        // Default implementation returns an empty map, subclasses can override to provide specific
+        // options.
+        return EMPTY_OPTIONS;
     }
 
     /** Read file from {@link #overwriteFileUtf8} file. */

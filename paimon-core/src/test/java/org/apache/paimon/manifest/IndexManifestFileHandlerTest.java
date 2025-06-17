@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,8 @@ public class IndexManifestFileHandlerTest {
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
                                 fileStore.fileIO(),
-                                FileFormat.manifestFormat(fileStore.options()),
+                                FileFormat.manifestFormat(
+                                        Options.EMPTY_OPTIONS, fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
                                 null)
@@ -81,7 +83,8 @@ public class IndexManifestFileHandlerTest {
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
                                 fileStore.fileIO(),
-                                FileFormat.manifestFormat(fileStore.options()),
+                                FileFormat.manifestFormat(
+                                        Options.EMPTY_OPTIONS, fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
                                 null)

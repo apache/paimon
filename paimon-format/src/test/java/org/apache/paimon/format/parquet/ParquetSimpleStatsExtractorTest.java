@@ -47,7 +47,7 @@ public class ParquetSimpleStatsExtractorTest extends SimpleColStatsExtractorTest
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("parquet", new Options());
+        return FileFormat.fromIdentifier("parquet", new Options(), new Options());
     }
 
     @Override

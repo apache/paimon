@@ -36,7 +36,7 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     public FileStatsExtractingAvroFormat() {
         super("avro");
-        avro = FileFormat.fromIdentifier("avro", new Options());
+        avro = FileFormat.fromIdentifier("avro", Options.EMPTY_OPTIONS, new Options());
     }
 
     @Override

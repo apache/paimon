@@ -45,7 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** base class for Test {@link ManifestFile}. */
 public abstract class ManifestFileMetaTestBase {
 
-    protected final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
+    protected final FileFormat avro =
+            FileFormat.fromIdentifier("avro", Options.EMPTY_OPTIONS, new Options());
     protected String manifestFileNameTemplate = "%d-%d";
 
     protected ManifestEntry makeEntry(boolean isAdd, String fileName) {
