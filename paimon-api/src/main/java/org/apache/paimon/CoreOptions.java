@@ -66,8 +66,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
-    public static final String DEFAULT_VALUE_SUFFIX = "default-value";
-
     public static final String FIELDS_PREFIX = "fields";
 
     public static final String FIELDS_SEPARATOR = ",";
@@ -2587,20 +2585,6 @@ public class CoreOptions implements Serializable {
 
     public boolean forceCreatingSnapshot() {
         return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
-    }
-
-    public Map<String, String> getFieldDefaultValues() {
-        Map<String, String> defaultValues = new HashMap<>();
-        String fieldPrefix = FIELDS_PREFIX + ".";
-        String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
-        for (Map.Entry<String, String> option : options.toMap().entrySet()) {
-            String key = option.getKey();
-            if (key != null && key.startsWith(fieldPrefix) && key.endsWith(defaultValueSuffix)) {
-                String fieldName = key.replace(fieldPrefix, "").replace(defaultValueSuffix, "");
-                defaultValues.put(fieldName, option.getValue());
-            }
-        }
-        return defaultValues;
     }
 
     public Map<String, String> commitCallbacks() {

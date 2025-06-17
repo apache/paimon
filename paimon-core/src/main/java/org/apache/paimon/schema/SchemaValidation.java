@@ -105,8 +105,6 @@ public class SchemaValidation {
 
         validateBucket(schema, options);
 
-        validateDefaultValues(schema);
-
         validateStartupMode(options);
 
         validateFieldsPrefix(schema, options);
@@ -483,64 +481,6 @@ public class SchemaValidation {
         if (!illegalGroup.isEmpty()) {
             throw new IllegalArgumentException(
                     "Should not defined aggregation function on sequence group: " + illegalGroup);
-        }
-    }
-
-    private static void validateDefaultValues(TableSchema schema) {
-        CoreOptions coreOptions = new CoreOptions(schema.options());
-        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
-
-        if (!defaultValues.isEmpty()) {
-
-            List<String> partitionKeys = schema.partitionKeys();
-            for (String partitionKey : partitionKeys) {
-                if (defaultValues.containsKey(partitionKey)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Partition key %s should not be assign default column.",
-                                    partitionKey));
-                }
-            }
-
-            List<String> primaryKeys = schema.primaryKeys();
-            for (String primaryKey : primaryKeys) {
-                if (defaultValues.containsKey(primaryKey)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Primary key %s should not be assign default column.",
-                                    primaryKey));
-                }
-            }
-
-            List<DataField> fields = schema.fields();
-
-            for (DataField field : fields) {
-                String defaultValueStr = defaultValues.get(field.name());
-                if (defaultValueStr == null) {
-                    continue;
-                }
-
-                @SuppressWarnings("unchecked")
-                CastExecutor<Object, Object> resolve =
-                        (CastExecutor<Object, Object>)
-                                CastExecutors.resolve(VarCharType.STRING_TYPE, field.type());
-                if (resolve == null) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The column %s with datatype %s is currently not supported for default value.",
-                                    field.name(), field.type().asSQLString()));
-                }
-
-                try {
-                    resolve.cast(BinaryString.fromString(defaultValueStr));
-                } catch (Exception e) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The default value %s of the column %s can not be cast to datatype: %s",
-                                    defaultValueStr, field.name(), field.type()),
-                            e);
-                }
-            }
         }
     }
 
