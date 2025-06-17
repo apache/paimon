@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.CoreOptions.BucketFunctionType
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions
+
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow => SparkInternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase

@@ -45,7 +45,7 @@ object PaimonFunctions {
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
-    new BucketFunction(PAIMON_BUCKET, BucketFunctionType.PAIMON),
+    new BucketFunction(BucketFunctionType.PAIMON),
     MAX_PT,
     new MaxPtFunction
   )
@@ -69,8 +69,9 @@ object PaimonFunctions {
  *
  * params arg0: bucket number, arg1...argn bucket keys.
  */
-class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
-  extends UnboundFunction {
+class BucketFunction(bucketFunctionType: BucketFunctionType) extends UnboundFunction {
+
+  private val NAME = "bucket"
 
   override def bind(inputType: StructType): BoundFunction = {
     assert(inputType.fields(0).dataType == IntegerType, "bucket number field must be integer type")
@@ -89,11 +90,11 @@ class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
 
       override def resultType: DataType = IntegerType
 
-      override def name: String = "bucket"
+      override def name: String = NAME
 
       override def canonicalName: String = {
         // We have to override this method to make it support canonical equivalent
-        s"paimon.$funcName(int, ${bucketKeyStructType.fields.map(_.dataType.catalogString).mkString(", ")})"
+        s"paimon.bucket(int, ${bucketKeyStructType.fields.map(_.dataType.catalogString).mkString(", ")})"
       }
 
       override def produceResult(input: InternalRow): Int = {
@@ -108,7 +109,7 @@ class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
 
   override def description: String = name
 
-  override def name: String = funcName
+  override def name: String = NAME
 
 }
 
