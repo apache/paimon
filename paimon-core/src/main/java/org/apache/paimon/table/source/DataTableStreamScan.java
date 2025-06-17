@@ -26,6 +26,7 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.ChangelogFollowUpScanner;
@@ -62,6 +63,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
     private final NextSnapshotFetcher nextSnapshotProvider;
+    private final boolean hasPk;
 
     private boolean initialized = false;
     private StartingScanner startingScanner;
@@ -75,25 +77,29 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     @Nullable private Long scanDelayMillis;
 
     public DataTableStreamScan(
+            TableSchema schema,
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
-            DefaultValueAssigner defaultValueAssigner) {
-        super(options, snapshotReader);
+            TableQueryAuth queryAuth,
+            boolean hasPk) {
+        super(schema, options, snapshotReader, queryAuth);
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
-        this.defaultValueAssigner = defaultValueAssigner;
+        this.defaultValueAssigner = DefaultValueAssigner.create(schema);
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
                         snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
+        this.hasPk = hasPk;
     }
 
     @Override
     public DataTableStreamScan withFilter(Predicate predicate) {
+        super.withFilter(predicate);
         snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
@@ -108,6 +114,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public Plan plan() {
+        authQuery();
+
         if (!initialized) {
             initScanner();
         }
@@ -250,7 +258,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         if (supportStreamingReadOverwrite) {
             LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
             SnapshotReader.Plan overwritePlan =
-                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
+                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader, !hasPk);
             currentWatermark = overwritePlan.watermark();
             return overwritePlan;
         }

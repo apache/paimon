@@ -37,6 +37,21 @@ public class IcebergOptions {
                             "When set, produce Iceberg metadata after a snapshot is committed, "
                                     + "so that Iceberg readers can read Paimon's raw data files.");
 
+    public static final ConfigOption<StorageLocation> METADATA_ICEBERG_STORAGE_LOCATION =
+            key("metadata.iceberg.storage-location")
+                    .enumType(StorageLocation.class)
+                    .noDefaultValue()
+                    .withDescription(
+                            "To store Iceberg metadata in a separate directory or under table location");
+
+    public static final ConfigOption<Integer> FORMAT_VERSION =
+            ConfigOptions.key("metadata.iceberg.format-version")
+                    .intType()
+                    .defaultValue(2)
+                    .withDescription(
+                            "The format version of iceberg table, the value can be 2 or 3. "
+                                    + "Note that only version 3 supports deletion vector.");
+
     public static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
                     .intType()
@@ -126,6 +141,12 @@ public class IcebergOptions {
                     .defaultValue(false)
                     .withDescription("Skip archive for AWS Glue catalog.");
 
+    public static final ConfigOption<Boolean> HIVE_SKIP_UPDATE_STATS =
+            key("metadata.iceberg.hive-skip-update-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Skip updating Hive stats.");
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
@@ -143,6 +164,36 @@ public class IcebergOptions {
         private final String description;
 
         StorageType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return TextElement.text(description);
+        }
+    }
+
+    /** Where to store Iceberg metadata. */
+    public enum StorageLocation implements DescribedEnum {
+        TABLE_LOCATION(
+                "table-location",
+                "Store Iceberg metadata in each table's directory. Useful for standalone "
+                        + "Iceberg tables or Java API access. Can also be used with Hive Catalog"),
+        CATALOG_STORAGE(
+                "catalog-location",
+                "Store Iceberg metadata in a separate directory. "
+                        + "Allows integration with Hive Catalog or Hadoop Catalog.");
+
+        private final String value;
+        private final String description;
+
+        StorageLocation(String value, String description) {
             this.value = value;
             this.description = description;
         }

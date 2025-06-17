@@ -94,9 +94,9 @@ public class IndexManifestFileHandler {
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
-            return new UnawareBucketCombiner();
+            return new GlobalCombiner();
         } else {
-            return new CommonBucketCombiner();
+            return new BucketedCombiner();
         }
     }
 
@@ -107,9 +107,9 @@ public class IndexManifestFileHandler {
 
     /**
      * We combine the previous and new index files by the file name. This is only used for tables
-     * with UnawareBucket.
+     * without bucket.
      */
-    static class UnawareBucketCombiner implements IndexManifestFileCombiner {
+    static class GlobalCombiner implements IndexManifestFileCombiner {
 
         @Override
         public List<IndexManifestEntry> combine(
@@ -131,7 +131,7 @@ public class IndexManifestFileHandler {
     }
 
     /** We combine the previous and new index files by {@link BucketIdentifier}. */
-    static class CommonBucketCombiner implements IndexManifestFileCombiner {
+    static class BucketedCombiner implements IndexManifestFileCombiner {
 
         @Override
         public List<IndexManifestEntry> combine(

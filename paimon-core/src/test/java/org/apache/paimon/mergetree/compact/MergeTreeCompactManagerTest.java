@@ -208,7 +208,8 @@ public class MergeTreeCompactManagerTest {
                         null,
                         false,
                         true,
-                        null);
+                        null,
+                        false);
 
         MergeTreeCompactManager defaultManager =
                 new MergeTreeCompactManager(
@@ -223,7 +224,8 @@ public class MergeTreeCompactManagerTest {
                         null,
                         false,
                         false,
-                        null);
+                        null,
+                        false);
 
         assertThat(lookupManager.compactNotCompleted()).isTrue();
         assertThat(defaultManager.compactNotCompleted()).isFalse();
@@ -259,7 +261,8 @@ public class MergeTreeCompactManagerTest {
                         null,
                         false,
                         false,
-                        null);
+                        null,
+                        false);
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =

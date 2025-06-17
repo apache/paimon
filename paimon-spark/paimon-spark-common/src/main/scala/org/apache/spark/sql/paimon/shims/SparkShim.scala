@@ -22,11 +22,12 @@ import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
@@ -42,6 +43,8 @@ import java.util.{Map => JMap}
  */
 trait SparkShim {
 
+  def classicApi: ClassicApi
+
   def createSparkParser(delegate: ParserInterface): ParserInterface
 
   def createCustomResolution(spark: SparkSession): Rule[LogicalPlan]
@@ -50,10 +53,6 @@ trait SparkShim {
 
   def createSparkArrayData(elementType: DataType): SparkArrayData
 
-  def supportsHashAggregate(
-      aggregateBufferAttributes: Seq[Attribute],
-      groupingExpression: Seq[Expression]): Boolean
-
   def createTable(
       tableCatalog: TableCatalog,
       ident: Identifier,
@@ -61,9 +60,19 @@ trait SparkShim {
       partitions: Array[Transform],
       properties: JMap[String, String]): Table
 
-  def column(expr: Expression): Column
+  def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef
 
-  def convertToExpression(spark: SparkSession, column: Column): Expression
+  def supportsHashAggregate(
+      aggregateBufferAttributes: Seq[Attribute],
+      groupingExpression: Seq[Expression]): Boolean
+
+  def supportsObjectHashAggregate(
+      aggregateExpressions: Seq[AggregateExpression],
+      groupByExpressions: Seq[Expression]): Boolean
 
   // for variant
   def toPaimonVariant(o: Object): Variant

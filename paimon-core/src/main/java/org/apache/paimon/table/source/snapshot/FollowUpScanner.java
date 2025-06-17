@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader.Plan;
 
@@ -29,7 +30,12 @@ public interface FollowUpScanner {
 
     Plan scan(Snapshot snapshot, SnapshotReader snapshotReader);
 
-    default Plan getOverwriteChangesPlan(Snapshot snapshot, SnapshotReader snapshotReader) {
-        return snapshotReader.withSnapshot(snapshot).readChanges();
+    default Plan getOverwriteChangesPlan(
+            Snapshot snapshot, SnapshotReader snapshotReader, boolean isAppend) {
+        if (isAppend) {
+            return snapshotReader.withSnapshot(snapshot).withMode(ScanMode.DELTA).read();
+        } else {
+            return snapshotReader.withSnapshot(snapshot).readChanges();
+        }
     }
 }

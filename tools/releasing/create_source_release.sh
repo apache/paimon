@@ -77,7 +77,7 @@ rsync -a \
   --exclude ".travis.yml" \
   . paimon-${RELEASE_VERSION}
 
-tar czf ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz paimon-${RELEASE_VERSION}
+tar czf ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz --no-xattrs paimon-${RELEASE_VERSION}
 gpg --armor --detach-sig ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz
 cd ${RELEASE_DIR}
 ${SHASUM} apache-paimon-${RELEASE_VERSION}-src.tgz > apache-paimon-${RELEASE_VERSION}-src.tgz.sha512

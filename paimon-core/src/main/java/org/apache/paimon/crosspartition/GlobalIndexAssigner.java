@@ -28,11 +28,11 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBOptions;
-import org.apache.paimon.lookup.RocksDBState;
-import org.apache.paimon.lookup.RocksDBStateFactory;
-import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
+import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
+import org.apache.paimon.lookup.rocksdb.RocksDBState;
+import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
+import org.apache.paimon.lookup.rocksdb.RocksDBValueState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -40,7 +40,7 @@ import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
-import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.table.sink.RowPartitionAllPrimaryKeyExtractor;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -62,16 +62,17 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.utils.ListUtils.pickRandomly;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -129,17 +130,19 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
         CoreOptions coreOptions = table.coreOptions();
         this.targetBucketRowNumber = (int) coreOptions.dynamicBucketTargetRowNum();
-        this.extractor = new RowPartitionKeyExtractor(table.schema());
+        this.extractor = new RowPartitionAllPrimaryKeyExtractor(table.schema());
         this.keyPartExtractor = new KeyPartPartitionKeyExtractor(table.schema());
+
+        String tmpDir = pickRandomly(Arrays.asList(ioManager.tempDirs()));
+        this.path = new File(tmpDir, "rocksdb-" + UUID.randomUUID());
+        if (!this.path.mkdirs()) {
+            throw new RuntimeException(
+                    "Failed to create RocksDB cache directory in temp dirs: "
+                            + Arrays.toString(ioManager.tempDirs()));
+        }
 
         // state
         Options options = coreOptions.toConfiguration();
-        String rocksDBDir =
-                ioManager
-                        .tempDirs()[
-                        ThreadLocalRandom.current().nextInt(ioManager.tempDirs().length)];
-        this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
-
         Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
         // we should avoid too small memory
         long blockCache = Math.max(offHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
@@ -149,7 +152,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         path.toString(),
                         rocksdbOptions,
                         coreOptions.crossPartitionUpsertIndexTtl());
-        RowType keyType = table.schema().logicalTrimmedPrimaryKeysType();
+        RowType keyType = table.schema().logicalPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(
                         INDEX_NAME,
@@ -207,14 +210,14 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         bootstrapRecords.complete();
         boolean isEmpty = true;
         if (bootstrapKeys.size() > 0) {
-            BulkLoader bulkLoader = keyIndex.createBulkLoader();
+            RocksDBBulkLoader bulkLoader = keyIndex.createBulkLoader();
             MutableObjectIterator<BinaryRow> keyIterator = bootstrapKeys.sortedIterator();
             BinaryRow row = new BinaryRow(2);
             try {
                 while ((row = keyIterator.next(row)) != null) {
                     bulkLoader.write(row.getBinary(0), row.getBinary(1));
                 }
-            } catch (BulkLoader.WriteException e) {
+            } catch (RocksDBBulkLoader.WriteException e) {
                 throw new RuntimeException(
                         "Exception in bulkLoad, the most suspicious reason is that "
                                 + "your data contains duplicates, please check your sink table. "

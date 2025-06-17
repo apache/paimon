@@ -93,7 +93,6 @@ public class AppendOnlyWriterTest {
     private static final String PART = "2022-05-01";
     private static final long SCHEMA_ID = 0L;
     private static final int MIN_FILE_NUM = 3;
-    private static final int MAX_FILE_NUM = 4;
 
     @BeforeEach
     public void before() {
@@ -162,8 +161,8 @@ public class AppendOnlyWriterTest {
 
             writer.sync();
             CommitIncrement inc = writer.prepareCommit(true);
-            if (txn > 0 && txn % 3 == 0) {
-                assertThat(inc.compactIncrement().compactBefore()).hasSize(4);
+            if (txn > 0 && txn % 2 == 0) {
+                assertThat(inc.compactIncrement().compactBefore()).hasSize(3);
                 assertThat(inc.compactIncrement().compactAfter()).hasSize(1);
                 DataFileMeta compactAfter = inc.compactIncrement().compactAfter().get(0);
                 assertThat(compactAfter.fileName()).startsWith("compact-");
@@ -269,7 +268,7 @@ public class AppendOnlyWriterTest {
         List<DataFileMeta> compactAfter = secInc.compactIncrement().compactAfter();
         assertThat(compactBefore)
                 .containsExactlyInAnyOrderElementsOf(
-                        firstInc.newFilesIncrement().newFiles().subList(0, 4));
+                        firstInc.newFilesIncrement().newFiles().subList(0, 3));
         assertThat(compactAfter).hasSize(1);
         assertThat(compactBefore.stream().mapToLong(DataFileMeta::fileSize).sum())
                 .isEqualTo(compactAfter.stream().mapToLong(DataFileMeta::fileSize).sum());
@@ -652,8 +651,8 @@ public class AppendOnlyWriterTest {
                         toCompact,
                         null,
                         MIN_FILE_NUM,
-                        MAX_FILE_NUM,
                         targetFileSize,
+                        false,
                         compactBefore -> {
                             latch.await();
                             return compactBefore.isEmpty()

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -35,6 +36,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -192,6 +194,71 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
             } else {
                 // not compacted
                 assertThat(split.dataFiles().size()).isEqualTo(3);
+            }
+        }
+    }
+
+    @Test
+    public void testForceCompactToExternalPath() throws Exception {
+        // test for pk table
+        String tmpPath = getTempDirPath("external/" + UUID.randomUUID());
+        sql(
+                "CREATE TABLE Tpk ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable pkTable = paimonTable("Tpk");
+
+        sql(
+                "INSERT INTO Tpk VALUES (1, 100, 15, '20221208'), (1, 100, 16, '20221208'), (1, 100, 15, '20221209')");
+        sql(
+                "INSERT INTO Tpk VALUES (2, 100, 15, '20221208'), (2, 100, 16, '20221208'), (2, 100, 15, '20221209')");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact(`table` => 'default.Tpk',"
+                        + " options => 'compaction.force-rewrite-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
+                tmpPath);
+        List<DataSplit> splits = pkTable.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            for (DataFileMeta meta : split.dataFiles()) {
+                assertThat(meta.externalPath().get().startsWith("file:" + tmpPath)).isTrue();
+            }
+        }
+
+        // test for append table
+        tmpPath = getTempDirPath("external/" + UUID.randomUUID());
+        sql(
+                "CREATE TABLE Tap ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " hh INT,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1',"
+                        + " 'bucket-key' = 'k'"
+                        + ")");
+        FileStoreTable apTable = paimonTable("Tap");
+
+        sql(
+                "INSERT INTO Tap VALUES (1, 100, 15, '20221208'), (1, 100, 16, '20221208'), (1, 100, 15, '20221209')");
+        sql(
+                "INSERT INTO Tap VALUES (2, 100, 15, '20221208'), (2, 100, 16, '20221208'), (2, 100, 15, '20221209')");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact(`table` => 'default.Tap',"
+                        + " options => 'compaction.force-rewrite-all-files=true,data-file.external-paths=file://%s,data-file.external-paths.strategy=specific-fs,data-file.external-paths.specific-fs=file')",
+                tmpPath);
+        splits = apTable.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            for (DataFileMeta meta : split.dataFiles()) {
+                assertThat(meta.externalPath().get().startsWith("file:" + tmpPath)).isTrue();
             }
         }
     }

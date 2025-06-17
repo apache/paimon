@@ -20,7 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.lookup.RocksDBSetState;
+import org.apache.paimon.lookup.SetState;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -35,7 +35,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     private final KeyProjectedRow secKeyRow;
 
-    private RocksDBSetState<InternalRow, InternalRow> indexState;
+    private SetState<InternalRow, InternalRow> indexState;
 
     public SecondaryIndexLookupTable(Context context, long lruCacheSize) {
         super(context, lruCacheSize / 2, context.table.primaryKeys());

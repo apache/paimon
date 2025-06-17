@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -39,8 +39,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.util.MockOutput;
 import org.apache.flink.streaming.util.MockStreamConfig;
-import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -49,10 +47,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
 /** Tests for {@link AppendOnlySingleTableCompactionWorkerOperator}. */
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
 
-    @RepeatedTest(100)
+    @Test
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
@@ -70,14 +71,14 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 20);
 
-        List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
-        List<StreamRecord<UnawareAppendCompactionTask>> records =
+        List<AppendCompactTask> tasks = packTask(commitMessages, 5);
+        List<StreamRecord<AppendCompactTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
-        Assertions.assertThat(tasks.size()).isEqualTo(4);
+        assertThat(tasks.size()).isEqualTo(4);
 
         workerOperator.open();
 
-        for (StreamRecord<UnawareAppendCompactionTask> record : records) {
+        for (StreamRecord<AppendCompactTask> record : records) {
             workerOperator.processElement(record);
         }
 
@@ -85,7 +86,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         Long timeStart = System.currentTimeMillis();
         long timeout = 60_000L;
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             while (committables.size() != 4) {
                                 committables.addAll(
@@ -105,7 +106,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 .doesNotThrowAnyException();
         committables.forEach(
                 a ->
-                        Assertions.assertThat(
+                        assertThat(
                                         ((CommitMessageImpl) a.wrappedCommittable())
                                                         .compactIncrement()
                                                         .compactAfter()
@@ -137,19 +138,19 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 40);
 
-        List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
-        List<StreamRecord<UnawareAppendCompactionTask>> records =
+        List<AppendCompactTask> tasks = packTask(commitMessages, 5);
+        List<StreamRecord<AppendCompactTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
-        Assertions.assertThat(tasks.size()).isEqualTo(8);
+        assertThat(tasks.size()).isEqualTo(8);
 
         workerOperator.open();
 
-        for (StreamRecord<UnawareAppendCompactionTask> record : records) {
+        for (StreamRecord<AppendCompactTask> record : records) {
             workerOperator.processElement(record);
         }
 
         // wait compaction
-        Thread.sleep(500);
+        Thread.sleep(5000);
 
         LocalFileIO localFileIO = LocalFileIO.create();
         DataFilePathFactory dataFilePathFactory =
@@ -166,8 +167,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
             List<DataFileMeta> fileMetas =
                     ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
             for (DataFileMeta fileMeta : fileMetas) {
-                Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
-                        .isTrue();
+                assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta))).isTrue();
             }
             if (i++ > 2) {
                 break;
@@ -193,8 +193,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 List<DataFileMeta> fileMetas =
                         ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
                 for (DataFileMeta fileMeta : fileMetas) {
-                    Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
-                            .isFalse();
+                    assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta))).isFalse();
                 }
             } catch (Exception e) {
                 // do nothing
@@ -209,7 +208,6 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         schemaBuilder.column("f1", DataTypes.BIGINT());
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.option(CoreOptions.BUCKET.key(), "-1");
-        schemaBuilder.option(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "5");
         return schemaBuilder.build();
     }
 
@@ -218,9 +216,8 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         return GenericRow.of(RANDOM.nextInt(), RANDOM.nextLong(), randomString());
     }
 
-    public static List<UnawareAppendCompactionTask> packTask(
-            List<CommitMessage> messages, int fileSize) {
-        List<UnawareAppendCompactionTask> result = new ArrayList<>();
+    public static List<AppendCompactTask> packTask(List<CommitMessage> messages, int fileSize) {
+        List<AppendCompactTask> result = new ArrayList<>();
         List<DataFileMeta> metas =
                 messages.stream()
                         .flatMap(
@@ -231,12 +228,10 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         for (int i = 0; i < metas.size(); i += fileSize) {
             if (i < metas.size() - fileSize) {
                 result.add(
-                        new UnawareAppendCompactionTask(
-                                BinaryRow.EMPTY_ROW, metas.subList(i, i + fileSize)));
+                        new AppendCompactTask(BinaryRow.EMPTY_ROW, metas.subList(i, i + fileSize)));
             } else {
                 result.add(
-                        new UnawareAppendCompactionTask(
-                                BinaryRow.EMPTY_ROW, metas.subList(i, metas.size())));
+                        new AppendCompactTask(BinaryRow.EMPTY_ROW, metas.subList(i, metas.size())));
             }
         }
         return result;

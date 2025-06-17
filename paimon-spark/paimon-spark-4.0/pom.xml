@@ -25,14 +25,14 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-spark</artifactId>
-        <version>1.1-SNAPSHOT</version>
+        <version>1.3-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-spark-4.0</artifactId>
     <name>Paimon : Spark : 4.0</name>
 
     <properties>
-        <spark.version>4.0.0-preview2</spark.version>
+        <spark.version>4.0.0</spark.version>
     </properties>
 
     <dependencies>
@@ -81,6 +81,12 @@ under the License.
             <version>${spark.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

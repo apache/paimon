@@ -19,10 +19,10 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 
-import java.util.Iterator;
 import java.util.LinkedList;
 
 /**
@@ -49,25 +49,43 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         candidates.add(kv);
     }
 
-    @Override
-    public KeyValue getResult() {
-        // 1. Find the latest high level record
-        Iterator<KeyValue> descending = candidates.descendingIterator();
+    @Nullable
+    public KeyValue pickHighLevel() {
         KeyValue highLevel = null;
-        while (descending.hasNext()) {
-            KeyValue kv = descending.next();
-            if (kv.level() > 0) {
-                if (highLevel != null) {
-                    descending.remove();
-                } else {
-                    highLevel = kv;
-                }
+        for (KeyValue kv : candidates) {
+            // records that has not been stored on the disk yet, such as the data in the write
+            // buffer being at level -1
+            if (kv.level() <= 0) {
+                continue;
+            }
+            // For high-level comparison logic (not involving Level 0), only the value of the
+            // minimum Level should be selected
+            if (highLevel == null || kv.level() < highLevel.level()) {
+                highLevel = kv;
             }
         }
+        return highLevel;
+    }
 
-        // 2. Do the merge for inputs
+    public InternalRow key() {
+        return candidates.get(0).key();
+    }
+
+    public LinkedList<KeyValue> candidates() {
+        return candidates;
+    }
+
+    @Override
+    public KeyValue getResult() {
         mergeFunction.reset();
-        candidates.forEach(mergeFunction::add);
+        KeyValue highLevel = pickHighLevel();
+        for (KeyValue kv : candidates) {
+            // records that has not been stored on the disk yet, such as the data in the write
+            // buffer being at level -1
+            if (kv.level() <= 0 || kv == highLevel) {
+                mergeFunction.add(kv);
+            }
+        }
         return mergeFunction.getResult();
     }
 

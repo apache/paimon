@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, Identifier}
+import org.apache.paimon.data.GenericRow
 import org.apache.paimon.fs.FileIO
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.spark.catalog.WithPaimonCatalog
@@ -189,5 +190,16 @@ class PaimonSparkTestBase
       .get
       .scan
       .asInstanceOf[PaimonScan]
+  }
+
+  object GenericRow {
+    def of(values: Any*): GenericRow = {
+      val row = new GenericRow(values.length)
+      values.zipWithIndex.foreach {
+        case (value, index) =>
+          row.setField(index, value)
+      }
+      row
+    }
   }
 }

@@ -95,8 +95,8 @@ paths:
     post:
       tags:
         - database
-      summary: Create Databases
-      operationId: createDatabases
+      summary: Create Database
+      operationId: createDatabase
       parameters:
         - name: prefix
           in: path
@@ -232,6 +232,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -305,6 +310,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -316,6 +326,50 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/tables:
+    get:
+      tags:
+        - table
+      summary: List tables globally
+      operationId: List tables globally
+      description: list tables paged globally which matches the given database name pattern and table name pattern both.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: path
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (%) for table names. All tables will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -580,6 +634,57 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/auth:
+    post:
+      tags:
+        - table
+      summary: Auth table query
+      operationId: authTableQuery
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthTableQueryRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTableQueryResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        404:
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
     get:
       tags:
@@ -627,6 +732,102 @@ paths:
                   $ref: '#/components/examples/SnapshotNotExistError'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshots/{version}:
+    get:
+      tags:
+        - table
+      summary: Get version snapshot
+      operationId: getVersionSnapshot
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetVersionSnapshotResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        404:
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+            - SnapshotNotExistException, the requested snapshot does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+                SnapshotNotExist:
+                  $ref: '#/components/examples/SnapshotNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshots:
+    get:
+      tags:
+        - table
+      summary: List snapshots
+      operationId: listSnapshots
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSnapshotsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -655,6 +856,11 @@ paths:
             type: integer
             format: int32
         - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: partitionNamePattern
+          description: A sql LIKE pattern (%) for partition names. Currently, only prefix matching is supported.
           in: query
           schema:
             type: string
@@ -896,6 +1102,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -969,6 +1180,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (%) for view names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -980,6 +1196,50 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/views:
+    get:
+      tags:
+        - view
+      summary: List views globally
+      operationId: listViewsGlobally
+      description: List views globally which matches the given database name pattern and view name pattern both.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: path
+          schema:
+            type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (%) for view names. All views will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -1112,6 +1372,181 @@ paths:
           $ref: '#/components/responses/ViewAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/functions:
+    get:
+      tags:
+        - function
+      summary: List functions
+      operationId: listFunctions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFunctionsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - function
+      summary: Create Function
+      operationId: createFunction
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFunctionRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/FunctionAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+
+  /v1/{prefix}/databases/{database}/functions/{function}:
+    get:
+      tags:
+        - function
+      summary: Get function
+      operationId: getFunction
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: function
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetFunctionResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - function
+      summary: Alter function
+      operationId: alterFunction
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: function
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterFunctionRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - function
+      summary: Drop function
+      operationId: dropFunction
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: function
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+
 components:
   #############################
   # Reusable Response Objects #
@@ -1138,6 +1573,17 @@ components:
           example: {
             "message": "No auth for this resource",
             "code": 401
+          }
+    ForbiddenErrorResponse:
+      description:
+        Used for 403 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Table has no permission",
+            "code": 403
           }
     ResourceNotExistErrorResponse:
       description:
@@ -1222,6 +1668,20 @@ components:
               "resourceName": "view",
               "code": 404
             }
+    FunctionNotExistErrorResponse:
+      description:
+        Not Found - FunctionNotExistException, the function does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+          example:
+            {
+              "message": "The given function does not exist",
+              "resourceType": "FUNCTION",
+              "resourceName": "function",
+              "code": 404
+            }
     ResourceAlreadyExistErrorResponse:
       description:
         Used for 409 errors.
@@ -1287,6 +1747,19 @@ components:
               "resourceName": "view",
               "code": 409
             }
+    FunctionAlreadyExistErrorResponse:
+      description: Conflict - The view already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+          example:
+            {
+              "message": "The given function already exists",
+              "resourceType": "FUNCTION",
+              "resourceName": "function",
+              "code": 409
+            }
     ServerErrorResponse:
       description:
         Used for server 5xx errors.
@@ -1308,13 +1781,6 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreatePartitionsRequest:
-      type: object
-      properties:
-        specs:
-          type: array
-          items:
-            type: object
     DropPartitionsRequest:
       type: object
       properties:
@@ -1381,6 +1847,184 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ViewChange'
+    CreateFunctionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        inputParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        returnParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        deterministic:
+          type: boolean
+        definitions:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/FunctionDefinition"
+        comment:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    AlterFunctionRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FunctionChange'
+    FunctionChange:
+      anyOf:
+        - $ref: '#/components/schemas/SetFunctionOption'
+        - $ref: '#/components/schemas/RemoveFunctionOption'
+        - $ref: '#/components/schemas/UpdateFunctionComment'
+        - $ref: '#/components/schemas/AddDefinition'
+        - $ref: '#/components/schemas/UpdateDefinition'
+        - $ref: '#/components/schemas/DropDefinition'
+    BaseFunctionChange:
+      discriminator:
+        propertyName: action
+        mapping:
+          setOption: '#/components/schemas/SetFunctionOption'
+          removeOption: '#/components/schemas/RemoveFunctionOption'
+          updateComment: '#/components/schemas/UpdateFunctionComment'
+          addDefinition: '#/components/schemas/AddDefinition'
+          updateDefinition: '#/components/schemas/UpdateDefinition'
+          dropDefinition: '#/components/schemas/DropDefinition'
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+    SetFunctionOption:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "setOption"
+        key:
+          type: string
+        value:
+          type: string
+    RemoveFunctionOption:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "removeOption"
+        key:
+          type: string
+    UpdateFunctionComment:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "updateComment"
+        comment:
+          type: string
+    AddDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "addDefinition"
+        name:
+          type: string
+        definition:
+          $ref: "#/components/schemas/FunctionDefinition"
+    UpdateDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "updateDefinition"
+        name:
+          type: string
+        definition:
+          $ref: "#/components/schemas/FunctionDefinition"
+    DropDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "dropDefinition"
+        name:
+          type: string
+    FunctionDefinition:
+      anyOf:
+        - $ref: '#/components/schemas/FileFunctionDefinition'
+        - $ref: '#/components/schemas/SQLFunctionDefinition'
+        - $ref: '#/components/schemas/LambdaFunctionDefinition'
+    BaseFunctionDefinition:
+      discriminator:
+        propertyName: type
+        mapping:
+          file: '#/components/schemas/FileFunctionDefinition'
+          sql: '#/components/schemas/SQLFunctionDefinition'
+          lambda: '#/components/schemas/LambdaFunctionDefinition'
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    SQLFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "sql"
+        definition:
+          type: string
+    FileFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "file"
+        fileResources:
+          type: array
+          items:
+            $ref: '#/components/schemas/FunctionFileResource'
+        language:
+          type: string
+        className:
+          type: string
+        functionName:
+          type: string
+    LambdaFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "lambda"
+        definition:
+          type: string
+        language:
+          type: string
+    FunctionFileResource:
+      type: object
+      properties:
+        resourceType:
+          type: string
+        uri:
+          type: string
     ViewChange:
       anyOf:
         - $ref: '#/components/schemas/SetViewOption'
@@ -1751,6 +2395,8 @@ components:
     CommitTableRequest:
       type: object
       properties:
+        tableId:
+          type: string
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:
@@ -1766,7 +2412,6 @@ components:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
         - $ref: '#/components/schemas/TagInstant'
-
     BaseInstant:
       discriminator:
         propertyName: action
@@ -1777,13 +2422,13 @@ components:
       required:
         - type
       properties:
-        'type':
+        type:
           type: string
     SnapshotInstant:
       allOf:
         - $ref: '#/components/schemas/BaseInstant'
       properties:
-        'type':
+        type:
           type: string
           const: "snapshot"
         snapshotId:
@@ -1793,7 +2438,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/BaseInstant'
       properties:
-        'type':
+        type:
           type: string
           const: "tag"
         tagName:
@@ -1886,6 +2531,34 @@ components:
       properties:
         snapshot:
           $ref: '#/components/schemas/TableSnapshot'
+    GetVersionSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+    ListSnapshotsResponse:
+      type: object
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Snapshot'
+        nextPageToken:
+          type: string
+    AuthTableQueryRequest:
+      type: object
+      properties:
+        select:
+          type: array
+          items:
+            type: string
+    AuthTableQueryResponse:
+      type: object
+      properties:
+        filter:
+          type: array
+          items:
+            type: string
     AlterDatabaseRequest:
       type: object
       properties:
@@ -1897,13 +2570,6 @@ components:
           type: object
           additionalProperties:
             type: string
-    AlterPartitionsRequest:
-      type: object
-      properties:
-        partitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Partition'
     AlterDatabaseResponse:
       type: object
       properties:
@@ -1958,6 +2624,7 @@ components:
           type: array
           items:
             type: string
+            description: table name or full table name of the table. full table name format is like "db.table"
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2035,6 +2702,7 @@ components:
           type: array
           items:
             type: string
+            description: view name or full view name of the view. full view name format is like "db.view"
         nextPageToken:
           type: string
     ListViewDetailsResponse:
@@ -2045,6 +2713,50 @@ components:
           items:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
+          type: string
+    ListFunctionsResponse:
+      type: object
+      properties:
+        functions:
+          type: array
+          items:
+            type: string
+        nextPageToken:
+          type: string
+    GetFunctionResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        inputParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        returnParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        deterministic:
+          type: boolean
+        definitions:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/FunctionDefinition"
+        comment:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
           type: string
     ViewSchema:
       type: object

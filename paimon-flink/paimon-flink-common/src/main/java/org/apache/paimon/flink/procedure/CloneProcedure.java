@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.action.CloneAction;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -29,23 +28,19 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Clone Procedure. */
+/** Clone tables procedure. */
 public class CloneProcedure extends ProcedureBase {
+
     public static final String IDENTIFIER = "clone";
 
     @ProcedureHint(
             argument = {
-                @ArgumentHint(
-                        name = "warehouse",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
                 @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "catalog_conf",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(name = "target_warehouse", type = @DataTypeHint("STRING")),
                 @ArgumentHint(
                         name = "target_database",
                         type = @DataTypeHint("STRING"),
@@ -58,35 +53,27 @@ public class CloneProcedure extends ProcedureBase {
                         name = "target_catalog_conf",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true)
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
+                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
-            String warehouse,
             String database,
             String tableName,
             String sourceCatalogConfigStr,
-            String targetWarehouse,
             String targetDatabase,
             String targetTableName,
             String targetCatalogConfigStr,
-            Integer parallelismStr)
+            Integer parallelism,
+            String where)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
-        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
-                && !sourceCatalogConfig.containsKey("warehouse")) {
-            sourceCatalogConfig.put("warehouse", warehouse);
-        }
 
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
-        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
-                && !targetCatalogConfig.containsKey("warehouse")) {
-            targetCatalogConfig.put("warehouse", targetWarehouse);
-        }
 
-        CloneAction cloneAction =
+        CloneAction action =
                 new CloneAction(
                         database,
                         tableName,
@@ -94,8 +81,9 @@ public class CloneProcedure extends ProcedureBase {
                         targetDatabase,
                         targetTableName,
                         targetCatalogConfig,
-                        parallelismStr == null ? null : Integer.toString(parallelismStr));
-        return execute(procedureContext, cloneAction, "Clone Job");
+                        parallelism,
+                        where);
+        return execute(procedureContext, action, "Clone Job");
     }
 
     @Override

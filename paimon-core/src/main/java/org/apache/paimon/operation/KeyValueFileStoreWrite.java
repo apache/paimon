@@ -88,6 +88,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
@@ -166,7 +167,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema.id(),
                         keyType,
                         valueType,
-                        options.fileFormat(),
+                        fileFormat(options),
                         createFormatPathFactories(options, formatPathFactory),
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;
@@ -289,7 +290,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     dvMaintainer,
                     options.prepareCommitWaitCompaction(),
                     options.needLookup(),
-                    recordLevelExpire);
+                    recordLevelExpire,
+                    options.forceRewriteAllFiles());
         }
     }
 

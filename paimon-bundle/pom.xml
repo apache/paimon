@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.1-SNAPSHOT</version>
+        <version>1.3-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-bundle</artifactId>
@@ -34,6 +34,12 @@ under the License.
     <packaging>jar</packaging>
 
     <dependencies>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -88,26 +94,6 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-
-        <!-- other runtime dependencies -->
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-jackson-2</artifactId>
-            <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-guava-30</artifactId>
-            <version>${paimon.shade.guava.version}-${paimon.shade.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-caffeine-2</artifactId>
-            <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -125,12 +111,8 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <!-- Paimon-shade -->
-                                    <include>org.apache.paimon:paimon-shade-jackson-2</include>
-                                    <include>org.apache.paimon:paimon-shade-guava-30</include>
-                                    <include>org.apache.paimon:paimon-shade-caffeine-2</include>
-
                                     <!-- Paimon -->
+                                    <include>org.apache.paimon:paimon-api</include>
                                     <include>org.apache.paimon:paimon-common</include>
                                     <include>org.apache.paimon:paimon-core</include>
                                     <include>org.apache.paimon:paimon-format</include>

@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LookupLocalFileType;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -34,9 +35,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
+import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -54,6 +58,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -71,6 +76,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -99,7 +105,11 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_STATS_MODE;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -107,8 +117,10 @@ import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PER_LEVEL;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE_PER_LEVEL;
 import static org.apache.paimon.CoreOptions.MergeEngine;
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
@@ -128,6 +140,39 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testPostponeBucketWithManyPartitions() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(new IOManagerImpl(tempDir.toString()));
+            for (int i = 0; i < 100; i++) {
+                write.write(rowData(i, i, (long) i));
+            }
+
+            for (Map<Integer, AbstractFileStoreWrite.WriterContainer<KeyValue>> bucketWriters :
+                    ((PostponeBucketFileStoreWrite) ((TableWriteImpl<?>) write).getWrite())
+                            .writers()
+                            .values()) {
+                for (AbstractFileStoreWrite.WriterContainer<KeyValue> writerContainer :
+                        bucketWriters.values()) {
+                    PostponeBucketWriter writer = (PostponeBucketWriter) writerContainer.writer;
+                    assertThat(writer.useBufferedSinkWriter()).isTrue();
+                }
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        ManifestFileMeta manifest =
+                table.manifestListReader().read(snapshot.deltaManifestList()).get(0);
+        List<ManifestEntry> entries = table.manifestFileReader().read(manifest.fileName());
+        assertThat(entries.size()).isEqualTo(100);
+    }
 
     @Test
     public void testPostponeBucket() throws Exception {
@@ -160,9 +205,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(
                         options -> {
                             options.set(FILE_FORMAT, format);
-                            options.set(
-                                    METADATA_STATS_MODE_PER_LEVEL,
-                                    Collections.singletonMap("0", "none"));
+                            options.set(METADATA_STATS_MODE_PER_LEVEL, singletonMap("0", "none"));
                         });
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -216,10 +259,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     @Test
     public void testAsyncReader() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        table =
-                table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1 b"));
+        table = table.copy(singletonMap(CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1 b"));
 
         Map<Integer, GenericRow> rows = new HashMap<>();
         for (int i = 0; i < 20; i++) {
@@ -528,10 +568,20 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 "+2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
-    @Test
-    public void testStreamingInputChangelog() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStreamingInputChangelog(boolean specificConfig) throws Exception {
         FileStoreTable table =
-                createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
+                            if (specificConfig) {
+                                conf.set(FILE_FORMAT, "parquet");
+                                conf.set(METADATA_STATS_MODE, "full");
+                                conf.set(CHANGELOG_FILE_FORMAT, "avro");
+                                conf.set(CHANGELOG_FILE_STATS_MODE, "none");
+                            }
+                        });
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
@@ -560,6 +610,15 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         "+U 1|20|201|binary|varbinary|mapKey:mapVal|multiset",
                         "-U 1|10|101|binary|varbinary|mapKey:mapVal|multiset",
                         "+U 1|10|102|binary|varbinary|mapKey:mapVal|multiset");
+
+        if (specificConfig) {
+            Snapshot snapshot = table.latestSnapshot().get();
+            ManifestFileMeta manifest =
+                    table.manifestListReader().read(snapshot.changelogManifestList()).get(0);
+            DataFileMeta file = table.manifestFileReader().read(manifest.fileName()).get(0).file();
+            assertThat(file.fileName()).endsWith(".avro");
+            assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(0);
+        }
     }
 
     @Test
@@ -846,6 +905,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(DELETION_VECTORS_ENABLED, true);
                             conf.set(TARGET_FILE_SIZE, MemorySize.ofBytes(1));
                             conf.set("file-index.bloom-filter.columns", "b");
+                            conf.set(FILE_FORMAT_PER_LEVEL, singletonMap("0", "avro"));
                         });
 
         StreamTableWrite write =
@@ -858,13 +918,18 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         write.write(rowData(1, 4, 500L));
         commit.commit(0, write.prepareCommit(true, 0));
 
+        // assert forcing rewriting when upgrading from level 0 to level x with different file
+        // formats
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).fileName()).endsWith("parquet");
+
         write.write(rowData(1, 5, 100L));
         write.write(rowData(1, 6, 600L));
         write.write(rowData(1, 7, 400L));
         commit.commit(1, write.prepareCommit(true, 1));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        splits = toSplits(table.newSnapshotReader().read().dataSplits());
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
@@ -2130,13 +2195,20 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         innerTestTableQuery(table);
     }
 
-    @Test
-    public void testLookupWithDropDelete() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLookupWithDropDelete(boolean specificConfig) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
                             conf.set(CHANGELOG_PRODUCER, LOOKUP);
                             conf.set("num-levels", "2");
+                            if (specificConfig) {
+                                conf.set(FILE_FORMAT, "parquet");
+                                conf.set(METADATA_STATS_MODE, "full");
+                                conf.set(CHANGELOG_FILE_FORMAT, "avro");
+                                conf.set(CHANGELOG_FILE_STATS_MODE, "none");
+                            }
                         });
         IOManager ioManager = IOManager.create(tablePath.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
@@ -2165,6 +2237,14 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
+
+        if (specificConfig) {
+            ManifestFileMeta manifest =
+                    table.manifestListReader().read(latestSnapshot.changelogManifestList()).get(0);
+            DataFileMeta file = table.manifestFileReader().read(manifest.fileName()).get(0).file();
+            assertThat(file.fileName()).endsWith(".avro");
+            assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(0);
+        }
     }
 
     @ParameterizedTest(name = "changelog-producer = {0}")
@@ -2205,15 +2285,10 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         table.rollbackTo("test1");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(19);
-        // rollback snapshot case testRollbackToSnapshotCase0 plus 4:
-        // table-path/tag/tag-test1
-        // table-path/changelog
-        // table-path/changelog/LATEST
-        // table-path/changelog/EARLIEST
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test1"));
+        ChangelogManager changelogManager = table.changelogManager();
+        assertThat(changelogManager.earliestLongLivedChangelogId()).isNull();
+        assertThat(changelogManager.latestLongLivedChangelogId()).isNull();
     }
 
     @ParameterizedTest
@@ -2274,10 +2349,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     private void assertReadChangelog(int id, FileStoreTable table) throws Exception {
         // read the changelog at #{id}
-        table =
-                table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
+        table = table.copy(singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
         ReadBuilder readBuilder = table.newReadBuilder();
         StreamTableScan scan = readBuilder.newStreamScan();
 

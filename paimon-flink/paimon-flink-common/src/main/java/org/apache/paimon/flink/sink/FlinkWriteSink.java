@@ -18,13 +18,22 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+
+import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_RECOVER_FROM_STATE;
 
 /** A {@link FlinkSink} to write records. */
 public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
@@ -55,6 +64,53 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
-        return new RestoreAndFailCommittableStateManager<>(ManifestCommittableSerializer::new);
+        Options options = table.coreOptions().toConfiguration();
+        return new RestoreAndFailCommittableStateManager<>(
+                ManifestCommittableSerializer::new,
+                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
+    }
+
+    protected static OneInputStreamOperatorFactory<InternalRow, Committable>
+            createNoStateRowWriteOperatorFactory(
+                    FileStoreTable table,
+                    LogSinkFunction logSinkFunction,
+                    StoreSinkWrite.Provider writeProvider,
+                    String commitUser) {
+        return new RowDataStoreWriteOperator.Factory(
+                table, logSinkFunction, writeProvider, commitUser) {
+            @Override
+            @SuppressWarnings("unchecked, rawtypes")
+            public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
+                return new RowDataStoreWriteOperator(
+                        parameters, table, logSinkFunction, writeProvider, commitUser) {
+
+                    @Override
+                    protected StoreSinkWriteState createState(
+                            int subtaskId,
+                            StateInitializationContext context,
+                            StoreSinkWriteState.StateValueFilter stateFilter) {
+                        // No conflicts will occur in append only unaware bucket writer, so no state
+                        // is needed.
+                        return new NoopStoreSinkWriteState(subtaskId, stateFilter);
+                    }
+
+                    @Override
+                    protected String getCommitUser(StateInitializationContext context)
+                            throws Exception {
+                        // No conflicts will occur in append only unaware bucket writer, so
+                        // commitUser does not matter.
+                        return commitUser;
+                    }
+                };
+            }
+        };
+    }
+
+    protected static CommittableStateManager<ManifestCommittable>
+            createRestoreOnlyCommittableStateManager(FileStoreTable table) {
+        Options options = table.coreOptions().toConfiguration();
+        return new RestoreCommittableStateManager<>(
+                ManifestCommittableSerializer::new,
+                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
     }
 }

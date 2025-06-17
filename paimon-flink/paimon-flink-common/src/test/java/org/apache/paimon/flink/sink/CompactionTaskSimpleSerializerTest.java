@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.table.sink.CompactionTaskSerializer;
+import org.apache.paimon.table.sink.AppendCompactTaskSerializer;
 
 import org.junit.jupiter.api.Test;
 
@@ -38,8 +38,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link CompactionTaskSimpleSerializer}. */
 public class CompactionTaskSimpleSerializerTest {
 
-    private final CompactionTaskSerializer compactionTaskSerializer =
-            new CompactionTaskSerializer();
+    private final AppendCompactTaskSerializer compactionTaskSerializer =
+            new AppendCompactTaskSerializer();
 
     private final CompactionTaskSimpleSerializer serializer =
             new CompactionTaskSimpleSerializer(compactionTaskSerializer);
@@ -49,9 +49,8 @@ public class CompactionTaskSimpleSerializerTest {
     @Test
     public void testSerializer() throws IOException {
 
-        UnawareAppendCompactionTask task1 =
-                new UnawareAppendCompactionTask(partition, newFiles(20));
-        UnawareAppendCompactionTask task2 = serializer.deserialize(2, serializer.serialize(task1));
+        AppendCompactTask task1 = new AppendCompactTask(partition, newFiles(20));
+        AppendCompactTask task2 = serializer.deserialize(2, serializer.serialize(task1));
 
         assertThat(task1).isEqualTo(task2);
     }

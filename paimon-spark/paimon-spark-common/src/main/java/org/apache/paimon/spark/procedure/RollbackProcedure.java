@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -47,7 +50,13 @@ public class RollbackProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField(
+                                "previous_snapshot_id",
+                                DataTypes.LongType,
+                                false,
+                                Metadata.empty()),
+                        new StructField(
+                                "current_snapshot_id", DataTypes.LongType, false, Metadata.empty())
                     });
 
     private RollbackProcedure(TableCatalog tableCatalog) {
@@ -92,12 +101,21 @@ public class RollbackProcedure extends BaseProcedure {
                         tag = args.isNullAt(3) ? null : args.getString(3);
                     }
 
+                    FileStore<?> store = ((FileStoreTable) table).store();
+                    Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+                    Preconditions.checkNotNull(
+                            latestSnapshot, "Latest snapshot is null, can not rollback.");
+
+                    long currentSnapshotId;
                     if (snapshot != null) {
                         table.rollbackTo(snapshot);
+                        currentSnapshotId = snapshot;
                     } else {
                         table.rollbackTo(tag);
+                        currentSnapshotId =
+                                store.newTagManager().getOrThrow(tag).trimToSnapshot().id();
                     }
-                    InternalRow outputRow = newInternalRow(true);
+                    InternalRow outputRow = newInternalRow(latestSnapshot.id(), currentSnapshotId);
                     return new InternalRow[] {outputRow};
                 });
     }

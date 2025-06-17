@@ -37,12 +37,16 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
+import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -67,6 +71,8 @@ public class RESTTokenFileIO implements FileIO {
                                             ThreadUtils.newDaemonThreadFactory(
                                                     "rest-token-file-io-scheduler"))))
                     .build();
+
+    private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
 
     private final RESTCatalogLoader catalogLoader;
     private final Identifier identifier;
@@ -186,10 +192,13 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private boolean shouldRefresh() {
-        return token == null || System.currentTimeMillis() > token.expireAtMillis();
+        return token == null
+                || token.expireAtMillis() - System.currentTimeMillis()
+                        < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
     }
 
     private void refreshToken() {
+        LOG.info("begin refresh data token for identifier [{}]", identifier);
         GetTableTokenResponse response;
         if (catalogInstance != null) {
             try {
@@ -204,6 +213,10 @@ public class RESTTokenFileIO implements FileIO {
                 throw new RuntimeException(e);
             }
         }
+        LOG.info(
+                "end refresh data token for identifier [{}] expiresAtMillis [{}]",
+                identifier,
+                response.getExpiresAtMillis());
 
         token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
     }

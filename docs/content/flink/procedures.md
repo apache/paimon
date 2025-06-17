@@ -85,7 +85,7 @@ All available procedures are listed below.
             <li>partitions(optional): partition filter.</li>
             <li>order_strategy(optional): 'order' or 'zorder' or 'hilbert' or 'none'.</li>
             <li>order_by(optional): the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
-            <li>options(optional): additional dynamic options of the table.</li>
+            <li>options(optional): additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
             <li>where(optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.</li>
             <li>partition_idle_time(optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
             <li>compact_strategy(optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
@@ -166,7 +166,7 @@ All available procedures are listed below.
          CALL sys.create_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => cast(10 as bigint), time_retained => '1 d')
       </td>
    </tr>
-    <tr>
+   <tr>
       <td>create_tag_from_timestamp</td>
       <td>
          -- Create a tag from the first snapshot whose commit-time greater than the specified timestamp. <br/>
@@ -486,29 +486,15 @@ All available procedures are listed below.
    <tr>
           <td>purge_files</td>
       <td>
-         -- for Flink 1.18<br/>
-         -- clear table with purge files directly.<br/>
+         -- clear table with purge files.<br/>
          CALL [catalog.]sys.purge_files('identifier')<br/>
-         -- only check what dirs will be deleted, but not really delete them.<br/>
-         CALL [catalog.]sys.purge_files('identifier', true)<br/><br/>
-         -- for Flink 1.19 and later<br/>
-         -- clear table with purge files directly.<br/>
-         CALL [catalog.]sys.purge_files(`table` => 'default.T')<br/>
-         -- only check what dirs will be deleted, but not really delete them.<br/>
-         CALL [catalog.]sys.purge_files(`table` => 'default.T', `dry_run` => true)<br/><br/>
       </td>
       <td>
-         To clear table with purge files directly. Argument:
+         To clear table with purge files. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>dry_run (optional): only check what dirs will be deleted, but not really delete them. Default is false.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/>
          CALL sys.purge_files('default.T')<br/>
-         CALL sys.purge_files('default.T', true)<br/><br/>
-         -- for Flink 1.19 and later<br/>
-         CALL sys.purge_files(`table` => 'default.T')<br/>
-         CALL sys.purge_files(`table` => 'default.T', `dry_run` => true)
       </td>
    </tr>
    <tr>
@@ -582,7 +568,8 @@ All available procedures are listed below.
             retain_max => 'retain_max', <br/>
             retain_min => 'retain_min', <br/>
             older_than => 'older_than', <br/>
-            max_deletes => 'max_deletes') <br/><br/>
+            max_deletes => 'max_deletes', <br/>
+            options => 'key1=value1,key2=value2') <br/><br/>
          -- Use indexed argument<br/>
          -- for Flink 1.18<br/>
          CALL [catalog.]sys.expire_snapshots(table, retain_max)<br/><br/>
@@ -596,6 +583,7 @@ All available procedures are listed below.
             <li>retain_min: the minimum number of completed snapshots to retain.</li>
             <li>order_than: timestamp before which snapshots will be removed.</li>
             <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
@@ -604,7 +592,7 @@ All available procedures are listed below.
          CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 2)<br/>
          CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/>
          CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/>
-         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10, options => 'snapshot.expire.limit=1')<br/>
       </td>
    </tr>
    <tr>
@@ -649,7 +637,7 @@ All available procedures are listed below.
 <tr>
       <td>expire_partitions</td>
       <td>
-         CALL [catalog.]sys.expire_partitions(table, expiration_time, timestamp_formatter, expire_strategy)<br/><br/>
+         CALL [catalog.]sys.expire_partitions(table, expiration_time, timestamp_formatter, expire_strategy, options)<br/><br/>
       </td>
       <td>
          To expire partitions. Argument:
@@ -659,13 +647,14 @@ All available procedures are listed below.
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
             <li>max_expires: The maximum of limited expired partitions, it is optional.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
          CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')<br/>
-         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd HH:mm', timestamp_pattern => '$dt $hm', expire_strategy => 'values-time')<br/><br/>
+         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd HH:mm', timestamp_pattern => '$dt $hm', expire_strategy => 'values-time', options => 'partition.expiration-max-num=2')<br/><br/>
       </td>
    </tr>
     <tr>
@@ -783,11 +772,13 @@ All available procedures are listed below.
    <tr>
       <td>compact_manifest</td>
       <td>
-         CALL [catalog.]sys.compact_manifest(`table` => 'identifier')
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier')<br/>
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', 'options' => 'key1=value1,key2=value2')
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')
@@ -840,6 +831,65 @@ All available procedures are listed below.
          -- drop dialect in the view<br/>
          CALL sys.alter_view_dialect('view_identifier', 'drop', 'flink')<br/>
          CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
+      </td>
+   </tr>
+   <tr>
+      <td>create_function</td>
+      <td>
+         CALL [catalog.]sys.create_function(<br/>
+                'function_identifier',<br/>
+                '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+                '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+                true, 'comment', 'k1=v1,k2=v2')<br/>
+      </td>
+      <td>
+         To create a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>inputParams: inputParams of the function.</li>
+            <li>returnParams: returnParams of the function.</li>
+            <li>deterministic: Whether the function is deterministic.</li>
+            <li>comment: The comment for the function.</li>
+            <li>options: the additional dynamic options of the function.</li>
+      </td>
+      <td>
+         CALL sys.create_function(`function` => 'function_identifier',<br/>
+              inputParams => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+              returnParams => '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+              deterministic => true,<br/>
+              comment => 'comment',<br/>
+              options => 'k1=v1,k2=v2'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>alter_function</td>
+      <td>
+         CALL [catalog.]sys.alter_function(<br/>
+                'function_identifier',<br/>
+                '{"action" : "addDefinition", "name" : "flink", "definition" : {"type" : "file", "fileResources" : [{"resourceType": "JAR", "uri": "oss://mybucket/xxxx.jar"}], "language": "JAVA", "className": "xxxx", "functionName": "functionName" } }')<br/>
+      </td>
+      <td>
+         To alter a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>change: change of the function.</li>
+      </td>
+      <td>
+         CALL sys.alter_function(`function` => 'function_identifier',<br/>
+              `change` => '{"action" : "addDefinition", "name" : "flink", "definition" : {"type" : "file", "fileResources" : [{"resourceType": "JAR", "uri": "oss://mybucket/xxxx.jar"}], "language": "JAVA", "className": "xxxx", "functionName": "functionName" } }'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>drop_function</td>
+      <td>
+         CALL [catalog.]sys.drop_function('function_identifier')<br/>
+      </td>
+      <td>
+         To drop a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.drop_function(`function` => 'function_identifier')<br/>
       </td>
    </tr>
    </tbody>

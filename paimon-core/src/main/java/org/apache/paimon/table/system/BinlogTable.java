@@ -39,8 +39,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /**
  * A {@link Table} for reading binlog of table. The binlog format is as below.
@@ -90,6 +91,8 @@ public class BinlogTable extends AuditLogTable {
 
     private class BinlogRead extends AuditLogRead {
 
+        private RowType wrappedReadType = wrapped.rowType();
+
         private BinlogRead(InnerTableRead dataRead) {
             super(dataRead);
         }
@@ -97,20 +100,30 @@ public class BinlogTable extends AuditLogTable {
         @Override
         public InnerTableRead withReadType(RowType readType) {
             List<DataField> fields = new ArrayList<>();
+            List<DataField> wrappedReadFields = new ArrayList<>();
             for (DataField field : readType.getFields()) {
                 if (field.name().equals(SpecialFields.ROW_KIND.name())) {
                     fields.add(field);
                 } else {
-                    fields.add(field.newType(((ArrayType) field.type()).getElementType()));
+                    DataField origin = field.newType(((ArrayType) field.type()).getElementType());
+                    fields.add(origin);
+                    wrappedReadFields.add(origin);
                 }
             }
+            this.wrappedReadType = this.wrappedReadType.copy(wrappedReadFields);
             return super.withReadType(readType.copy(fields));
         }
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
-            InternalRow.FieldGetter[] fieldGetters = wrapped.rowType().fieldGetters();
+            InternalRow.FieldGetter[] fieldGetters =
+                    IntStream.range(0, wrappedReadType.getFieldCount())
+                            .mapToObj(
+                                    i ->
+                                            InternalRow.createFieldGetter(
+                                                    wrappedReadType.getTypeAt(i), i))
+                            .toArray(InternalRow.FieldGetter[]::new);
 
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(

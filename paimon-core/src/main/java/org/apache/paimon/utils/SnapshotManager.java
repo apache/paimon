@@ -49,6 +49,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -124,7 +125,7 @@ public class SnapshotManager implements Serializable {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
         if (snapshot == null) {
-            snapshot = Snapshot.fromPath(fileIO, path);
+            snapshot = fromPath(fileIO, path);
             if (cache != null) {
                 cache.put(path, snapshot);
             }
@@ -136,7 +137,7 @@ public class SnapshotManager implements Serializable {
         Path path = snapshotPath(snapshotId);
         Snapshot snapshot = cache == null ? null : cache.getIfPresent(path);
         if (snapshot == null) {
-            snapshot = Snapshot.tryFromPath(fileIO, path);
+            snapshot = tryFromPath(fileIO, path);
             if (cache != null) {
                 cache.put(path, snapshot);
             }
@@ -172,7 +173,11 @@ public class SnapshotManager implements Serializable {
                 throw new UncheckedIOException(e);
             }
         }
-        Long snapshotId = latestSnapshotId();
+        return latestSnapshotFromFileSystem();
+    }
+
+    public @Nullable Snapshot latestSnapshotFromFileSystem() {
+        Long snapshotId = latestSnapshotIdFromFileSystem();
         return snapshotId == null ? null : snapshot(snapshotId);
     }
 
@@ -184,6 +189,14 @@ public class SnapshotManager implements Serializable {
                 } catch (UnsupportedOperationException ignored) {
                 }
             }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find latest snapshot id", e);
+        }
+        return latestSnapshotIdFromFileSystem();
+    }
+
+    public @Nullable Long latestSnapshotIdFromFileSystem() {
+        try {
             return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
@@ -461,21 +474,25 @@ public class SnapshotManager implements Serializable {
     }
 
     public long snapshotCount() throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
+        return snapshotIdStream().count();
     }
 
     public Iterator<Snapshot> snapshots() throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+        return snapshotIdStream()
                 .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
     }
 
     public List<Path> snapshotPaths(Predicate<Long> predicate) throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+        return snapshotIdStream()
                 .filter(predicate)
                 .map(this::snapshotPath)
                 .collect(Collectors.toList());
+    }
+
+    public Stream<Long> snapshotIdStream() throws IOException {
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX);
     }
 
     public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
@@ -531,17 +548,14 @@ public class SnapshotManager implements Serializable {
      * be deleted by other processes, so just skip this snapshot.
      */
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
-        List<Path> paths =
-                listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                        .map(this::snapshotPath)
-                        .collect(Collectors.toList());
+        List<Path> paths = snapshotIdStream().map(this::snapshotPath).collect(Collectors.toList());
 
         List<Snapshot> snapshots = Collections.synchronizedList(new ArrayList<>(paths.size()));
         collectSnapshots(
                 path -> {
                     try {
                         // do not pollution cache
-                        snapshots.add(Snapshot.tryFromPath(fileIO, path));
+                        snapshots.add(tryFromPath(fileIO, path));
                     } catch (FileNotFoundException ignored) {
                     }
                 },
@@ -566,7 +580,14 @@ public class SnapshotManager implements Serializable {
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
-        Long latestId = latestSnapshotId();
+        return latestSnapshotOfUser(user, latestSnapshotId());
+    }
+
+    public Optional<Snapshot> latestSnapshotOfUserFromFilesystem(String user) {
+        return latestSnapshotOfUser(user, latestSnapshotIdFromFileSystem());
+    }
+
+    private Optional<Snapshot> latestSnapshotOfUser(String user, Long latestId) {
         if (latestId == null) {
             return Optional.empty();
         }
@@ -723,5 +744,31 @@ public class SnapshotManager implements Serializable {
 
     public void commitEarliestHint(long snapshotId) throws IOException {
         HintFileUtils.commitEarliestHint(fileIO, snapshotId, snapshotDirectory());
+    }
+
+    public static Snapshot fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            String errorMessage =
+                    String.format(
+                            "Snapshot file %s does not exist. "
+                                    + "It might have been expired by other jobs operating on this table. "
+                                    + "In this case, you can avoid concurrent modification issues by configuring "
+                                    + "write-only = true and use a dedicated compaction job, or configuring "
+                                    + "different expiration thresholds for different jobs.",
+                            path);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return Snapshot.fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new RuntimeException("Fails to read snapshot from path " + path, e);
+        }
     }
 }

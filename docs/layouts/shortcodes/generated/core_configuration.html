@@ -33,6 +33,12 @@ under the License.
             <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
         </tr>
         <tr>
+            <td><h5>alter-column-null-to-not-null.disabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -43,12 +49,6 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to create underlying storage when reading and writing the table.</td>
-        </tr>
-        <tr>
-            <td><h5>branch</h5></td>
-            <td style="word-wrap: break-word;">"main"</td>
-            <td>String</td>
-            <td>Specify branch name.</td>
         </tr>
         <tr>
             <td><h5>bucket</h5></td>
@@ -69,10 +69,28 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>changelog-file.compression</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file compression.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the message format of changelog files, currently parquet, avro and orc are supported.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-file.prefix</h5></td>
             <td style="word-wrap: break-word;">"changelog-"</td>
             <td>String</td>
             <td>Specify the file name prefix of changelog files.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.stats-mode</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file metadata stats collection. none, counts, truncate(16), full is available.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer</h5></td>
@@ -132,13 +150,19 @@ under the License.
             <td><h5>commit.force-create-snapshot</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to force create snapshot on commit.</td>
+            <td>In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.</td>
         </tr>
         <tr>
             <td><h5>commit.max-retries</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
             <td>Maximum number of retries when commit failed.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, starting from the snapshot after this one. If found, commit will be aborted. If the value of this option is -1, committer will not check for its first commit.</td>
         </tr>
         <tr>
             <td><h5>commit.timeout</h5></td>
@@ -153,6 +177,18 @@ under the License.
             <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
+            <td><h5>compaction.delete-ratio-threshold</h5></td>
+            <td style="word-wrap: break-word;">0.2</td>
+            <td>Double</td>
+            <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.force-rewrite-all-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force pick all files for a full compaction. Usually seen in a compaction task to external paths.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.force-up-level-0</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -165,16 +201,10 @@ under the License.
             <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
         </tr>
         <tr>
-            <td><h5>compaction.max.file-num</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the maximum file number to trigger a compaction for append-only table, even if sum(size(f_i)) &lt; targetFileSize. This value avoids pending too much small files.<ul><li>Default value of Append Table is '50'.</li><li>Default value of Bucketed Append Table is '5'.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append-only table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
         </tr>
         <tr>
             <td><h5>compaction.optimization-interval</h5></td>
@@ -285,10 +315,22 @@ under the License.
             <td>The target size of deletion vector index file.</td>
         </tr>
         <tr>
+            <td><h5>deletion-vectors.bitmap64</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable 64 bit bitmap implementation. Note that only 64 bit bitmap implementation is compatible with Iceberg.</td>
+        </tr>
+        <tr>
             <td><h5>deletion-vectors.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
+        </tr>
+        <tr>
+            <td><h5>disable-explicit-type-casting</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. Users can enable this option to disable explicit type casting</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -432,7 +474,7 @@ under the License.
             <td><h5>incremental-to-auto-tag</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. </td>
+            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. This option requires 'tag.creation-period' and 'tag.period-formatter' configured.</td>
         </tr>
         <tr>
             <td><h5>local-merge-buffer-size</h5></td>
@@ -681,7 +723,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.expiration-strategy</h5></td>
             <td style="word-wrap: break-word;">values-time</td>
             <td><p>Enum</p></td>
-            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li><li>"custom": This strategy use custom class to expire partitions.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>
@@ -691,7 +733,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>partition.idle-time-to-report-statistic</h5></td>
-            <td style="word-wrap: break-word;">1 h</td>
+            <td style="word-wrap: break-word;">0 ms</td>
             <td>Duration</td>
             <td>Set a time duration when a partition has no new data after this time duration, start to report the partition statistics to hms.</td>
         </tr>
@@ -720,12 +762,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.</td>
         </tr>
         <tr>
-            <td><h5>partition.mark-done-action.http.timeout</h5></td>
-            <td style="word-wrap: break-word;">5 s</td>
-            <td>Duration</td>
-            <td>Http client connection timeout, this can only be used by http-report partition mark done action.</td>
-        </tr>
-        <tr>
             <td><h5>partition.mark-done-action.http.url</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -735,7 +771,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.sink-strategy</h5></td>
             <td style="word-wrap: break-word;">NONE</td>
             <td><p>Enum</p></td>
-            <td>This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
+            <td>This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -754,6 +790,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>query-auth.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable query auth to give Catalog the opportunity to perform column level and row level permission validation on queries.</td>
         </tr>
         <tr>
             <td><h5>read.batch-size</h5></td>
@@ -786,6 +828,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
         </tr>
         <tr>
+            <td><h5>scan.creation-time-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-creation-timestamp" scan mode.</td>
+        </tr>
+        <tr>
             <td><h5>scan.fallback-branch</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -813,7 +861,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>scan.mode</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
-            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"default": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp", and if "scan.snapshot-id" or "scan.tag-name" is set the actual startup mode will be "from-snapshot". Otherwise the actual startup mode will be "latest-full".</li><li>"latest-full": For streaming sources, produces the latest snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce the latest snapshot but does not read new changes.</li><li>"full": Deprecated. Same as "latest-full".</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "latest-full" startup mode.</li><li>"compacted-full": For streaming sources, produces a snapshot after the latest compaction on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot after the latest compaction but does not read new changes. Snapshots of full compaction are picked when scheduled full-compaction is enabled.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li><li>"from-file-creation-time": For streaming and batch sources, produces a snapshot and filters the data files by creation time. For streaming sources, upon first startup, and continue to read the latest changes.</li><li>"from-snapshot": For streaming sources, continuously reads changes starting from snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning. For batch sources, produces a snapshot specified by "scan.snapshot-id" or "scan.tag-name" but does not read new changes.</li><li>"from-snapshot-full": For streaming sources, produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes. For batch sources, produces a snapshot specified by "scan.snapshot-id" but does not read new changes.</li><li>"incremental": Read incremental changes between start and end snapshot or timestamp.</li></ul></td>
+            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"default": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp", and if "scan.snapshot-id" or "scan.tag-name" is set the actual startup mode will be "from-snapshot". Otherwise the actual startup mode will be "latest-full".</li><li>"latest-full": For streaming sources, produces the latest snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce the latest snapshot but does not read new changes.</li><li>"full": Deprecated. Same as "latest-full".</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "latest-full" startup mode.</li><li>"compacted-full": For streaming sources, produces a snapshot after the latest compaction on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot after the latest compaction but does not read new changes. Snapshots of full compaction are picked when scheduled full-compaction is enabled.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li><li>"from-creation-timestamp": For streaming sources and batch sources, If timestamp specified by "scan.creation-time-millis" is during in the range of earliest snapshot and latest snapshot: mode is from-snapshot which snapshot is equal or later the timestamp. If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time.</li><li>"from-file-creation-time": For streaming and batch sources, consumes a snapshot and filters the data files by creation time. For streaming sources, upon first startup, and continue to read the latest changes.</li><li>"from-snapshot": For streaming sources, continuously reads changes starting from snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning. For batch sources, produces a snapshot specified by "scan.snapshot-id" or "scan.tag-name" but does not read new changes.</li><li>"from-snapshot-full": For streaming sources, produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes. For batch sources, produces a snapshot specified by "scan.snapshot-id" but does not read new changes.</li><li>"incremental": Read incremental changes between start and end snapshot or timestamp.</li></ul></td>
         </tr>
         <tr>
             <td><h5>scan.plan-sort-partition</h5></td>
@@ -965,6 +1013,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
             <td>Default spill compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming-read-append-overwrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read the delta from append table's overwrite commit in streaming mode.</td>
         </tr>
         <tr>
             <td><h5>streaming-read-mode</h5></td>

@@ -73,9 +73,9 @@ magic:                            8 bytes long, value is 1493475289347502L, BIG_
 version:                          4 bytes int, BIG_ENDIAN
 head length:                      4 bytes int, BIG_ENDIAN
 column number:                    4 bytes int, BIG_ENDIAN
-column x name:                    2 bytes short BIG_ENDIAN and Java modified-utf-8
+column x name:                    var bytes, Java modified-utf-8
 index number:                     4 bytes int (how many column items below), BIG_ENDIAN
-index name x:                     2 bytes short BIG_ENDIAN and Java modified-utf-8
+index name x:                     var bytes, Java modified-utf-8
 start pos:                        4 bytes int, BIG_ENDIAN
 length:                           4 bytes int, BIG_ENDIAN
 redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
@@ -170,7 +170,7 @@ length:                        4 bytes int
 
 (Legacy) Bitmap file index format (V1):
 
-You can configure `file-index.bitmap.version` to use legacy bitmap version 1.
+You can configure `file-index.bitmap.<column_name>.version` to use legacy bitmap version 1.
 
 <pre>
 

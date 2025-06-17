@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon
 
 import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.util.{Utils => SparkUtils}
 
 import java.io.File
@@ -36,7 +37,7 @@ object Utils {
   }
 
   def createDataFrame(sparkSession: SparkSession, plan: LogicalPlan): DataFrame = {
-    Dataset.ofRows(sparkSession, plan)
+    SparkShimLoader.shim.classicApi.createDataset(sparkSession, plan)
   }
 
 }

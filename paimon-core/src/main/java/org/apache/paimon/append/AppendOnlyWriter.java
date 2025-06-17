@@ -23,7 +23,6 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -45,14 +44,15 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOFunction;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SinkWriter;
+import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
+import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -72,7 +72,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final RowType writeSchema;
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
-    private final IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> bucketFileRead;
+    private final IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead;
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
     private final boolean statsDenseStore;
@@ -80,17 +80,17 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
-    @Nullable private CompactDeletionFile compactDeletionFile;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
     private final CompressOptions spillCompression;
-    private SinkWriter sinkWriter;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
-
-    private MemorySegmentPool memorySegmentPool;
     private final MemorySize maxDiskSize;
+
+    @Nullable private CompactDeletionFile compactDeletionFile;
+    private SinkWriter<InternalRow> sinkWriter;
+    private MemorySegmentPool memorySegmentPool;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -101,7 +101,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             RowType writeSchema,
             long maxSequenceNumber,
             CompactManager compactManager,
-            IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> bucketFileRead,
+            IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead,
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
@@ -121,7 +121,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.writeSchema = writeSchema;
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
-        this.bucketFileRead = bucketFileRead;
+        this.dataFileRead = dataFileRead;
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
         this.statsDenseStore = statsDenseStore;
@@ -139,8 +139,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
         this.sinkWriter =
                 useWriteBuffer
-                        ? new BufferedSinkWriter(spillable, maxDiskSize, spillCompression)
-                        : new DirectSinkWriter();
+                        ? createBufferedSinkWriter(spillable)
+                        : new DirectSinkWriter<>(this::createRollingRowWriter);
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -149,6 +149,18 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             compactAfter.addAll(increment.compactIncrement().compactAfter());
             updateCompactDeletionFile(increment.compactDeletionFile());
         }
+    }
+
+    private BufferedSinkWriter<InternalRow> createBufferedSinkWriter(boolean spillable) {
+        return new BufferedSinkWriter<>(
+                this::createRollingRowWriter,
+                t -> t,
+                t -> t,
+                ioManager,
+                writeSchema,
+                spillable,
+                maxDiskSize,
+                spillCompression);
     }
 
     @Override
@@ -178,7 +190,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 write(row);
             }
         } else {
-            ((DirectSinkWriter) sinkWriter).writeBundle(bundle);
+            ((DirectSinkWriter<?>) sinkWriter).writeBundle(bundle);
         }
     }
 
@@ -232,9 +244,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     @Override
-    public void withInsertOnly(boolean insertOnly) {}
-
-    @Override
     public void close() throws Exception {
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
@@ -255,16 +264,16 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     public void toBufferedWriter() throws Exception {
-        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter() && bucketFileRead != null) {
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter() && dataFileRead != null) {
             // fetch the written results
             List<DataFileMeta> files = sinkWriter.flush();
 
             sinkWriter.close();
-            sinkWriter = new BufferedSinkWriter(true, maxDiskSize, spillCompression);
+            sinkWriter = createBufferedSinkWriter(true);
             sinkWriter.setMemoryPool(memorySegmentPool);
 
             // rewrite small files
-            try (RecordReaderIterator<InternalRow> reader = bucketFileRead.apply(files)) {
+            try (RecordReaderIterator<InternalRow> reader = dataFileRead.apply(files)) {
                 while (reader.hasNext()) {
                     sinkWriter.write(reader.next());
                 }
@@ -359,7 +368,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @VisibleForTesting
     public RowBuffer getWriteBuffer() {
         if (sinkWriter instanceof BufferedSinkWriter) {
-            return ((BufferedSinkWriter) sinkWriter).writeBuffer;
+            return ((BufferedSinkWriter<?>) sinkWriter).rowBuffer();
         } else {
             return null;
         }
@@ -368,177 +377,5 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @VisibleForTesting
     List<DataFileMeta> getNewFiles() {
         return newFiles;
-    }
-
-    /** Internal interface to Sink Data from input. */
-    private interface SinkWriter {
-
-        boolean write(InternalRow data) throws IOException;
-
-        List<DataFileMeta> flush() throws IOException;
-
-        boolean flushMemory() throws IOException;
-
-        long memoryOccupancy();
-
-        void close();
-
-        void setMemoryPool(MemorySegmentPool memoryPool);
-
-        boolean bufferSpillableWriter();
-    }
-
-    /**
-     * Directly sink data to file, no memory cache here, use OrcWriter/ParquetWrite/etc directly
-     * write data. May cause out-of-memory.
-     */
-    private class DirectSinkWriter implements SinkWriter {
-
-        private RowDataRollingFileWriter writer;
-
-        @Override
-        public boolean write(InternalRow data) throws IOException {
-            if (writer == null) {
-                writer = createRollingRowWriter();
-            }
-            writer.write(data);
-            return true;
-        }
-
-        public void writeBundle(BundleRecords bundle) throws IOException {
-            if (writer == null) {
-                writer = createRollingRowWriter();
-            }
-            writer.writeBundle(bundle);
-        }
-
-        @Override
-        public List<DataFileMeta> flush() throws IOException {
-            List<DataFileMeta> flushedFiles = new ArrayList<>();
-            if (writer != null) {
-                writer.close();
-                flushedFiles.addAll(writer.result());
-                writer = null;
-            }
-            return flushedFiles;
-        }
-
-        @Override
-        public boolean flushMemory() throws IOException {
-            return false;
-        }
-
-        @Override
-        public long memoryOccupancy() {
-            return 0;
-        }
-
-        @Override
-        public void close() {
-            if (writer != null) {
-                writer.abort();
-                writer = null;
-            }
-        }
-
-        @Override
-        public void setMemoryPool(MemorySegmentPool memoryPool) {
-            // do nothing
-        }
-
-        @Override
-        public boolean bufferSpillableWriter() {
-            return false;
-        }
-    }
-
-    /**
-     * Use buffered writer, segment pooled from segment pool. When spillable, may delay checkpoint
-     * acknowledge time. When non-spillable, may cause too many small files.
-     */
-    private class BufferedSinkWriter implements SinkWriter {
-
-        private final boolean spillable;
-
-        private final MemorySize maxDiskSize;
-
-        private final CompressOptions compression;
-
-        private RowBuffer writeBuffer;
-
-        private BufferedSinkWriter(
-                boolean spillable, MemorySize maxDiskSize, CompressOptions compression) {
-            this.spillable = spillable;
-            this.maxDiskSize = maxDiskSize;
-            this.compression = compression;
-        }
-
-        @Override
-        public boolean write(InternalRow data) throws IOException {
-            return writeBuffer.put(data);
-        }
-
-        @Override
-        public List<DataFileMeta> flush() throws IOException {
-            List<DataFileMeta> flushedFiles = new ArrayList<>();
-            if (writeBuffer != null) {
-                writeBuffer.complete();
-                RowDataRollingFileWriter writer = createRollingRowWriter();
-                IOException exception = null;
-                try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
-                    while (iterator.advanceNext()) {
-                        writer.write(iterator.getRow());
-                    }
-                } catch (IOException e) {
-                    exception = e;
-                } finally {
-                    if (exception != null) {
-                        IOUtils.closeQuietly(writer);
-                        // cleanup code that might throw another exception
-                        throw exception;
-                    }
-                    writer.close();
-                }
-                flushedFiles.addAll(writer.result());
-                // reuse writeBuffer
-                writeBuffer.reset();
-            }
-            return flushedFiles;
-        }
-
-        @Override
-        public long memoryOccupancy() {
-            return writeBuffer.memoryOccupancy();
-        }
-
-        @Override
-        public void close() {
-            if (writeBuffer != null) {
-                writeBuffer.reset();
-                writeBuffer = null;
-            }
-        }
-
-        @Override
-        public void setMemoryPool(MemorySegmentPool memoryPool) {
-            writeBuffer =
-                    RowBuffer.getBuffer(
-                            ioManager,
-                            memoryPool,
-                            new InternalRowSerializer(writeSchema),
-                            spillable,
-                            maxDiskSize,
-                            compression);
-        }
-
-        @Override
-        public boolean bufferSpillableWriter() {
-            return spillable;
-        }
-
-        @Override
-        public boolean flushMemory() throws IOException {
-            return writeBuffer.flushMemory();
-        }
     }
 }

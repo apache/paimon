@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.flink.source.BucketUnawareCompactSource;
+import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.flink.source.AppendTableCompactSource;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.StreamOperator;
@@ -28,11 +28,11 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /**
- * Operator to execute {@link UnawareAppendCompactionTask} passed from {@link
- * BucketUnawareCompactSource} for compacting single unaware bucket tables in divided mode.
+ * Operator to execute {@link AppendCompactTask} passed from {@link AppendTableCompactSource} for
+ * compacting single unaware bucket tables in divided mode.
  */
 public class AppendOnlySingleTableCompactionWorkerOperator
-        extends AppendCompactWorkerOperator<UnawareAppendCompactionTask> {
+        extends AppendCompactWorkerOperator<AppendCompactTask> {
 
     private AppendOnlySingleTableCompactionWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -42,13 +42,12 @@ public class AppendOnlySingleTableCompactionWorkerOperator
     }
 
     @Override
-    public void processElement(StreamRecord<UnawareAppendCompactionTask> element) throws Exception {
+    public void processElement(StreamRecord<AppendCompactTask> element) throws Exception {
         this.unawareBucketCompactor.processElement(element.getValue());
     }
 
     /** {@link StreamOperatorFactory} of {@link AppendOnlySingleTableCompactionWorkerOperator}. */
-    public static class Factory
-            extends AppendCompactWorkerOperator.Factory<UnawareAppendCompactionTask> {
+    public static class Factory extends AppendCompactWorkerOperator.Factory<AppendCompactTask> {
 
         public Factory(FileStoreTable table, String initialCommitUser) {
             super(table, initialCommitUser);

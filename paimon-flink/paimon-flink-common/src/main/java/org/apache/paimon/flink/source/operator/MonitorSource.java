@@ -24,13 +24,13 @@ import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -49,33 +49,35 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
 
-import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
-
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
  *
  * <ol>
  *   <li>Monitoring snapshots of the Paimon table.
- *   <li>Creating the {@link Split splits} corresponding to the incremental files
+ *   <li>Creating the {@link Split splits} corresponding to the DateFiles
  *   <li>Assigning them to downstream tasks for further processing.
  * </ol>
  *
  * <p>The splits to be read are forwarded to the downstream {@link ReadOperator} which can have
  * parallelism greater than one.
  *
- * <p>Currently, there are two features that rely on this monitor:
+ * <p>Currently, there are three features that rely on this monitor:
  *
  * <ol>
  *   <li>Consumer-id: rely on this source to do aligned snapshot consumption, and ensure that all
  *       data in a snapshot is consumed within each checkpoint.
  *   <li>Snapshot-watermark: when there is no watermark definition, the default Paimon table will
  *       pass the watermark recorded in the snapshot.
+ *   <li>Optimize-coordinator-memory: rely on this source to get splits on a single task, this can
+ *       reduce the memory pressure of source coordinator.
  * </ol>
  */
 public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
@@ -87,17 +89,22 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     private final ReadBuilder readBuilder;
     private final long monitorInterval;
     private final boolean emitSnapshotWatermark;
+    private final boolean isBounded;
 
     public MonitorSource(
-            ReadBuilder readBuilder, long monitorInterval, boolean emitSnapshotWatermark) {
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean isBounded) {
         this.readBuilder = readBuilder;
         this.monitorInterval = monitorInterval;
         this.emitSnapshotWatermark = emitSnapshotWatermark;
+        this.isBounded = isBounded;
     }
 
     @Override
     public Boundedness getBoundedness() {
-        return Boundedness.CONTINUOUS_UNBOUNDED;
+        return isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
     }
 
     @Override
@@ -111,6 +118,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         private static final String NEXT_SNAPSHOT_STATE = "NSS";
 
         private final StreamTableScan scan = readBuilder.newStreamScan();
+        private final TableScan batchScan = readBuilder.newScan();
         private final SplitListState<Long> checkpointState =
                 new SplitListState<>(CHECKPOINT_STATE, x -> Long.toString(x), Long::parseLong);
         private final SplitListState<Tuple2<Long, Long>> nextSnapshotState =
@@ -181,11 +189,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         public InputStatus pollNext(ReaderOutput<Split> readerOutput) throws Exception {
             boolean isEmpty;
             try {
-                List<Split> splits = scan.plan().splits();
+                List<Split> splits = isBounded ? batchScan.plan().splits() : scan.plan().splits();
                 isEmpty = splits.isEmpty();
                 splits.forEach(readerOutput::collect);
 
-                if (emitSnapshotWatermark) {
+                if (emitSnapshotWatermark && !isBounded) {
                     Long watermark = scan.watermark();
                     if (watermark != null) {
                         readerOutput.emitWatermark(new Watermark(watermark));
@@ -193,6 +201,10 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                 }
             } catch (EndOfScanException esf) {
                 LOG.info("Catching EndOfStreamException, the stream is finished.");
+                return InputStatus.END_OF_INPUT;
+            }
+
+            if (isBounded) {
                 return InputStatus.END_OF_INPUT;
             }
 
@@ -211,33 +223,40 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean shuffleBucketWithPartition,
-            BucketMode bucketMode,
-            NestedProjectedRowData nestedProjectedRowData) {
+            boolean unawareBucket,
+            NestedProjectedRowData nestedProjectedRowData,
+            boolean isBounded,
+            @Nullable Long limit) {
         SingleOutputStreamOperator<Split> singleOutputStreamOperator =
                 env.fromSource(
                                 new MonitorSource(
-                                        readBuilder, monitorInterval, emitSnapshotWatermark),
+                                        readBuilder,
+                                        monitorInterval,
+                                        emitSnapshotWatermark,
+                                        isBounded),
                                 WatermarkStrategy.noWatermarks(),
                                 name + "-Monitor",
                                 new JavaTypeInfo<>(Split.class))
                         .forceNonParallel();
 
         DataStream<Split> sourceDataStream =
-                bucketMode == BUCKET_UNAWARE
-                        ? shuffleUnwareBucket(singleOutputStreamOperator)
-                        : shuffleNonUnwareBucket(
+                unawareBucket
+                        ? shuffleUnawareBucket(singleOutputStreamOperator)
+                        : shuffleNonUnawareBucket(
                                 singleOutputStreamOperator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
-                name + "-Reader", typeInfo, new ReadOperator(readBuilder, nestedProjectedRowData));
+                name + "-Reader",
+                typeInfo,
+                new ReadOperator(readBuilder::newRead, nestedProjectedRowData, limit));
     }
 
-    private static DataStream<Split> shuffleUnwareBucket(
+    private static DataStream<Split> shuffleUnawareBucket(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator) {
         return singleOutputStreamOperator.rebalance();
     }
 
-    private static DataStream<Split> shuffleNonUnwareBucket(
+    private static DataStream<Split> shuffleNonUnawareBucket(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator,
             boolean shuffleBucketWithPartition) {
         return singleOutputStreamOperator.partitionCustom(

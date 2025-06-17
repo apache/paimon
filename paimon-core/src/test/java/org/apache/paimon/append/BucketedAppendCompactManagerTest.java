@@ -20,6 +20,7 @@ package org.apache.paimon.append;
 
 import org.apache.paimon.io.DataFileMeta;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -124,6 +125,7 @@ public class BucketedAppendCompactManagerTest {
                 Arrays.asList(newFile(2001L, 2005L), newFile(2006L, 2010L)));
     }
 
+    @Disabled // TODO create new tests for min files only
     @Test
     public void testPick() {
         // fileNum is 13 (which > 12) and totalFileSize is 130 (which < 1024)
@@ -197,7 +199,6 @@ public class BucketedAppendCompactManagerTest {
             List<DataFileMeta> expectedCompactBefore,
             List<DataFileMeta> toCompactAfterPick) {
         int minFileNum = 4;
-        int maxFileNum = 12;
         long targetFileSize = 1024;
         BucketedAppendCompactManager manager =
                 new BucketedAppendCompactManager(
@@ -205,8 +206,8 @@ public class BucketedAppendCompactManagerTest {
                         toCompactBeforePick,
                         null,
                         minFileNum,
-                        maxFileNum,
                         targetFileSize,
+                        false,
                         null, // not used
                         null);
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();

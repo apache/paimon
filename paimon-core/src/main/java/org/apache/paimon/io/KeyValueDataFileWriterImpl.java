@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -38,31 +37,27 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
 
     public KeyValueDataFileWriterImpl(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
-            SimpleStatsProducer statsProducer,
             long schemaId,
             int level,
-            String compression,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath) {
         super(
                 fileIO,
-                factory,
+                context,
                 path,
                 converter,
                 keyType,
                 valueType,
                 KeyValue.schema(keyType, valueType),
-                statsProducer,
                 schemaId,
                 level,
-                compression,
                 options,
                 fileSource,
                 fileIndexOptions,

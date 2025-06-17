@@ -133,11 +133,14 @@ public class PartitionMarkDone implements PartitionListener {
     }
 
     @Override
-    public void notifyCommittable(List<ManifestCommittable> committables) {
-        if (partitionMarkDoneActionMode == PartitionMarkDoneActionMode.WATERMARK) {
-            markDoneByWatermark(committables);
-        } else {
-            markDoneByProcessTime(committables);
+    public void notifyCommittable(
+            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
+        if (partitionMarkDoneRecoverFromState) {
+            if (partitionMarkDoneActionMode == PartitionMarkDoneActionMode.WATERMARK) {
+                markDoneByWatermark(committables);
+            } else {
+                markDoneByProcessTime(committables);
+            }
         }
     }
 

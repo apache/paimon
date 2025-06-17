@@ -75,16 +75,16 @@ public class PartitionStatisticsReporter implements Closeable {
             long fileCount = 0;
             for (DataSplit split : splits) {
                 List<DataFileMeta> fileMetas = split.dataFiles();
-                rowCount += split.rowCount();
                 fileCount += fileMetas.size();
                 for (DataFileMeta fileMeta : fileMetas) {
+                    rowCount += fileMeta.rowCount();
                     totalSize += fileMeta.fileSize();
                 }
             }
 
             PartitionStatistics partitionStats =
                     new PartitionStatistics(
-                            partitionSpec, fileCount, totalSize, rowCount, modifyTimeMillis);
+                            partitionSpec, rowCount, totalSize, fileCount, modifyTimeMillis);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
             partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
         }

@@ -88,7 +88,10 @@ public interface FileStore<T> {
 
     FileStoreWrite<T> newWrite(String commitUser);
 
-    FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
+    FileStoreWrite<T> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId);
 
     FileStoreCommit newCommit(String commitUser, FileStoreTable table);
 
@@ -111,13 +114,13 @@ public interface FileStore<T> {
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy);
 
-    TagAutoManager newTagCreationManager();
+    TagAutoManager newTagCreationManager(FileStoreTable table);
 
     ServiceManager newServiceManager();
 
     boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
 
-    List<TagCallback> createTagCallbacks();
+    List<TagCallback> createTagCallbacks(FileStoreTable table);
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
 

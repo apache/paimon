@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>1.1-SNAPSHOT</version>
+        <version>1.3-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -36,6 +36,7 @@ under the License.
     <properties>
         <flink.version>1.17.2</flink.version>
         <iceberg.flink.version>1.17</iceberg.flink.version>
+        <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
     </properties>
 
     <dependencies>
@@ -49,6 +50,18 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-flink-common</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink1-common</artifactId>
             <version>${project.version}</version>
             <exclusions>
                 <exclusion>
@@ -114,6 +127,13 @@ under the License.
             <version>${iceberg.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>frocksdbjni</artifactId>
+            <version>${frocksdbjni.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -132,6 +152,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-flink-common</include>
+                                    <include>org.apache.paimon:paimon-flink1-common</include>
                                     <include>org.apache.paimon:paimon-flink-cdc</include>
                                 </includes>
                             </artifactSet>

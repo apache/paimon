@@ -19,7 +19,6 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -43,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link AuditLogTable}. */
@@ -72,7 +72,7 @@ public class AuditLogTableTest extends TableTestBase {
         FileStoreTable table =
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         Identifier filesTableId =
-                identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + AuditLogTable.AUDIT_LOG);
+                identifier(tableName + SYSTEM_TABLE_SPLITTER + AuditLogTable.AUDIT_LOG);
         auditLogTable = (AuditLogTable) catalog.getTable(filesTableId);
 
         write(table, GenericRow.ofKind(RowKind.INSERT, 1, 1, 1));

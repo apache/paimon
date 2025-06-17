@@ -28,10 +28,17 @@ import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
+import org.apache.paimon.flink.lookup.partitioner.BucketIdExtractor;
+import org.apache.paimon.flink.lookup.partitioner.BucketShufflePartitioner;
+import org.apache.paimon.flink.lookup.partitioner.BucketShuffleStrategy;
+import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.BucketSpec;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -46,20 +53,25 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsAggregatePushDown;
+import org.apache.flink.table.connector.source.abilities.SupportsLookupCustomShuffle;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.AggregateExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.types.DataType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -82,7 +94,11 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * batch mode or streaming mode.
  */
 public abstract class BaseDataTableSource extends FlinkTableSource
-        implements LookupTableSource, SupportsWatermarkPushDown, SupportsAggregatePushDown {
+        implements LookupTableSource,
+                SupportsWatermarkPushDown,
+                SupportsAggregatePushDown,
+                SupportsLookupCustomShuffle {
+    private static final Logger LOG = LoggerFactory.getLogger(BaseDataTableSource.class);
 
     private static final List<ConfigOption<?>> TIME_TRAVEL_OPTIONS =
             Arrays.asList(
@@ -98,7 +114,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     protected final boolean unbounded;
     protected final DynamicTableFactory.Context context;
     @Nullable protected final LogStoreTableFactory logStoreTableFactory;
-
+    @Nullable private BucketShufflePartitioner bucketShufflePartitioner;
     @Nullable protected WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable protected Long countPushed;
 
@@ -276,7 +292,32 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     protected FileStoreLookupFunction getFileStoreLookupFunction(
             LookupContext context, FileStoreTable table, int[] projection, int[] joinKey) {
-        return new FileStoreLookupFunction(table, projection, joinKey, predicate);
+        // 1.Get the join key field names from join key indexes.
+        List<String> joinKeyFieldNames =
+                Arrays.stream(joinKey)
+                        .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
+                        .collect(Collectors.toList());
+        // 2.Get the bucket key field names from bucket key indexes.
+        List<String> bucketKeyFieldNames = table.schema().bucketKeys();
+        boolean useCustomShuffle =
+                supportBucketShufflePartitioner(joinKeyFieldNames, bucketKeyFieldNames)
+                        && RuntimeContextUtils.preferCustomShuffle(context);
+        int numBuckets;
+        ShuffleStrategy strategy = null;
+        if (useCustomShuffle) {
+            numBuckets = table.store().options().bucket();
+            BucketIdExtractor extractor =
+                    new BucketIdExtractor(
+                            numBuckets, table.schema(), joinKeyFieldNames, bucketKeyFieldNames);
+
+            strategy = new BucketShuffleStrategy(numBuckets);
+            bucketShufflePartitioner = new BucketShufflePartitioner(strategy, extractor);
+        }
+
+        if (strategy != null) {
+            LOG.info("Paimon connector is using bucket shuffle partitioning strategy.");
+        }
+        return new FileStoreLookupFunction(table, projection, joinKey, predicate, strategy);
     }
 
     private FileStoreTable timeTravelDisabledTable(FileStoreTable table) {
@@ -331,6 +372,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         List<Split> splits =
                 table.newReadBuilder()
                         .dropStats()
+                        .withProjection(new int[0])
                         .withFilter(getPredicateWithScanPartitions())
                         .newScan()
                         .plan()
@@ -360,5 +402,17 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     @Override
     public boolean isUnbounded() {
         return unbounded;
+    }
+
+    @Override
+    public Optional<InputDataPartitioner> getPartitioner() {
+        return Optional.ofNullable(bucketShufflePartitioner);
+    }
+
+    private boolean supportBucketShufflePartitioner(
+            List<String> joinKeyFieldNames, List<String> bucketKeyFieldNames) {
+        BucketSpec bucketSpec = ((FileStoreTable) table).bucketSpec();
+        return bucketSpec.getBucketMode() == BucketMode.HASH_FIXED
+                && new HashSet<>(joinKeyFieldNames).containsAll(bucketKeyFieldNames);
     }
 }

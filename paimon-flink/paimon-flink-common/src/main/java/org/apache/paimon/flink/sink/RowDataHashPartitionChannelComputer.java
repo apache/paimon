@@ -21,8 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
-import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 
 /** This is only for partitioned unaware-buckets Append only table. */
 public class RowDataHashPartitionChannelComputer implements ChannelComputer<InternalRow> {
@@ -32,7 +31,7 @@ public class RowDataHashPartitionChannelComputer implements ChannelComputer<Inte
     private final TableSchema schema;
 
     private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
+    private transient RowPartitionKeyExtractor extractor;
 
     public RowDataHashPartitionChannelComputer(TableSchema schema) {
         this.schema = schema;
@@ -41,13 +40,12 @@ public class RowDataHashPartitionChannelComputer implements ChannelComputer<Inte
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new UnawareBucketRowKeyExtractor(schema);
+        this.extractor = new RowPartitionKeyExtractor(schema);
     }
 
     @Override
     public int channel(InternalRow record) {
-        extractor.setRecord(record);
-        return ChannelComputer.select(extractor.partition(), 0, numChannels);
+        return ChannelComputer.select(extractor.partition(record), 0, numChannels);
     }
 
     @Override

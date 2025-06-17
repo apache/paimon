@@ -59,8 +59,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private final DeletionVectorsMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
-    private final int maxFileNum;
     private final long targetFileSize;
+    private final boolean forceRewriteAllFiles;
     private final CompactRewriter rewriter;
 
     private List<DataFileMeta> compacting;
@@ -72,8 +72,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             List<DataFileMeta> restored,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             int minFileNum,
-            int maxFileNum,
             long targetFileSize,
+            boolean forceRewriteAllFiles,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
@@ -81,8 +81,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         this.toCompact = new PriorityQueue<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
-        this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
+        this.forceRewriteAllFiles = forceRewriteAllFiles;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
     }
@@ -101,10 +101,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 taskFuture == null,
                 "A compaction task is still running while the user "
                         + "forces a new compaction. This is unexpected.");
-        // if deletion vector enables, always trigger compaction.
-        if (toCompact.isEmpty()
-                || (dvMaintainer == null && toCompact.size() < FULL_COMPACT_MIN_FILE)) {
+        // if all files are force picked or deletion vector enables, always trigger compaction.
+        if (!forceRewriteAllFiles
+                && (toCompact.isEmpty()
+                        || (dvMaintainer == null && toCompact.size() < FULL_COMPACT_MIN_FILE))) {
             return;
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Submit full compaction with these files {}", toCompact);
         }
 
         taskFuture =
@@ -113,6 +118,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                                 dvMaintainer,
                                 toCompact,
                                 targetFileSize,
+                                forceRewriteAllFiles,
                                 rewriter,
                                 metricsReporter));
         recordCompactionsQueuedRequest();
@@ -133,6 +139,10 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         Optional<List<DataFileMeta>> picked = pickCompactBefore();
         if (picked.isPresent()) {
             compacting = picked.get();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Submit normal compaction with these files {}", compacting);
+            }
+
             taskFuture =
                     executor.submit(
                             new AutoCompactTask(
@@ -201,8 +211,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             candidates.add(file);
             totalFileSize += file.fileSize();
             fileNum++;
-            if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                    || fileNum >= maxFileNum) {
+            if (fileNum >= minFileNum) {
                 return Optional.of(candidates);
             } else if (totalFileSize >= targetFileSize) {
                 // let pointer shift one pos to right
@@ -234,25 +243,28 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         private final DeletionVectorsMaintainer dvMaintainer;
         private final LinkedList<DataFileMeta> toCompact;
         private final long targetFileSize;
+        private final boolean forceRewriteAllFiles;
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
                 DeletionVectorsMaintainer dvMaintainer,
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
+                boolean forceRewriteAllFiles,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
             super(metricsReporter);
             this.dvMaintainer = dvMaintainer;
             this.toCompact = new LinkedList<>(inputs);
             this.targetFileSize = targetFileSize;
+            this.forceRewriteAllFiles = forceRewriteAllFiles;
             this.rewriter = rewriter;
         }
 
         @Override
         protected CompactResult doCompact() throws Exception {
             // remove large files
-            while (!toCompact.isEmpty()) {
+            while (!forceRewriteAllFiles && !toCompact.isEmpty()) {
                 DataFileMeta file = toCompact.peekFirst();
                 // the data file with deletion file always need to be compacted.
                 if (file.fileSize() >= targetFileSize && !hasDeletionFile(file)) {
@@ -277,7 +289,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                         small++;
                     }
                 }
-                if (small > big && toCompact.size() >= FULL_COMPACT_MIN_FILE) {
+                if (forceRewriteAllFiles
+                        || (small > big && toCompact.size() >= FULL_COMPACT_MIN_FILE)) {
                     return compact(null, toCompact, rewriter);
                 } else {
                     return result(emptyList(), emptyList());

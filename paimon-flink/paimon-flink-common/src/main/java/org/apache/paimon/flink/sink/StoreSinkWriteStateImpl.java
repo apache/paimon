@@ -46,6 +46,7 @@ import java.util.Map;
  */
 public class StoreSinkWriteStateImpl implements StoreSinkWriteState {
 
+    private final int subtaskId;
     private final StoreSinkWriteState.StateValueFilter stateValueFilter;
 
     private final ListState<Tuple5<String, String, byte[], Integer, byte[]>> listState;
@@ -53,10 +54,13 @@ public class StoreSinkWriteStateImpl implements StoreSinkWriteState {
 
     @SuppressWarnings("unchecked")
     public StoreSinkWriteStateImpl(
+            int subtaskId,
             StateInitializationContext context,
             StoreSinkWriteState.StateValueFilter stateValueFilter)
             throws Exception {
+        this.subtaskId = subtaskId;
         this.stateValueFilter = stateValueFilter;
+
         TupleSerializer<Tuple5<String, String, byte[], Integer, byte[]>> listStateSerializer =
                 new TupleSerializer<>(
                         (Class<Tuple5<String, String, byte[], Integer, byte[]>>)
@@ -119,5 +123,10 @@ public class StoreSinkWriteStateImpl implements StoreSinkWriteState {
             }
         }
         listState.update(list);
+    }
+
+    @Override
+    public int getSubtaskId() {
+        return subtaskId;
     }
 }

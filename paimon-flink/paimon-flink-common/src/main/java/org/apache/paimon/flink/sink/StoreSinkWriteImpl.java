@@ -65,8 +65,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Nullable private final MetricGroup metricGroup;
 
-    @Nullable private Boolean insertOnly;
-
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
@@ -145,7 +143,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(
                                 commitUser,
                                 (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket))
+                                        state.stateValueFilter().filter(table.name(), part, bucket),
+                                state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)
@@ -156,31 +155,19 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         }
 
         if (memoryPoolFactory != null) {
-            tableWrite.withMemoryPoolFactory(memoryPoolFactory);
+            return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
         } else {
-            tableWrite.withMemoryPool(
+            return tableWrite.withMemoryPool(
                     memoryPool != null
                             ? memoryPool
                             : new HeapMemorySegmentPool(
                                     table.coreOptions().writeBufferSize(),
                                     table.coreOptions().pageSize()));
         }
-
-        if (insertOnly != null) {
-            tableWrite.withInsertOnly(insertOnly);
-        }
-
-        return tableWrite;
     }
 
     public void withCompactExecutor(ExecutorService compactExecutor) {
         write.withCompactExecutor(compactExecutor);
-    }
-
-    @Override
-    public void withInsertOnly(boolean insertOnly) {
-        this.insertOnly = insertOnly;
-        write.withInsertOnly(insertOnly);
     }
 
     @Override

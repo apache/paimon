@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
@@ -136,15 +136,15 @@ public class CompactAction extends TableActionBase {
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             return buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            buildForUnawareBucketCompaction(env, fileStoreTable, isStreaming);
+            buildForAppendTableCompact(env, fileStoreTable, isStreaming);
             return true;
         } else {
-            buildForTraditionalCompaction(env, fileStoreTable, isStreaming);
+            buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
             return true;
         }
     }
 
-    private void buildForTraditionalCompaction(
+    private void buildForBucketedTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         if (fullCompaction == null) {
@@ -180,16 +180,15 @@ public class CompactAction extends TableActionBase {
         sinkBuilder.withInput(source).build();
     }
 
-    private void buildForUnawareBucketCompaction(
+    private void buildForAppendTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
-        UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
-                new UnawareBucketCompactionTopoBuilder(env, identifier.getFullName(), table);
-
-        unawareBucketCompactionTopoBuilder.withPartitionPredicate(getPredicate());
-        unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
-        unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);
-        unawareBucketCompactionTopoBuilder.build();
+        AppendTableCompactBuilder builder =
+                new AppendTableCompactBuilder(env, identifier.getFullName(), table);
+        builder.withPartitionPredicate(getPredicate());
+        builder.withContinuousMode(isStreaming);
+        builder.withPartitionIdleTime(partitionIdleTime);
+        builder.build();
     }
 
     protected Predicate getPredicate() throws Exception {
@@ -260,7 +259,7 @@ public class CompactAction extends TableActionBase {
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         fileStoreTable.coreOptions().partitionDefaultName(),
-                        fileStoreTable.rowType(),
+                        fileStoreTable.store().partitionType(),
                         fileStoreTable.partitionKeys().toArray(new String[0]),
                         fileStoreTable.coreOptions().legacyPartitionName());
         String commitUser = CoreOptions.createCommitUser(options);
@@ -285,12 +284,8 @@ public class CompactAction extends TableActionBase {
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     PostponeBucketCompactSplitSource.buildSource(
                             env,
-                            realTable.fullName() + partitionSpec,
-                            realTable.rowType(),
-                            realTable
-                                    .newReadBuilder()
-                                    .withPartitionFilter(partitionSpec)
-                                    .withBucket(BucketMode.POSTPONE_BUCKET),
+                            realTable,
+                            partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             DataStream<InternalRow> partitioned =

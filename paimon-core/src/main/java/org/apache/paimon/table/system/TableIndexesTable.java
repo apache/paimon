@@ -63,7 +63,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing indexes. */
@@ -230,7 +230,7 @@ public class TableIndexesTable implements ReadonlyTable {
 
     private static List<IndexManifestEntry> allIndexEntries(FileStoreTable dataTable) {
         IndexFileHandler indexFileHandler = dataTable.store().newIndexFileHandler();
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(dataTable);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(dataTable);
         if (snapshot == null) {
             LOG.warn("Check if your snapshot is empty.");
             return Collections.emptyList();

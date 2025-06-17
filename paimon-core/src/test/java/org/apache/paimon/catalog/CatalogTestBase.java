@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
@@ -49,6 +50,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -75,6 +77,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -275,7 +278,7 @@ public abstract class CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null);
+        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -288,22 +291,22 @@ public abstract class CatalogTestBase {
         // List tables paged returns a list with the names of all tables in the database in all
         // catalogs except RestCatalog
         // even if the maxResults or pageToken is not null
-        pagedTables = catalog.listTablesPaged(databaseName, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         String pageToken = "table1";
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
         assertPagedTables(pagedTables, tableNames);
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
         assertPagedTables(pagedTables, tableNames);
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
         assertPagedTables(pagedTables, tableNames);
 
         // List tables throws DatabaseNotExistException when the database does not exist
@@ -312,7 +315,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTablesPaged(
-                                        "non_existing_db", finalMaxResults, pageToken));
+                                        "non_existing_db", finalMaxResults, pageToken, null));
     }
 
     @Test
@@ -321,7 +324,7 @@ public abstract class CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -334,26 +337,28 @@ public abstract class CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -363,7 +368,45 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken));
+                                        "non_existing_db", finalMaxResults, pageToken, null));
+    }
+
+    @Test
+    public void testListTablesPagedGlobally() throws Exception {
+        // List table paged globally throws UnsupportedOperationException if current catalog does
+        // not
+        // supportsListObjectsPaged or current catalog does not supportsListByPattern
+        String databaseName = "list_tables_paged_globally_db";
+        catalog.createDatabase(databaseName, false);
+        if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(databaseName, null, null, null));
+        }
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(null, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(databaseName, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(null, null, 100, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(databaseName, "abc", null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listTablesPagedGlobally(databaseName, "abc", null, "table"));
+        }
     }
 
     @Test
@@ -395,6 +438,17 @@ public abstract class CatalogTestBase {
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("The value of auto-create property should be false.");
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
+
+        // Create table throws Exception when type = format-table.
+        if (supportsFormatTable()) {
+            schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+            schema.options().put(CoreOptions.PRIMARY_KEY.key(), "a");
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> catalog.createTable(identifier, schema, false))
+                    .withMessage("Cannot define primary-key for format table.");
+            schema.options().remove(CoreOptions.TYPE.key());
+            schema.options().remove(CoreOptions.PRIMARY_KEY.key());
+        }
 
         // Create table and check the schema
         schema.options().put("k1", "v1");
@@ -483,9 +537,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.createTable(
                                         Identifier.create("test_db", "wrong_table"), schema, false))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
 
         // conflict options
         Schema conflictOptionsSchema =
@@ -973,6 +1025,13 @@ public abstract class CatalogTestBase {
 
         catalog.alterTable(
                 identifier,
+                Lists.newArrayList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")),
+                false);
+
+        catalog.alterTable(
+                identifier,
                 Lists.newArrayList(SchemaChange.updateColumnNullability("col1", false)),
                 false);
 
@@ -1102,7 +1161,7 @@ public abstract class CatalogTestBase {
         // List views returns an empty list when there are no views in the database
         String databaseName = "views_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null);
+        PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null, null);
         assertThat(pagedViews.getElements()).isEmpty();
         assertNull(pagedViews.getNextPageToken());
 
@@ -1115,22 +1174,22 @@ public abstract class CatalogTestBase {
             catalog.createView(Identifier.create(databaseName, viewName), view, false);
         }
 
-        pagedViews = catalog.listViewsPaged(databaseName, null, null);
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, null);
         assertPagedViews(pagedViews, viewNames);
 
         int maxResults = 2;
-        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null);
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null, null);
         assertPagedViews(pagedViews, viewNames);
 
         String pageToken = "view1";
-        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken);
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken, null);
         assertPagedViews(pagedViews, viewNames);
 
         maxResults = 8;
-        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null);
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null, null);
         assertPagedViews(pagedViews, viewNames);
 
-        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken);
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken, null);
         assertPagedViews(pagedViews, viewNames);
 
         // List views throws DatabaseNotExistException when the database does not exist
@@ -1139,7 +1198,13 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listViewsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken));
+                                        "non_existing_db", finalMaxResults, pageToken, null));
+
+        assertThatExceptionOfType(UnsupportedOperationException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listViewsPaged(
+                                        databaseName, finalMaxResults, pageToken, "view%"));
     }
 
     @Test
@@ -1152,7 +1217,7 @@ public abstract class CatalogTestBase {
         String databaseName = "view_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<View> pagedViewDetailsPaged =
-                catalog.listViewDetailsPaged(databaseName, null, null);
+                catalog.listViewDetailsPaged(databaseName, null, null, null);
         assertThat(pagedViewDetailsPaged.getElements()).isEmpty();
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
@@ -1165,26 +1230,28 @@ public abstract class CatalogTestBase {
             catalog.createView(Identifier.create(databaseName, viewName), view, false);
         }
 
-        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, null, null);
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, null, null, null);
         assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
         int maxResults = 2;
-        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null);
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null, null);
         assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
         String pageToken = "view1";
-        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        pagedViewDetailsPaged =
+                catalog.listViewDetailsPaged(databaseName, maxResults, pageToken, null);
         assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
         maxResults = 8;
-        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null);
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null, null);
         assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
-        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        pagedViewDetailsPaged =
+                catalog.listViewDetailsPaged(databaseName, maxResults, pageToken, null);
         assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
@@ -1194,7 +1261,48 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listViewDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken));
+                                        "non_existing_db", finalMaxResults, pageToken, null));
+    }
+
+    @Test
+    public void testListViewsPagedGlobally() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        // List view paged globally throws UnsupportedOperationException if current catalog does not
+        // supportsListObjectsPaged or odes not supportsListByPattern
+        String databaseName = "list_views_paged_globally_db";
+        catalog.createDatabase(databaseName, false);
+        if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(databaseName, null, null, null));
+        }
+
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(null, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(databaseName, null, null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(null, null, 100, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(databaseName, "abc", null, null));
+            Assertions.assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> catalog.listViewsPagedGlobally(databaseName, "abc", null, "view"));
+        }
     }
 
     @Test
@@ -1345,23 +1453,24 @@ public abstract class CatalogTestBase {
         // List partitions paged returns a list with all partitions of the table in all catalogs
         // except RestCatalog even
         // if the maxResults or pageToken is not null
-        PagedList<Partition> pagedPartitions = catalog.listPartitionsPaged(identifier, null, null);
+        PagedList<Partition> pagedPartitions =
+                catalog.listPartitionsPaged(identifier, null, null, null);
         Map[] specs = partitionSpecs.toArray(new Map[0]);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         int maxResults = 2;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         String pageToken = "dt=20250101";
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         maxResults = 8;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         // List partitions throws TableNotExistException when the table does not exist
@@ -1372,7 +1481,28 @@ public abstract class CatalogTestBase {
                                 catalog.listPartitionsPaged(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         finalMaxResults,
-                                        pageToken));
+                                        pageToken,
+                                        null));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=_0101"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101_"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=%0101"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101%"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
     }
 
     protected boolean supportsAlterDatabase() {

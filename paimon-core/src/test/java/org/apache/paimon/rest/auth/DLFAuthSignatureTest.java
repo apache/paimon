@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.rest.MockRESTMessage;
-import org.apache.paimon.rest.RESTObjectMapper;
+import org.apache.paimon.rest.RESTApi;
 
 import org.junit.jupiter.api.Test;
 
@@ -39,9 +39,7 @@ public class DLFAuthSignatureTest {
         Map<String, String> parameters = new HashMap<>();
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
-        String data =
-                RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(
-                        MockRESTMessage.createDatabaseRequest("database"));
+        String data = RESTApi.toJson(MockRESTMessage.createDatabaseRequest("database"));
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter("/v1/paimon/databases", parameters, "POST", data);
         DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);

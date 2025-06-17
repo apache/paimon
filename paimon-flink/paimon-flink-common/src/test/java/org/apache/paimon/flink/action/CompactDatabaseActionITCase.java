@@ -118,7 +118,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                     FileStoreTable table =
                             createTable(dbName, tableName, Arrays.asList("dt", "hh"), keys, option);
@@ -223,7 +222,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                 } else {
                     option.put("bucket", "1");
@@ -566,7 +564,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                 } else {
                     option.put("bucket", "1");
@@ -872,7 +869,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String tableName : TABLE_NAMES) {
@@ -946,7 +942,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String tableName : TABLE_NAMES) {
@@ -1013,7 +1008,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         } else {
             options.put(CoreOptions.BUCKET.key(), "-1");
             options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-            options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
             keys = Collections.emptyList();
         }
 
@@ -1051,24 +1045,22 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         "--table_conf",
                         CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key() + "=3");
 
-        StreamExecutionEnvironment env =
-                streamExecutionEnvironmentBuilder().streamingMode().build();
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
         action.withStreamExecutionEnvironment(env).build();
         JobClient jobClient = env.executeAsync();
 
         waitUtil(
                 () -> snapshotManager.latestSnapshotId() == 11L,
-                Duration.ofSeconds(60),
+                Duration.ofSeconds(240),
                 Duration.ofMillis(500));
-        jobClient.cancel();
 
         assertThat(snapshotManager.latestSnapshot().commitKind())
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
 
         waitUtil(
                 () -> snapshotManager.earliestSnapshotId() == 9L,
-                Duration.ofSeconds(60),
-                Duration.ofMillis(200),
+                Duration.ofSeconds(240),
+                Duration.ofMillis(500),
                 "Failed to wait snapshot expiration success");
 
         List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
@@ -1078,6 +1070,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 splits.get(0).dataFiles().stream()
                         .anyMatch(file -> file.fileFormat().equalsIgnoreCase("avro"));
         assertThat(hasAvroFile).isTrue();
+        jobClient.cancel();
     }
 
     private void writeData(

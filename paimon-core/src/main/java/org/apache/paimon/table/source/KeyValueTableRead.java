@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -45,7 +46,7 @@ import java.util.function.Supplier;
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
+public final class KeyValueTableRead extends AbstractDataTableRead {
 
     private final List<SplitReadProvider> readProviders;
 
@@ -141,5 +142,10 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
                 reader.close();
             }
         };
+    }
+
+    @VisibleForTesting
+    public IOManager ioManager() {
+        return ioManager;
     }
 }

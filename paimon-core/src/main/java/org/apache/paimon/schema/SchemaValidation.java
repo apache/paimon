@@ -173,7 +173,10 @@ public class SchemaValidation {
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
-                    "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
+                    String.format(
+                            "Doesn't support streaming read the changes from overwrite when the primary keys are "
+                                    + "not defined. Please use %s to enable the streaming read overwrite commit for append table.",
+                            CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
         }
 
         if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
@@ -604,7 +607,7 @@ public class SchemaValidation {
             if (schema.primaryKeys().isEmpty()
                     && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
                 throw new RuntimeException(
-                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+                        "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");

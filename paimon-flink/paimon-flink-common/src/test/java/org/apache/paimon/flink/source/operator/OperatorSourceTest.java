@@ -123,12 +123,25 @@ public class OperatorSourceTest {
     }
 
     @Test
+    public void testMonitorSourceWhenIsBoundedIsTrue() throws Exception {
+        MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, true);
+        TestingSourceOperator<Split> operator =
+                (TestingSourceOperator<Split>)
+                        TestingSourceOperator.createTestOperator(
+                                source.createReader(null), WatermarkStrategy.noWatermarks(), false);
+        AbstractStreamOperatorTestHarness<Split> testHarness =
+                new AbstractStreamOperatorTestHarness<>(operator, 1, 1, 0);
+        testHarness.open();
+        testReadSplit(operator, () -> 1, 1, 1, 1);
+    }
+
+    @Test
     public void testMonitorSource() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // 1. run first
         OperatorSubtaskState snapshot;
         {
-            MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false);
+            MonitorSource source = new MonitorSource(table.newReadBuilder(), 10, false, false);
             TestingSourceOperator<Split> operator =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
@@ -143,7 +156,7 @@ public class OperatorSourceTest {
 
         // 2. restore from state
         {
-            MonitorSource sourceCopy1 = new MonitorSource(table.newReadBuilder(), 10, false);
+            MonitorSource sourceCopy1 = new MonitorSource(table.newReadBuilder(), 10, false, false);
             TestingSourceOperator<Split> operatorCopy1 =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
@@ -168,7 +181,7 @@ public class OperatorSourceTest {
 
         // 3. restore from consumer id
         {
-            MonitorSource sourceCopy2 = new MonitorSource(table.newReadBuilder(), 10, false);
+            MonitorSource sourceCopy2 = new MonitorSource(table.newReadBuilder(), 10, false, false);
             TestingSourceOperator<Split> operatorCopy2 =
                     (TestingSourceOperator<Split>)
                             TestingSourceOperator.createTestOperator(
@@ -184,7 +197,8 @@ public class OperatorSourceTest {
 
     @Test
     public void testReadOperator() throws Exception {
-        ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
+        ReadOperator readOperator =
+                new ReadOperator(() -> table.newReadBuilder().newRead(), null, null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);
         harness.setup(
@@ -205,8 +219,40 @@ public class OperatorSourceTest {
     }
 
     @Test
+    public void testReadOperatorWithLimit() throws Exception {
+        ReadOperator readOperator =
+                new ReadOperator(() -> table.newReadBuilder().newRead(), null, 2L);
+        OneInputStreamOperatorTestHarness<Split, RowData> harness =
+                new OneInputStreamOperatorTestHarness<>(readOperator);
+        harness.setup(
+                InternalSerializers.create(
+                        RowType.of(new IntType(), new IntType(), new IntType())));
+        writeToTable(1, 1, 1);
+        writeToTable(2, 2, 2);
+        writeToTable(3, 3, 3);
+        writeToTable(4, 4, 4);
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        harness.open();
+        for (Split split : splits) {
+            harness.processElement(new StreamRecord<>(split));
+        }
+        ArrayList<Object> values = new ArrayList<>(harness.getOutput());
+
+        // In ReadOperator each Split is already counted as one input record. But in this case it
+        // will not happen.
+        // So in this case the result values's size if 3 even if the limit is 2.
+        // The IT case see BatchFileStoreITCase#testBatchReadSourceWithSnapshot.
+        assertThat(values)
+                .containsExactlyInAnyOrder(
+                        new StreamRecord<>(GenericRowData.of(1, 1, 1)),
+                        new StreamRecord<>(GenericRowData.of(2, 2, 2)),
+                        new StreamRecord<>(GenericRowData.of(3, 3, 3)));
+    }
+
+    @Test
     public void testReadOperatorMetricsRegisterAndUpdate() throws Exception {
-        ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
+        ReadOperator readOperator =
+                new ReadOperator(() -> table.newReadBuilder().newRead(), null, null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);
         harness.setup(
@@ -305,6 +351,8 @@ public class OperatorSourceTest {
                     public void emitWatermark(WatermarkEvent watermarkEvent) {}
                 };
 
+        writeToTable(a, b, c);
+
         AtomicBoolean isRunning = new AtomicBoolean(true);
         Thread runner =
                 new Thread(
@@ -319,8 +367,6 @@ public class OperatorSourceTest {
                             }
                         });
         runner.start();
-
-        writeToTable(a, b, c);
 
         Split split = queue.poll(1, TimeUnit.MINUTES);
         assertThat(readSplit(split)).containsExactlyInAnyOrder(Arrays.asList(a, b, c));

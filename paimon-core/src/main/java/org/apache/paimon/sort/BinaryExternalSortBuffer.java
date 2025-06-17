@@ -50,7 +50,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     private final BinaryRowSerializer serializer;
     private final BinaryInMemorySortBuffer inMemorySortBuffer;
     private final IOManager ioManager;
-    private SpillChannelManager channelManager;
+    private final SpillChannelManager channelManager;
     private final int maxNumFileHandles;
     private final BlockCompressionFactory compressionCodecFactory;
     private final int compressionBlockSize;
@@ -154,8 +154,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         inMemorySortBuffer.clear();
         spillChannelIDs.clear();
         // delete files
-        channelManager.close();
-        channelManager = new SpillChannelManager();
+        channelManager.reset();
     }
 
     @Override

@@ -44,16 +44,14 @@ public class MergeTreeCompactTask extends CompactTask {
     private final CompactRewriter rewriter;
     private final int outputLevel;
     private final Supplier<CompactDeletionFile> compactDfSupplier;
-
     private final List<List<SortedRun>> partitioned;
-
     private final boolean dropDelete;
     private final int maxLevel;
+    @Nullable private final RecordLevelExpire recordLevelExpire;
+    private final boolean forceRewriteAllFiles;
 
     // metric
     private int upgradeFilesNum;
-
-    @Nullable private final RecordLevelExpire recordLevelExpire;
 
     public MergeTreeCompactTask(
             Comparator<InternalRow> keyComparator,
@@ -64,7 +62,8 @@ public class MergeTreeCompactTask extends CompactTask {
             int maxLevel,
             @Nullable CompactionMetrics.Reporter metricsReporter,
             Supplier<CompactDeletionFile> compactDfSupplier,
-            @Nullable RecordLevelExpire recordLevelExpire) {
+            @Nullable RecordLevelExpire recordLevelExpire,
+            boolean forceRewriteAllFiles) {
         super(metricsReporter);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
@@ -74,6 +73,7 @@ public class MergeTreeCompactTask extends CompactTask {
         this.dropDelete = dropDelete;
         this.maxLevel = maxLevel;
         this.recordLevelExpire = recordLevelExpire;
+        this.forceRewriteAllFiles = forceRewriteAllFiles;
 
         this.upgradeFilesNum = 0;
     }
@@ -121,27 +121,19 @@ public class MergeTreeCompactTask extends CompactTask {
     }
 
     private void upgrade(DataFileMeta file, CompactResult toUpdate) throws Exception {
-        if (file.level() == outputLevel) {
-            if (isContainExpiredRecords(file)) {
-                // if the large file in maxLevel has expired records, we need to rewrite it
-                rewriteFile(file, toUpdate);
-            }
+        if ((outputLevel == maxLevel && containsDeleteRecords(file))
+                || forceRewriteAllFiles
+                || containsExpiredRecords(file)) {
+            List<List<SortedRun>> candidate = new ArrayList<>();
+            candidate.add(singletonList(SortedRun.fromSingle(file)));
+            rewriteImpl(candidate, toUpdate);
             return;
         }
 
-        if (outputLevel != maxLevel || file.deleteRowCount().map(d -> d == 0).orElse(false)) {
-            if (isContainExpiredRecords(file)) {
-                // if the file which could be directly upgraded has expired records, we need to
-                // rewrite it
-                rewriteFile(file, toUpdate);
-            } else {
-                CompactResult upgradeResult = rewriter.upgrade(outputLevel, file);
-                toUpdate.merge(upgradeResult);
-                upgradeFilesNum++;
-            }
-        } else {
-            // files with delete records should not be upgraded directly to max level
-            rewriteFile(file, toUpdate);
+        if (file.level() != outputLevel) {
+            CompactResult upgradeResult = rewriter.upgrade(outputLevel, file);
+            toUpdate.merge(upgradeResult);
+            upgradeFilesNum++;
         }
     }
 
@@ -171,14 +163,11 @@ public class MergeTreeCompactTask extends CompactTask {
         candidate.clear();
     }
 
-    private void rewriteFile(DataFileMeta file, CompactResult toUpdate) throws Exception {
-        List<List<SortedRun>> candidate = new ArrayList<>();
-        candidate.add(new ArrayList<>());
-        candidate.get(0).add(SortedRun.fromSingle(file));
-        rewriteImpl(candidate, toUpdate);
+    private boolean containsDeleteRecords(DataFileMeta file) {
+        return file.deleteRowCount().map(d -> d > 0).orElse(true);
     }
 
-    private boolean isContainExpiredRecords(DataFileMeta file) {
+    private boolean containsExpiredRecords(DataFileMeta file) {
         return recordLevelExpire != null && recordLevelExpire.isExpireFile(file);
     }
 }

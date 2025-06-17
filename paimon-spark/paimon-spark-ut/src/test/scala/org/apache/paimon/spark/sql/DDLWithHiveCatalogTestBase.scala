@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.DelegateCatalog
 import org.apache.paimon.fs.Path
-import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -28,6 +26,8 @@ import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
+
+  import testImplicits._
 
   test("Paimon DDL with hive catalog: create database with location and comment") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
@@ -285,41 +285,45 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   }
 
   test("Paimon DDL with hive catalog: set default database") {
-    var reusedSpark = spark
+    if (!gteqSpark4_0) {
+      // TODO: This is skipped in Spark 4.0, because it would fail in afterAll method, not because the default database is not supported.
 
-    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
-      catalogName =>
-        {
-          val dbName = s"${catalogName}_default_db"
-          val tblName = s"${dbName}_tbl"
+      var reusedSpark = spark
 
-          reusedSpark.sql(s"use $catalogName")
-          reusedSpark.sql(s"create database $dbName")
-          reusedSpark.sql(s"use $dbName")
-          reusedSpark.sql(s"create table $tblName (id int, name string, dt string) using paimon")
-          reusedSpark.stop()
+      Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+        catalogName =>
+          {
+            val dbName = s"${catalogName}_default_db"
+            val tblName = s"${dbName}_tbl"
 
-          reusedSpark = SparkSession
-            .builder()
-            .master("local[2]")
-            .config(sparkConf)
-            .config("spark.sql.defaultCatalog", catalogName)
-            .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
-            .getOrCreate()
-
-          if (catalogName.equals(sparkCatalogName) && !gteqSpark3_4) {
-            checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
+            reusedSpark.sql(s"use $catalogName")
+            reusedSpark.sql(s"create database $dbName")
             reusedSpark.sql(s"use $dbName")
+            reusedSpark.sql(s"create table $tblName (id int, name string, dt string) using paimon")
+            reusedSpark.stop()
+
+            reusedSpark = SparkSession
+              .builder()
+              .master("local[2]")
+              .config(sparkConf)
+              .config("spark.sql.defaultCatalog", catalogName)
+              .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
+              .getOrCreate()
+
+            if (catalogName.equals(sparkCatalogName) && !gteqSpark3_4) {
+              checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
+              reusedSpark.sql(s"use $dbName")
+            }
+            checkAnswer(reusedSpark.sql("show tables").select("tableName"), Row(tblName) :: Nil)
+
+            reusedSpark.sql(s"drop table $tblName")
           }
-          checkAnswer(reusedSpark.sql("show tables").select("tableName"), Row(tblName) :: Nil)
+      }
 
-          reusedSpark.sql(s"drop table $tblName")
-        }
+      // Since we created a new sparkContext, we need to stop it and reset the default sparkContext
+      reusedSpark.stop()
+      reset()
     }
-
-    // Since we created a new sparkContext, we need to stop it and reset the default sparkContext
-    reusedSpark.stop()
-    reset()
   }
 
   test("Paimon DDL with hive catalog: drop database cascade which contains paimon table") {
@@ -376,11 +380,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(s"show partitions $tblName"),
                 Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
               // check partitions in HMS
-              var catalog = paimonCatalog
-              while (catalog.isInstanceOf[DelegateCatalog]) {
-                catalog = catalog.asInstanceOf[DelegateCatalog].wrapped()
-              }
-              val hmsClient = catalog.asInstanceOf[HiveCatalog].getHmsClient
+              val hmsClient = getHmsClient(paimonCatalog)
               assert(hmsClient.listPartitions(dbName, tblName, 100).size() == 3)
               // check partitions in filesystem
               if (dataFilePathDir.isEmpty) {
@@ -665,6 +665,68 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 }
               }
             }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: sync unset table props to HMS") {
+    spark.sql(s"USE $paimonHiveCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon_db")
+      spark.sql(s"USE paimon_db")
+      withTable("t") {
+        spark.sql("CREATE TABLE t (id INT) USING paimon")
+
+        val hmsClient = getHmsClient(paimonCatalog)
+        spark.sql("ALTER TABLE t SET TBLPROPERTIES ('write-buffer-spillable' = 'true')")
+        assert(
+          hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+        spark.sql("ALTER TABLE t UNSET TBLPROPERTIES ('write-buffer-spillable')")
+        assert(
+          !hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: Create Table As Select") {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE paimon_db")
+          spark.sql(s"USE paimon_db")
+
+          withTable("source", "t1", "t2") {
+            Seq((1L, "x1", "2023"), (2L, "x2", "2023"))
+              .toDF("a", "b", "pt")
+              .createOrReplaceTempView("source")
+
+            spark.sql("""
+                        |CREATE TABLE t1 USING paimon AS SELECT * FROM source
+                        |""".stripMargin)
+            val t1 = loadTable("paimon_db", "t1")
+            Assertions.assertTrue(t1.primaryKeys().isEmpty)
+            Assertions.assertTrue(t1.partitionKeys().isEmpty)
+
+            spark.sql(
+              """
+                |CREATE TABLE t2
+                |USING paimon
+                |PARTITIONED BY (pt)
+                |TBLPROPERTIES ('bucket' = '5', 'primary-key' = 'a,pt', 'target-file-size' = '128MB')
+                |AS SELECT * FROM source
+                |""".stripMargin)
+            val t2 = loadTable("paimon_db", "t2")
+            Assertions.assertEquals(2, t2.primaryKeys().size())
+            Assertions.assertTrue(t2.primaryKeys().contains("a"))
+            Assertions.assertTrue(t2.primaryKeys().contains("pt"))
+            Assertions.assertEquals(1, t2.partitionKeys().size())
+            Assertions.assertEquals("pt", t2.partitionKeys().get(0))
+
+            // check all the core options
+            Assertions.assertEquals("5", t2.options().get("bucket"))
+            Assertions.assertEquals("128MB", t2.options().get("target-file-size"))
+          }
         }
     }
   }

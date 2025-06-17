@@ -42,6 +42,9 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Aliyun OSS                   | oss://     | Y         |                                                                        |
 | S3                           | s3://      | Y         |                                                                        |
 | Tencent Cloud Object Storage | cosn://    | Y         |                                                                        |
+| Microsoft Azure Storage      | abfs://    | Y         |                                                                        |
+| Huawei OBS                   | obs://     | Y         |                                                                        |
+| Google Cloud Storage         | gs://      | Y         |                                                                        |
 
 ## Dependency
 
@@ -403,7 +406,7 @@ Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots
 {{< tab "Flink" >}}
 
 {{< hint info >}}
-If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
+If you have already configured [gcs access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
 here you can skip the following configuration.
 {{< /hint >}}
 
@@ -412,7 +415,7 @@ Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'oss://<bucket>/<path>',
+    'warehouse' = 'gs://<bucket>/<path>',
     'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
     'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
 );
@@ -421,45 +424,6 @@ CREATE CATALOG my_catalog WITH (
 {{< /tab >}}
 
 {{< /tabs >}}
-
-## Microsoft Azure Storage
-
-{{< stable >}}
-
-Download [paimon-azure-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-gs/{{< version >}}/paimon-gs-{{< version >}}.jar).
-
-{{< /stable >}}
-
-{{< unstable >}}
-
-Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-gs/{{< version >}}/).
-
-{{< /unstable >}}
-
-{{< tabs "gs" >}}
-
-{{< tab "Flink" >}}
-
-{{< hint info >}}
-If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
-here you can skip the following configuration.
-{{< /hint >}}
-
-Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
-
-```sql
-CREATE CATALOG my_catalog WITH (
-    'type' = 'paimon',
-    'warehouse' = 'oss://<bucket>/<path>',
-    'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
-    'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
-);
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
 
 ## Microsoft Azure Storage
 
@@ -509,6 +473,88 @@ spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=wasb://,<container>@<account>.blob.core.windows.net/<path> \
   --conf fs.azure.account.key.Account.blob.core.windows.net=yyy \
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## OBS
+
+{{< stable >}}
+
+Download [paimon-obs-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-obs/{{< version >}}/paimon-obs-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-obs-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-obs/{{< version >}}/).
+
+{{< /unstable >}}
+
+{{< tabs "obs" >}}
+
+{{< tab "Flink" >}}
+
+{{< hint info >}}
+If you have already configured [obs access through Flink](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/filesystems/s3/) (Via Flink FileSystem),
+here you can skip the following configuration.
+{{< /hint >}}
+
+Put `paimon-obs-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type' = 'paimon',
+    'warehouse' = 'obs://<bucket>/<path>',
+    'fs.obs.endpoint' = 'obs-endpoint-hostname',
+    'fs.obs.access.key' = 'xxx',
+    'fs.obs.secret.key' = 'yyy'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+{{< hint info >}}
+If you have already configured obs access through Spark (Via Hadoop FileSystem), here you can skip the following configuration.
+{{< /hint >}}
+
+Place `paimon-obs-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
+
+```shell
+spark-sql \ 
+  --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+  --conf spark.sql.catalog.paimon.warehouse=obs://<bucket>/<path> \
+  --conf spark.sql.catalog.paimon.fs.obs.endpoint=obs-endpoint-hostname \
+  --conf spark.sql.catalog.paimon.fs.obs.access.key=xxx \
+  --conf spark.sql.catalog.paimon.fs.obs.secret.key=yyy
+```
+
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+
+{{< hint info >}}
+If you have already configured obs access through Hive ((Via Hadoop FileSystem)), here you can skip the following configuration.
+{{< /hint >}}
+
+NOTE: You need to ensure that Hive metastore can access `obs`.
+
+Place `paimon-obs-{{< version >}}.jar` together with `paimon-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
+
+```sql
+SET paimon.fs.obs.endpoint=obs-endpoint-hostname;
+SET paimon.fs.obs.access.key=xxx;
+SET paimon.fs.obs.secret.key=yyy;
+```
+
+And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "flink/sql-ddl" >}})
+```sql
+SELECT * FROM test_table;
+SELECT COUNT(1) FROM test_table;
 ```
 
 {{< /tab >}}

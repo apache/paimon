@@ -475,6 +475,7 @@ public class DebeziumSchemaUtils {
                 return DataTypes.INT();
             case LONG:
                 return DataTypes.BIGINT();
+            case ENUM:
             case STRING:
                 return DataTypes.STRING();
             case RECORD:

@@ -345,6 +345,15 @@ public class BinaryStringUtils {
             default:
                 throw new RuntimeException("Unsupported precision: " + precision);
         }
+
+        // If nanoseconds is negative, remove a millisecond
+        // and calculate the nanosecond offset forwards instead
+        // as nanoseconds should always be a positive offset on top of the milliseconds.
+        if (nanosOfMillis < 0) {
+            nanosOfMillis = 1000000 + nanosOfMillis;
+            millis -= 1;
+        }
+
         return Timestamp.fromEpochMillis(millis, nanosOfMillis);
     }
 
@@ -356,7 +365,7 @@ public class BinaryStringUtils {
         } else if (strData.numChars() < targetLength && targetCharType) {
             int padLength = targetLength - strData.numChars();
             BinaryString padString = BinaryString.blankString(padLength);
-            return StringUtils.concat(strData, padString);
+            return concat(strData, padString);
         }
         return strData;
     }
@@ -376,5 +385,38 @@ public class BinaryStringUtils {
                 return Arrays.copyOf(byteArrayTerm, targetLength);
             }
         }
+    }
+
+    /**
+     * Concatenates input strings together into a single string. Returns NULL if any argument is
+     * NULL.
+     */
+    public static BinaryString concat(BinaryString... inputs) {
+        return concat(Arrays.asList(inputs));
+    }
+
+    public static BinaryString concat(Iterable<BinaryString> inputs) {
+        // Compute the total length of the result.
+        int totalLength = 0;
+        for (BinaryString input : inputs) {
+            if (input == null) {
+                return null;
+            }
+
+            totalLength += input.getSizeInBytes();
+        }
+
+        // Allocate a new byte array, and copy the inputs one by one into it.
+        final byte[] result = new byte[totalLength];
+        int offset = 0;
+        for (BinaryString input : inputs) {
+            if (input != null) {
+                int len = input.getSizeInBytes();
+                MemorySegmentUtils.copyToBytes(
+                        input.getSegments(), input.getOffset(), result, offset, len);
+                offset += len;
+            }
+        }
+        return BinaryString.fromBytes(result);
     }
 }

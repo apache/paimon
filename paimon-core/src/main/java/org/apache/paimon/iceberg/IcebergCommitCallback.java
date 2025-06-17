@@ -37,11 +37,16 @@ import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionField;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
+import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
+import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -49,7 +54,9 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -59,7 +66,11 @@ import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -67,6 +78,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -78,15 +90,22 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /**
  * A {@link CommitCallback} to create Iceberg compatible metadata, so Iceberg readers can read
  * Paimon's {@link RawFile}.
  */
-public class IcebergCommitCallback implements CommitCallback {
+public class IcebergCommitCallback implements CommitCallback, TagCallback {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IcebergCommitCallback.class);
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
+
+    private static final String PUFFIN_FORMAT = "puffin";
 
     private final FileStoreTable table;
     private final String commitUser;
@@ -97,6 +116,10 @@ public class IcebergCommitCallback implements CommitCallback {
     private final FileStorePathFactory fileStorePathFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
+    private final int formatVersion;
+
+    private final IndexFileHandler indexFileHandler;
+    private final boolean needAddDvToIceberg;
 
     // -------------------------------------------------------------------------------------
     // Public interface
@@ -108,18 +131,7 @@ public class IcebergCommitCallback implements CommitCallback {
 
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        switch (storageType) {
-            case TABLE_LOCATION:
-                this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
-                break;
-            case HADOOP_CATALOG:
-            case HIVE_CATALOG:
-                this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
-                break;
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown storage type " + storageType.name());
-        }
+        this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
 
         IcebergMetadataCommitterFactory metadataCommitterFactory;
         try {
@@ -137,6 +149,17 @@ public class IcebergCommitCallback implements CommitCallback {
         this.fileStorePathFactory = table.store().pathFactory();
         this.manifestFile = IcebergManifestFile.create(table, pathFactory);
         this.manifestList = IcebergManifestList.create(table, pathFactory);
+
+        this.formatVersion =
+                table.coreOptions().toConfiguration().get(IcebergOptions.FORMAT_VERSION);
+        Preconditions.checkArgument(
+                formatVersion == IcebergMetadata.FORMAT_VERSION_V2
+                        || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
+                "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is ",
+                formatVersion);
+
+        this.indexFileHandler = table.store().newIndexFileHandler();
+        this.needAddDvToIceberg = needAddDvToIceberg();
     }
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
@@ -147,13 +170,48 @@ public class IcebergCommitCallback implements CommitCallback {
     public static Path catalogDatabasePath(FileStoreTable table) {
         Path dbPath = table.location().getParent();
         final String dbSuffix = ".db";
-        if (dbPath.getName().endsWith(dbSuffix)) {
-            String dbName =
-                    dbPath.getName().substring(0, dbPath.getName().length() - dbSuffix.length());
-            return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
-        } else {
+
+        IcebergOptions.StorageType storageType =
+                table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+
+        if (!dbPath.getName().endsWith(dbSuffix)) {
             throw new UnsupportedOperationException(
-                    "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
+                    String.format(
+                            "Storage type %s can only be used on Paimon tables in a Paimon warehouse.",
+                            storageType.name()));
+        }
+
+        IcebergOptions.StorageLocation storageLocation =
+                table.coreOptions()
+                        .toConfiguration()
+                        .getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION)
+                        .orElse(inferDefaultMetadataLocation(storageType));
+
+        switch (storageLocation) {
+            case TABLE_LOCATION:
+                return dbPath;
+            case CATALOG_STORAGE:
+                String dbName =
+                        dbPath.getName()
+                                .substring(0, dbPath.getName().length() - dbSuffix.length());
+                return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage location " + storageLocation.name());
+        }
+    }
+
+    private static IcebergOptions.StorageLocation inferDefaultMetadataLocation(
+            IcebergOptions.StorageType storageType) {
+        switch (storageType) {
+            case TABLE_LOCATION:
+                return IcebergOptions.StorageLocation.TABLE_LOCATION;
+            case HIVE_CATALOG:
+            case HADOOP_CATALOG:
+                return IcebergOptions.StorageLocation.CATALOG_STORAGE;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage type: " + storageType.name());
         }
     }
 
@@ -161,23 +219,26 @@ public class IcebergCommitCallback implements CommitCallback {
     public void close() throws Exception {}
 
     @Override
-    public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
+    public void call(
+            List<ManifestEntry> committedEntries,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot) {
         createMetadata(
-                snapshot.id(),
+                snapshot,
                 (removedFiles, addedFiles) ->
-                        collectFileChanges(committedEntries, removedFiles, addedFiles));
+                        collectFileChanges(committedEntries, removedFiles, addedFiles),
+                indexFiles);
     }
 
     @Override
     public void retry(ManifestCommittable committable) {
         SnapshotManager snapshotManager = table.snapshotManager();
-        long snapshotId =
+        Snapshot snapshot =
                 snapshotManager
                         .findSnapshotsForIdentifiers(
                                 commitUser, Collections.singletonList(committable.identifier()))
                         .stream()
-                        .mapToLong(Snapshot::id)
-                        .max()
+                        .max(Comparator.comparingLong(Snapshot::id))
                         .orElseThrow(
                                 () ->
                                         new RuntimeException(
@@ -186,13 +247,19 @@ public class IcebergCommitCallback implements CommitCallback {
                                                         + " and identifier "
                                                         + committable.identifier()
                                                         + ". This is unexpected."));
+        long snapshotId = snapshot.id();
         createMetadata(
-                snapshotId,
+                snapshot,
                 (removedFiles, addedFiles) ->
-                        collectFileChanges(snapshotId, removedFiles, addedFiles));
+                        collectFileChanges(snapshotId, removedFiles, addedFiles),
+                indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX));
     }
 
-    private void createMetadata(long snapshotId, FileChangesCollector fileChangesCollector) {
+    private void createMetadata(
+            Snapshot snapshot,
+            FileChangesCollector fileChangesCollector,
+            List<IndexManifestEntry> indexFiles) {
+        long snapshotId = snapshot.id();
         try {
             if (snapshotId == Snapshot.FIRST_SNAPSHOT_ID) {
                 // If Iceberg metadata is stored separately in another directory, dropping the table
@@ -206,8 +273,19 @@ public class IcebergCommitCallback implements CommitCallback {
             }
 
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
+
             if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(fileChangesCollector, snapshotId, baseMetadataPath);
+                createMetadataWithBase(
+                        fileChangesCollector,
+                        indexFiles.stream()
+                                .filter(
+                                        index ->
+                                                index.indexFile()
+                                                        .indexType()
+                                                        .equals(DELETION_VECTORS_INDEX))
+                                .collect(Collectors.toList()),
+                        snapshot,
+                        baseMetadataPath);
             } else {
                 createMetadataWithoutBase(snapshotId);
             }
@@ -223,19 +301,34 @@ public class IcebergCommitCallback implements CommitCallback {
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
         SchemaCache schemaCache = new SchemaCache();
-        Iterator<IcebergManifestEntry> entryIterator =
+        List<IcebergManifestEntry> dataFileEntries = new ArrayList<>();
+        List<IcebergManifestEntry> dvFileEntries = new ArrayList<>();
+
+        List<DataSplit> filteredDataSplits =
                 snapshotReader.read().dataSplits().stream()
                         .filter(DataSplit::rawConvertible)
-                        .flatMap(
-                                s ->
-                                        dataSplitToManifestEntries(s, snapshotId, schemaCache)
-                                                .stream())
-                        .iterator();
-        List<IcebergManifestFileMeta> manifestFileMetas =
-                manifestFile.rollingWrite(entryIterator, snapshotId);
+                        .collect(Collectors.toList());
+        for (DataSplit dataSplit : filteredDataSplits) {
+            dataSplitToManifestEntries(
+                    dataSplit, snapshotId, schemaCache, dataFileEntries, dvFileEntries);
+        }
+
+        List<IcebergManifestFileMeta> manifestFileMetas = new ArrayList<>();
+        if (!dataFileEntries.isEmpty()) {
+            manifestFileMetas.addAll(
+                    manifestFile.rollingWrite(dataFileEntries.iterator(), snapshotId));
+        }
+        if (!dvFileEntries.isEmpty()) {
+            manifestFileMetas.addAll(
+                    manifestFile.rollingWrite(
+                            dvFileEntries.iterator(),
+                            snapshotId,
+                            IcebergManifestFileMeta.Content.DELETES));
+        }
+
         String manifestListFileName = manifestList.writeWithoutRolling(manifestFileMetas);
 
-        int schemaId = (int) table.schema().id();
+        int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
@@ -248,9 +341,17 @@ public class IcebergCommitCallback implements CommitCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId);
 
+        Map<String, IcebergRef> icebergTags =
+                table.tagManager().tags().entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        entry -> entry.getValue().get(0),
+                                        entry -> new IcebergRef(entry.getKey().id())));
+
         String tableUuid = UUID.randomUUID().toString();
         IcebergMetadata metadata =
                 new IcebergMetadata(
+                        formatVersion,
                         tableUuid,
                         table.location().toString(),
                         snapshotId,
@@ -265,7 +366,8 @@ public class IcebergCommitCallback implements CommitCallback {
                                         // not sure why, this is a result tested by hand
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
-                        (int) snapshotId);
+                        (int) snapshotId,
+                        icebergTags);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
@@ -281,10 +383,14 @@ public class IcebergCommitCallback implements CommitCallback {
         }
     }
 
-    private List<IcebergManifestEntry> dataSplitToManifestEntries(
-            DataSplit dataSplit, long snapshotId, SchemaCache schemaCache) {
-        List<IcebergManifestEntry> result = new ArrayList<>();
+    private void dataSplitToManifestEntries(
+            DataSplit dataSplit,
+            long snapshotId,
+            SchemaCache schemaCache,
+            List<IcebergManifestEntry> dataFileEntries,
+            List<IcebergManifestEntry> dvFileEntries) {
         List<RawFile> rawFiles = dataSplit.convertToRawFiles().get();
+
         for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
             DataFileMeta paimonFileMeta = dataSplit.dataFiles().get(i);
             RawFile rawFile = rawFiles.get(i);
@@ -299,15 +405,52 @@ public class IcebergCommitCallback implements CommitCallback {
                             schemaCache.get(paimonFileMeta.schemaId()),
                             paimonFileMeta.valueStats(),
                             paimonFileMeta.valueStatsCols());
-            result.add(
+            dataFileEntries.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
                             snapshotId,
                             snapshotId,
                             snapshotId,
                             fileMeta));
+
+            if (needAddDvToIceberg
+                    && dataSplit.deletionFiles().isPresent()
+                    && dataSplit.deletionFiles().get().get(i) != null) {
+                DeletionFile deletionFile = dataSplit.deletionFiles().get().get(i);
+
+                // Iceberg will check the cardinality between deserialized dv and iceberg deletion
+                // file, so if deletionFile.cardinality() is null, we should stop synchronizing all
+                // dvs.
+                Preconditions.checkState(
+                        deletionFile.cardinality() != null,
+                        "cardinality in DeletionFile is null, stop generating dv for iceberg. "
+                                + "dataFile path is {}, deletionFile is {}",
+                        rawFile.path(),
+                        deletionFile);
+
+                // We can not get the file size of the complete DV index file from the DeletionFile,
+                // so we set 'fileSizeInBytes' to -1(default in iceberg)
+                IcebergDataFileMeta deleteFileMeta =
+                        IcebergDataFileMeta.createForDeleteFile(
+                                IcebergDataFileMeta.Content.POSITION_DELETES,
+                                deletionFile.path(),
+                                PUFFIN_FORMAT,
+                                dataSplit.partition(),
+                                deletionFile.cardinality(),
+                                -1,
+                                rawFile.path(),
+                                deletionFile.offset(),
+                                deletionFile.length());
+
+                dvFileEntries.add(
+                        new IcebergManifestEntry(
+                                IcebergManifestEntry.Status.ADDED,
+                                snapshotId,
+                                snapshotId,
+                                snapshotId,
+                                deleteFileMeta));
+            }
         }
-        return result;
     }
 
     private List<IcebergPartitionField> getPartitionFields(
@@ -331,11 +474,34 @@ public class IcebergCommitCallback implements CommitCallback {
     // -------------------------------------------------------------------------------------
 
     private void createMetadataWithBase(
-            FileChangesCollector fileChangesCollector, long snapshotId, Path baseMetadataPath)
+            FileChangesCollector fileChangesCollector,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot,
+            Path baseMetadataPath)
             throws IOException {
+        long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+        if (!isSameFormatVersion(baseMetadata.formatVersion())) {
+            // we need to recreate iceberg metadata if format version changed
+            createMetadataWithoutBase(snapshot.id());
+            return;
+        }
+
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
+
+        // base manifest file for data files
+        List<IcebergManifestFileMeta> baseDataManifestFileMetas =
+                baseManifestFileMetas.stream()
+                        .filter(meta -> meta.content() == IcebergManifestFileMeta.Content.DATA)
+                        .collect(Collectors.toList());
+
+        // base manifest file for deletion vector index files
+        List<IcebergManifestFileMeta> baseDVManifestFileMetas =
+                baseManifestFileMetas.stream()
+                        .filter(meta -> meta.content() == IcebergManifestFileMeta.Content.DELETES)
+                        .collect(Collectors.toList());
 
         Map<String, BinaryRow> removedFiles = new LinkedHashMap<>();
         Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
@@ -349,13 +515,14 @@ public class IcebergCommitCallback implements CommitCallback {
         // because if a file's level is changed, it will first be removed and then added.
         // In this case, if `baseMetadata` already contains this file, we should not add a
         // duplicate.
-        List<IcebergManifestFileMeta> newManifestFileMetas;
+        List<IcebergManifestFileMeta> newDataManifestFileMetas;
         IcebergSnapshotSummary snapshotSummary;
         if (isAddOnly) {
             // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
             // new metadata files.
-            newManifestFileMetas = new ArrayList<>(baseManifestFileMetas);
-            newManifestFileMetas.addAll(createNewlyAddedManifestFileMetas(addedFiles, snapshotId));
+            newDataManifestFileMetas = new ArrayList<>(baseDataManifestFileMetas);
+            newDataManifestFileMetas.addAll(
+                    createNewlyAddedManifestFileMetas(addedFiles, snapshotId));
             snapshotSummary = IcebergSnapshotSummary.APPEND;
         } else {
             Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary> result =
@@ -363,18 +530,36 @@ public class IcebergCommitCallback implements CommitCallback {
                             removedFiles,
                             addedFiles,
                             modifiedPartitions,
-                            baseManifestFileMetas,
+                            baseDataManifestFileMetas,
                             snapshotId);
-            newManifestFileMetas = result.getLeft();
+            newDataManifestFileMetas = result.getLeft();
             snapshotSummary = result.getRight();
         }
+
+        List<IcebergManifestFileMeta> newDVManifestFileMetas = new ArrayList<>();
+        if (needAddDvToIceberg) {
+            if (!indexFiles.isEmpty()) {
+                // reconstruct the dv index
+                newDVManifestFileMetas.addAll(createDvManifestFileMetas(snapshot));
+            } else {
+                // no new dv index, reuse the old one
+                newDVManifestFileMetas.addAll(baseDVManifestFileMetas);
+            }
+        }
+
+        // compact data manifest file if needed
+        newDataManifestFileMetas = compactMetadataIfNeeded(newDataManifestFileMetas, snapshotId);
+
         String manifestListFileName =
                 manifestList.writeWithoutRolling(
-                        compactMetadataIfNeeded(newManifestFileMetas, snapshotId));
+                        Stream.concat(
+                                        newDataManifestFileMetas.stream(),
+                                        newDVManifestFileMetas.stream())
+                                .collect(Collectors.toList()));
 
         // add new schema if needed
         SchemaCache schemaCache = new SchemaCache();
-        int schemaId = (int) table.schema().id();
+        int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergSchema> schemas = baseMetadata.schemas();
         if (baseMetadata.currentSchemaId() != schemaId) {
@@ -406,6 +591,7 @@ public class IcebergCommitCallback implements CommitCallback {
 
         IcebergMetadata metadata =
                 new IcebergMetadata(
+                        baseMetadata.formatVersion(),
                         baseMetadata.tableUuid(),
                         baseMetadata.location(),
                         snapshotId,
@@ -415,7 +601,8 @@ public class IcebergCommitCallback implements CommitCallback {
                         baseMetadata.partitionSpecs(),
                         baseMetadata.lastPartitionId(),
                         snapshots,
-                        (int) snapshotId);
+                        (int) snapshotId,
+                        baseMetadata.refs());
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
@@ -492,6 +679,9 @@ public class IcebergCommitCallback implements CommitCallback {
         if (table.primaryKeys().isEmpty()) {
             return true;
         } else {
+            if (needAddDvToIceberg) {
+                return meta.level() > 0;
+            }
             int maxLevel = table.coreOptions().numLevels() - 1;
             return meta.level() == maxLevel;
         }
@@ -774,9 +964,221 @@ public class IcebergCommitCallback implements CommitCallback {
         }
     }
 
+    @Override
+    public void notifyCreation(String tagName) {
+        throw new UnsupportedOperationException(
+                "IcebergCommitCallback notifyCreation requires a snapshot ID");
+    }
+
+    @Override
+    public void notifyCreation(String tagName, long snapshotId) {
+        try {
+            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+            if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        tagName,
+                        snapshotId);
+                return;
+            }
+
+            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+            if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when creating tag {} for snapshot {}. Unable to create tag.",
+                        baseMetadataPath,
+                        tagName,
+                        snapshotId);
+                return;
+            }
+
+            IcebergMetadata baseMetadata =
+                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+            baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
+
+            IcebergMetadata metadata =
+                    new IcebergMetadata(
+                            baseMetadata.formatVersion(),
+                            baseMetadata.tableUuid(),
+                            baseMetadata.location(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.lastColumnId(),
+                            baseMetadata.schemas(),
+                            baseMetadata.currentSchemaId(),
+                            baseMetadata.partitionSpecs(),
+                            baseMetadata.lastPartitionId(),
+                            baseMetadata.snapshots(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.refs());
+
+            /*
+            Overwrite the latest metadata file
+            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+            version number. Tag creation overwrites the latest metadata file to maintain this.
+            There is no need to update the catalog after overwrite.
+             */
+            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to add tag {} for snapshot {}.",
+                    baseMetadataPath,
+                    tagName,
+                    snapshotId);
+
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+        }
+    }
+
+    @Override
+    public void notifyDeletion(String tagName) {
+        try {
+            Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+            if (latestSnapshot == null) {
+                LOG.info(
+                        "Latest Iceberg snapshot not found when deleting tag {}. Unable to delete tag.",
+                        tagName);
+                return;
+            }
+
+            Path baseMetadataPath = pathFactory.toMetadataPath(latestSnapshot.id());
+            if (!table.fileIO().exists(baseMetadataPath)) {
+                LOG.info(
+                        "Iceberg metadata file {} not found when deleting tag {}. Unable to delete tag.",
+                        baseMetadataPath,
+                        tagName);
+                return;
+            }
+
+            IcebergMetadata baseMetadata =
+                    IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+
+            baseMetadata.refs().remove(tagName);
+
+            IcebergMetadata metadata =
+                    new IcebergMetadata(
+                            baseMetadata.formatVersion(),
+                            baseMetadata.tableUuid(),
+                            baseMetadata.location(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.lastColumnId(),
+                            baseMetadata.schemas(),
+                            baseMetadata.currentSchemaId(),
+                            baseMetadata.partitionSpecs(),
+                            baseMetadata.lastPartitionId(),
+                            baseMetadata.snapshots(),
+                            baseMetadata.currentSnapshotId(),
+                            baseMetadata.refs());
+
+            /*
+            Overwrite the latest metadata file
+            Currently the Paimon table snapshot id value is the same as the Iceberg metadata
+            version number. Tag creation overwrites the latest metadata file to maintain this.
+            There is no need to update the catalog after overwrite.
+             */
+            table.fileIO().overwriteFileUtf8(baseMetadataPath, metadata.toJson());
+            LOG.info(
+                    "Iceberg metadata file {} overwritten to delete tag {}.",
+                    baseMetadataPath,
+                    tagName);
+
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create tag " + tagName, e);
+        }
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Deletion vectors
+    // -------------------------------------------------------------------------------------
+
+    private boolean needAddDvToIceberg() {
+        CoreOptions options = table.coreOptions();
+        // there may be dv indexes using bitmap32 in index files even if 'deletion-vectors.bitmap64'
+        // is true, but analyzing all deletion vectors is very costly, so we do not check exactly
+        // currently.
+        return options.deletionVectorsEnabled()
+                && options.deletionVectorBitmap64()
+                && formatVersion == IcebergMetadata.FORMAT_VERSION_V3;
+    }
+
+    private List<IcebergManifestFileMeta> createDvManifestFileMetas(Snapshot snapshot) {
+        List<IcebergManifestEntry> icebergDvEntries = new ArrayList<>();
+
+        long snapshotId = snapshot.id();
+        List<IndexManifestEntry> newIndexes =
+                indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX);
+        if (newIndexes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        for (IndexManifestEntry entry : newIndexes) {
+            IndexFileMeta indexFileMeta = entry.indexFile();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas = indexFileMeta.deletionVectorMetas();
+            Path bucketPath = fileStorePathFactory.bucketPath(entry.partition(), entry.bucket());
+            if (dvMetas != null) {
+                for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+
+                    // Iceberg will check the cardinality between deserialized dv and iceberg
+                    // deletion file, so if deletionFile.cardinality() is null, we should stop
+                    // synchronizing all dvs.
+                    Preconditions.checkState(
+                            dvMeta.cardinality() != null,
+                            "cardinality in DeletionVector is null, stop generate dv for iceberg. "
+                                    + "dataFile path is {}, indexFile path is {}",
+                            new Path(bucketPath, dvMeta.dataFileName()),
+                            indexFileHandler.filePath(indexFileMeta).toString());
+
+                    IcebergDataFileMeta deleteFileMeta =
+                            IcebergDataFileMeta.createForDeleteFile(
+                                    IcebergDataFileMeta.Content.POSITION_DELETES,
+                                    indexFileHandler.filePath(indexFileMeta).toString(),
+                                    PUFFIN_FORMAT,
+                                    entry.partition(),
+                                    dvMeta.cardinality(),
+                                    indexFileMeta.fileSize(),
+                                    new Path(bucketPath, dvMeta.dataFileName()).toString(),
+                                    (long) dvMeta.offset(),
+                                    (long) dvMeta.length());
+
+                    icebergDvEntries.add(
+                            new IcebergManifestEntry(
+                                    IcebergManifestEntry.Status.ADDED,
+                                    snapshotId,
+                                    snapshotId,
+                                    snapshotId,
+                                    deleteFileMeta));
+                }
+            }
+        }
+
+        if (icebergDvEntries.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return manifestFile.rollingWrite(
+                icebergDvEntries.iterator(), snapshotId, IcebergManifestFileMeta.Content.DELETES);
+    }
+
     // -------------------------------------------------------------------------------------
     // Utils
     // -------------------------------------------------------------------------------------
+
+    private boolean isSameFormatVersion(int baseFormatVersion) {
+        if (baseFormatVersion != formatVersion) {
+            Preconditions.checkArgument(
+                    formatVersion > baseFormatVersion,
+                    "format version in base metadata is {}, and it's bigger than the current format version {}, "
+                            + "this is not allowed!");
+
+            LOG.info(
+                    "format version in base metadata is {}, and it's different from the current format version {}. "
+                            + "New metadata will be recreated using format version {}.",
+                    baseFormatVersion,
+                    formatVersion,
+                    formatVersion);
+            return false;
+        }
+        return true;
+    }
 
     private class SchemaCache {
 
@@ -786,6 +1188,10 @@ public class IcebergCommitCallback implements CommitCallback {
         private IcebergSchema get(long schemaId) {
             return schemas.computeIfAbsent(
                     schemaId, id -> IcebergSchema.create(schemaManager.schema(id)));
+        }
+
+        private long getLatestSchemaId() {
+            return schemaManager.latest().get().id();
         }
     }
 }

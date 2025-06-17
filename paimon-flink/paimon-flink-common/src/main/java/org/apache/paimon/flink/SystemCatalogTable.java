@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AuditLogTable;
+import org.apache.paimon.table.system.BinlogTable;
 
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -34,7 +35,10 @@ import java.util.Optional;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.SCHEMA;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
+import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.NAME;
 import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK;
 
 /** A {@link CatalogTable} to represent system table. */
@@ -57,11 +61,28 @@ public class SystemCatalogTable implements CatalogTable {
                 TypeConversions.fromLogicalToDataType(toLogicalType(table.rowType())));
         if (table instanceof AuditLogTable) {
             Map<String, String> newOptions = new HashMap<>(table.options());
+
+            // add watermark
             if (newOptions.keySet().stream()
                     .anyMatch(key -> key.startsWith(compoundKey(SCHEMA, WATERMARK)))) {
                 deserializeWatermarkSpec(newOptions, builder);
-                return builder.build();
             }
+
+            if (!(table instanceof BinlogTable)) {
+                // add non-physical columns
+                List<String> physicalColumns = table.rowType().getFieldNames();
+                int columnCount =
+                        physicalColumns.size()
+                                + nonPhysicalColumnsCount(newOptions, physicalColumns);
+                for (int i = 0; i < columnCount; i++) {
+                    String optionalName = newOptions.get(compoundKey(SCHEMA, i, NAME));
+                    if (optionalName != null && !physicalColumns.contains(optionalName)) {
+                        // build non-physical column from options
+                        deserializeNonPhysicalColumn(newOptions, i, builder);
+                    }
+                }
+            }
+            return builder.build();
         }
         return builder.build();
     }

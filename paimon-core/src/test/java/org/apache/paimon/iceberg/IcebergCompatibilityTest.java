@@ -25,10 +25,12 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
@@ -38,8 +40,10 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -47,6 +51,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -66,6 +72,8 @@ import org.apache.iceberg.data.Record;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.StructLikeSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -177,15 +185,9 @@ public class IcebergCompatibilityTest {
 
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
-        if (deletionVector) {
-            // level 0 file is compacted into deletion vector, so max level data file does not
-            // change
-            // this is still a valid table state at some time in the history
-            assertThat(getIcebergResult())
-                    .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 21)");
-        } else {
-            assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
-        }
+
+        // In dv mode, full compaction will remove all dv index and rewrite data files
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
 
         write.close();
         commit.close();
@@ -769,6 +771,171 @@ public class IcebergCompatibilityTest {
         }
     }
 
+    /*
+    Create snapshots
+    Create tags
+    Verify tags
+    Delete a tag
+    Verify tags
+     */
+    @Test
+    public void testCreateAndDeleteTags() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.write(GenericRow.of(3, 30));
+        write.write(GenericRow.of(4, 40));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        String tagV1 = "v1";
+        table.createTag(tagV1, 1);
+        String tagV3 = "v3";
+        table.createTag(tagV3, 3);
+
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        Map<String, IcebergRef> refs = getRefsFromSnapshot(table, latestSnapshotId);
+
+        assertThat(refs.size() == 2).isTrue();
+
+        assertThat(refs.get(tagV1).snapshotId() == 1).isTrue();
+        assertThat(refs.get(tagV1).type().equals("tag")).isTrue(); // constant
+        assertThat(refs.get(tagV1).maxRefAgeMs() == Long.MAX_VALUE).isTrue(); // constant
+
+        assertThat(refs.get(tagV3).snapshotId() == latestSnapshotId).isTrue();
+
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable)
+                                                .useSnapshot(
+                                                        icebergTable.refs().get(tagV1).snapshotId())
+                                                .build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable)
+                                                .useSnapshot(
+                                                        icebergTable.refs().get(tagV3).snapshotId())
+                                                .build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        table.deleteTag(tagV1);
+
+        Map<String, IcebergRef> refsAfterDelete = getRefsFromSnapshot(table, latestSnapshotId);
+
+        assertThat(refsAfterDelete.size() == 1).isTrue();
+        assertThat(refsAfterDelete.get(tagV3).snapshotId() == latestSnapshotId).isTrue();
+
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable)
+                                                .useSnapshot(
+                                                        icebergTable.refs().get(tagV3).snapshotId())
+                                                .build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        write.close();
+        commit.close();
+    }
+
+    /*
+    Create a snapshot and tag
+    Delete Iceberg metadata
+    Commit again and verify that Iceberg metadata and tags are created
+     */
+    @Test
+    public void testTagsCreateMetadataWithoutBase() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        String tagV1 = "v1";
+        table.createTag(tagV1, 1);
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.write(GenericRow.of(3, 30));
+        write.write(GenericRow.of(4, 40));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        Map<String, IcebergRef> refs =
+                getRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+
+        assertThat(refs.size() == 1).isTrue();
+        assertThat(refs.get(tagV1).snapshotId() == 1).isTrue();
+
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable)
+                                                .useSnapshot(
+                                                        icebergTable.refs().get(tagV1).snapshotId())
+                                                .build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // Delete Iceberg metadata so that metadata is created without base
+        table.fileIO().deleteDirectoryQuietly(new Path(table.location(), "metadata"));
+
+        write.write(GenericRow.of(5, 50));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(4, write.prepareCommit(true, 4));
+
+        Map<String, IcebergRef> refsAfterMetadataDelete =
+                getRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+        assertThat(refsAfterMetadataDelete.size() == 1).isTrue();
+        assertThat(refsAfterMetadataDelete.get(tagV1).snapshotId() == 1).isTrue();
+    }
+
+    private Map<String, IcebergRef> getRefsFromSnapshot(FileStoreTable table, long snapshotId) {
+        return IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"))
+                .refs();
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------
@@ -998,5 +1165,48 @@ public class IcebergCompatibilityTest {
         }
         result.close();
         return actual;
+    }
+
+    private void validateIcebergResult(List<Object[]> expected) throws Exception {
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+
+        Types.StructType type = icebergTable.schema().asStruct();
+
+        StructLikeSet actualSet = StructLikeSet.create(type);
+        StructLikeSet expectSet = StructLikeSet.create(type);
+
+        try (CloseableIterable<Record> reader = IcebergGenerics.read(icebergTable).build()) {
+            reader.forEach(actualSet::add);
+        }
+        expectSet.addAll(
+                expected.stream().map(r -> icebergRecord(type, r)).collect(Collectors.toList()));
+
+        assertThat(actualSet).isEqualTo(expectSet);
+    }
+
+    private org.apache.iceberg.data.GenericRecord icebergRecord(
+            Types.StructType type, Object[] row) {
+        org.apache.iceberg.data.GenericRecord record =
+                org.apache.iceberg.data.GenericRecord.create(type);
+        for (int i = 0; i < row.length; i++) {
+            record.set(i, row[i]);
+        }
+        return record;
+    }
+
+    private List<String> getPaimonResult(FileStoreTable paimonTable) throws Exception {
+        List<Split> splits = paimonTable.newReadBuilder().newScan().plan().splits();
+        TableRead read = paimonTable.newReadBuilder().newRead();
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(
+                    row ->
+                            result.add(
+                                    DataFormatTestUtil.toStringWithRowKind(
+                                            row, paimonTable.rowType())));
+            return result;
+        }
     }
 }

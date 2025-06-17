@@ -33,7 +33,6 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -44,8 +43,6 @@ case class UpdatePaimonTableCommand(
   with PaimonCommand
   with AssignmentAlignmentHelper
   with SupportsSubquery {
-
-  private lazy val writer = PaimonSparkWriter(table)
 
   private lazy val updateExpressions = {
     generateAlignedExpressions(relation.output, assignments).zip(relation.output).map {
@@ -60,7 +57,7 @@ case class UpdatePaimonTableCommand(
     } else {
       performUpdateForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    dvSafeWriter.commit(commitMessages)
 
     Seq.empty[Row]
   }
@@ -70,7 +67,7 @@ case class UpdatePaimonTableCommand(
     val updatedPlan = Project(updateExpressions, Filter(condition, relation))
     val df = createDataset(sparkSession, updatedPlan)
       .withColumn(ROW_KIND_COL, lit(RowKind.UPDATE_AFTER.toByteValue))
-    writer.write(df)
+    dvSafeWriter.write(df)
   }
 
   /** Update for table without primary keys */
@@ -98,12 +95,12 @@ case class UpdatePaimonTableCommand(
         try {
           // Step3: write these updated data
           val touchedDataSplits = deletionVectors.collect().map {
-            SparkDeletionVectors.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
+            SparkDeletionVector.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
           }
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = dvSafeWriter.persistDeletionVectors(deletionVectors)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
@@ -134,7 +131,7 @@ case class UpdatePaimonTableCommand(
       touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
     val updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
-        SparkShimLoader.getSparkShim.column(update).as(origin.name, origin.metadata)
+        toColumn(update).as(origin.name, origin.metadata)
     }
 
     val toUpdateScanRelation = createNewRelation(touchedDataSplits, relation)
@@ -144,7 +141,7 @@ case class UpdatePaimonTableCommand(
       Filter(condition, toUpdateScanRelation)
     }
     val data = createDataset(sparkSession, newPlan).select(updateColumns: _*)
-    writer.write(data)
+    dvSafeWriter.write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
@@ -157,10 +154,10 @@ case class UpdatePaimonTableCommand(
         } else {
           If(condition, update, origin)
         }
-        SparkShimLoader.getSparkShim.column(updated).as(origin.name, origin.metadata)
+        toColumn(updated).as(origin.name, origin.metadata)
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.write(data)
+    dvSafeWriter.write(data)
   }
 }

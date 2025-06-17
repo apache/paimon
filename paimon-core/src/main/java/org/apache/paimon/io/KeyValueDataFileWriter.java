@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -78,29 +77,19 @@ public abstract class KeyValueDataFileWriter
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
             RowType writeRowType,
-            SimpleStatsProducer statsProducer,
             long schemaId,
             int level,
-            String compression,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath) {
-        super(
-                fileIO,
-                factory,
-                path,
-                converter,
-                writeRowType,
-                statsProducer,
-                compression,
-                options.asyncFileWrite());
+        super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
         this.valueType = valueType;

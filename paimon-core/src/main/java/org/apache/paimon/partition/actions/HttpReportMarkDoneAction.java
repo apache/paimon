@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SimpleHttpClient;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -32,33 +33,18 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Deseriali
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 
-import okhttp3.Dispatcher;
-import okhttp3.Headers;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.SynchronousQueue;
 
-import static okhttp3.ConnectionSpec.CLEARTEXT;
-import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
-import static okhttp3.ConnectionSpec.MODERN_TLS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
-import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Report partition submission information to remote http server. */
 public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
-    private OkHttpClient client;
+    private SimpleHttpClient client;
     private String url;
     private ObjectMapper mapper;
-    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     private String tableName;
     private String location;
@@ -87,18 +73,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
-        OkHttpClient.Builder builder =
-                new OkHttpClient.Builder()
-                        .dispatcher(
-                                new Dispatcher(
-                                        createCachedThreadPool(
-                                                1, THREAD_NAME, new SynchronousQueue<>())))
-                        .retryOnConnectionFailure(true)
-                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-                        .connectTimeout(options.httpReportMarkDoneActionTimeout())
-                        .readTimeout(options.httpReportMarkDoneActionTimeout());
-
-        this.client = builder.build();
+        this.client = new SimpleHttpClient(THREAD_NAME);
     }
 
     @Override
@@ -121,12 +96,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     @Override
     public void close() throws IOException {
-        try {
-            client.dispatcher().cancelAll();
-            client.connectionPool().evictAll();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        client.close();
     }
 
     /** RestRequest only for HttpReportMarkDoneAction. */
@@ -205,27 +175,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     public HttpReportMarkDoneResponse post(
             HttpReportMarkDoneRequest body, Map<String, String> headers) throws IOException {
-        RequestBody requestBody = RequestBody.create(mapper.writeValueAsBytes(body), MEDIA_TYPE);
-        Request request =
-                new Request.Builder()
-                        .url(url)
-                        .post(requestBody)
-                        .headers(Headers.of(headers))
-                        .build();
-        try (Response response = client.newCall(request).execute()) {
-            String responseBodyStr = response.body() != null ? response.body().string() : null;
-            if (!response.isSuccessful() || StringUtils.isNullOrWhitespaceOnly(responseBodyStr)) {
-                throw new HttpReportMarkDoneException(
-                        response.isSuccessful()
-                                ? "ResponseBody is null or empty."
-                                : String.format(
-                                        "Response is not successful, response is %s", response));
-            }
-            return mapper.readValue(responseBodyStr, HttpReportMarkDoneResponse.class);
-        } catch (HttpReportMarkDoneException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new HttpReportMarkDoneException(e);
-        }
+        String responseBodyStr = this.client.post(url, mapper.writeValueAsBytes(body), headers);
+        return mapper.readValue(responseBodyStr, HttpReportMarkDoneResponse.class);
     }
 }

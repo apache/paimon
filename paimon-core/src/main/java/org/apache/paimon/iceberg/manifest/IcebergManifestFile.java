@@ -161,9 +161,15 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     public List<IcebergManifestFileMeta> rollingWrite(
             Iterator<IcebergManifestEntry> entries, long sequenceNumber) {
+
+        return rollingWrite(entries, sequenceNumber, Content.DATA);
+    }
+
+    public List<IcebergManifestFileMeta> rollingWrite(
+            Iterator<IcebergManifestEntry> entries, long sequenceNumber, Content content) {
         RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> writer =
                 new RollingFileWriter<>(
-                        () -> createWriter(sequenceNumber), targetFileSize.getBytes());
+                        () -> createWriter(sequenceNumber, content), targetFileSize.getBytes());
         try {
             writer.write(entries);
             writer.close();
@@ -174,9 +180,9 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     }
 
     public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> createWriter(
-            long sequenceNumber) {
+            long sequenceNumber, Content content) {
         return new IcebergManifestEntryWriter(
-                writerFactory, pathFactory.newPath(), compression, sequenceNumber);
+                writerFactory, pathFactory.newPath(), compression, sequenceNumber, content);
     }
 
     private class IcebergManifestEntryWriter
@@ -193,11 +199,14 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         private long deletedRowsCount = 0;
         private Long minSequenceNumber = null;
 
+        private final Content content;
+
         IcebergManifestEntryWriter(
                 FormatWriterFactory factory,
                 Path path,
                 String fileCompression,
-                long sequenceNumber) {
+                long sequenceNumber,
+                Content content) {
             super(
                     IcebergManifestFile.this.fileIO,
                     factory,
@@ -207,6 +216,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     false);
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.sequenceNumber = sequenceNumber;
+            this.content = content;
         }
 
         @Override
@@ -253,7 +263,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     path.toString(),
                     outputBytes,
                     IcebergPartitionSpec.SPEC_ID,
-                    Content.DATA,
+                    content,
                     sequenceNumber,
                     minSequenceNumber != null ? minSequenceNumber : UNASSIGNED_SEQ,
                     sequenceNumber,

@@ -28,6 +28,7 @@ import org.apache.parquet.filter2.predicate.FilterPredicate.Visitor;
 import org.apache.parquet.filter2.predicate.Operators;
 import org.apache.parquet.filter2.predicate.Operators.And;
 import org.apache.parquet.filter2.predicate.Operators.Column;
+import org.apache.parquet.filter2.predicate.Operators.Contains;
 import org.apache.parquet.filter2.predicate.Operators.Eq;
 import org.apache.parquet.filter2.predicate.Operators.Gt;
 import org.apache.parquet.filter2.predicate.Operators.GtEq;
@@ -196,6 +197,12 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     }
 
     @Override
+    public <T extends Comparable<T>> RowRanges visit(Contains<T> contains) {
+        return contains.filter(
+                this, RowRanges::intersection, RowRanges::union, ranges -> allRows());
+    }
+
+    @Override
     public <T extends Comparable<T>, U extends UserDefinedPredicate<T>> RowRanges visit(
             UserDefined<T, U> udp) {
         return applyPredicate(
@@ -239,7 +246,7 @@ public class ColumnIndexFilter implements Visitor<RowRanges> {
     @Override
     public RowRanges visit(And and) {
         RowRanges leftResult = and.getLeft().accept(this);
-        if (leftResult.getRanges().size() == 0) {
+        if (leftResult.getRanges().isEmpty()) {
             return leftResult;
         }
 

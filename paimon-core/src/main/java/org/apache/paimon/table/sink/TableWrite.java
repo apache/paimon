@@ -41,15 +41,6 @@ public interface TableWrite extends AutoCloseable {
     /** With {@link MemorySegmentPool} for the current table write. */
     TableWrite withMemoryPool(MemorySegmentPool memoryPool);
 
-    /**
-     * This method is called when the insert only status of the records changes.
-     *
-     * @param insertOnly If true, all the following records would be of {@link
-     *     org.apache.paimon.types.RowKind#INSERT}, and no two records would have the same primary
-     *     key.
-     */
-    void withInsertOnly(boolean insertOnly);
-
     /** Calculate which partition {@code row} belongs to. */
     BinaryRow getPartition(InternalRow row);
 
@@ -76,6 +67,6 @@ public interface TableWrite extends AutoCloseable {
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
-    /** With metrics to measure compaction. */
+    /** Set {@link MetricRegistry} to table write. */
     TableWrite withMetricRegistry(MetricRegistry registry);
 }

@@ -18,43 +18,23 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
-import org.apache.paimon.disk.IOManager
-import org.apache.paimon.reader.RecordReader
-import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.{ReadBuilder, Split}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 
-import java.util.{ArrayList => JList}
 import java.util.Objects
-
-import scala.collection.JavaConverters._
 
 case class PaimonPartitionReaderFactory(
     readBuilder: ReadBuilder,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends PartitionReaderFactory {
 
-  private lazy val ioManager: IOManager = createIOManager()
-
-  private lazy val row: SparkInternalRow = {
-    val dataFields = new JList(readBuilder.readType().getFields)
-    dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
-    val rowType = new RowType(dataFields)
-    SparkInternalRow.create(rowType)
-  }
-
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
-        val readFunc: Split => RecordReader[PaimonInternalRow] =
-          (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
-        PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns)
+        PaimonPartitionReader(readBuilder, paimonInputPartition, metadataColumns)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }

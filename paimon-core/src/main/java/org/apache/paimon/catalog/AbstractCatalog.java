@@ -25,6 +25,8 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -49,6 +51,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -57,6 +61,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
 import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -65,10 +70,10 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
-import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
@@ -139,7 +144,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
+    public PagedList<String> listDatabasesPaged(
+            Integer maxResults, String pageToken, String databaseNamePattern) {
+        CatalogUtils.validateNamePattern(this, databaseNamePattern);
         return new PagedList<>(listDatabases(), null);
     }
 
@@ -179,8 +186,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, Integer maxResults, String pageToken)
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
             throws TableNotExistException {
+        CatalogUtils.validateNamePattern(this, partitionNamePattern);
         return new PagedList<>(listPartitions(identifier), null);
     }
 
@@ -242,15 +253,17 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         return new PagedList<>(listTables(databaseName), null);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
                     SystemTableLoader.loadGlobalTableNames().stream()
@@ -283,7 +296,8 @@ public abstract class AbstractCatalog implements Catalog {
     protected PagedList<Table> listTableDetailsPagedImpl(
             String databaseName, Integer maxResults, String pageToken)
             throws DatabaseNotExistException {
-        PagedList<String> pagedTableNames = listTablesPaged(databaseName, maxResults, pageToken);
+        PagedList<String> pagedTableNames =
+                listTablesPaged(databaseName, maxResults, pageToken, null);
         return new PagedList<>(
                 pagedTableNames.getElements().stream()
                         .map(
@@ -314,7 +328,18 @@ public abstract class AbstractCatalog implements Catalog {
             Table table = getTable(identifier);
             if (table instanceof FileStoreTable) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
-                externalPaths = fileStoreTable.store().pathFactory().getExternalPaths();
+                externalPaths =
+                        fileStoreTable.schemaManager().listAll().stream()
+                                .map(
+                                        schema ->
+                                                schema.toSchema()
+                                                        .options()
+                                                        .get(DATA_FILE_EXTERNAL_PATHS.key()))
+                                .filter(Objects::nonNull)
+                                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
+                                .map(Path::new)
+                                .distinct()
+                                .collect(Collectors.toList());
             }
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
@@ -333,7 +358,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateAutoCreateClose(schema.options());
+        validateCreateTable(schema);
         validateCustomTablePath(schema.options());
 
         // check db exists
@@ -465,12 +490,26 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics) {
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Snapshot snapshot,
+            List<PartitionStatistics> statistics) {
         throw new UnsupportedOperationException();
     }
 
     @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Snapshot> loadSnapshot(Identifier identifier, String version) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PagedList<Snapshot> listSnapshotsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
         throw new UnsupportedOperationException();
     }
 
@@ -481,8 +520,18 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListObjectsPaged() {
+        return false;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return false;
+    }
+
+    @Override
+    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -503,6 +552,36 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {}
+
+    @Override
+    public List<String> listFunctions(String databaseName) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
+        throw new FunctionNotExistException(identifier);
+    }
+
+    @Override
+    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void alterFunction(
+            Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
+                    DefinitionNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
      * Create a {@link FormatTable} identified by the given {@link Identifier}.

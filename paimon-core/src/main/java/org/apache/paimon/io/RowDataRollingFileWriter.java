@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -53,19 +54,30 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                 () ->
                         new RowDataFileWriter(
                                 fileIO,
-                                fileFormat.createWriterFactory(writeSchema),
+                                createFileWriterContext(
+                                        fileFormat, writeSchema, statsCollectors, fileCompression),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                createStatsProducer(fileFormat, writeSchema, statsCollectors),
                                 schemaId,
                                 seqNumCounter,
-                                fileCompression,
                                 fileIndexOptions,
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath()),
                 targetFileSize);
+    }
+
+    @VisibleForTesting
+    static FileWriterContext createFileWriterContext(
+            FileFormat fileFormat,
+            RowType rowType,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            String fileCompression) {
+        return new FileWriterContext(
+                fileFormat.createWriterFactory(rowType),
+                createStatsProducer(fileFormat, rowType, statsCollectors),
+                fileCompression);
     }
 
     private static SimpleStatsProducer createStatsProducer(

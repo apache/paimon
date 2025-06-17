@@ -30,6 +30,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -56,7 +57,6 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
 import static org.apache.paimon.CoreOptions.OrderType.ORDER;
 import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
-import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -108,11 +108,8 @@ public class FlinkSinkBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         SingleOutputStreamOperator<RowData> newInput =
-                input.transform(
-                        "Map",
-                        InternalTypeInfo.of(rowType),
-                        new StreamMapWithForwardingRecordAttributes<>(
-                                (MapFunction<Row, RowData>) converter::toInternal));
+                input.map((MapFunction<Row, RowData>) converter::toInternal)
+                        .returns(InternalTypeInfo.of(rowType));
         setParallelism(newInput, input.getParallelism(), false);
         this.input = newInput;
         return this;
@@ -235,12 +232,10 @@ public class FlinkSinkBuilder {
 
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
+            case POSTPONE_MODE:
+                return buildPostponeBucketSink(input);
             case HASH_FIXED:
-                if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-                    return buildPostponeBucketSink(input);
-                } else {
-                    return buildForFixedBucket(input);
-                }
+                return buildForFixedBucket(input);
             case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
             case CROSS_PARTITION:
@@ -255,11 +250,10 @@ public class FlinkSinkBuilder {
     public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
         SingleOutputStreamOperator<InternalRow> result =
-                input.transform(
-                        "Map",
-                        org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
-                        new StreamMapWithForwardingRecordAttributes<>(
-                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new));
+                input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                        .returns(
+                                org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
+                                        rowType));
         forwardParallelism(result, input);
         return result;
     }
@@ -298,10 +292,16 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, null);
-        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
-        DataStream<Committable> written = sink.doWrite(input, commitUser, parallelism);
-        return sink.doCommit(written, commitUser);
+        ChannelComputer<InternalRow> channelComputer;
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        } else {
+            channelComputer = new PostponeBucketChannelComputer(table.schema());
+        }
+        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
+        return sink.sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
@@ -318,7 +318,7 @@ public class FlinkSinkBuilder {
                             parallelism);
         }
 
-        return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
+        return new RowAppendTableSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }
 

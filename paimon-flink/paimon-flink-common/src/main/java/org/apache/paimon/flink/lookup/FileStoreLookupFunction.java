@@ -25,14 +25,18 @@ import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -67,8 +71,8 @@ import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
-import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
-import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
+import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
@@ -84,6 +88,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
+    @Nullable private final ShuffleStrategy strategy;
 
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
@@ -103,7 +108,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             FileStoreTable table,
             int[] projection,
             int[] joinKeyIndex,
-            @Nullable Predicate predicate) {
+            @Nullable Predicate predicate,
+            @Nullable ShuffleStrategy strategy) {
         if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
             TableScanUtils.streamingReadingValidate(table);
         }
@@ -112,19 +118,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.partitionLoader = DynamicPartitionLoader.of(table);
 
         // join keys are based on projection fields
+        RowType rowType = table.rowType();
         this.joinKeys =
                 Arrays.stream(joinKeyIndex)
-                        .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
+                        .mapToObj(i -> rowType.getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
 
         this.projectFields =
                 Arrays.stream(projection)
-                        .mapToObj(i -> table.rowType().getFieldNames().get(i))
+                        .mapToObj(i -> rowType.getFieldNames().get(i))
                         .collect(Collectors.toList());
 
         this.projectFieldsGetters =
                 Arrays.stream(projection)
-                        .mapToObj(i -> table.rowType().fieldGetters()[i])
+                        .mapToObj(i -> InternalRow.createFieldGetter(rowType.getTypeAt(i), i))
                         .collect(Collectors.toList());
 
         // add primary keys
@@ -143,6 +150,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.refreshBlacklist =
                 RefreshBlacklist.create(
                         table.options().get(LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key()));
+
+        this.strategy = strategy;
     }
 
     public void open(FunctionContext context) throws Exception {
@@ -404,8 +413,21 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
      * @return the set of bucket IDs to be cached
      */
     protected Set<Integer> getRequireCachedBucketIds() {
-        // TODO: Implement the method when Flink support bucket shuffle for lookup join.
-        return null;
+        if (strategy == null) {
+            return null;
+        }
+        @Nullable
+        Integer indexOfThisSubtask = RuntimeContextUtils.getIndexOfThisSubtask(functionContext);
+        @Nullable
+        Integer numberOfParallelSubtasks =
+                RuntimeContextUtils.getNumberOfParallelSubtasks(functionContext);
+        if (indexOfThisSubtask == null) {
+            Preconditions.checkState(numberOfParallelSubtasks == null);
+            return null;
+        } else {
+            Preconditions.checkState(numberOfParallelSubtasks != null);
+        }
+        return strategy.getRequiredCacheBucketIds(indexOfThisSubtask, numberOfParallelSubtasks);
     }
 
     protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {

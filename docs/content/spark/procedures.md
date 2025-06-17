@@ -46,6 +46,7 @@ This section introduce all available spark procedures about paimon.
             <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
+            <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
             <li>compact_strategy: this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
@@ -53,6 +54,7 @@ This section introduce all available spark procedures about paimon.
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
          CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
          CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
+         CALL sys.compact(table => 'T', where => 'dt>10 and h<20', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4')<br/><br/> 
          CALL sys.compact(table => 'T', partition_idle_time => '60s')<br/><br/>
          CALL sys.compact(table => 'T', compact_strategy => 'minor')<br/><br/>
       </td>
@@ -66,8 +68,9 @@ This section introduce all available spark procedures about paimon.
             <li>retain_min: the minimum number of completed snapshots to retain.</li>
             <li>older_than: timestamp before which snapshots will be removed.</li>
             <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
-      <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
+      <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10, options => 'snapshot.expire.limit=1')</td>
     </tr>
     <tr>
       <td>expire_partitions</td>
@@ -79,9 +82,10 @@ This section introduce all available spark procedures about paimon.
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
             <li>max_expires: The maximum of limited expired partitions, it is optional.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 
-'yyyy-MM-dd', timestamp_pattern => '$dt', expire_strategy => 'values-time')</td>
+'yyyy-MM-dd', timestamp_pattern => '$dt', expire_strategy => 'values-time', options => 'partition.expiration-max-num=2')</td>
     </tr>
     <tr>
       <td>create_tag</td>
@@ -198,13 +202,11 @@ This section introduce all available spark procedures about paimon.
     <tr>
       <td>purge_files</td>
       <td>
-         To clear table with purge files directly. Argument:
+         To clear table with purge files. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>dry_run (optional): only check what dirs will be deleted, but not really delete them. Default is false.</li>
       </td>
       <td>
           CALL sys.purge_files(table => 'default.T')<br/>
-          CALL sys.purge_files(table => 'default.T', dry_run => true)
       </td>
     </tr>
     <tr>
@@ -378,6 +380,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
+            <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')
@@ -402,6 +405,65 @@ This section introduce all available spark procedures about paimon.
          -- drop dialect in the view<br/>
          CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark')<br/>
          CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
+      </td>
+   </tr>
+      <tr>
+      <td>create_function</td>
+      <td>
+         CALL sys.create_function(<br/>
+                'function_identifier',<br/>
+                '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+                '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+                true, 'comment', 'k1=v1,k2=v2')<br/>
+      </td>
+      <td>
+         To create a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>inputParams: inputParams of the function.</li>
+            <li>returnParams: returnParams of the function.</li>
+            <li>deterministic: Whether the function is deterministic.</li>
+            <li>comment: The comment for the function.</li>
+            <li>options: the additional dynamic options of the function.</li>
+      </td>
+      <td>
+         CALL sys.create_function(`function` => 'function_identifier',<br/>
+              `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
+              `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
+              `deterministic` => true,<br/>
+              `comment` => 'comment',<br/>
+              `options` => 'k1=v1,k2=v2'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>alter_function</td>
+      <td>
+         CALL sys.alter_function(<br/>
+                'function_identifier',<br/>
+                '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }')<br/>
+      </td>
+      <td>
+         To alter a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+            <li>change: change of the function.</li>
+      </td>
+      <td>
+         CALL sys.alter_function(`function` => 'function_identifier',<br/>
+              `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'<br/>
+         )<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>drop_function</td>
+      <td>
+         CALL [catalog.]sys.drop_function('function_identifier')<br/>
+      </td>
+      <td>
+         To drop a function. Arguments:
+            <li>function: the target function identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.drop_function(`function` => 'function_identifier')<br/>
       </td>
    </tr>
    </tbody>

@@ -30,6 +30,8 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.HashSet;
 import java.util.Map;
 
@@ -157,7 +159,10 @@ public interface ObjectTable extends FileStoreTable {
         }
 
         @Override
-        public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+        public TableWriteImpl<?> newWrite(
+                String commitUser,
+                @Nullable ManifestCacheFilter manifestFilter,
+                @Nullable Integer writeId) {
             throw new UnsupportedOperationException("Object table does not support Write.");
         }
 

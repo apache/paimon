@@ -35,10 +35,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
-import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple7;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -58,7 +56,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -118,8 +115,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     public void processElement(
                                             String branch,
                                             ProcessFunction<String, Tuple2<Long, Long>>.Context ctx,
-                                            Collector<Tuple2<Long, Long>> out)
-                                            throws Exception {
+                                            Collector<Tuple2<Long, Long>> out) {
                                         AtomicLong deletedFilesCount = new AtomicLong(0);
                                         AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
                                         cleanBranchSnapshotDir(
@@ -239,88 +235,17 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 });
 
         usedFiles = usedFiles.union(usedManifestFiles);
-        FileStorePathFactory pathFactory = table.store().pathFactory();
-        List<Tuple7<String, String, String, String, String, Integer, String>> tablePaths =
-                Arrays.asList(
-                        new Tuple7<>(
-                                table.fullName(),
-                                pathFactory.manifestPath().toString(),
-                                pathFactory.indexPath().toString(),
-                                pathFactory.statisticsPath().toString(),
-                                pathFactory.dataFilePath().toString(),
-                                partitionKeysNum,
-                                table.store().options().dataFileExternalPaths()));
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromCollection(
-                                tablePaths,
-                                TypeInformation.of(
-                                        new TypeHint<
-                                                Tuple7<
-                                                        String,
-                                                        String,
-                                                        String,
-                                                        String,
-                                                        String,
-                                                        Integer,
-                                                        String>>() {}))
+                env.fromCollection(Collections.singletonList(1), TypeInformation.of(Integer.class))
                         .process(
-                                new ProcessFunction<
-                                        Tuple7<
-                                                String,
-                                                String,
-                                                String,
-                                                String,
-                                                String,
-                                                Integer,
-                                                String>,
-                                        Tuple2<String, Long>>() {
+                                new ProcessFunction<Integer, Tuple2<String, Long>>() {
                                     @Override
                                     public void processElement(
-                                            Tuple7<
-                                                            String,
-                                                            String,
-                                                            String,
-                                                            String,
-                                                            String,
-                                                            Integer,
-                                                            String>
-                                                    paths,
-                                            ProcessFunction<
-                                                                    Tuple7<
-                                                                            String,
-                                                                            String,
-                                                                            String,
-                                                                            String,
-                                                                            String,
-                                                                            Integer,
-                                                                            String>,
-                                                                    Tuple2<String, Long>>
-                                                            .Context
+                                            Integer i,
+                                            ProcessFunction<Integer, Tuple2<String, Long>>.Context
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
-                                        List<String> dirs =
-                                                listPaimonFileDirs(
-                                                                paths.f0, paths.f1, paths.f2,
-                                                                paths.f3, paths.f4, paths.f5,
-                                                                paths.f6)
-                                                        .stream()
-                                                        .map(Path::toUri)
-                                                        .map(Object::toString)
-                                                        .collect(Collectors.toList());
-                                        for (String dir : dirs) {
-                                            for (FileStatus fileStatus :
-                                                    tryBestListingDirs(new Path(dir))) {
-                                                if (oldEnough(fileStatus)) {
-                                                    out.collect(
-                                                            new Tuple2(
-                                                                    fileStatus
-                                                                            .getPath()
-                                                                            .toUri()
-                                                                            .toString(),
-                                                                    fileStatus.getLen()));
-                                                }
-                                            }
-                                        }
+                                        listPaimonFilesForTable(out);
                                     }
                                 })
                         .setParallelism(1);
@@ -396,6 +321,50 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         deleted = deleted.union(branchSnapshotDirDeleted);
 
         return deleted;
+    }
+
+    private void listPaimonFilesForTable(Collector<Tuple2<String, Long>> out) {
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+        List<String> dirs =
+                listPaimonFileDirs(
+                                table.fullName(),
+                                pathFactory.manifestPath().toString(),
+                                pathFactory.indexPath().toString(),
+                                pathFactory.statisticsPath().toString(),
+                                pathFactory.dataFilePath().toString(),
+                                partitionKeysNum,
+                                table.coreOptions().dataFileExternalPaths())
+                        .stream()
+                        .map(Path::toUri)
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+        Set<Path> emptyDirs = new HashSet<>();
+        for (String dir : dirs) {
+            Path dirPath = new Path(dir);
+            List<FileStatus> files = tryBestListingDirs(dirPath);
+            for (FileStatus file : files) {
+                if (oldEnough(file)) {
+                    out.collect(new Tuple2<>(file.getPath().toUri().toString(), file.getLen()));
+                }
+            }
+            if (files.isEmpty()) {
+                emptyDirs.add(dirPath);
+            }
+        }
+
+        // delete empty dir
+        while (!emptyDirs.isEmpty()) {
+            Set<Path> newEmptyDir = new HashSet<>();
+            for (Path emptyDir : emptyDirs) {
+                try {
+                    fileIO.delete(emptyDir, false);
+                    // recursive cleaning
+                    newEmptyDir.add(emptyDir.getParent());
+                } catch (IOException ignored) {
+                }
+            }
+            emptyDirs = newEmptyDir;
+        }
     }
 
     public static CleanOrphanFilesResult executeDatabaseOrphanFiles(

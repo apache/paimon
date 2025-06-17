@@ -50,8 +50,7 @@ By default, Partial update can not accept delete records, you can choose one of 
 
 - Configure 'ignore-delete' to ignore delete records.
 - Configure 'partial-update.remove-record-on-delete' to remove the whole row when receiving delete records.
-- Configure 'sequence-group's to retract partial columns.
-  * Configure 'partial-update.remove-record-on-sequence-group' to remove the whole row when receiving delete records of specified sequence group.
+- Configure 'sequence-group's to retract partial columns. Also configure 'partial-update.remove-record-on-sequence-group' to remove the whole row when receiving deleted records of `specified sequence group`.
 {{< /hint >}}
 
 ## Sequence Group
@@ -131,7 +130,7 @@ CREATE TABLE SG
 INSERT INTO SG
 VALUES (1, 1, 1, 1, 1, 1, 1, 1);
 
--- g_2, g_3 should not be updated
+-- g_3 is null, g_2, g_3 are not bigger, c, d should not be updated
 INSERT INTO SG
 VALUES (1, 2, 2, 2, 2, 2, 1, CAST(NULL AS INT));
 
@@ -139,7 +138,7 @@ SELECT *
 FROM SG;
 -- output 1, 2, 2, 2, 1, 1, 1, 1
 
--- g_1 should not be updated
+-- g_1 is smaller, a, b should not be updated
 INSERT INTO SG
 VALUES (1, 3, 3, 1, 3, 3, 3, 1);
 
@@ -212,7 +211,7 @@ CREATE TABLE AGG
 INSERT INTO AGG
 VALUES (1, 1, 1, 1, '1', 1, 1);
 
--- g_2 should not be updated
+-- g_2 is null, c should not be updated
 INSERT INTO AGG
 VALUES (1, 2, 2, 2, '2', CAST(NULL AS INT), 2);
 
@@ -220,7 +219,7 @@ SELECT *
 FROM AGG;
 -- output 1, 3, 2, 2, "1", 1, 2
 
--- g_1, g_3 should not be updated
+-- g_1, g_3 are smaller, a should not beupdated
 INSERT INTO AGG
 VALUES (1, 3, 3, 2, '3', 3, 1);
 

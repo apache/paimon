@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
@@ -41,6 +41,7 @@ import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
+import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_RECOVER_FROM_STATE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
@@ -72,7 +73,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource) {
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
@@ -84,7 +85,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource,
             String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
         DataStream<MultiTableCommittable> written =
@@ -96,7 +97,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStream<MultiTableCommittable> doWrite(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource,
             String commitUser) {
         StreamExecutionEnvironment env = awareBucketTableSource.getExecutionEnvironment();
         boolean isStreaming =
@@ -203,6 +204,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                WrappedManifestCommittableSerializer::new);
+                WrappedManifestCommittableSerializer::new,
+                options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
     }
 }

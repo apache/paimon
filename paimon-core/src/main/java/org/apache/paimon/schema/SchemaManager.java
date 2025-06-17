@@ -57,6 +57,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -69,15 +70,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -116,6 +117,10 @@ public class SchemaManager implements Serializable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    public TableSchema latestOrThrow(String message) {
+        return latest().orElseThrow(() -> new RuntimeException(message));
     }
 
     public long earliestCreationTime() {
@@ -283,192 +288,7 @@ public class SchemaManager implements Serializable {
                                             new Catalog.TableNotExistException(
                                                     identifierFromPath(
                                                             tableRoot.toString(), true, branch)));
-            Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
-            Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
-            List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
-            AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
-            String newComment = oldTableSchema.comment();
-            for (SchemaChange change : changes) {
-                if (change instanceof SetOption) {
-                    SetOption setOption = (SetOption) change;
-                    if (hasSnapshots.get()) {
-                        checkAlterTableOption(
-                                setOption.key(),
-                                oldOptions.get(setOption.key()),
-                                setOption.value(),
-                                false);
-                    }
-                    newOptions.put(setOption.key(), setOption.value());
-                } else if (change instanceof RemoveOption) {
-                    RemoveOption removeOption = (RemoveOption) change;
-                    if (hasSnapshots.get()) {
-                        checkResetTableOption(removeOption.key());
-                    }
-                    newOptions.remove(removeOption.key());
-                } else if (change instanceof UpdateComment) {
-                    UpdateComment updateComment = (UpdateComment) change;
-                    newComment = updateComment.comment();
-                } else if (change instanceof AddColumn) {
-                    AddColumn addColumn = (AddColumn) change;
-                    SchemaChange.Move move = addColumn.move();
-                    Preconditions.checkArgument(
-                            addColumn.dataType().isNullable(),
-                            "Column %s cannot specify NOT NULL in the %s table.",
-                            String.join(".", addColumn.fieldNames()),
-                            identifierFromPath(tableRoot.toString(), true, branch).getFullName());
-                    int id = highestFieldId.incrementAndGet();
-                    DataType dataType =
-                            ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
-
-                    new NestedColumnModifier(addColumn.fieldNames()) {
-                        @Override
-                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
-                                throws Catalog.ColumnAlreadyExistException {
-                            assertColumnNotExists(newFields, fieldName);
-
-                            DataField dataField =
-                                    new DataField(id, fieldName, dataType, addColumn.description());
-
-                            // key: name ; value : index
-                            Map<String, Integer> map = new HashMap<>();
-                            for (int i = 0; i < newFields.size(); i++) {
-                                map.put(newFields.get(i).name(), i);
-                            }
-
-                            if (null != move) {
-                                if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
-                                    newFields.add(0, dataField);
-                                } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
-                                    int fieldIndex = map.get(move.referenceFieldName());
-                                    newFields.add(fieldIndex + 1, dataField);
-                                }
-                            } else {
-                                newFields.add(dataField);
-                            }
-                        }
-                    }.updateIntermediateColumn(newFields, 0);
-                } else if (change instanceof RenameColumn) {
-                    RenameColumn rename = (RenameColumn) change;
-                    assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
-                    new NestedColumnModifier(rename.fieldNames()) {
-                        @Override
-                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
-                                throws Catalog.ColumnNotExistException,
-                                        Catalog.ColumnAlreadyExistException {
-                            assertColumnExists(newFields, fieldName);
-                            assertColumnNotExists(newFields, rename.newName());
-                            for (int i = 0; i < newFields.size(); i++) {
-                                DataField field = newFields.get(i);
-                                if (!field.name().equals(fieldName)) {
-                                    continue;
-                                }
-
-                                DataField newField =
-                                        new DataField(
-                                                field.id(),
-                                                rename.newName(),
-                                                field.type(),
-                                                field.description());
-                                newFields.set(i, newField);
-                                return;
-                            }
-                        }
-                    }.updateIntermediateColumn(newFields, 0);
-                } else if (change instanceof DropColumn) {
-                    DropColumn drop = (DropColumn) change;
-                    dropColumnValidation(oldTableSchema, drop);
-                    new NestedColumnModifier(drop.fieldNames()) {
-                        @Override
-                        protected void updateLastColumn(List<DataField> newFields, String fieldName)
-                                throws Catalog.ColumnNotExistException {
-                            assertColumnExists(newFields, fieldName);
-                            newFields.removeIf(f -> f.name().equals(fieldName));
-                            if (newFields.isEmpty()) {
-                                throw new IllegalArgumentException(
-                                        "Cannot drop all fields in table");
-                            }
-                        }
-                    }.updateIntermediateColumn(newFields, 0);
-                } else if (change instanceof UpdateColumnType) {
-                    UpdateColumnType update = (UpdateColumnType) change;
-                    assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
-                    updateNestedColumn(
-                            newFields,
-                            update.fieldNames(),
-                            (field) -> {
-                                DataType targetType = update.newDataType();
-                                if (update.keepNullability()) {
-                                    targetType = targetType.copy(field.type().isNullable());
-                                }
-                                checkState(
-                                        DataTypeCasts.supportsExplicitCast(field.type(), targetType)
-                                                && CastExecutors.resolve(field.type(), targetType)
-                                                        != null,
-                                        String.format(
-                                                "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                                field.name(), field.type(), targetType));
-                                return new DataField(
-                                        field.id(), field.name(), targetType, field.description());
-                            });
-                } else if (change instanceof UpdateColumnNullability) {
-                    UpdateColumnNullability update = (UpdateColumnNullability) change;
-                    if (update.fieldNames().length == 1
-                            && update.newNullability()
-                            && oldTableSchema.primaryKeys().contains(update.fieldNames()[0])) {
-                        throw new UnsupportedOperationException(
-                                "Cannot change nullability of primary key");
-                    }
-                    updateNestedColumn(
-                            newFields,
-                            update.fieldNames(),
-                            (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            field.name(),
-                                            field.type().copy(update.newNullability()),
-                                            field.description()));
-                } else if (change instanceof UpdateColumnComment) {
-                    UpdateColumnComment update = (UpdateColumnComment) change;
-                    updateNestedColumn(
-                            newFields,
-                            update.fieldNames(),
-                            (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            field.name(),
-                                            field.type(),
-                                            update.newDescription()));
-                } else if (change instanceof UpdateColumnPosition) {
-                    UpdateColumnPosition update = (UpdateColumnPosition) change;
-                    SchemaChange.Move move = update.move();
-                    applyMove(newFields, move);
-                } else {
-                    throw new UnsupportedOperationException(
-                            "Unsupported change: " + change.getClass());
-                }
-            }
-
-            // We change TableSchema to Schema, because we want to deal with primary-key and
-            // partition in options.
-            Schema newSchema =
-                    new Schema(
-                            newFields,
-                            oldTableSchema.partitionKeys(),
-                            applyNotNestedColumnRename(
-                                    oldTableSchema.primaryKeys(),
-                                    Iterables.filter(changes, RenameColumn.class)),
-                            applySchemaChanges(newOptions, changes),
-                            newComment);
-            TableSchema newTableSchema =
-                    new TableSchema(
-                            oldTableSchema.id() + 1,
-                            newSchema.fields(),
-                            highestFieldId.get(),
-                            newSchema.partitionKeys(),
-                            newSchema.primaryKeys(),
-                            newSchema.options(),
-                            newSchema.comment());
-
+            TableSchema newTableSchema = generateTableSchema(oldTableSchema, changes, hasSnapshots);
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
@@ -477,6 +297,311 @@ public class SchemaManager implements Serializable {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    public TableSchema generateTableSchema(
+            TableSchema oldTableSchema, List<SchemaChange> changes, LazyField<Boolean> hasSnapshots)
+            throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
+        Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
+        Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
+        boolean disableNullToNotNull =
+                Boolean.parseBoolean(
+                        oldOptions.getOrDefault(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(),
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL
+                                        .defaultValue()
+                                        .toString()));
+
+        boolean disableExplicitTypeCasting =
+                Boolean.parseBoolean(
+                        oldOptions.getOrDefault(
+                                CoreOptions.DISABLE_EXPLICIT_TYPE_CASTING.key(),
+                                CoreOptions.DISABLE_EXPLICIT_TYPE_CASTING
+                                        .defaultValue()
+                                        .toString()));
+        List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
+        AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
+        String newComment = oldTableSchema.comment();
+        for (SchemaChange change : changes) {
+            if (change instanceof SetOption) {
+                SetOption setOption = (SetOption) change;
+                if (hasSnapshots.get()) {
+                    checkAlterTableOption(
+                            setOption.key(),
+                            oldOptions.get(setOption.key()),
+                            setOption.value(),
+                            false);
+                }
+                newOptions.put(setOption.key(), setOption.value());
+            } else if (change instanceof RemoveOption) {
+                RemoveOption removeOption = (RemoveOption) change;
+                if (hasSnapshots.get()) {
+                    checkResetTableOption(removeOption.key());
+                }
+                newOptions.remove(removeOption.key());
+            } else if (change instanceof UpdateComment) {
+                UpdateComment updateComment = (UpdateComment) change;
+                newComment = updateComment.comment();
+            } else if (change instanceof AddColumn) {
+                AddColumn addColumn = (AddColumn) change;
+                SchemaChange.Move move = addColumn.move();
+                Preconditions.checkArgument(
+                        addColumn.dataType().isNullable(),
+                        "Column %s cannot specify NOT NULL in the %s table.",
+                        String.join(".", addColumn.fieldNames()),
+                        identifierFromPath(tableRoot.toString(), true, branch).getFullName());
+                int id = highestFieldId.incrementAndGet();
+                DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
+
+                new NestedColumnModifier(addColumn.fieldNames()) {
+                    @Override
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
+                            throws Catalog.ColumnAlreadyExistException {
+                        assertColumnNotExists(newFields, fieldName);
+
+                        DataField dataField =
+                                new DataField(id, fieldName, dataType, addColumn.description());
+
+                        // key: name ; value : index
+                        Map<String, Integer> map = new HashMap<>();
+                        for (int i = 0; i < newFields.size(); i++) {
+                            map.put(newFields.get(i).name(), i);
+                        }
+
+                        if (null != move) {
+                            if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
+                                newFields.add(0, dataField);
+                            } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
+                                int fieldIndex = map.get(move.referenceFieldName());
+                                newFields.add(fieldIndex + 1, dataField);
+                            }
+                        } else {
+                            newFields.add(dataField);
+                        }
+                    }
+                }.updateIntermediateColumn(newFields, 0);
+            } else if (change instanceof RenameColumn) {
+                RenameColumn rename = (RenameColumn) change;
+                assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
+                new NestedColumnModifier(rename.fieldNames()) {
+                    @Override
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
+                            throws Catalog.ColumnNotExistException,
+                                    Catalog.ColumnAlreadyExistException {
+                        assertColumnExists(newFields, fieldName);
+                        assertColumnNotExists(newFields, rename.newName());
+                        for (int i = 0; i < newFields.size(); i++) {
+                            DataField field = newFields.get(i);
+                            if (!field.name().equals(fieldName)) {
+                                continue;
+                            }
+
+                            DataField newField =
+                                    new DataField(
+                                            field.id(),
+                                            rename.newName(),
+                                            field.type(),
+                                            field.description());
+                            newFields.set(i, newField);
+                            return;
+                        }
+                    }
+                }.updateIntermediateColumn(newFields, 0);
+            } else if (change instanceof DropColumn) {
+                DropColumn drop = (DropColumn) change;
+                dropColumnValidation(oldTableSchema, drop);
+                new NestedColumnModifier(drop.fieldNames()) {
+                    @Override
+                    protected void updateLastColumn(
+                            int depth, List<DataField> newFields, String fieldName)
+                            throws Catalog.ColumnNotExistException {
+                        assertColumnExists(newFields, fieldName);
+                        newFields.removeIf(f -> f.name().equals(fieldName));
+                        if (newFields.isEmpty()) {
+                            throw new IllegalArgumentException("Cannot drop all fields in table");
+                        }
+                    }
+                }.updateIntermediateColumn(newFields, 0);
+            } else if (change instanceof UpdateColumnType) {
+                UpdateColumnType update = (UpdateColumnType) change;
+                assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                updateNestedColumn(
+                        newFields,
+                        update.fieldNames(),
+                        (field, depth) -> {
+                            // find the dataType at depth and update the type for it
+                            DataType sourceRootType =
+                                    getRootType(field.type(), depth, update.fieldNames().length);
+                            DataType targetRootType = update.newDataType();
+                            if (update.keepNullability()) {
+                                targetRootType = targetRootType.copy(sourceRootType.isNullable());
+                            } else {
+                                assertNullabilityChange(
+                                        sourceRootType.isNullable(),
+                                        targetRootType.isNullable(),
+                                        StringUtils.join(Arrays.asList(update.fieldNames()), "."),
+                                        disableNullToNotNull);
+                            }
+                            checkState(
+                                    DataTypeCasts.supportsCast(
+                                                    sourceRootType,
+                                                    targetRootType,
+                                                    !disableExplicitTypeCasting)
+                                            && CastExecutors.resolve(sourceRootType, targetRootType)
+                                                    != null,
+                                    String.format(
+                                            "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                            field.name(), sourceRootType, targetRootType));
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    getArrayMapTypeWithTargetTypeRoot(
+                                            field.type(),
+                                            targetRootType,
+                                            depth,
+                                            update.fieldNames().length),
+                                    field.description());
+                        });
+            } else if (change instanceof UpdateColumnNullability) {
+                UpdateColumnNullability update = (UpdateColumnNullability) change;
+                if (update.fieldNames().length == 1
+                        && update.newNullability()
+                        && oldTableSchema.primaryKeys().contains(update.fieldNames()[0])) {
+                    throw new UnsupportedOperationException(
+                            "Cannot change nullability of primary key");
+                }
+                updateNestedColumn(
+                        newFields,
+                        update.fieldNames(),
+                        (field, depth) -> {
+                            // find the DataType at depth and update that DataTypes nullability
+                            DataType sourceRootType =
+                                    getRootType(field.type(), depth, update.fieldNames().length);
+                            assertNullabilityChange(
+                                    sourceRootType.isNullable(),
+                                    update.newNullability(),
+                                    StringUtils.join(Arrays.asList(update.fieldNames()), "."),
+                                    disableNullToNotNull);
+                            sourceRootType = sourceRootType.copy(update.newNullability());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    getArrayMapTypeWithTargetTypeRoot(
+                                            field.type(),
+                                            sourceRootType,
+                                            depth,
+                                            update.fieldNames().length),
+                                    field.description());
+                        });
+            } else if (change instanceof UpdateColumnComment) {
+                UpdateColumnComment update = (UpdateColumnComment) change;
+                updateNestedColumn(
+                        newFields,
+                        update.fieldNames(),
+                        (field, depth) ->
+                                new DataField(
+                                        field.id(),
+                                        field.name(),
+                                        field.type(),
+                                        update.newDescription()));
+            } else if (change instanceof UpdateColumnPosition) {
+                UpdateColumnPosition update = (UpdateColumnPosition) change;
+                SchemaChange.Move move = update.move();
+                applyMove(newFields, move);
+            } else {
+                throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
+            }
+        }
+
+        // We change TableSchema to Schema, because we want to deal with primary-key and
+        // partition in options.
+        Schema newSchema =
+                new Schema(
+                        newFields,
+                        oldTableSchema.partitionKeys(),
+                        applyNotNestedColumnRename(
+                                oldTableSchema.primaryKeys(),
+                                Iterables.filter(changes, RenameColumn.class)),
+                        applySchemaChanges(newOptions, changes),
+                        newComment);
+
+        return new TableSchema(
+                oldTableSchema.id() + 1,
+                newSchema.fields(),
+                highestFieldId.get(),
+                newSchema.partitionKeys(),
+                newSchema.primaryKeys(),
+                newSchema.options(),
+                newSchema.comment());
+    }
+
+    // gets the rootType at the defined depth
+    // ex: ARRAY<MAP<STRING, ARRAY<INT>>>
+    // if we want to update ARRAY<INT> -> ARRAY<BIGINT>
+    // the maxDepth will be based on updateFieldNames
+    // which in the case will be [v, element, value, element],
+    // so maxDepth is 4 and return DataType will be INT
+    private DataType getRootType(DataType type, int currDepth, int maxDepth) {
+        if (currDepth == maxDepth - 1) {
+            return type;
+        }
+        switch (type.getTypeRoot()) {
+            case ARRAY:
+                return getRootType(((ArrayType) type).getElementType(), currDepth + 1, maxDepth);
+            case MAP:
+                return getRootType(((MapType) type).getValueType(), currDepth + 1, maxDepth);
+            default:
+                return type;
+        }
+    }
+
+    // builds the targetType from source type based on the maxDepth which needs to be updated
+    // ex: ARRAY<MAP<STRING, ARRAY<INT>>> -> ARRAY<MAP<STRING, ARRAY<BIGINT>>>
+    // here we only need to update type of ARRAY<INT> to ARRAY<BIGINT> and rest of the type
+    // remains same. This function achieves this.
+    private DataType getArrayMapTypeWithTargetTypeRoot(
+            DataType source, DataType target, int currDepth, int maxDepth) {
+        if (currDepth == maxDepth - 1) {
+            return target;
+        }
+        switch (source.getTypeRoot()) {
+            case ARRAY:
+                return new ArrayType(
+                        source.isNullable(),
+                        getArrayMapTypeWithTargetTypeRoot(
+                                ((ArrayType) source).getElementType(),
+                                target,
+                                currDepth + 1,
+                                maxDepth));
+            case MAP:
+                return new MapType(
+                        source.isNullable(),
+                        ((MapType) source).getKeyType(),
+                        getArrayMapTypeWithTargetTypeRoot(
+                                ((MapType) source).getValueType(),
+                                target,
+                                currDepth + 1,
+                                maxDepth));
+            default:
+                return target;
+        }
+    }
+
+    private void assertNullabilityChange(
+            boolean oldNullability,
+            boolean newNullability,
+            String fieldName,
+            boolean disableNullToNotNull) {
+        if (disableNullToNotNull && oldNullability && !newNullability) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot update column type from nullable to non nullable for %s. "
+                                    + "You can set table configuration option 'alter-column-null-to-not-null.disabled' = 'false' "
+                                    + "to allow converting null columns to not null",
+                            fieldName));
         }
     }
 
@@ -634,10 +759,22 @@ public class SchemaManager implements Serializable {
             this.updateFieldNames = updateFieldNames;
         }
 
-        public void updateIntermediateColumn(List<DataField> newFields, int depth)
+        private void updateIntermediateColumn(
+                List<DataField> newFields, List<DataField> previousFields, int depth, int prevDepth)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
             if (depth == updateFieldNames.length - 1) {
-                updateLastColumn(newFields, updateFieldNames[depth]);
+                updateLastColumn(depth, newFields, updateFieldNames[depth]);
+                return;
+            } else if (depth >= updateFieldNames.length) {
+                // to handle the case of ARRAY or MAP type evolution
+                // for instance : ARRAY<INT> -> ARRAY<BIGINT>
+                // the updateFieldNames in this case is [v, element] where v is array field name
+                // the depth returned by extractRowDataFields is 2 which will overflow.
+                // So the logic is to go to previous depth and update the column using previous
+                // fields which will have DataFields from prevDepth
+                // The reason for this handling is the addition of element and value for array
+                // and map type in FlinkCatalog as dummy column name
+                updateLastColumn(prevDepth, previousFields, updateFieldNames[prevDepth]);
                 return;
             }
 
@@ -646,13 +783,10 @@ public class SchemaManager implements Serializable {
                 if (!field.name().equals(updateFieldNames[depth])) {
                     continue;
                 }
-
-                String fullFieldName =
-                        String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1));
                 List<DataField> nestedFields = new ArrayList<>();
-                int newDepth =
-                        depth + extractRowDataFields(field.type(), fullFieldName, nestedFields);
-                updateIntermediateColumn(nestedFields, newDepth);
+                int newDepth = depth + extractRowDataFields(field.type(), nestedFields);
+                updateIntermediateColumn(nestedFields, newFields, newDepth, depth);
+                field = newFields.get(i);
                 newFields.set(
                         i,
                         new DataField(
@@ -668,25 +802,23 @@ public class SchemaManager implements Serializable {
                     String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
         }
 
-        private int extractRowDataFields(
-                DataType type, String fullFieldName, List<DataField> nestedFields) {
+        public void updateIntermediateColumn(List<DataField> newFields, int depth)
+                throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
+            updateIntermediateColumn(newFields, newFields, depth, depth);
+        }
+
+        private int extractRowDataFields(DataType type, List<DataField> nestedFields) {
             switch (type.getTypeRoot()) {
                 case ROW:
                     nestedFields.addAll(((RowType) type).getFields());
                     return 1;
                 case ARRAY:
-                    return extractRowDataFields(
-                                    ((ArrayType) type).getElementType(),
-                                    fullFieldName,
-                                    nestedFields)
+                    return extractRowDataFields(((ArrayType) type).getElementType(), nestedFields)
                             + 1;
                 case MAP:
-                    return extractRowDataFields(
-                                    ((MapType) type).getValueType(), fullFieldName, nestedFields)
-                            + 1;
+                    return extractRowDataFields(((MapType) type).getValueType(), nestedFields) + 1;
                 default:
-                    throw new IllegalArgumentException(
-                            fullFieldName + " is not a structured type.");
+                    return 1;
             }
         }
 
@@ -705,12 +837,12 @@ public class SchemaManager implements Serializable {
                             mapType.getKeyType(),
                             wrapNewRowType(mapType.getValueType(), nestedFields));
                 default:
-                    throw new IllegalStateException(
-                            "Trying to wrap a row type in " + type + ". This is unexpected.");
+                    return type;
             }
         }
 
-        protected abstract void updateLastColumn(List<DataField> newFields, String fieldName)
+        protected abstract void updateLastColumn(
+                int depth, List<DataField> newFields, String fieldName)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException;
 
         protected void assertColumnExists(List<DataField> newFields, String fieldName)
@@ -749,11 +881,11 @@ public class SchemaManager implements Serializable {
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
-            Function<DataField, DataField> updateFunc)
+            BiFunction<DataField, Integer, DataField> updateFunc)
             throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
         new NestedColumnModifier(updateFieldNames) {
             @Override
-            protected void updateLastColumn(List<DataField> newFields, String fieldName)
+            protected void updateLastColumn(int depth, List<DataField> newFields, String fieldName)
                     throws Catalog.ColumnNotExistException {
                 for (int i = 0; i < newFields.size(); i++) {
                     DataField field = newFields.get(i);
@@ -761,7 +893,7 @@ public class SchemaManager implements Serializable {
                         continue;
                     }
 
-                    newFields.set(i, updateFunc.apply(field));
+                    newFields.set(i, updateFunc.apply(field, depth));
                     return;
                 }
 
@@ -782,7 +914,7 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        return TableSchema.fromPath(fileIO, toSchemaPath(id));
+        return fromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -910,5 +1042,23 @@ public class SchemaManager implements Serializable {
         database = database.substring(0, index);
 
         return new Identifier(database, paths[paths.length - 1], branchName, null);
+    }
+
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public static TableSchema tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return TableSchema.fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

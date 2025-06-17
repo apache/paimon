@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
@@ -30,7 +29,6 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
 import java.io.IOException;
 import java.util.List;
@@ -64,16 +62,17 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         boolean containLogSystem = containLogSystem();
         int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
+        int subtaskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
+                    return task == subtaskId;
                 };
 
-        state = createState(context, stateFilter);
+        state = createState(subtaskId, context, stateFilter);
         write =
                 storeSinkWriteProvider.provide(
                         table,
@@ -85,9 +84,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     }
 
     protected StoreSinkWriteState createState(
-            StateInitializationContext context, StoreSinkWriteState.StateValueFilter stateFilter)
+            int subtaskId,
+            StateInitializationContext context,
+            StoreSinkWriteState.StateValueFilter stateFilter)
             throws Exception {
-        return new StoreSinkWriteStateImpl(context, stateFilter);
+        return new StoreSinkWriteStateImpl(subtaskId, context, stateFilter);
     }
 
     protected String getCommitUser(StateInitializationContext context) throws Exception {
@@ -101,12 +102,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         }
 
         return commitUser;
-    }
-
-    @Override
-    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
-        ProcessRecordAttributesUtil.processWithWrite(recordAttributes, write);
-        super.processRecordAttributes(recordAttributes);
     }
 
     protected abstract boolean containLogSystem();

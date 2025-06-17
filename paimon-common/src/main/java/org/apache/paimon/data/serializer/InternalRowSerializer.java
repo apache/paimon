@@ -24,14 +24,20 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.data.BinaryWriter.ValueSetter;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.data.NestedRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -46,6 +52,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     private final Serializer[] fieldSerializers;
     private final FieldGetter[] fieldGetters;
     private final ValueSetter[] valueSetters;
+    private final boolean[] writeNulls;
 
     private transient BinaryRow reuseRow;
     private transient BinaryRowWriter reuseWriter;
@@ -70,11 +77,18 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         this.binarySerializer = new BinaryRowSerializer(types.length);
         this.fieldGetters = new FieldGetter[types.length];
         this.valueSetters = new ValueSetter[types.length];
+        this.writeNulls = new boolean[types.length];
         for (int i = 0; i < types.length; i++) {
             DataType type = types[i];
             fieldGetters[i] = InternalRow.createFieldGetter(type, i);
             // pass serializer to avoid infinite loop
             valueSetters[i] = BinaryWriter.createValueSetter(type, fieldSerializers[i]);
+            // see reference: org.apache.paimon.codegen.GenerateUtils.binaryWriterWriteNull
+            if (type instanceof DecimalType) {
+                writeNulls[i] = !Decimal.isCompact(DataTypeChecks.getPrecision(type));
+            } else if (type instanceof TimestampType || type instanceof LocalZonedTimestampType) {
+                writeNulls[i] = !Timestamp.isCompact(DataTypeChecks.getPrecision(type));
+            }
         }
     }
 
@@ -157,7 +171,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         reuseWriter.writeRowKind(row.getRowKind());
         for (int i = 0; i < types.length; i++) {
             Object field = fieldGetters[i].getFieldOrNull(row);
-            if (field == null) {
+            if (field == null && !writeNulls[i]) {
                 reuseWriter.setNullAt(i);
             } else {
                 valueSetters[i].setValue(reuseWriter, i, field);

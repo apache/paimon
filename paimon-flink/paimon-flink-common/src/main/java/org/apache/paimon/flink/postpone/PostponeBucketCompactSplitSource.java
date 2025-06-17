@@ -28,13 +28,11 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -58,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,10 +70,13 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
     private static final Logger LOG =
             LoggerFactory.getLogger(PostponeBucketCompactSplitSource.class);
 
-    private final ReadBuilder readBuilder;
+    private final FileStoreTable table;
+    private final Map<String, String> partitionSpec;
 
-    public PostponeBucketCompactSplitSource(ReadBuilder readBuilder) {
-        this.readBuilder = readBuilder;
+    public PostponeBucketCompactSplitSource(
+            FileStoreTable table, Map<String, String> partitionSpec) {
+        this.table = table;
+        this.partitionSpec = partitionSpec;
     }
 
     @Override
@@ -90,50 +92,50 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
     private class Reader extends AbstractNonCoordinatedSourceReader<Split> {
 
-        private final TableScan scan = readBuilder.newScan();
-
         @Override
         public InputStatus pollNext(ReaderOutput<Split> output) throws Exception {
-            try {
-                List<Split> splits = scan.plan().splits();
+            List<Split> splits =
+                    table.newSnapshotReader()
+                            .withPartitionFilter(partitionSpec)
+                            .withBucket(BucketMode.POSTPONE_BUCKET)
+                            .read()
+                            .splits();
 
-                for (Split split : splits) {
-                    DataSplit dataSplit = (DataSplit) split;
-                    List<DataFileMeta> files = new ArrayList<>(dataSplit.dataFiles());
-                    // we must replay the written records in exact order
-                    files.sort(Comparator.comparing(DataFileMeta::creationTime));
-                    for (DataFileMeta meta : files) {
-                        DataSplit s =
-                                DataSplit.builder()
-                                        .withPartition(dataSplit.partition())
-                                        .withBucket(dataSplit.bucket())
-                                        .withBucketPath(dataSplit.bucketPath())
-                                        .withTotalBuckets(dataSplit.totalBuckets())
-                                        .withDataFiles(Collections.singletonList(meta))
-                                        .isStreaming(false)
-                                        .build();
-                        output.collect(s);
-                    }
+            for (Split split : splits) {
+                DataSplit dataSplit = (DataSplit) split;
+                List<DataFileMeta> files = new ArrayList<>(dataSplit.dataFiles());
+                // we must replay the written records in exact order
+                files.sort(Comparator.comparing(DataFileMeta::creationTime));
+                for (DataFileMeta meta : files) {
+                    DataSplit s =
+                            DataSplit.builder()
+                                    .withPartition(dataSplit.partition())
+                                    .withBucket(dataSplit.bucket())
+                                    .withBucketPath(dataSplit.bucketPath())
+                                    .withTotalBuckets(dataSplit.totalBuckets())
+                                    .withDataFiles(Collections.singletonList(meta))
+                                    .isStreaming(false)
+                                    .build();
+                    output.collect(s);
                 }
-            } catch (EndOfScanException esf) {
-                LOG.info("Catching EndOfStreamException, the stream is finished.");
-                return InputStatus.END_OF_INPUT;
             }
-            return InputStatus.MORE_AVAILABLE;
+
+            return InputStatus.END_OF_INPUT;
         }
     }
 
     public static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
             StreamExecutionEnvironment env,
-            String name,
-            RowType rowType,
-            ReadBuilder readBuilder,
+            FileStoreTable table,
+            Map<String, String> partitionSpec,
             @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
-                                new PostponeBucketCompactSplitSource(readBuilder),
+                                new PostponeBucketCompactSplitSource(table, partitionSpec),
                                 WatermarkStrategy.noWatermarks(),
-                                "Compact split generator: " + name,
+                                String.format(
+                                        "Compact split generator: %s - %s",
+                                        table.fullName(), partitionSpec),
                                 new JavaTypeInfo<>(Split.class))
                         .forceNonParallel();
 
@@ -148,9 +150,12 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
         return Pair.of(
                 new DataStream<>(source.getExecutionEnvironment(), partitioned)
                         .transform(
-                                "Compact split reader: " + name,
-                                InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(rowType)),
-                                new ReadOperator(readBuilder, null)),
+                                String.format(
+                                        "Compact split reader: %s - %s",
+                                        table.fullName(), partitionSpec),
+                                InternalTypeInfo.of(
+                                        LogicalTypeConversion.toLogicalType(table.rowType())),
+                                new ReadOperator(table::newRead, null, null)),
                 source.forward()
                         .transform(
                                 "Remove new files",
@@ -181,13 +186,8 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                     matcher.find(),
                     "Data file name %s does not match the pattern. This is unexpected.",
                     fileName);
-
-            // use long to avoid overflow
-            long subtaskId = Long.parseLong(matcher.group(1));
-            // send records written by the same subtask to the same subtask
-            // to make sure we replay the written records in the exact order
-            long channel = (Math.abs(dataSplit.partition().hashCode()) + subtaskId) % numChannels;
-            return (int) channel;
+            return ChannelComputer.select(
+                    dataSplit.partition(), Integer.parseInt(matcher.group(1)), numChannels);
         }
     }
 }

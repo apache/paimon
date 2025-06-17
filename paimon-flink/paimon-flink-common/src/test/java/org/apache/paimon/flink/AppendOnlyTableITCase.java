@@ -28,6 +28,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,7 +69,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1','full-compaction.delta-commits'='10')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+                        "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
     }
 
     @Test
@@ -257,7 +258,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
+    public void testReadUnawareBucketTableWithRebalanceShuffle() throws Exception {
         batchSql(
                 "CREATE TABLE append_scalable_table (id INT, data STRING) "
                         + "WITH ('bucket' = '-1', 'consumer-id' = 'test', 'consumer.expiration-time' = '365 d', 'target-file-size' = '1 B', 'source.split.target-size' = '1 B', 'scan.parallelism' = '4')");
@@ -342,8 +343,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testAutoCompaction() {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
 
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
@@ -489,6 +489,21 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> paimonTable("T$branch_branch2"))
                 .isInstanceOf(Catalog.TableNotExistException.class)
                 .hasMessage("Table %s does not exist.", "default.T$branch_branch2");
+    }
+
+    @Test
+    public void testStreamReadOverwriteTable() throws Exception {
+        // create table
+        sql(
+                "CREATE TABLE T (id INT, p STRING) PARTITIONED BY (p) with ("
+                        + "'streaming-read-append-overwrite' = 'true')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
+        // insert data
+        batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (1)");
+        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, "2024"));
+        batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (2)");
+        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2, "2024"));
+        iterator.close();
     }
 
     @Override

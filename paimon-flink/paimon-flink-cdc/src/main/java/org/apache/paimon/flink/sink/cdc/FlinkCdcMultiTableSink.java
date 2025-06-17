@@ -50,7 +50,7 @@ import java.io.Serializable;
 import java.util.Collections;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
-import static org.apache.paimon.flink.sink.FlinkSink.configureGlobalCommitter;
+import static org.apache.paimon.flink.sink.FlinkSink.configureSlotSharingGroup;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
@@ -64,6 +64,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private final boolean isOverwrite = false;
     private final CatalogLoader catalogLoader;
+    private final double writeCpuCores;
+    private final MemorySize writeHeapMemory;
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final String commitUser;
@@ -72,12 +74,16 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     public FlinkCdcMultiTableSink(
             CatalogLoader catalogLoader,
+            double writeCpuCores,
+            @Nullable MemorySize writeHeapMemory,
             double commitCpuCores,
             @Nullable MemorySize commitHeapMemory,
             String commitUser,
             boolean eagerInit,
             TableFilter tableFilter) {
         this.catalogLoader = catalogLoader;
+        this.writeCpuCores = writeCpuCores;
+        this.writeHeapMemory = writeHeapMemory;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
         this.commitUser = commitUser;
@@ -120,6 +126,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                 input.transform(
                         WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
         forwardParallelism(written, input);
+        configureSlotSharingGroup(written, writeCpuCores, writeHeapMemory);
 
         // shuffle committables by table
         DataStream<MultiTableCommittable> partitioned =
@@ -139,7 +146,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 createCommitterFactory(tableFilter),
                                 createCommittableStateManager()));
         forwardParallelism(committed, input);
-        configureGlobalCommitter(committed, commitCpuCores, commitHeapMemory);
+        configureSlotSharingGroup(committed, commitCpuCores, commitHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
@@ -170,6 +177,6 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                WrappedManifestCommittableSerializer::new);
+                WrappedManifestCommittableSerializer::new, true);
     }
 }

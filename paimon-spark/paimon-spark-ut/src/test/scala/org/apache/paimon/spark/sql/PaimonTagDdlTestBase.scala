@@ -23,6 +23,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.Row
 
 abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
+
   test("Tag ddl: show tags syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
@@ -39,7 +40,7 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
       Row("2024-10-11") :: Row("2024-10-12") :: Row("2024-10-13") :: Nil)
   }
 
-  test("Tag ddl: alter table t crete tag syntax") {
+  test("Tag ddl: alter table t create tag syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
                 |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
@@ -100,6 +101,33 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
       Row("tag-2", 2, "PT1H") :: Nil)
   }
 
+  test("Tag ddl: alter table t create or replace tag twice") {
+    sql("""
+          |CREATE TABLE T (id INT, name STRING)
+          |USING PAIMON
+          |TBLPROPERTIES ('primary-key'='id')
+          |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (1, 'a')")
+
+    sql("ALTER TABLE  T CREATE TAG `tag-1`")
+    checkAnswer(sql("SHOW TAGS T"), Row("tag-1"))
+
+    // create tag
+    val t = intercept[Throwable] {
+      sql("ALTER TABLE T CREATE TAG `tag-1`")
+    }
+    assert(t.getMessage.contains("Tag tag-1 is exists."))
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1`")
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1` AS OF VERSION 1")
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1` AS OF VERSION 1 RETAIN 1 HOURS")
+
+    // replace tag
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1`")
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1` AS OF VERSION 1")
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1` AS OF VERSION 1 RETAIN 1 HOURS")
+  }
+
   test("Tag ddl: alter table t delete tag syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
@@ -157,5 +185,34 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
     // tag overwrite
     assertResult(1)(loadTable("T").tagManager().tagObjects().size())
     assertResult("haha")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+  }
+
+  test("Tag expiration: batch write expire tag") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("T") {
+          spark.sql("""CREATE TABLE T (id INT, name STRING)
+                      |USING PAIMON
+                      |TBLPROPERTIES (
+                      |'file.format' = 'avro',
+                      |'tag.automatic-creation'='batch',
+                      |'tag.num-retained-max'='1')""".stripMargin)
+
+          val table = loadTable("T")
+
+          withSparkSQLConf("spark.paimon.tag.batch.customized-name" -> "batch-tag-1") {
+            spark.sql("insert into T values(1, 'a')")
+            assertResult(1)(table.tagManager().tagObjects().size())
+            assertResult("batch-tag-1")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+          }
+
+          withSparkSQLConf("spark.paimon.tag.batch.customized-name" -> "batch-tag-2") {
+            spark.sql("insert into T values(2, 'b')")
+            assertResult(1)(table.tagManager().tagObjects().size())
+            assertResult("batch-tag-2")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+          }
+        }
+      }
+    }
   }
 }

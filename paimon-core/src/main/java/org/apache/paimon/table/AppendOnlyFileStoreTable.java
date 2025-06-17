@@ -25,7 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
-import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -39,9 +39,10 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;
@@ -91,13 +92,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 bucketMode());
     }
 
-    /**
-     * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
-     * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
-     */
     @Override
     public boolean supportStreamingReadOverwrite() {
-        return false;
+        return new CoreOptions(tableSchema.options()).streamingReadAppendOverwrite();
     }
 
     @Override
@@ -108,7 +105,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public InnerTableRead newRead() {
         RawFileSplitRead read = store().newRead();
-        return new AbstractDataTableRead<InternalRow>(schema()) {
+        return new AbstractDataTableRead(schema()) {
 
             @Override
             protected InnerTableRead innerWithFilter(Predicate predicate) {
@@ -130,13 +127,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
-        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
+        BaseAppendFileStoreWrite writer = store().newWrite(commitUser, manifestFilter, writeId);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,

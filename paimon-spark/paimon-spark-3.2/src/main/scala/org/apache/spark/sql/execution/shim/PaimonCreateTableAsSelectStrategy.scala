@@ -19,6 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.spark.catalog.FormatTableCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
@@ -42,6 +43,20 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession) extends Strate
             case (key, _) => coreOptionKeys.contains(key)
           }
           val newProps = CatalogV2Util.withDefaultOwnership(props) ++ coreOptions
+
+          val isPartitionedFormatTable = {
+            catalog match {
+              case catalog: FormatTableCatalog =>
+                catalog.isFormatTable(newProps.get("provider").orNull) && parts.nonEmpty
+              case _ => false
+            }
+          }
+
+          if (isPartitionedFormatTable) {
+            throw new UnsupportedOperationException(
+              "Using CTAS with partitioned format table is not supported yet.")
+          }
+
           CreateTableAsSelectExec(
             catalog,
             ident,

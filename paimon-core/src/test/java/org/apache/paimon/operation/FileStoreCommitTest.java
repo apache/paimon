@@ -62,6 +62,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +87,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -530,7 +532,7 @@ public class FileStoreCommitTest {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
+                (commit, committable) -> commit.commit(committable, false));
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
         // commit empty new files
@@ -544,7 +546,7 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 (commit, committable) -> {
                     commit.ignoreEmptyCommit(false);
-                    commit.commit(committable, Collections.emptyMap());
+                    commit.commit(committable, false);
                 });
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id() + 1);
     }
@@ -565,20 +567,14 @@ public class FileStoreCommitTest {
                     null,
                     Collections.emptyList(),
                     (commit, committable) -> {
-                        commit.commit(committable, Collections.emptyMap());
+                        commit.commit(committable, false);
                         committables.add(committable);
                     });
         }
 
         // commit the first snapshot again, should throw exception due to conflicts
         for (int i = 0; i < 3; i++) {
-            assertThatThrownBy(
-                            () ->
-                                    store.newCommit()
-                                            .commit(
-                                                    committables.get(0),
-                                                    Collections.emptyMap(),
-                                                    true))
+            assertThatThrownBy(() -> store.newCommit().commit(committables.get(0), true))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("Give up committing.");
         }
@@ -870,9 +866,12 @@ public class FileStoreCommitTest {
         fileStoreCommit.close();
     }
 
-    @Test
-    public void testDVIndexFiles() throws Exception {
-        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDVIndexFiles(boolean bitmap64) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
 
         // commit 1
         CommitMessageImpl commitMessage1 =
@@ -1008,6 +1007,34 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testCommitManifestWithProperties() throws Exception {
+        TestFileStore store = createStore(false);
+
+        try (FileStoreCommit fileStoreCommit = store.newCommit()) {
+            fileStoreCommit.ignoreEmptyCommit(false);
+
+            // commit with empty properties, the properties in snapshot should be null
+            ManifestCommittable manifestCommittable = new ManifestCommittable(0);
+            fileStoreCommit.commit(manifestCommittable, false);
+            Snapshot snapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+            assertThat(snapshot.properties()).isNull();
+
+            // commit with non-empty properties
+            manifestCommittable = new ManifestCommittable(0);
+            manifestCommittable.addProperty("k1", "v1");
+            manifestCommittable.addProperty("k2", "v2");
+            fileStoreCommit.commit(manifestCommittable, false);
+            snapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+            Map<String, String> expectedProps = new HashMap<>();
+            expectedProps.put("k1", "v1");
+            expectedProps.put("k2", "v2");
+            Map<String, String> snapshotProps = snapshot.properties();
+            assertThat(snapshotProps).isNotNull();
+            assertThat(snapshotProps).isEqualTo(expectedProps);
+        }
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)

@@ -34,6 +34,7 @@ public class ManifestCommittable {
     private final long identifier;
     @Nullable private final Long watermark;
     private final Map<Integer, Long> logOffsets;
+    private final Map<String, String> properties;
     private final List<CommitMessage> commitMessages;
 
     public ManifestCommittable(long identifier) {
@@ -45,6 +46,7 @@ public class ManifestCommittable {
         this.watermark = watermark;
         this.logOffsets = new HashMap<>();
         this.commitMessages = new ArrayList<>();
+        this.properties = new HashMap<>();
     }
 
     public ManifestCommittable(
@@ -52,10 +54,20 @@ public class ManifestCommittable {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             List<CommitMessage> commitMessages) {
+        this(identifier, watermark, logOffsets, commitMessages, new HashMap<>());
+    }
+
+    public ManifestCommittable(
+            long identifier,
+            @Nullable Long watermark,
+            Map<Integer, Long> logOffsets,
+            List<CommitMessage> commitMessages,
+            Map<String, String> properties) {
         this.identifier = identifier;
         this.watermark = watermark;
         this.logOffsets = logOffsets;
         this.commitMessages = commitMessages;
+        this.properties = properties;
     }
 
     public void addFileCommittable(CommitMessage commitMessage) {
@@ -70,6 +82,10 @@ public class ManifestCommittable {
         }
         long newOffset = Math.max(logOffsets.getOrDefault(bucket, offset), offset);
         logOffsets.put(bucket, newOffset);
+    }
+
+    public void addProperty(String key, String value) {
+        properties.put(key, value);
     }
 
     public long identifier() {
@@ -89,6 +105,10 @@ public class ManifestCommittable {
         return commitMessages;
     }
 
+    public Map<String, String> properties() {
+        return properties;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -101,12 +121,13 @@ public class ManifestCommittable {
         return Objects.equals(identifier, that.identifier)
                 && Objects.equals(watermark, that.watermark)
                 && Objects.equals(logOffsets, that.logOffsets)
-                && Objects.equals(commitMessages, that.commitMessages);
+                && Objects.equals(commitMessages, that.commitMessages)
+                && Objects.equals(properties, that.properties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, watermark, logOffsets, commitMessages);
+        return Objects.hash(identifier, watermark, logOffsets, commitMessages, properties);
     }
 
     @Override
@@ -116,7 +137,8 @@ public class ManifestCommittable {
                         + "identifier = %s, "
                         + "watermark = %s, "
                         + "logOffsets = %s, "
-                        + "commitMessages = %s",
-                identifier, watermark, logOffsets, commitMessages);
+                        + "commitMessages = %s, "
+                        + "properties = %s}",
+                identifier, watermark, logOffsets, commitMessages, properties);
     }
 }

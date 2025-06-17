@@ -41,7 +41,6 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.KeyValueTableRead;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -117,7 +116,7 @@ public class TestChangelogDataReadWrite {
         this.commitUser = UUID.randomUUID().toString();
     }
 
-    public TableRead createReadWithKey() {
+    public KeyValueTableRead createReadWithKey() {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         CoreOptions options = new CoreOptions(new HashMap<>());
         TableSchema schema = schemaManager.schema(0);

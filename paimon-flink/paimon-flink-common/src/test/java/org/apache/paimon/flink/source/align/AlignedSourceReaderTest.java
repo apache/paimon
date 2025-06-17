@@ -25,18 +25,17 @@ import org.apache.paimon.flink.source.FileStoreSourceReader;
 import org.apache.paimon.flink.source.FileStoreSourceReaderTest;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitGenerator;
-import org.apache.paimon.flink.source.TestChangelogDataReadWrite;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
@@ -127,11 +126,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
 
         AlignedContinuousFileStoreSource alignedSource =
                 new AlignedContinuousFileStoreSource(
-                        table.newReadBuilder(),
-                        table.options(),
-                        null,
-                        BucketMode.HASH_DYNAMIC,
-                        null);
+                        table.newReadBuilder(), table.options(), null, false, null);
         SourceOperatorFactory<RowData> sourceOperatorFactory =
                 new SourceOperatorFactory<>(alignedSource, WatermarkStrategy.noWatermarks());
         StreamTaskMailboxTestHarnessBuilder<RowData> builder =
@@ -220,10 +215,11 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
     }
 
     @Override
-    protected FileStoreSourceReader createReader(TestingReaderContext context) {
+    protected FileStoreSourceReader createReader(
+            TestingReaderContext context, TableRead tableRead) {
         return new AlignedSourceReader(
                 context,
-                new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
+                tableRead,
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
                 null,

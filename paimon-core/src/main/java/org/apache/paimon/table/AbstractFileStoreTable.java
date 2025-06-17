@@ -36,13 +36,14 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.sink.AppendTableRowKeyExtractor;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketWriteSelector;
+import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
@@ -50,8 +51,6 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
-import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CatalogBranchManager;
@@ -69,8 +68,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -81,14 +79,11 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
-    private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -192,7 +187,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(this);
         if (snapshot != null) {
             String file = snapshot.statistics();
             if (file == null) {
@@ -219,6 +214,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case HASH_FIXED:
                 return Optional.of(new FixedBucketWriteSelector(schema()));
             case BUCKET_UNAWARE:
+            case POSTPONE_MODE:
                 return Optional.empty();
             default:
                 throw new UnsupportedOperationException(
@@ -239,7 +235,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case CROSS_PARTITION:
                 return new DynamicBucketRowKeyExtractor(schema());
             case BUCKET_UNAWARE:
-                return new UnawareBucketRowKeyExtractor(schema());
+                return new AppendTableRowKeyExtractor(schema());
+            case POSTPONE_MODE:
+                return new PostponeBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
@@ -264,21 +262,23 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                tableSchema.primaryKeys().size() > 0,
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()));
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
                 changelogManager(),
                 supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()),
+                !tableSchema.primaryKeys().isEmpty());
     }
 
     protected abstract SplitGenerator splitGenerator();
@@ -444,12 +444,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser, this),
                 newExpireRunnable(),
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagCreationManager(),
+                options.writeOnly() ? null : store().newTagCreationManager(this),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot());
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        return new ConsumerManager(fileIO, path, snapshotManager().branch());
     }
 
     @Nullable
@@ -475,75 +480,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
-        CoreOptions coreOptions = new CoreOptions(options);
-
-        switch (coreOptions.startupMode()) {
-            case FROM_SNAPSHOT:
-            case FROM_SNAPSHOT_FULL:
-                if (coreOptions.scanVersion() != null) {
-                    return travelToVersion(coreOptions.scanVersion(), options);
-                } else if (coreOptions.scanSnapshotId() != null) {
-                    return travelToSnapshot(coreOptions.scanSnapshotId(), options);
-                } else if (coreOptions.scanWatermark() != null) {
-                    return travelToWatermark(coreOptions.scanWatermark(), options);
-                } else {
-                    return travelToTag(coreOptions.scanTagName(), options);
-                }
-            case FROM_TIMESTAMP:
-                Snapshot snapshot =
-                        StaticFromTimestampStartingScanner.timeTravelToTimestamp(
-                                snapshotManager(), coreOptions.scanTimestampMills());
-                return travelToSnapshot(snapshot, options);
-            default:
-                return Optional.empty();
+        Snapshot snapshot;
+        try {
+            snapshot =
+                    TimeTravelUtil.tryTravelToSnapshot(options, snapshotManager(), tagManager())
+                            .orElse(null);
+        } catch (Exception e) {
+            return Optional.empty();
         }
-    }
-
-    /** Tag first when travelling to a version. */
-    private Optional<TableSchema> travelToVersion(String version, Options options) {
-        options.remove(CoreOptions.SCAN_VERSION.key());
-        if (tagManager().tagExists(version)) {
-            options.set(CoreOptions.SCAN_TAG_NAME, version);
-            return travelToTag(version, options);
-        } else if (version.startsWith(WATERMARK_PREFIX)) {
-            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
-            options.set(CoreOptions.SCAN_WATERMARK, watermark);
-            return travelToWatermark(watermark, options);
-        } else if (version.chars().allMatch(Character::isDigit)) {
-            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
-            return travelToSnapshot(Long.parseLong(version), options);
-        } else {
-            throw new RuntimeException("Cannot find a time travel version for " + version);
+        if (snapshot == null) {
+            return Optional.empty();
         }
-    }
-
-    private Optional<TableSchema> travelToTag(String tagName, Options options) {
-        return travelToSnapshot(tagManager().getOrThrow(tagName).trimToSnapshot(), options);
-    }
-
-    private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
-        SnapshotManager snapshotManager = snapshotManager();
-        if (snapshotManager.snapshotExists(snapshotId)) {
-            return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
-        }
-        return Optional.empty();
-    }
-
-    private Optional<TableSchema> travelToWatermark(long watermark, Options options) {
-        Snapshot snapshot =
-                StaticFromWatermarkStartingScanner.timeTravelToWatermark(
-                        snapshotManager(), watermark);
-        if (snapshot != null) {
-            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
-        }
-        return Optional.empty();
-    }
-
-    private Optional<TableSchema> travelToSnapshot(@Nullable Snapshot snapshot, Options options) {
-        if (snapshot != null) {
-            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
-        }
-        return Optional.empty();
+        return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
     }
 
     @Override
@@ -551,14 +499,37 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
-            return;
-        } catch (UnsupportedOperationException ignore) {
+        } catch (UnsupportedOperationException e) {
+            try {
+                Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+                rollbackHelper().cleanLargerThan(snapshot);
+            } catch (FileNotFoundException ex) {
+                // try to get snapshot from tag
+                TagManager tagManager = tagManager();
+                SortedMap<Snapshot, List<String>> tags = tagManager.tags();
+                for (Map.Entry<Snapshot, List<String>> entry : tags.entrySet()) {
+                    if (entry.getKey().id() == snapshotId) {
+                        rollbackTo(entry.getValue().get(0));
+                        return;
+                    }
+                }
+                throw new IllegalArgumentException(
+                        String.format("Rollback snapshot '%s' doesn't exist.", snapshotId), ex);
+            }
         }
-        checkArgument(
-                snapshotManager.snapshotExists(snapshotId),
-                "Rollback snapshot '%s' doesn't exist.",
-                snapshotId);
-        rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
+    }
+
+    @Override
+    public void rollbackTo(String tagName) {
+        SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(Instant.tag(tagName));
+        } catch (UnsupportedOperationException e) {
+            Snapshot taggedSnapshot = tagManager().getOrThrow(tagName).trimToSnapshot();
+            RollbackHelper rollbackHelper = rollbackHelper();
+            rollbackHelper.cleanLargerThan(taggedSnapshot);
+            rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+        }
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -616,7 +587,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
         tagManager()
                 .createTag(
-                        fromSnapshot, tagName, timeRetained, store().createTagCallbacks(), false);
+                        fromSnapshot,
+                        tagName,
+                        timeRetained,
+                        store().createTagCallbacks(this),
+                        false);
     }
 
     @Override
@@ -631,9 +606,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Snapshot latestSnapshot = snapshotManager().latestSnapshot();
             SnapshotNotExistException.checkNotNull(
                     latestSnapshot, "Cannot replace tag because latest snapshot doesn't exist.");
-            tagManager().replaceTag(latestSnapshot, tagName, timeRetained);
+            tagManager()
+                    .replaceTag(
+                            latestSnapshot,
+                            tagName,
+                            timeRetained,
+                            store().createTagCallbacks(this));
         } else {
-            tagManager().replaceTag(findSnapshot(fromSnapshotId), tagName, timeRetained);
+            tagManager()
+                    .replaceTag(
+                            findSnapshot(fromSnapshotId),
+                            tagName,
+                            timeRetained,
+                            store().createTagCallbacks(this));
         }
     }
 
@@ -644,7 +629,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         tagName,
                         store().newTagDeletion(),
                         snapshotManager(),
-                        store().createTagCallbacks());
+                        store().createTagCallbacks(this));
     }
 
     @Override
@@ -677,38 +662,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void fastForward(String branchName) {
         branchManager().fastForward(branchName);
-    }
-
-    @Override
-    public void rollbackTo(String tagName) {
-        SnapshotManager snapshotManager = snapshotManager();
-        try {
-            snapshotManager.rollback(Instant.tag(tagName));
-            return;
-        } catch (UnsupportedOperationException ignore) {
-
-        }
-        TagManager tagManager = tagManager();
-        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
-
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        rollbackHelper().updateLatestAndCleanLargerThan(taggedSnapshot);
-
-        try {
-            // it is possible that the earliest snapshot is later than the rollback tag because of
-            // snapshot expiration, in this case the `cleanLargerThan` method will delete all
-            // snapshots, so we should write the tag file to snapshot directory and modify the
-            // earliest hint
-            if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-                fileIO.writeFile(
-                        snapshotManager().snapshotPath(taggedSnapshot.id()),
-                        fileIO.readFileUtf8(tagManager.tagPath(tagName)),
-                        false);
-                snapshotManager.commitEarliestHint(taggedSnapshot.id());
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 
     @Override
@@ -748,14 +701,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private RollbackHelper rollbackHelper() {
-        return new RollbackHelper(
-                snapshotManager(),
-                changelogManager(),
-                tagManager(),
-                fileIO,
-                store().newSnapshotDeletion(),
-                store().newChangelogDeletion(),
-                store().newTagDeletion());
+        return new RollbackHelper(snapshotManager(), changelogManager(), tagManager(), fileIO);
     }
 
     protected RowKindGenerator rowKindGenerator() {

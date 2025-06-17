@@ -83,6 +83,42 @@ public interface PartitionPredicate {
                 new RowDataToObjectArrayConverter(partitionType), partitions);
     }
 
+    static PartitionPredicate alwaysFalse() {
+        return new PartitionPredicate() {
+            @Override
+            public boolean test(BinaryRow part) {
+                return false;
+            }
+
+            @Override
+            public boolean test(
+                    long rowCount,
+                    InternalRow minValues,
+                    InternalRow maxValues,
+                    InternalArray nullCounts) {
+                return false;
+            }
+        };
+    }
+
+    static PartitionPredicate alwaysTrue() {
+        return new PartitionPredicate() {
+            @Override
+            public boolean test(BinaryRow part) {
+                return true;
+            }
+
+            @Override
+            public boolean test(
+                    long rowCount,
+                    InternalRow minValues,
+                    InternalRow maxValues,
+                    InternalArray nullCounts) {
+                return true;
+            }
+        };
+    }
+
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 

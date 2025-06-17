@@ -40,12 +40,13 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 
 /** Wrapper to fetch value from the spark internal row. */
-public class SparkInternalRowWrapper implements InternalRow {
+public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
-    private org.apache.spark.sql.catalyst.InternalRow internalRow;
+    private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
     private final int length;
     private final int rowKindIdx;
     private final StructType structType;
@@ -151,7 +152,7 @@ public class SparkInternalRowWrapper implements InternalRow {
 
     @Override
     public Variant getVariant(int pos) {
-        return SparkShimLoader.getSparkShim().toPaimonVariant(internalRow, pos);
+        return SparkShimLoader.shim().toPaimonVariant(internalRow, pos);
     }
 
     @Override
@@ -306,7 +307,7 @@ public class SparkInternalRowWrapper implements InternalRow {
 
         @Override
         public Variant getVariant(int pos) {
-            return SparkShimLoader.getSparkShim().toPaimonVariant(arrayData, pos);
+            return SparkShimLoader.shim().toPaimonVariant(arrayData, pos);
         }
 
         @Override

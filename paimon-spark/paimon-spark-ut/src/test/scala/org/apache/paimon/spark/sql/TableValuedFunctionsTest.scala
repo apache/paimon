@@ -367,15 +367,4 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
   private def utcMills(timestamp: String) =
     Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond
-
-  object GenericRow {
-    def of(values: Any*): GenericRow = {
-      val row = new GenericRow(values.length)
-      values.zipWithIndex.foreach {
-        case (value, index) =>
-          row.setField(index, value)
-      }
-      row
-    }
-  }
 }

@@ -26,17 +26,20 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.data.RowData;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link StoreCompactOperator}. */
 public class StoreCompactOperatorTest extends TableTestBase {
@@ -70,15 +73,23 @@ public class StoreCompactOperatorTest extends TableTestBase {
         harness.processElement(new StreamRecord<>(data(1)));
         harness.processElement(new StreamRecord<>(data(2)));
 
-        ((StoreCompactOperator) harness.getOneInputOperator()).prepareCommit(true, 1);
-        Assertions.assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
+        StoreCompactOperator operator = (StoreCompactOperator) harness.getOperator();
+        assertThat(operator.compactionWaitingSet())
+                .containsExactlyInAnyOrder(
+                        Pair.of(BinaryRow.EMPTY_ROW, 0),
+                        Pair.of(BinaryRow.EMPTY_ROW, 1),
+                        Pair.of(BinaryRow.EMPTY_ROW, 2));
+        assertThat(compactRememberStoreWrite.compactTime).isEqualTo(0);
+        operator.prepareCommit(true, 1);
+        assertThat(operator.compactionWaitingSet()).isEmpty();
+        assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
     }
 
     private RowData data(int bucket) {
         GenericRow genericRow =
                 GenericRow.of(
                         0L,
-                        BinaryRow.EMPTY_ROW.toBytes(),
+                        SerializationUtils.serializeBinaryRow(BinaryRow.EMPTY_ROW),
                         bucket,
                         new byte[] {0x00, 0x00, 0x00, 0x00});
         return new FlinkRowData(genericRow);
@@ -92,9 +103,6 @@ public class StoreCompactOperatorTest extends TableTestBase {
         public CompactRememberStoreWrite(boolean streamingMode) {
             this.streamingMode = streamingMode;
         }
-
-        @Override
-        public void withInsertOnly(boolean insertOnly) {}
 
         @Override
         public SinkRecord write(InternalRow rowData) {

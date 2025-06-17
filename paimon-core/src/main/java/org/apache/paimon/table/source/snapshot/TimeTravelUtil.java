@@ -20,13 +20,13 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
@@ -36,9 +36,17 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
+import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
 
@@ -47,95 +55,100 @@ public class TimeTravelUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(TimeTravelUtil.class);
 
+    private static final String WATERMARK_PREFIX = "watermark-";
+
     private static final String[] SCAN_KEYS = {
-        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-        CoreOptions.SCAN_TAG_NAME.key(),
-        CoreOptions.SCAN_WATERMARK.key(),
-        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
+        SCAN_SNAPSHOT_ID.key(),
+        SCAN_TAG_NAME.key(),
+        SCAN_WATERMARK.key(),
+        SCAN_TIMESTAMP.key(),
+        SCAN_TIMESTAMP_MILLIS.key()
     };
 
-    public static Snapshot resolveSnapshot(FileStoreTable table) {
-        return resolveSnapshotFromOptions(table.coreOptions(), table.snapshotManager());
+    public static Snapshot tryTravelOrLatest(FileStoreTable table) {
+        return tryTravelToSnapshot(table).orElseGet(() -> table.latestSnapshot().orElse(null));
     }
 
-    public static Snapshot resolveSnapshotFromOptions(
-            CoreOptions options, SnapshotManager snapshotManager) {
+    public static Optional<Snapshot> tryTravelToSnapshot(FileStoreTable table) {
+        return tryTravelToSnapshot(
+                table.coreOptions().toConfiguration(), table.snapshotManager(), table.tagManager());
+    }
+
+    public static Optional<Snapshot> tryTravelToSnapshot(
+            Options options, SnapshotManager snapshotManager, TagManager tagManager) {
+        adaptScanVersion(options, tagManager);
+
         List<String> scanHandleKey = new ArrayList<>(1);
         for (String key : SCAN_KEYS) {
-            if (options.toConfiguration().containsKey(key)) {
+            if (options.containsKey(key)) {
                 scanHandleKey.add(key);
             }
         }
 
-        if (scanHandleKey.size() == 0) {
-            return snapshotManager.latestSnapshot();
+        if (scanHandleKey.isEmpty()) {
+            return Optional.empty();
         }
 
         checkArgument(
                 scanHandleKey.size() == 1,
                 String.format(
-                        "Only one of the following parameters may be set : [%s, %s, %s, %s]",
-                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                        CoreOptions.SCAN_TAG_NAME.key(),
-                        CoreOptions.SCAN_WATERMARK.key(),
-                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
+                        "Only one of the following parameters may be set : %s",
+                        Arrays.toString(SCAN_KEYS)));
 
         String key = scanHandleKey.get(0);
-        Snapshot snapshot = null;
-        if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
-            snapshot = resolveSnapshotBySnapshotId(snapshotManager, options);
-        } else if (key.equals(CoreOptions.SCAN_WATERMARK.key())) {
-            snapshot = resolveSnapshotByWatermark(snapshotManager, options);
-        } else if (key.equals(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())) {
-            snapshot = resolveSnapshotByTimestamp(snapshotManager, options);
-        } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
-            snapshot = resolveSnapshotByTagName(snapshotManager, options);
+        CoreOptions coreOptions = new CoreOptions(options);
+        Snapshot snapshot;
+        if (key.equals(SCAN_SNAPSHOT_ID.key())) {
+            snapshot =
+                    new StaticFromSnapshotStartingScanner(
+                                    snapshotManager, coreOptions.scanSnapshotId())
+                            .getSnapshot();
+        } else if (key.equals(SCAN_WATERMARK.key())) {
+            snapshot =
+                    new StaticFromWatermarkStartingScanner(
+                                    snapshotManager, coreOptions.scanWatermark())
+                            .getSnapshot();
+        } else if (key.equals(SCAN_TIMESTAMP.key())) {
+            snapshot =
+                    new StaticFromTimestampStartingScanner(
+                                    snapshotManager,
+                                    parseTimestampData(
+                                                    coreOptions.scanTimestamp(),
+                                                    3,
+                                                    TimeZone.getDefault())
+                                            .getMillisecond())
+                            .getSnapshot();
+        } else if (key.equals(SCAN_TIMESTAMP_MILLIS.key())) {
+            snapshot =
+                    new StaticFromTimestampStartingScanner(
+                                    snapshotManager, coreOptions.scanTimestampMills())
+                            .getSnapshot();
+        } else if (key.equals(SCAN_TAG_NAME.key())) {
+            snapshot =
+                    new StaticFromTagStartingScanner(snapshotManager, coreOptions.scanTagName())
+                            .getSnapshot();
+        } else {
+            throw new UnsupportedOperationException("Unsupported time travel mode: " + key);
+        }
+        return Optional.of(snapshot);
+    }
+
+    private static void adaptScanVersion(Options options, TagManager tagManager) {
+        String version = options.remove(CoreOptions.SCAN_VERSION.key());
+        if (version == null) {
+            return;
         }
 
-        if (snapshot == null) {
-            snapshot = snapshotManager.latestSnapshot();
+        if (tagManager.tagExists(version)) {
+            options.set(SCAN_TAG_NAME, version);
+        } else if (version.startsWith(WATERMARK_PREFIX)) {
+            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
+            options.set(SCAN_WATERMARK, watermark);
+        } else if (version.chars().allMatch(Character::isDigit)) {
+            options.set(SCAN_SNAPSHOT_ID.key(), version);
+        } else {
+            throw new RuntimeException("Cannot find a time travel version for " + version);
         }
-        return snapshot;
-    }
-
-    private static Snapshot resolveSnapshotBySnapshotId(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long snapshotId = options.scanSnapshotId();
-        if (snapshotId != null) {
-            if (!snapshotManager.snapshotExists(snapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-                Long latestSnapshotId = snapshotManager.latestSnapshotId();
-                throw new SnapshotNotExistException(
-                        String.format(
-                                "Specified parameter %s = %s is not exist, you can set it in range from %s to %s.",
-                                SCAN_SNAPSHOT_ID.key(),
-                                snapshotId,
-                                earliestSnapshotId,
-                                latestSnapshotId));
-            }
-            return snapshotManager.snapshot(snapshotId);
-        }
-        return null;
-    }
-
-    private static Snapshot resolveSnapshotByTimestamp(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long timestamp = options.scanTimestampMills();
-        return snapshotManager.earlierOrEqualTimeMills(timestamp);
-    }
-
-    private static Snapshot resolveSnapshotByWatermark(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long watermark = options.scanWatermark();
-        return snapshotManager.laterOrEqualWatermark(watermark);
-    }
-
-    private static Snapshot resolveSnapshotByTagName(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        String tagName = options.scanTagName();
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        return tagManager.getOrThrow(tagName).trimToSnapshot();
     }
 
     /**
@@ -282,5 +295,15 @@ public class TimeTravelUtil {
         public long endSnapshotId() {
             return endSnapshotId;
         }
+    }
+
+    @Nullable
+    public static Long scanTimestampMills(Options options) {
+        String timestampStr = options.get(SCAN_TIMESTAMP);
+        Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
+        if (timestampMillis == null && timestampStr != null) {
+            return parseTimestampData(timestampStr, 3, TimeZone.getDefault()).getMillisecond();
+        }
+        return timestampMillis;
     }
 }

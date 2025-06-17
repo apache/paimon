@@ -33,13 +33,20 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
     private final VectorizedColumnBatch batch;
 
     public OrcRowColumnVector(
-            StructColumnVector hiveVector, VectorizedRowBatch orcBatch, RowType type) {
+            StructColumnVector hiveVector,
+            VectorizedRowBatch orcBatch,
+            RowType type,
+            boolean legacyTimestampLtzType) {
         super(hiveVector, orcBatch);
         int len = hiveVector.fields.length;
         ColumnVector[] paimonVectors = new ColumnVector[len];
         for (int i = 0; i < len; i++) {
             paimonVectors[i] =
-                    createPaimonVector(hiveVector.fields[i], orcBatch, type.getTypeAt(i));
+                    createPaimonVector(
+                            hiveVector.fields[i],
+                            orcBatch,
+                            type.getTypeAt(i),
+                            legacyTimestampLtzType);
         }
         this.batch = new VectorizedColumnBatch(paimonVectors);
     }

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,7 +76,15 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 values.add(String.format("(%d, %d, %d)", i, j, i * numKeys + j));
             }
         }
-        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (random.nextBoolean()) {
+            tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        } else {
+            tEnv.executeSql(
+                            "INSERT INTO T /*+ OPTIONS('partition.sink-strategy'='hash') */ VALUES "
+                                    + String.join(", ", values))
+                    .await();
+        }
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
 
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
@@ -423,6 +432,244 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
 
         assertThat(collect(tEnv.executeSql("SELECT COUNT(*) FROM `T$snapshots`")))
                 .containsExactlyInAnyOrder("+I[5]");
+    }
+
+    @Timeout(TIMEOUT)
+    @Test
+    public void testLookupPostponeBucketTable() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        String createCatalogSql =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        bEnv.executeSql(createCatalogSql);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        bEnv.executeSql("CREATE TABLE SRC (i INT, `proctime` AS PROCTIME())");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(200)
+                        .build();
+        sEnv.executeSql(createCatalogSql);
+        sEnv.executeSql("USE CATALOG mycat");
+        TableResult streamingSelect =
+                sEnv.executeSql(
+                        "SELECT i, v FROM SRC LEFT JOIN T "
+                                + "FOR SYSTEM_TIME AS OF SRC.proctime AS D ON SRC.i = D.k");
+
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // lookup join
+        bEnv.executeSql("INSERT INTO SRC VALUES (1), (2), (3)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]");
+
+        // rescale and re-join
+        bEnv.executeSql("CALL sys.rescale(`table` => 'default.T', `bucket_num` => 5)").await();
+        bEnv.executeSql("INSERT INTO SRC VALUES (1), (2), (3)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]");
+
+        it.close();
+    }
+
+    @Timeout(TIMEOUT)
+    @Test
+    public void testLookupPostponeBucketPartitionedTable() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        String createCatalogSql =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        bEnv.executeSql(createCatalogSql);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  pt INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k, pt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        bEnv.executeSql("CREATE TABLE SRC (i INT, pt INT, `proctime` AS PROCTIME())");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(200)
+                        .build();
+        sEnv.executeSql(createCatalogSql);
+        sEnv.executeSql("USE CATALOG mycat");
+        TableResult streamingSelect =
+                sEnv.executeSql(
+                        "SELECT i, D.pt, v FROM SRC LEFT JOIN T "
+                                + "FOR SYSTEM_TIME AS OF SRC.proctime AS D ON SRC.i = D.k AND SRC.pt = D.pt");
+
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 1, 10), (2, 2, 20), (3, 2, 30)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // rescale for partitions to different num buckets and lookup join
+        bEnv.executeSql(
+                        "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 5, `partition` => 'pt=1')")
+                .await();
+        bEnv.executeSql(
+                        "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 8, `partition` => 'pt=2')")
+                .await();
+        bEnv.executeSql("INSERT INTO SRC VALUES (1, 1), (2, 2), (3, 2)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 1, 10]", "+I[2, 2, 20]", "+I[3, 2, 30]");
+
+        it.close();
+    }
+
+    @Test
+    public void testDeletionVector() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'deletion-vectors.enabled' = 'true'\n"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30), (4, 40)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 11), (5, 51)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]", "+I[5, 51]");
+
+        tEnv.executeSql("INSERT INTO T VALUES (2, 52), (3, 32)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 52]", "+I[3, 32]", "+I[4, 40]", "+I[5, 51]");
+    }
+
+    @Test
+    public void testSameKeyPreserveOrder() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ VALUES (1, 10), (1, 20), (1, 30), (1, 40)")
+                .await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 40]");
+    }
+
+    @Test
+    public void testAvroUnsupportedTypes() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v TIMESTAMP(9),\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T VALUES (1, TIMESTAMP '2025-06-11 16:35:45.123456789'), (2, CAST(NULL AS TIMESTAMP(9)))")
+                .await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 2025-06-11T16:35:45.123456789]", "+I[2, null]");
     }
 
     private List<String> collect(TableResult result) throws Exception {

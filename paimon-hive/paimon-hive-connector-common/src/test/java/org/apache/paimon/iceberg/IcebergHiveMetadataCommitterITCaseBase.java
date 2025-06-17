@@ -174,6 +174,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
         tEnv.executeSql(
                 "CREATE TABLE my_paimon.test_db.t ( pt INT, id INT, data STRING ) PARTITIONED BY (pt) WITH "
                         + "( 'metadata.iceberg.storage' = 'hive-catalog', 'metadata.iceberg.uri' = '', 'file.format' = 'avro',"
+                        + " 'metadata.iceberg.hive-skip-update-stats' = 'true',"
                         + " 'metadata.iceberg.glue.skip-archive' = 'true' )");
         tEnv.executeSql(
                         "INSERT INTO my_paimon.test_db.t VALUES "
@@ -261,6 +262,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 + "'metadata.iceberg.storage' = 'hive-catalog', "
                                 + "'metadata.iceberg.uri' = '', "
                                 + "'file.format' = 'avro', "
+                                + "'metadata.iceberg.hive-skip-update-stats' = 'true', "
                                 + "'metadata.iceberg.hive-client-class' = '%s')",
                         createFailHiveMetaStoreClient()));
         assertThrows(

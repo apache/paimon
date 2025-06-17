@@ -64,6 +64,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -305,8 +306,7 @@ public class LookupLevelsTest {
     private KeyValueFileWriterFactory createWriterFactory() {
         Path path = new Path(tempDir.toUri().toString());
         String identifier = "avro";
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, createNonPartFactory(path));
+        Function<String, FileStorePathFactory> pathFactoryMap = k -> createNonPartFactory(path);
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,

@@ -22,6 +22,7 @@ import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -57,12 +58,10 @@ public class ArrowFormatWriter implements AutoCloseable {
         fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
 
         for (int i = 0; i < fieldWriters.length; i++) {
+            DataType type = rowType.getFields().get(i).type();
             fieldWriters[i] =
-                    rowType.getFields()
-                            .get(i)
-                            .type()
-                            .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
-                            .create(vectorSchemaRoot.getVector(i));
+                    type.accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
+                            .create(vectorSchemaRoot.getVector(i), type.isNullable());
         }
 
         this.batchSize = writeBatchSize;

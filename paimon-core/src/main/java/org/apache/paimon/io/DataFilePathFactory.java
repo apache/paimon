@@ -66,6 +66,10 @@ public class DataFilePathFactory {
         this.externalPathProvider = externalPathProvider;
     }
 
+    public String dataFilePrefix() {
+        return dataFilePrefix;
+    }
+
     public Path newPath() {
         return newPath(dataFilePrefix);
     }
@@ -79,11 +83,7 @@ public class DataFilePathFactory {
     }
 
     public Path newPath(String prefix) {
-        String fileName = newFileName(prefix);
-        if (externalPathProvider != null) {
-            return externalPathProvider.getNextExternalDataPath(fileName);
-        }
-        return new Path(parent, fileName);
+        return newPathFromName(newFileName(prefix));
     }
 
     private String newFileName(String prefix) {
@@ -93,6 +93,21 @@ public class DataFilePathFactory {
         } else {
             extension = "." + formatIdentifier;
         }
+        return newFileName(prefix, extension);
+    }
+
+    public Path newPathFromExtension(String extension) {
+        return newPathFromName(newFileName(dataFilePrefix, extension));
+    }
+
+    private Path newPathFromName(String fileName) {
+        if (externalPathProvider != null) {
+            return externalPathProvider.getNextExternalDataPath(fileName);
+        }
+        return new Path(parent, fileName);
+    }
+
+    private String newFileName(String prefix, String extension) {
         return prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
     }
 

@@ -49,6 +49,10 @@ Paimon also supports reading some hidden metadata columns, currently supporting 
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+{{< hint info >}}
+Note: only append table or deletion vector table support querying metadata columns.
+{{< /hint >}}
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
@@ -161,7 +165,10 @@ A simple example with default scan mode:
 // no any scan-related configs are provided, that will use latest-full scan mode.
 val query = spark.readStream
   .format("paimon")
-  .load("/path/to/paimon/source/table")
+  // by table name
+  .table("table_name") 
+  // or by location
+  // .load("/path/to/paimon/source/table")
   .writeStream
   .format("console")
   .start()
@@ -226,7 +233,7 @@ Use `org.apache.spark.sql.streaming.Trigger.AvailableNow()` and `maxBytesPerTrig
 val query = spark.readStream
   .format("paimon")
   .option("read.stream.maxBytesPerTrigger", "134217728")
-  .load("/path/to/paimon/source/table")
+  .table("table_name")
   .writeStream
   .format("console")
   .trigger(Trigger.AvailableNow())
@@ -244,7 +251,7 @@ val query = spark.readStream
   .format("paimon")
   .option("read.stream.minRowsPerTrigger", "5000")
   .option("read.stream.maxTriggerDelayMs", "300000")
-  .load("/path/to/paimon/source/table")
+  .table("table_name")
   .writeStream
   .format("console")
   .start()
@@ -271,7 +278,7 @@ val query1 = spark.readStream
 val query2 = spark.readStream
   .format("paimon")
   .option("read.changelog", "true")
-  .load("/path/to/paimon/source/table")
+  .table("table_name")
   .writeStream
   .format("console")
   .start()

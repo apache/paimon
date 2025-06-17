@@ -44,7 +44,8 @@ import java.util.Objects;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class IcebergMetadata {
 
-    public static final int CURRENT_FORMAT_VERSION = 2;
+    public static final int FORMAT_VERSION_V2 = 2;
+    public static final int FORMAT_VERSION_V3 = 3;
 
     private static final String FIELD_FORMAT_VERSION = "format-version";
     private static final String FIELD_TABLE_UUID = "table-uuid";
@@ -62,6 +63,7 @@ public class IcebergMetadata {
     private static final String FIELD_SNAPSHOTS = "snapshots";
     private static final String FIELD_CURRENT_SNAPSHOT_ID = "current-snapshot-id";
     private static final String FIELD_PROPERTIES = "properties";
+    private static final String FIELD_REFS = "refs";
 
     @JsonProperty(FIELD_FORMAT_VERSION)
     private final int formatVersion;
@@ -112,7 +114,12 @@ public class IcebergMetadata {
     @Nullable
     private final Map<String, String> properties;
 
+    @JsonProperty(FIELD_REFS)
+    @Nullable
+    private final Map<String, IcebergRef> refs;
+
     public IcebergMetadata(
+            int formatVersion,
             String tableUuid,
             String location,
             long lastSequenceNumber,
@@ -122,9 +129,10 @@ public class IcebergMetadata {
             List<IcebergPartitionSpec> partitionSpecs,
             int lastPartitionId,
             List<IcebergSnapshot> snapshots,
-            long currentSnapshotId) {
+            long currentSnapshotId,
+            @Nullable Map<String, IcebergRef> refs) {
         this(
-                CURRENT_FORMAT_VERSION,
+                formatVersion,
                 tableUuid,
                 location,
                 lastSequenceNumber,
@@ -139,7 +147,8 @@ public class IcebergMetadata {
                 IcebergSortOrder.ORDER_ID,
                 snapshots,
                 currentSnapshotId,
-                new HashMap<>());
+                new HashMap<>(),
+                refs);
     }
 
     @JsonCreator
@@ -159,7 +168,8 @@ public class IcebergMetadata {
             @JsonProperty(FIELD_DEFAULT_SORT_ORDER_ID) int defaultSortOrderId,
             @JsonProperty(FIELD_SNAPSHOTS) List<IcebergSnapshot> snapshots,
             @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) long currentSnapshotId,
-            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties) {
+            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
+            @JsonProperty(FIELD_REFS) @Nullable Map<String, IcebergRef> refs) {
         this.formatVersion = formatVersion;
         this.tableUuid = tableUuid;
         this.location = location;
@@ -176,6 +186,7 @@ public class IcebergMetadata {
         this.snapshots = snapshots;
         this.currentSnapshotId = currentSnapshotId;
         this.properties = properties;
+        this.refs = refs;
     }
 
     @JsonGetter(FIELD_FORMAT_VERSION)
@@ -258,6 +269,11 @@ public class IcebergMetadata {
         return properties == null ? new HashMap<>() : properties;
     }
 
+    @JsonGetter(FIELD_REFS)
+    public Map<String, IcebergRef> refs() {
+        return refs == null ? new HashMap<>() : refs;
+    }
+
     public IcebergSnapshot currentSnapshot() {
         for (IcebergSnapshot snapshot : snapshots) {
             if (snapshot.snapshotId() == currentSnapshotId) {
@@ -302,7 +318,8 @@ public class IcebergMetadata {
                 sortOrders,
                 defaultSortOrderId,
                 snapshots,
-                currentSnapshotId);
+                currentSnapshotId,
+                refs);
     }
 
     @Override
@@ -329,6 +346,7 @@ public class IcebergMetadata {
                 && Objects.equals(sortOrders, that.sortOrders)
                 && defaultSortOrderId == that.defaultSortOrderId
                 && Objects.equals(snapshots, that.snapshots)
-                && currentSnapshotId == that.currentSnapshotId;
+                && currentSnapshotId == that.currentSnapshotId
+                && Objects.equals(refs, that.refs);
     }
 }

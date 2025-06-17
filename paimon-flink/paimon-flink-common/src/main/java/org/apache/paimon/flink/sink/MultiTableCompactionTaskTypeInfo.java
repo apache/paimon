@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.table.sink.MultiTableCompactionTaskSerializer;
 
@@ -28,9 +28,8 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 
-/** Type information of {@link MultiTableUnawareAppendCompactionTask}. */
-public class MultiTableCompactionTaskTypeInfo
-        extends TypeInformation<MultiTableUnawareAppendCompactionTask> {
+/** Type information of {@link MultiTableAppendCompactTask}. */
+public class MultiTableCompactionTaskTypeInfo extends TypeInformation<MultiTableAppendCompactTask> {
     @Override
     public boolean isBasicType() {
         return false;
@@ -52,8 +51,8 @@ public class MultiTableCompactionTaskTypeInfo
     }
 
     @Override
-    public Class<MultiTableUnawareAppendCompactionTask> getTypeClass() {
-        return MultiTableUnawareAppendCompactionTask.class;
+    public Class<MultiTableAppendCompactTask> getTypeClass() {
+        return MultiTableAppendCompactTask.class;
     }
 
     @Override
@@ -64,7 +63,7 @@ public class MultiTableCompactionTaskTypeInfo
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
      */
-    public TypeSerializer<MultiTableUnawareAppendCompactionTask> createSerializer(
+    public TypeSerializer<MultiTableAppendCompactTask> createSerializer(
             SerializerConfig serializerConfig) {
         return this.createSerializer((ExecutionConfig) null);
     }
@@ -72,21 +71,18 @@ public class MultiTableCompactionTaskTypeInfo
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
      */
-    public TypeSerializer<MultiTableUnawareAppendCompactionTask> createSerializer(
+    public TypeSerializer<MultiTableAppendCompactTask> createSerializer(
             ExecutionConfig executionConfig) {
-        return new SimpleVersionedSerializerTypeSerializerProxy<
-                MultiTableUnawareAppendCompactionTask>(
+        return new SimpleVersionedSerializerTypeSerializerProxy<MultiTableAppendCompactTask>(
                 () -> new VersionedSerializerWrapper<>(new MultiTableCompactionTaskSerializer())) {
             @Override
-            public MultiTableUnawareAppendCompactionTask copy(
-                    MultiTableUnawareAppendCompactionTask from) {
+            public MultiTableAppendCompactTask copy(MultiTableAppendCompactTask from) {
                 return from;
             }
 
             @Override
-            public MultiTableUnawareAppendCompactionTask copy(
-                    MultiTableUnawareAppendCompactionTask from,
-                    MultiTableUnawareAppendCompactionTask reuse) {
+            public MultiTableAppendCompactTask copy(
+                    MultiTableAppendCompactTask from, MultiTableAppendCompactTask reuse) {
                 return from;
             }
         };
@@ -99,7 +95,7 @@ public class MultiTableCompactionTaskTypeInfo
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof MultiTableUnawareAppendCompactionTask;
+        return o instanceof MultiTableAppendCompactTask;
     }
 
     @Override
@@ -109,6 +105,6 @@ public class MultiTableCompactionTaskTypeInfo
 
     @Override
     public boolean canEqual(Object o) {
-        return o instanceof MultiTableUnawareAppendCompactionTask;
+        return o instanceof MultiTableAppendCompactTask;
     }
 }

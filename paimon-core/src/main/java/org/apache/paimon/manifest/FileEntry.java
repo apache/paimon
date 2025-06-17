@@ -50,6 +50,8 @@ public interface FileEntry {
 
     int bucket();
 
+    int totalBuckets();
+
     int level();
 
     String fileName();

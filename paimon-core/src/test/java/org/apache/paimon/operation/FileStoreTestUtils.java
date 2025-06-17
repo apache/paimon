@@ -35,7 +35,6 @@ import org.apache.paimon.utils.RecordWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -60,6 +59,10 @@ public class FileStoreTestUtils {
 
     public static void assertPathNotExists(FileIO fileIO, Path path) throws IOException {
         assertThat(fileIO.exists(path)).isFalse();
+    }
+
+    public static void assertNFilesExists(FileIO fileIO, Path path, int num) throws IOException {
+        assertThat(fileIO.listStatus(path)).hasSize(num);
     }
 
     // --------------------------------------------------------------------------------
@@ -107,7 +110,7 @@ public class FileStoreTestUtils {
         }
 
         try (FileStoreCommit commit = store.newCommit()) {
-            commit.commit(committable, Collections.emptyMap());
+            commit.commit(committable, false);
         }
 
         writers.values().stream()

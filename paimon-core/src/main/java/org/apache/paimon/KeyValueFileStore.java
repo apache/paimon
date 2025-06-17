@@ -46,6 +46,8 @@ import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
+import javax.annotation.Nullable;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -99,11 +101,15 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public BucketMode bucketMode() {
-        if (options.bucket() == -1) {
-            return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
-        } else {
-            checkArgument(!crossPartitionUpdate);
-            return BucketMode.HASH_FIXED;
+        int bucket = options.bucket();
+        switch (bucket) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
+            default:
+                checkArgument(!crossPartitionUpdate);
+                return BucketMode.HASH_FIXED;
         }
     }
 
@@ -150,12 +156,14 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, null);
     }
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
@@ -169,16 +177,19 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
+                    pathFactory(),
                     schema,
                     commitUser,
                     partitionType,
                     keyType,
                     valueType,
                     this::pathFactory,
+                    newReaderFactoryBuilder(),
                     snapshotManager(),
                     newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
-                    tableName);
+                    tableName,
+                    writeId);
         } else {
             return new KeyValueFileStoreWrite(
                     fileIO,
@@ -206,9 +217,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     protected KeyValueFileStoreScan newScan(ScanType scanType) {
+        BucketMode bucketMode = bucketMode();
         BucketSelectConverter bucketSelectConverter =
                 keyFilter -> {
-                    if (bucketMode() != BucketMode.HASH_FIXED) {
+                    if (bucketMode != BucketMode.HASH_FIXED
+                            && bucketMode != BucketMode.POSTPONE_MODE) {
                         return Optional.empty();
                     }
 

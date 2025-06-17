@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -28,8 +29,11 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -238,15 +242,14 @@ public class HiveWriteITCase extends HiveTestBase {
 
     @Test
     public void testWriteOnlyWithAppendOnlyTableOption() throws Exception {
-
         String innerName = "hive_test_table_output";
-        int maxCompact = 3;
+        int maxCompact = 5;
         String path = folder.newFolder().toURI().toString();
         String tablePath = String.format("%s/test_db.db/%s", path, innerName);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
-        conf.set(CoreOptions.COMPACTION_MAX_FILE_NUM, maxCompact);
+        conf.set(CoreOptions.COMPACTION_MIN_FILE_NUM, maxCompact);
         Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -1170,5 +1173,42 @@ public class HiveWriteITCase extends HiveTestBase {
         List<Object[]> select = hiveShell.executeStatement("select * from " + outputTableName);
         List<Object[]> expect = hiveShell.executeStatement("select * from " + tableName);
         assertThat(select.toArray()).containsExactlyInAnyOrder(expect.toArray());
+    }
+
+    @Test
+    public void testInsertIntoPostponeBucket() throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE, folder.newFolder().toURI().toString());
+        options.set(CoreOptions.BUCKET, -2);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        Identifier identifier = Identifier.create(DATABASE_NAME, "postpone_bucket");
+        FileStoreTable table =
+                (FileStoreTable)
+                        FileStoreTestUtils.createFileStoreTable(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT()),
+                                Collections.emptyList(),
+                                Collections.singletonList("f0"),
+                                identifier);
+        String tableName =
+                writeData(
+                        table,
+                        table.location().toString(),
+                        Collections.singletonList(GenericRow.of(1, 2, 3)));
+        hiveShell.execute("insert into " + tableName + " values (1,2,3),(4,5,6)");
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        ManifestEntry manifestEntry =
+                table.manifestFileReader()
+                        .read(
+                                table.manifestListReader()
+                                        .read(snapshot.deltaManifestList())
+                                        .get(0)
+                                        .fileName())
+                        .get(0);
+        DataFileMeta file = manifestEntry.file();
+        assertThat(manifestEntry.bucket()).isEqualTo(-2);
+        // default format for postpone bucket is avro
+        assertThat(file.fileName()).endsWith(".avro");
     }
 }

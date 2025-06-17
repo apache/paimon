@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
 
 import java.util.List;
@@ -34,6 +35,9 @@ import java.util.List;
  */
 @Public
 public interface TableCommit extends AutoCloseable {
+
+    /** Set {@link MetricRegistry} to table commit. */
+    TableCommit withMetricRegistry(MetricRegistry registry);
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

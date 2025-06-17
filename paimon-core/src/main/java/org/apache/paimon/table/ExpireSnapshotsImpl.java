@@ -135,6 +135,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     @VisibleForTesting
     public int expireUntil(long earliestId, long endExclusiveId) {
+        long startTime = System.currentTimeMillis();
+
         if (endExclusiveId <= earliestId) {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
@@ -156,11 +158,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 beginInclusiveId = id + 1;
                 break;
             }
-        }
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
@@ -230,21 +227,31 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return 0;
         }
 
-        Set<String> skippingSet = new HashSet<>();
+        Set<String> skippingSet = null;
         try {
-            skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            skippingSet = new HashSet<>(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
         } catch (Exception e) {
-            // maybe snapshot been deleted by other jobs.
-            if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
-                throw e;
+            LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
+        }
+        if (skippingSet != null) {
+            for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Ready to delete manifests in snapshot #" + id);
+                }
+
+                Snapshot snapshot;
+                try {
+                    snapshot = snapshotManager.tryGetSnapshot(id);
+                } catch (FileNotFoundException e) {
+                    beginInclusiveId = id + 1;
+                    continue;
+                }
+                snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             }
         }
 
+        // delete snapshot file finally
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete manifests in snapshot #" + id);
-            }
-
             Snapshot snapshot;
             try {
                 snapshot = snapshotManager.tryGetSnapshot(id);
@@ -252,7 +259,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 beginInclusiveId = id + 1;
                 continue;
             }
-            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             if (expireConfig.isChangelogDecoupled()) {
                 commitChangelog(new Changelog(snapshot));
             }
@@ -260,6 +266,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         writeEarliestHint(endExclusiveId);
+        long duration = System.currentTimeMillis() - startTime;
+        LOG.info(
+                "Finished expire snapshots, duration {} ms, range is [{}, {})",
+                duration,
+                beginInclusiveId,
+                endExclusiveId);
         return (int) (endExclusiveId - beginInclusiveId);
     }
 

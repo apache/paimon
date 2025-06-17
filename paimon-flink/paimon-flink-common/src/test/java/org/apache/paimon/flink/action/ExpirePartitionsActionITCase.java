@@ -124,6 +124,65 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         assertThat(actual).isEqualTo(expected);
     }
 
+    @Test
+    public void testExpirePartitionsWithTableConf() throws Exception {
+        FileStoreTable table = prepareTable();
+        // prepare more data
+        writeData(
+                rowData(
+                        BinaryString.fromString("3"),
+                        BinaryString.fromString("2024-01-01"),
+                        BinaryString.fromString("02:00")));
+        writeData(
+                rowData(
+                        BinaryString.fromString("4"),
+                        BinaryString.fromString("2024-01-02"),
+                        BinaryString.fromString("01:00")));
+
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
+        List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+        List<String> expected;
+        expected =
+                Arrays.asList(
+                        "+I[1, 2024-01-01, 01:00]",
+                        "+I[2, 9999-09-20, 02:00]",
+                        "+I[3, 2024-01-01, 02:00]",
+                        "+I[4, 2024-01-02, 01:00]");
+
+        assertThat(actual).isEqualTo(expected);
+
+        // only expire one partition
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--expiration_time",
+                        "1 d",
+                        "--timestamp_formatter",
+                        "yyyy-MM-dd",
+                        "--timestamp_pattern",
+                        "$dt",
+                        "--table_conf",
+                        "partition.expiration-max-num=1")
+                .run();
+
+        plan = table.newReadBuilder().newScan().plan();
+        actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+
+        expected =
+                Arrays.asList(
+                        "+I[2, 9999-09-20, 02:00]",
+                        "+I[3, 2024-01-01, 02:00]",
+                        "+I[4, 2024-01-02, 01:00]");
+
+        assertThat(actual).isEqualTo(expected);
+    }
+
     private FileStoreTable prepareTable() throws Exception {
         init(warehouse);
 

@@ -61,7 +61,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
-import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAMS;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAM_MAP;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PLUGIN_CLASS_NAME;
@@ -166,6 +165,15 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
+    // flink-connector-pulsar 4.1.0+ remove PulsarOptions#PULSAR_ADMIN_URL option, Compatible with
+    // lower version flink-connector-pulsar.
+    @Deprecated
+    static final ConfigOption<String> PULSAR_ADMIN_URL =
+            ConfigOptions.key("pulsar.admin.adminUrl")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The Pulsar service HTTP URL for the admin endpoint.");
+
     public static PulsarSource<CdcSourceRecord> buildPulsarSource(
             Configuration pulsarConfig,
             DeserializationSchema<CdcSourceRecord> deserializationSchema) {
@@ -174,10 +182,10 @@ public class PulsarActionUtils {
         // the minimum setup
         pulsarSourceBuilder
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
-                .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
                 .setDeserializationSchema(deserializationSchema);
 
+        pulsarConfig.getOptional(PULSAR_ADMIN_URL).ifPresent(pulsarSourceBuilder::setAdminUrl);
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
         pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
 

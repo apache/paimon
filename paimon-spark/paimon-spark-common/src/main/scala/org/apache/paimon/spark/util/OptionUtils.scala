@@ -59,6 +59,10 @@ object OptionUtils extends SQLConfHelper {
     }
   }
 
+  def useV2Write(): Boolean = {
+    getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
+  }
+
   def extractCatalogName(): Option[String] = {
     val sparkCatalogTemplate = String.format("%s([^.]*)$", SPARK_CATALOG_PREFIX)
     val sparkCatalogPattern = Pattern.compile(sparkCatalogTemplate)

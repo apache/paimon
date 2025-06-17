@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
-
     private static final int PORT = 9087;
+    @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
     public static void startMetastore() {
@@ -56,148 +57,120 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreateFormatTable(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.warehouse",
-                                warehousePath.toString())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]")
-                        .getOrCreate();
+    public void testCreateFormatTable() throws IOException {
+        SparkSession spark = createSessionBuilder().getOrCreate();
+        {
+            spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+            spark.sql("USE spark_catalog.my_db1");
 
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
-        spark.sql("USE spark_catalog.my_db1");
+            // test orc table
 
-        // test orc table
+            spark.sql("CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc");
 
-        spark.sql("CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc");
+            assertThat(
+                            spark.sql("SHOW TABLES").collectAsList().stream()
+                                    .map(s -> s.get(1))
+                                    .map(Object::toString))
+                    .containsExactlyInAnyOrder("table_orc");
 
-        assertThat(
-                        spark.sql("SHOW TABLES").collectAsList().stream()
-                                .map(s -> s.get(1))
-                                .map(Object::toString))
-                .containsExactlyInAnyOrder("table_orc");
+            assertThat(
+                            spark.sql("EXPLAIN EXTENDED SELECT * from table_orc").collectAsList()
+                                    .stream()
+                                    .map(s -> s.get(0))
+                                    .map(Object::toString)
+                                    .filter(s -> s.contains("OrcScan"))
+                                    .count())
+                    .isGreaterThan(0);
 
-        assertThat(
-                        spark.sql("EXPLAIN EXTENDED SELECT * from table_orc").collectAsList()
-                                .stream()
-                                .map(s -> s.get(0))
-                                .map(Object::toString)
-                                .filter(s -> s.contains("OrcScan"))
-                                .count())
-                .isGreaterThan(0);
+            // todo: There are some bugs with Spark CSV table's options. In Spark 3.x, both reading
+            // and
+            // writing using the default delimiter value ',' even if we specific it. In Spark 4.x,
+            // reading is correct, but writing is still incorrect, just skip setting it for now.
+            // test csv table
 
-        // todo: There are some bugs with Spark CSV table's options. In Spark 3.x, both reading and
-        // writing using the default delimiter value ',' even if we specific it. In Spark 4.x,
-        // reading is correct, but writing is still incorrect, just skip setting it for now.
-        // test csv table
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('field-delimiter' ',')");
+            spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
+            assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
+                    .contains("sep=,");
+            assertThat(
+                            spark.sql("SELECT * FROM table_csv").collectAsList().stream()
+                                    .map(Row::toString)
+                                    .collect(Collectors.toList()))
+                    .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
 
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('field-delimiter' ',')");
-        spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
-        assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
-                .contains("sep=,");
-        assertThat(
-                        spark.sql("SELECT * FROM table_csv").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
+            // test json table
 
-        // test json table
-
-        spark.sql("CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json");
-        spark.sql("INSERT INTO table_json VALUES(1, 1, '1'), (2, 2, '2')");
-        assertThat(
-                        spark.sql("SELECT * FROM table_json").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
-
-        spark.close();
+            spark.sql("CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json");
+            spark.sql("INSERT INTO table_json VALUES(1, 1, '1'), (2, 2, '2')");
+            assertThat(
+                            spark.sql("SELECT * FROM table_json").collectAsList().stream()
+                                    .map(Row::toString)
+                                    .collect(Collectors.toList()))
+                    .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
+        }
+        spark.stop();
     }
 
     @Test
-    public void testSpecifyHiveConfDir(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
+    public void testSpecifyHiveConfDirInGenericCatalog() throws IOException {
+        try (SparkSession spark =
+                createSessionBuilder()
                         .config("spark.sql.catalog.spark_catalog.hive-conf-dir", "nonExistentPath")
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog",
                                 SparkGenericCatalog.class.getName())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]")
-                        .getOrCreate();
-
-        assertThatThrownBy(() -> spark.sql("CREATE DATABASE my_db"))
-                .rootCause()
-                .isInstanceOf(FileNotFoundException.class)
-                .hasMessageContaining("nonExistentPath");
-
-        spark.close();
+                        .getOrCreate()) {
+            assertThatThrownBy(() -> spark.sql("CREATE DATABASE my_db"))
+                    .rootCause()
+                    .isInstanceOf(FileNotFoundException.class)
+                    .hasMessageContaining("nonExistentPath");
+        }
     }
 
     @Test
-    public void testCreateExternalTable(@TempDir java.nio.file.Path tempDir) {
+    public void testCreateExternalTable() throws IOException {
+        try (SparkSession spark = createSessionBuilder().getOrCreate()) {
+            String warehousePath = spark.sparkContext().conf().get("spark.sql.warehouse.dir");
+            spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
+            spark.sql("USE spark_catalog.test_db");
+
+            // create hive external table
+            spark.sql("CREATE EXTERNAL TABLE external_table (a INT, bb INT, c STRING)");
+
+            // drop hive external table
+            spark.sql("DROP TABLE external_table");
+
+            // file system table exists
+            assertThatCode(
+                            () ->
+                                    FileStoreTableFactory.create(
+                                            LocalFileIO.create(),
+                                            new Path(
+                                                    warehousePath,
+                                                    String.format(
+                                                            "%s.db/%s",
+                                                            "test_db", "external_table"))))
+                    .doesNotThrowAnyException();
+        }
+    }
+
+    private SparkSession.Builder createSessionBuilder() {
         Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
-                        .config(
-                                "spark.sql.catalog.spark_catalog.warehouse",
-                                warehousePath.toString())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]")
-                        .getOrCreate();
-
-        spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
-        spark.sql("USE spark_catalog.test_db");
-
-        // create hive external table
-        spark.sql("CREATE EXTERNAL TABLE t1 (a INT, bb INT, c STRING)");
-
-        // drop hive external table
-        spark.sql("DROP TABLE t1");
-
-        // file system table exists
-        assertThatCode(
-                        () ->
-                                FileStoreTableFactory.create(
-                                        LocalFileIO.create(),
-                                        new Path(
-                                                warehousePath,
-                                                String.format("%s.db/%s", "test_db", "t1"))))
-                .doesNotThrowAnyException();
-
-        spark.close();
+        return SparkSession.builder()
+                .config("spark.sql.warehouse.dir", warehousePath.toString())
+                // with hive metastore
+                .config("spark.sql.catalogImplementation", "hive")
+                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
+                .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                .config(
+                        "spark.sql.catalog.spark_catalog.hive.metastore.uris",
+                        "thrift://localhost:" + PORT)
+                .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
+                .config(
+                        "spark.sql.extensions",
+                        "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+                .master("local[2]");
     }
 }

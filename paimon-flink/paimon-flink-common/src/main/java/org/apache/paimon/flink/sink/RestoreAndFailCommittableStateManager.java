@@ -19,18 +19,9 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.utils.SerializableSupplier;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
-
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -44,42 +35,20 @@ import java.util.List;
  * store writers.
  */
 public class RestoreAndFailCommittableStateManager<GlobalCommitT>
-        implements CommittableStateManager<GlobalCommitT> {
+        extends RestoreCommittableStateManager<GlobalCommitT> {
 
     private static final long serialVersionUID = 1L;
 
-    /** The committable's serializer. */
-    private final SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer;
-
-    /** GlobalCommitT state of this job. Used to filter out previous successful commits. */
-    private ListState<GlobalCommitT> streamingCommitterState;
-
     public RestoreAndFailCommittableStateManager(
-            SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer) {
-        this.committableSerializer = committableSerializer;
+            SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer,
+            boolean partitionMarkDoneRecoverFromState) {
+        super(committableSerializer, partitionMarkDoneRecoverFromState);
     }
 
     @Override
-    public void initializeState(
-            StateInitializationContext context, Committer<?, GlobalCommitT> committer)
+    protected int recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
-        streamingCommitterState =
-                new SimpleVersionedListState<>(
-                        context.getOperatorStateStore()
-                                .getListState(
-                                        new ListStateDescriptor<>(
-                                                "streaming_committer_raw_states",
-                                                BytePrimitiveArraySerializer.INSTANCE)),
-                        new VersionedSerializerWrapper<>(committableSerializer.get()));
-        List<GlobalCommitT> restored = new ArrayList<>();
-        streamingCommitterState.get().forEach(restored::add);
-        streamingCommitterState.clear();
-        recover(restored, committer);
-    }
-
-    private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
-            throws Exception {
-        int numCommitted = committer.filterAndCommit(committables);
+        int numCommitted = super.recover(committables, committer);
         if (numCommitted > 0) {
             throw new RuntimeException(
                     "This exception is intentionally thrown "
@@ -87,11 +56,6 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
                             + "By restarting the job we hope that "
                             + "writers can start writing based on these new commits.");
         }
-    }
-
-    @Override
-    public void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
-            throws Exception {
-        streamingCommitterState.update(committables);
+        return numCommitted;
     }
 }

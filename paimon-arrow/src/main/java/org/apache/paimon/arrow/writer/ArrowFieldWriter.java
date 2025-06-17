@@ -25,14 +25,18 @@ import org.apache.arrow.vector.FieldVector;
 
 import javax.annotation.Nullable;
 
+import static java.lang.String.format;
+
 /** A reusable writer to convert a field into Arrow {@link FieldVector}. */
 public abstract class ArrowFieldWriter {
 
     // reusable
     protected final FieldVector fieldVector;
+    protected final boolean isNullable;
 
-    public ArrowFieldWriter(FieldVector fieldVector) {
+    public ArrowFieldWriter(FieldVector fieldVector, boolean isNullable) {
         this.fieldVector = fieldVector;
+        this.isNullable = isNullable;
     }
 
     /** Reset the state of the writer to write the next batch of fields. */
@@ -67,6 +71,12 @@ public abstract class ArrowFieldWriter {
     /** Get the value from the row at the given position and write to specified row index. */
     public void write(int rowIndex, DataGetters getters, int pos) {
         if (getters.isNullAt(pos)) {
+            if (!isNullable) {
+                throw new IllegalArgumentException(
+                        format(
+                                "Arrow does not support null values in non-nullable fields. Field name : %s expected not null but found null",
+                                fieldVector.getName()));
+            }
             fieldVector.setNull(rowIndex);
         } else {
             doWrite(rowIndex, getters, pos);

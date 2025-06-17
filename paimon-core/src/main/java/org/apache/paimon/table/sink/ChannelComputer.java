@@ -35,12 +35,25 @@ public interface ChannelComputer<T> extends Serializable {
     int channel(T record);
 
     static int select(BinaryRow partition, int bucket, int numChannels) {
-        int startChannel = Math.abs(partition.hashCode()) % numChannels;
-        return (startChannel + bucket) % numChannels;
+        return (startChannel(partition, numChannels) + bucket) % numChannels;
     }
 
     static int select(int bucket, int numChannels) {
         return bucket % numChannels;
+    }
+
+    static int startChannel(BinaryRow partition, int numChannels) {
+        int hashCode = partition.hashCode();
+        if (hashCode == Integer.MIN_VALUE) {
+            hashCode = Integer.MAX_VALUE;
+        }
+        // Due to backward compatibility (Flink users may recover from state),
+        // we need to use this formula.
+        // However, if hashCode equals Integer.MIN_VALUE,
+        // Math.abs will still return Integer.MIN_VALUE,
+        // and this formula will produce a negative integer.
+        // So we specially handle this case above.
+        return Math.abs(hashCode) % numChannels;
     }
 
     static <T, R> ChannelComputer<R> transform(

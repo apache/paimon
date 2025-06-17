@@ -89,7 +89,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
-    private boolean isInsertOnly;
     private final boolean legacyPartitionName;
 
     protected AbstractFileStoreWrite(
@@ -143,16 +142,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
-    }
-
-    @Override
-    public void withInsertOnly(boolean insertOnly) {
-        this.isInsertOnly = insertOnly;
-        for (Map<Integer, WriterContainer<T>> containerMap : writers.values()) {
-            for (WriterContainer<T> container : containerMap.values()) {
-                container.writer.withInsertOnly(insertOnly);
-            }
-        }
     }
 
     @Override
@@ -280,7 +269,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     String commitUser, SnapshotManager snapshotManager) {
         long latestCommittedIdentifier =
                 snapshotManager
-                        .latestSnapshotOfUser(commitUser)
+                        .latestSnapshotOfUserFromFilesystem(commitUser)
                         .map(Snapshot::commitIdentifier)
                         .orElse(Long.MIN_VALUE);
         if (LOG.isDebugEnabled()) {
@@ -433,11 +422,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        // NOTE: don't use snapshotManager.latestSnapshot() here,
+        // because we don't want to flood the catalog with high concurrency
+        Snapshot previousSnapshot =
+                ignorePreviousFiles ? null : snapshotManager.latestSnapshotFromFileSystem();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         int totalBuckets;
-        if (!ignorePreviousFiles && latestSnapshot != null) {
-            totalBuckets = scanExistingFileMetas(latestSnapshot, partition, bucket, restoreFiles);
+        if (previousSnapshot != null) {
+            totalBuckets = scanExistingFileMetas(previousSnapshot, partition, bucket, restoreFiles);
         } else {
             totalBuckets = getDefaultBucketNum(partition);
         }
@@ -445,13 +437,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         IndexMaintainer<T> indexMaintainer =
                 indexFactory == null
                         ? null
-                        : indexFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
+                        : indexFactory.createOrRestore(previousSnapshot, partition, bucket);
         DeletionVectorsMaintainer deletionVectorsMaintainer =
                 dvMaintainerFactory == null
                         ? null
-                        : dvMaintainerFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
+                        : dvMaintainerFactory.createOrRestore(previousSnapshot, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(
                         partition.copy(),
@@ -461,14 +451,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         null,
                         compactExecutor(),
                         deletionVectorsMaintainer);
-        writer.withInsertOnly(isInsertOnly);
         notifyNewWriter(writer);
         return new WriterContainer<>(
                 writer,
                 totalBuckets,
                 indexMaintainer,
                 deletionVectorsMaintainer,
-                latestSnapshot == null ? null : latestSnapshot.id());
+                previousSnapshot == null ? null : previousSnapshot.id());
     }
 
     @Override
@@ -578,7 +567,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @VisibleForTesting
-    Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
+    public Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
         return writers;
     }
 

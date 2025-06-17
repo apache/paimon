@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -46,31 +45,27 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
 
     public KeyValueThinDataFileWriterImpl(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
-            SimpleStatsProducer statsProducer,
             long schemaId,
             int level,
-            String compression,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath) {
         super(
                 fileIO,
-                factory,
+                context,
                 path,
                 converter,
                 keyType,
                 valueType,
                 KeyValue.schema(RowType.of(), valueType),
-                statsProducer,
                 schemaId,
                 level,
-                compression,
                 options,
                 fileSource,
                 fileIndexOptions,
@@ -97,7 +92,7 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
     Pair<SimpleColStats[], SimpleColStats[]> fetchKeyValueStats(SimpleColStats[] rowStats) {
         int numKeyFields = keyType.getFieldCount();
         // In thin mode, there is no key stats in rowStats, so we only jump
-        // _SEQUNCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
+        // _SEQUENCE_NUMBER_ and _ROW_KIND_ stats. Therefore, the 'from' value is 2.
         SimpleColStats[] valFieldStats = Arrays.copyOfRange(rowStats, 2, rowStats.length);
         // Thin mode on, so need to map value stats to key stats.
         SimpleColStats[] keyStats = new SimpleColStats[numKeyFields];

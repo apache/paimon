@@ -72,10 +72,9 @@ public class ConfigOptionsDocGenerator {
 
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
-                new OptionsClassLocation("paimon-common", "org.apache.paimon.options"),
-                new OptionsClassLocation("paimon-common", "org.apache.paimon"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon.lookup"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon.catalog"),
+                new OptionsClassLocation("paimon-api", "org.apache.paimon.options"),
+                new OptionsClassLocation("paimon-api", "org.apache.paimon"),
+                new OptionsClassLocation("paimon-core", "org.apache.paimon.lookup.rocksdb"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.jdbc"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.table"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.iceberg"),

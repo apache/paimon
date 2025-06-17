@@ -57,8 +57,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
 
         String fullOption = ", 'lookup.cache' = 'full'";
-
         String lruOption = ", 'changelog-producer'='lookup'";
+        String memoryOption = ", 'lookup.cache' = 'memory'";
 
         switch (cacheMode) {
             case FULL:
@@ -68,6 +68,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
             case AUTO:
                 tEnv.executeSql(String.format(dim, lruOption));
                 tEnv.executeSql(String.format(partitioned, lruOption));
+                break;
+            case MEMORY:
+                tEnv.executeSql(String.format(dim, memoryOption));
+                tEnv.executeSql(String.format(partitioned, memoryOption));
                 break;
             default:
                 throw new UnsupportedOperationException();
@@ -159,7 +163,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         BlockingIterator<Row, Row> streamIter =
                 streamSqlBlockIter(
                         "SELECT T.pt, T.id, T.data, D.pt, D.id, D.data "
-                                + "FROM t1 AS T LEFT JOIN d /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'scan.snapshot-id'='2') */ "
+                                + "FROM t1 AS T LEFT JOIN d /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'scan.snapshot-id'='2', "
+                                // just test that black list won't cause exception
+                                + " 'lookup.refresh.time-periods-blacklist'='2000-01-01 00:00->2000-01-01 01:00') */ "
                                 + "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.id = D.id");
 
         assertThat(streamIter.collect(3))
@@ -1070,5 +1076,36 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         List<Row> result = iterator.collect(3);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
         iterator.close();
+    }
+
+    @Test
+    public void testMaxPtAndOverwrite() throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt INT, k INT, v INT) "
+                        + "PARTITIONED BY (`pt`) WITH ("
+                        + "'bucket' = '2', "
+                        + "'bucket-key' = 'k', "
+                        + "'lookup.dynamic-partition' = 'max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '99999 s', "
+                        + "'continuous.discovery-interval'='1 ms')");
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES (1, 1, 101), (1, 2, 102), (2, 1, 201), (2, 2, 202)");
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        String query =
+                "SELECT T.i, D.v FROM T "
+                        + "LEFT JOIN PARTITIONED_DIM /*+ OPTIONS('scan.partitions' = 'max_pt()') */ "
+                        + "for system_time as of T.proctime AS D ON T.i = D.k";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1, 201), Row.of(2, 202), Row.of(3, null));
+
+        sql(
+                "INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 2) VALUES (1, 211), (2, 212), (3, 213)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
     }
 }

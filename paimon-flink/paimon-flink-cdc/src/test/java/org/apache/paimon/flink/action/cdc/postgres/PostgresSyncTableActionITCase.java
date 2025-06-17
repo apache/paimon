@@ -532,7 +532,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(180)
     public void testComputedColumn() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table

@@ -79,6 +79,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -95,11 +96,12 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
-import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -111,6 +113,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
@@ -291,12 +294,10 @@ public abstract class SimpleTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Collections.singletonList(
-                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
+                        singletonList("1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Collections.singletonList(
-                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+                        singletonList("2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -450,7 +451,7 @@ public abstract class SimpleTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (fileFormat(table.coreOptions()).getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }
@@ -579,7 +580,6 @@ public abstract class SimpleTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(WRITE_ONLY, true);
-                            conf.set(COMPACTION_MAX_FILE_NUM, 5);
                             // 'write-only' options will also skip expiration
                             // these options shouldn't have any effect
                             conf.set(SNAPSHOT_NUM_RETAINED_MIN, 3);
@@ -790,8 +790,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(8);
+        assertRollbackTo(table, singletonList(1L), 1, 1, emptyList());
     }
 
     // All tags are after the rollback snapshot
@@ -814,16 +813,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(8);
-        // table-path/snapshot/LATEST
-        // table-path/snapshot/EARLIEST
-        // table-path/snapshot/snapshot-1
-        // table-path/pt=0/bucket-0/data-0.orc
-        // table-path/manifest/manifest-list-1
-        // table-path/manifest/manifest-0
-        // table-path/manifest/manifest-list-0
-        // table-path/schema/schema-0
+        assertRollbackTo(table, singletonList(1L), 1, 1, emptyList());
     }
 
     // One tag is at the rollback snapshot and others are after it
@@ -857,10 +847,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(9);
-        // case 0 plus 1:
-        // table-path/tag/tag-test3
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test3"));
     }
 
     // One tag is before the rollback snapshot and others are after it
@@ -896,15 +883,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(14);
-        // case 0 plus 6:
-        // table-path/manifest/manifest-list-2
-        // table-path/manifest/manifest-list-3
-        // table-path/manifest/manifest-1
-        // table-path/snapshot/snapshot-2
-        // table-path/tag/tag-test3
-        // table-path/pt=1/bucket-0/data-0.orc
+        assertRollbackTo(table, Arrays.asList(1L, 2L), 1, 2, singletonList("test3"));
     }
 
     @ParameterizedTest(name = "expire snapshots = {0}")
@@ -949,10 +928,36 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(9);
-        // rollback snapshot case 0 plus 1:
-        // table-path/tag/tag-test1
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test1"));
+    }
+
+    @Test
+    public void testRollbackToTagFromSnapshotId() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
+
+        table.createTag("test", 1);
+
+        // expire snapshots
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
+        options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
+        table.copy(options.toMap()).newCommit("").expireSnapshots();
+
+        table.rollbackTo(1);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test"));
     }
 
     private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {
@@ -1095,7 +1100,7 @@ public abstract class SimpleTableTestBase {
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
-                Snapshot.fromPath(
+                SnapshotManager.fromPath(
                         table.fileIO(),
                         tagManager.copyWithBranch("test-branch").tagPath("test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
@@ -1104,14 +1109,14 @@ public abstract class SimpleTableTestBase {
         SnapshotManager snapshotManager =
                 newSnapshotManager(table.fileIO(), table.location(), "test-branch");
         Snapshot branchSnapshot =
-                Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
+                SnapshotManager.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
                 new SchemaManager(table.fileIO(), table.location(), "test-branch");
         TableSchema branchSchema =
-                TableSchema.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
+                SchemaManager.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1268,16 +1273,17 @@ public abstract class SimpleTableTestBase {
         // verify snapshot in branch1 and main branch is same
         SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
         Snapshot branchSnapshot =
-                Snapshot.fromPath(
+                SnapshotManager.fromPath(
                         table.fileIO(),
                         snapshotManager.copyWithBranch(BRANCH_NAME).snapshotPath(2));
-        Snapshot snapshot = Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
+        Snapshot snapshot =
+                SnapshotManager.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         TableSchema branchSchema =
-                TableSchema.fromPath(
+                SchemaManager.fromPath(
                         table.fileIO(), schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
@@ -1761,5 +1767,21 @@ public abstract class SimpleTableTestBase {
                                 toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    protected void assertRollbackTo(
+            FileStoreTable table,
+            List<Long> expectedSnapshots,
+            long expectedEarliest,
+            long expectedLatest,
+            List<String> expectedTags)
+            throws IOException {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        List<Long> snapshots = snapshotManager.snapshotIdStream().collect(Collectors.toList());
+        assertThat(snapshots).containsExactlyInAnyOrderElementsOf(expectedSnapshots);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(expectedEarliest);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(expectedLatest);
+        assertThat(table.tagManager().allTagNames())
+                .containsExactlyInAnyOrderElementsOf(expectedTags);
     }
 }

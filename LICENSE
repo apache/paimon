@@ -254,6 +254,10 @@ paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/pa
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/sort/SparkZOrderUDF.java
 from http://iceberg.apache.org/ version 1.3.0
 
+paimon-common/src/main/java/org/apache/paimon/utils/OptimizedRoaringBitmap64.java
+paimon-core/src/main/java/org/apache/paimon/deletionvectors/Bitmap64DeletionVector.java
+from http://iceberg.apache.org/ version 1.8.1
+
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql
 from https://hive.apache.org/ version 3.1.0
 

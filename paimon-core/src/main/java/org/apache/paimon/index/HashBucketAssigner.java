@@ -118,7 +118,7 @@ public class HashBucketAssigner implements BucketAssigner {
         } else {
             latestCommittedIdentifier =
                     snapshotManager
-                            .latestSnapshotOfUser(commitUser)
+                            .latestSnapshotOfUserFromFilesystem(commitUser)
                             .map(Snapshot::commitIdentifier)
                             .orElse(Long.MIN_VALUE);
         }

@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -47,6 +48,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -103,6 +106,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public SchemaManager schemaManager() {
         return wrapped.schemaManager();
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        return wrapped.consumerManager();
     }
 
     @Override
@@ -286,8 +294,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
-        return wrapped.newWrite(commitUser, manifestFilter);
+    public TableWriteImpl<?> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
+        return wrapped.newWrite(commitUser, manifestFilter, writeId);
     }
 
     @Override

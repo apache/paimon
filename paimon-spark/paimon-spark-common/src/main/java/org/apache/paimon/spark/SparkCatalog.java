@@ -23,37 +23,48 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
-import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
+import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.PartitionedCSVTable;
+import org.apache.spark.sql.execution.PartitionedJsonTable;
+import org.apache.spark.sql.execution.PartitionedOrcTable;
+import org.apache.spark.sql.execution.PartitionedParquetTable;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
 import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
-import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
-import org.apache.spark.sql.execution.datasources.v2.json.JsonTable;
-import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
-import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -80,10 +91,12 @@ import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, SupportView {
+public class SparkCatalog extends SparkBaseCatalog
+        implements SupportView, FunctionCatalog, SupportsNamespaces, FormatTableCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
+    public static final String FUNCTION_DEFINITION_NAME = "spark";
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
     protected Catalog catalog = null;
@@ -98,7 +111,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options),
-                        SparkSession.active().sessionState().newHadoopConf());
+                        PaimonSparkSession$.MODULE$.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
@@ -389,7 +402,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
-        if (!usePaimon(provider) && SparkSource.FORMAT_NAMES().contains(provider.toLowerCase())) {
+        if (!usePaimon(provider) && isFormatTable(provider)) {
             normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
             normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
         }
@@ -463,7 +476,11 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     }
 
     private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+        SparkSession spark = PaimonSparkSession$.MODULE$.active();
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
+        StructType partitionSchema =
+                SparkTypeUtils.fromPaimonRowType(
+                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
         Options options = Options.fromMap(formatTable.options());
@@ -471,37 +488,41 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(FormatTableOptions.FIELD_DELIMITER));
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
-            return new CSVTable(
+            return new PartitionedCSVTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    CSVFileFormat.class);
+                    CSVFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.ORC) {
-            return new OrcTable(
+            return new PartitionedOrcTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    OrcFileFormat.class);
+                    OrcFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-            return new ParquetTable(
+            return new PartitionedParquetTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    ParquetFileFormat.class);
+                    ParquetFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.JSON) {
-            return new JsonTable(
+            return new PartitionedJsonTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    JsonFileFormat.class);
+                    JsonFileFormat.class,
+                    partitionSchema);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported format table "
@@ -540,6 +561,75 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
         }
+    }
+
+    @Override
+    public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
+        if (isFunctionNamespace(namespace)) {
+            List<Identifier> functionIdentifiers = new ArrayList<>();
+            PaimonFunctions.names()
+                    .forEach(name -> functionIdentifiers.add(Identifier.of(namespace, name)));
+            if (namespace.length > 0) {
+                String databaseName = getDatabaseNameFromNamespace(namespace);
+                try {
+                    catalog.listFunctions(databaseName)
+                            .forEach(
+                                    name ->
+                                            functionIdentifiers.add(
+                                                    Identifier.of(namespace, name)));
+                } catch (Catalog.DatabaseNotExistException e) {
+                    throw new NoSuchNamespaceException(namespace);
+                }
+            }
+            return functionIdentifiers.toArray(new Identifier[0]);
+        }
+        throw new NoSuchNamespaceException(namespace);
+    }
+
+    @Override
+    public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
+        if (isFunctionNamespace(ident.namespace())) {
+            UnboundFunction func = PaimonFunctions.load(ident.name());
+            if (func != null) {
+                return func;
+            }
+            try {
+                Function paimonFunction = catalog.getFunction(toIdentifier(ident));
+                FunctionDefinition functionDefinition =
+                        paimonFunction.definition(FUNCTION_DEFINITION_NAME);
+                if (functionDefinition != null
+                        && functionDefinition
+                                instanceof FunctionDefinition.LambdaFunctionDefinition) {
+                    FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
+                            (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
+                    if (paimonFunction.returnParams().isPresent()) {
+                        List<DataField> dataFields = paimonFunction.returnParams().get();
+                        if (dataFields.size() == 1) {
+                            DataField dataField = dataFields.get(0);
+                            return new LambdaScalarFunction(
+                                    ident.name(),
+                                    CatalogUtils.paimonType2SparkType(dataField.type()),
+                                    CatalogUtils.paimonType2JavaType(dataField.type()),
+                                    lambdaFunctionDefinition.definition());
+                        } else {
+                            throw new UnsupportedOperationException(
+                                    "outParams size > 1 is not supported");
+                        }
+                    }
+                }
+            } catch (Catalog.FunctionNotExistException e) {
+                throw new NoSuchFunctionException(ident);
+            }
+        }
+
+        throw new NoSuchFunctionException(ident);
+    }
+
+    private boolean isFunctionNamespace(String[] namespace) {
+        // Allow for empty namespace, as Spark's bucket join will use `bucket` function with empty
+        // namespace to generate transforms for partitioning.
+        // Otherwise, check if it is paimon namespace.
+        return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {

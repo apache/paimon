@@ -608,4 +608,27 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon Insert: dynamic insert into table with partition columns contain primary key") {
+    withSparkSQLConf("spark.sql.shuffle.partitions" -> "10") {
+      withTable("pk_pt") {
+        sql("""
+              |create table pk_pt (c1 int) partitioned by(p1 string, p2 string)
+              |tblproperties('primary-key'='c1, p1')
+              |""".stripMargin)
+
+        sql("insert into table pk_pt partition(p1, p2) values(1, 'a', 'b'), (1, 'b', 'b')")
+        checkAnswer(
+          sql("select * from pk_pt"),
+          Seq(Row(1, "a", "b"), Row(1, "b", "b"))
+        )
+
+        sql("insert into table pk_pt partition(p1, p2) values(1, 'a', 'b'), (1, 'c', 'c')")
+        checkAnswer(
+          sql("select * from pk_pt order by c1, p1, p2"),
+          Seq(Row(1, "a", "b"), Row(1, "b", "b"), Row(1, "c", "c"))
+        )
+      }
+    }
+  }
 }

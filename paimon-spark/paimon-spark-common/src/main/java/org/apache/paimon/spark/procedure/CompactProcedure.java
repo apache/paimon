@@ -21,12 +21,12 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
+import org.apache.paimon.append.AppendCompactCoordinator;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.PaimonSplitScan;
 import org.apache.paimon.spark.SparkUtils;
@@ -36,12 +36,12 @@ import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.AppendCompactTaskSerializer;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
-import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -361,10 +361,9 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Predicate filter,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
-        List<UnawareAppendCompactionTask> compactionTasks;
+        List<AppendCompactTask> compactionTasks;
         try {
-            compactionTasks =
-                    new UnawareAppendTableCompactionCoordinator(table, false, filter).run();
+            compactionTasks = new AppendCompactCoordinator(table, false, filter).run();
         } catch (EndOfScanException e) {
             compactionTasks = new ArrayList<>();
         }
@@ -391,10 +390,10 @@ public class CompactProcedure extends BaseProcedure {
             return;
         }
 
-        CompactionTaskSerializer serializer = new CompactionTaskSerializer();
+        AppendCompactTaskSerializer serializer = new AppendCompactTaskSerializer();
         List<byte[]> serializedTasks = new ArrayList<>();
         try {
-            for (UnawareAppendCompactionTask compactionTask : compactionTasks) {
+            for (AppendCompactTask compactionTask : compactionTasks) {
                 serializedTasks.add(serializer.serialize(compactionTask));
             }
         } catch (IOException e) {
@@ -409,17 +408,17 @@ public class CompactProcedure extends BaseProcedure {
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<byte[]>, byte[]>)
                                         taskIterator -> {
-                                            AppendOnlyFileStoreWrite write =
-                                                    (AppendOnlyFileStoreWrite)
+                                            BaseAppendFileStoreWrite write =
+                                                    (BaseAppendFileStoreWrite)
                                                             table.store().newWrite(commitUser);
-                                            CompactionTaskSerializer ser =
-                                                    new CompactionTaskSerializer();
+                                            AppendCompactTaskSerializer ser =
+                                                    new AppendCompactTaskSerializer();
                                             List<byte[]> messages = new ArrayList<>();
                                             try {
                                                 CommitMessageSerializer messageSer =
                                                         new CommitMessageSerializer();
                                                 while (taskIterator.hasNext()) {
-                                                    UnawareAppendCompactionTask task =
+                                                    AppendCompactTask task =
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());

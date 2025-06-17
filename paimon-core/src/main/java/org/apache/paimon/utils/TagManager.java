@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
@@ -48,7 +49,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -112,10 +113,17 @@ public class TagManager {
     }
 
     /** Replace a tag from given snapshot and save it in the storage. */
-    public void replaceTag(Snapshot snapshot, String tagName, Duration timeRetained) {
+    public void replaceTag(
+            Snapshot snapshot, String tagName, Duration timeRetained, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        createOrReplaceTag(snapshot, tagName, timeRetained, null);
+        createOrReplaceTag(
+                snapshot,
+                tagName,
+                timeRetained,
+                callbacks.stream()
+                        .filter(callback -> callback instanceof IcebergCommitCallback)
+                        .collect(Collectors.toList()));
     }
 
     private void createOrReplaceTag(
@@ -146,7 +154,7 @@ public class TagManager {
 
         if (callbacks != null) {
             try {
-                callbacks.forEach(callback -> callback.notifyCreation(tagName));
+                callbacks.forEach(callback -> callback.notifyCreation(tagName, snapshot.id()));
             } finally {
                 for (TagCallback tagCallback : callbacks) {
                     IOUtils.closeQuietly(tagCallback);

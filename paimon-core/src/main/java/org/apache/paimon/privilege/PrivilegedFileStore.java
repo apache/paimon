@@ -147,9 +147,12 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+    public FileStoreWrite<T> newWrite(
+            String commitUser,
+            @Nullable ManifestCacheFilter manifestFilter,
+            @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newWrite(commitUser, manifestFilter);
+        return wrapped.newWrite(commitUser, manifestFilter, writeId);
     }
 
     @Override
@@ -202,9 +205,9 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public TagAutoManager newTagCreationManager() {
+    public TagAutoManager newTagCreationManager(FileStoreTable table) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newTagCreationManager();
+        return wrapped.newTagCreationManager(table);
     }
 
     @Override
@@ -220,8 +223,8 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public List<TagCallback> createTagCallbacks() {
-        return wrapped.createTagCallbacks();
+    public List<TagCallback> createTagCallbacks(FileStoreTable table) {
+        return wrapped.createTagCallbacks(table);
     }
 
     @Override
