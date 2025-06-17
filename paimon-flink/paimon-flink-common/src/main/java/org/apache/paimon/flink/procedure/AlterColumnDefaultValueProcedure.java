@@ -18,18 +18,17 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
-import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.view.ViewChange;
-
-import static org.apache.paimon.flink.FlinkCatalog.DIALECT;
 
 /**
  * Alter column default value procedure. Usage:
@@ -52,45 +51,13 @@ public class AlterColumnDefaultValueProcedure extends ProcedureBase {
                 @ArgumentHint(name = "default_value", type = @DataTypeHint("STRING"))
             })
     public String[] call(
-            ProcedureContext procedureContext,
-            String table,
-            String column,
-            String defaultValue)
-            throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
-                    Catalog.DialectNotExistException {
+            ProcedureContext procedureContext, String table, String column, String defaultValue)
+            throws Catalog.ColumnAlreadyExistException, Catalog.TableNotExistException,
+                    Catalog.ColumnNotExistException {
         Identifier identifier = Identifier.fromString(table);
-        String[] columns = StringUtils.split(column, ".");
-        SchemaChange.update
-        ViewChange viewChange;
-        String dialect = StringUtils.isNullOrWhitespaceOnly(engine) ? DIALECT : engine;
-        switch (action) {
-            case "add":
-                {
-                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
-                        throw new IllegalArgumentException("query is required for add action.");
-                    }
-                    viewChange = ViewChange.addDialect(dialect, query);
-                    break;
-                }
-            case "update":
-                {
-                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
-                        throw new IllegalArgumentException("query is required for update action.");
-                    }
-                    viewChange = ViewChange.updateDialect(dialect, query);
-                    break;
-                }
-            case "drop":
-                {
-                    viewChange = ViewChange.dropDialect(dialect);
-                    break;
-                }
-            default:
-                {
-                    throw new IllegalArgumentException("Unsupported action: " + action);
-                }
-        }
-        catalog.alterView(identifier, ImmutableList.of(viewChange), false);
+        String[] fieldNames = StringUtils.split(column, ".");
+        SchemaChange schemaChange = SchemaChange.updateColumnDefaultValue(fieldNames, defaultValue);
+        catalog.alterTable(identifier, ImmutableList.of(schemaChange), false);
         return new String[] {"Success"};
     }
 }

@@ -57,12 +57,16 @@ class DefaultValueAssignerTest {
         options.put(
                 String.format(
                         "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "col4", DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
+                        CoreOptions.FIELDS_PREFIX,
+                        "col4",
+                        DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
                 "0");
         options.put(
                 String.format(
                         "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "col5", DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
+                        CoreOptions.FIELDS_PREFIX,
+                        "col5",
+                        DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
                 "1");
         Schema schema =
                 new Schema(
