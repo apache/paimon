@@ -85,8 +85,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final String WATERMARK_PREFIX = "watermark-";
-
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
@@ -502,14 +500,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
         } catch (UnsupportedOperationException e) {
-            Snapshot snapshot;
             try {
-                snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+                Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+                rollbackHelper().cleanLargerThan(snapshot);
             } catch (FileNotFoundException ex) {
+                // try to get snapshot from tag
+                TagManager tagManager = tagManager();
+                SortedMap<Snapshot, List<String>> tags = tagManager.tags();
+                for (Map.Entry<Snapshot, List<String>> entry : tags.entrySet()) {
+                    if (entry.getKey().id() == snapshotId) {
+                        rollbackTo(entry.getValue().get(0));
+                        return;
+                    }
+                }
                 throw new IllegalArgumentException(
                         String.format("Rollback snapshot '%s' doesn't exist.", snapshotId), ex);
             }
-            rollbackHelper().cleanLargerThan(snapshot);
         }
     }
 
