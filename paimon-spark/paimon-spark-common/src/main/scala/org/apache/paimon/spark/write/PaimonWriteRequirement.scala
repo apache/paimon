@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.table.{BucketMode, FileStoreTable}
+import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.BucketMode._
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortOrder}
@@ -63,7 +64,4 @@ object PaimonWriteRequirement {
       PaimonWriteRequirement(distribution, EMPTY_ORDERING)
     }
   }
-
-  private def quote(columnName: String): String =
-    s"`${columnName.replace("`", "``")}`"
 }

@@ -19,9 +19,9 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
-import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
@@ -67,7 +67,7 @@ case class PaimonScan(
             case Some(num) =>
               val bucketKey = bucketSpec.getBucketKeys.get(0)
               if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
-                Some(Expressions.bucket(num, StringUtils.quote(bucketKey)))
+                Some(Expressions.bucket(num, quote(bucketKey)))
               } else {
                 None
               }

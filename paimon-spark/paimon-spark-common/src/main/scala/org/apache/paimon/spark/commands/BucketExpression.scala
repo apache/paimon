@@ -18,21 +18,16 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.data.serializer.InternalRowSerializer
-import org.apache.paimon.spark.SparkInternalRowWrapper
-import org.apache.paimon.spark.SparkTypeUtils.toPaimonType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions.BUCKET
-import org.apache.paimon.table.sink.KeyAndBucketExtractor.{bucket, bucketKeyHashCode}
-import org.apache.paimon.types.{RowKind, RowType}
 
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow => SparkInternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
-import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Literal, SpecificInternalRow}
+import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, SpecificInternalRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction
-import org.apache.spark.sql.types.{DataType, DataTypes, StructField, StructType}
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 /**
  * The reason for adding it is that the current spark_catalog cannot access v2 functions, which
@@ -99,4 +94,5 @@ object BucketExpression {
     (ident, info, builder)
   }
 
+  def quote(columnName: String): String = s"`${columnName.replace("`", "``")}`"
 }
