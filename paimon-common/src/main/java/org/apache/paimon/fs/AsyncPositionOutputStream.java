@@ -211,6 +211,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
+        this.bufferQueue.clear();
         this.closed = true;
     }
 
