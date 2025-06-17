@@ -931,6 +931,35 @@ public abstract class SimpleTableTestBase {
         assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test1"));
     }
 
+    @Test
+    public void testRollbackToTagFromSnapshotId() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
+
+        table.createTag("test", 1);
+
+        // expire snapshots
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
+        options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
+        table.copy(options.toMap()).newCommit("").expireSnapshots();
+
+        table.rollbackTo(1);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test"));
+    }
+
     private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {
         FileStoreTable table = createFileStoreTable();
         return prepareRollbackTable(commitTimes, table);
