@@ -261,7 +261,7 @@ public class CatalogUtils {
                                 "Cannot add column %s with default value %s.",
                                 Arrays.toString(addColumn.fieldNames()), defaultValue));
             }
-        } catch (NoClassDefFoundError ignored) {
+        } catch (NoClassDefFoundError | NoSuchMethodError ignored) {
         }
     }
 
