@@ -123,11 +123,12 @@ public class FileChannelManagerImpl implements FileChannelManager {
     /** Remove all the temp directories. */
     @Override
     public void close() throws Exception {
-        IOUtils.closeAll(
+        IOUtils.closeAllConcurrently(
                 Arrays.stream(paths)
                         .filter(File::exists)
                         .map(this::getFileCloser)
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                Exception.class);
         LOG.info(
                 "Closed {} with directories:\n\t{}",
                 FileChannelManager.class.getSimpleName(),

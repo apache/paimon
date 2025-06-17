@@ -29,6 +29,11 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static java.util.Arrays.asList;
 
@@ -39,6 +44,10 @@ public final class IOUtils {
 
     /** The block size for byte operations in byte. */
     public static final int BLOCKSIZE = 4096;
+
+    /** The executor service for concurrent executions. */
+    private static final ExecutorService executorService =
+            Executors.newCachedThreadPool(new ExecutorThreadFactory("paimon-ioutils"));
 
     // ------------------------------------------------------------------------
     //  Byte copy operations
@@ -183,16 +192,8 @@ public final class IOUtils {
             Exception collectedExceptions = null;
 
             for (AutoCloseable closeable : closeables) {
-                try {
-                    if (null != closeable) {
-                        closeable.close();
-                    }
-                } catch (Throwable e) {
-                    if (!suppressedException.isAssignableFrom(e.getClass())) {
-                        throw e;
-                    }
-
-                    Exception ex = e instanceof Exception ? (Exception) e : new Exception(e);
+                Exception ex = close(closeable, suppressedException);
+                if (null != ex) {
                     collectedExceptions = ExceptionUtils.firstOrSuppressed(ex, collectedExceptions);
                 }
             }
@@ -200,6 +201,70 @@ public final class IOUtils {
             if (null != collectedExceptions) {
                 throw collectedExceptions;
             }
+        }
+    }
+
+    /**
+     * Closes all {@link AutoCloseable} objects in the parameter, suppressing exceptions. Exception
+     * will be emitted after calling close() on every object.
+     *
+     * <p>Note that this method executes closeables concurrently. If the closeables are independent
+     * of each other, this method could be used to accelerate the closing process.
+     *
+     * @param closeables iterable with closeables to close.
+     * @param suppressedException class of exceptions which should be suppressed during the closing.
+     * @throws Exception collected exceptions that occurred during closing
+     */
+    public static <T extends Throwable> void closeAllConcurrently(
+            Iterable<? extends AutoCloseable> closeables, Class<T> suppressedException)
+            throws Exception {
+        if (null == closeables) {
+            return;
+        }
+
+        final Exception[] collectedExceptions = new Exception[] {null};
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        Object lock = new Object();
+        for (AutoCloseable closeable : closeables) {
+            CompletableFuture<Void> future =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                Exception ex = close(closeable, suppressedException);
+                                if (null != ex) {
+                                    synchronized (lock) {
+                                        collectedExceptions[0] =
+                                                ExceptionUtils.firstOrSuppressed(
+                                                        ex, collectedExceptions[0]);
+                                    }
+                                }
+                            },
+                            executorService);
+
+            futures.add(future);
+        }
+
+        CompletableFuture<Void> allFutures =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        allFutures.join();
+
+        if (null != collectedExceptions[0]) {
+            throw collectedExceptions[0];
+        }
+    }
+
+    private static <T extends Throwable> Exception close(
+            AutoCloseable closeable, Class<T> suppressedException) {
+        try {
+            if (closeable != null) {
+                closeable.close();
+            }
+            return null;
+        } catch (Throwable e) {
+            if (!suppressedException.isAssignableFrom(e.getClass())) {
+                throw new RuntimeException(e);
+            }
+
+            return e instanceof Exception ? (Exception) e : new Exception(e);
         }
     }
 
