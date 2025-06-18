@@ -47,6 +47,7 @@ import static java.util.Collections.emptyList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.createMockContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FlinkConnectorOptions.PartitionMarkDoneActionMode}. */
@@ -75,7 +76,7 @@ public class WatermarkPartitionMarkDoneTest extends TableTestBase {
         TableWriteImpl<?> write = table.newWrite("user1");
         TableCommitImpl commit = table.newCommit("user1");
         StoreCommitter committer =
-                new StoreCommitter(table, commit, ListenerTestUtils.createMockContext(true, false));
+                new StoreCommitter(table, commit, createMockContext(true, false));
 
         write.write(GenericRow.of(BinaryString.fromString("2025-03-01 12"), 1, 1));
         write.write(GenericRow.of(BinaryString.fromString("2025-03-01 13"), 1, 1));

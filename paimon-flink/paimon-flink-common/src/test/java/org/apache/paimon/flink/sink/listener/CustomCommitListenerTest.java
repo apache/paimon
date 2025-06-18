@@ -48,6 +48,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.createMockContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test custom {@link CommitListener}. */
@@ -57,7 +58,7 @@ public class CustomCommitListenerTest {
     private static final Map<String, Set<String>> commitListenerResult = new ConcurrentHashMap<>();
 
     @Test
-    public void test() throws Exception {
+    public void testCustomCommitListener() throws Exception {
         Path tablePath = new Path(tempDir.toString());
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         String testId = UUID.randomUUID().toString();
@@ -84,9 +85,7 @@ public class CustomCommitListenerTest {
 
         StoreCommitter committer =
                 new StoreCommitter(
-                        table,
-                        table.newCommit(commitUser),
-                        Committer.createContext(commitUser, null, true, false, null, 1, 1));
+                        table, table.newCommit(commitUser), createMockContext(true, false));
         ManifestCommittable committable = new ManifestCommittable(1L, null);
         commitMessages.forEach(committable::addFileCommittable);
         committer.commit(Collections.singletonList(committable));
@@ -96,7 +95,7 @@ public class CustomCommitListenerTest {
     }
 
     /** A mock {@link CommitListener}. */
-    private static class TestPartitionCollector implements CommitListener {
+    public static class TestPartitionCollector implements CommitListener {
 
         private final String testId;
 
