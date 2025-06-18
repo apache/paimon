@@ -26,6 +26,8 @@ import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.table.PartitionHandler;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +57,7 @@ public class PartitionExpire {
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
     private int maxExpireNum;
+    private Integer expireBatchSize;
 
     public PartitionExpire(
             Duration expirationTime,
@@ -64,7 +67,8 @@ public class PartitionExpire {
             FileStoreCommit commit,
             @Nullable PartitionHandler partitionHandler,
             boolean endInputCheckPartitionExpire,
-            int maxExpireNum) {
+            int maxExpireNum,
+            Integer expireBatchSize) {
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
         this.strategy = strategy;
@@ -74,6 +78,7 @@ public class PartitionExpire {
         this.lastCheck = LocalDateTime.now();
         this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
         this.maxExpireNum = maxExpireNum;
+        this.expireBatchSize = expireBatchSize;
     }
 
     public PartitionExpire(
@@ -83,7 +88,8 @@ public class PartitionExpire {
             FileStoreScan scan,
             FileStoreCommit commit,
             @Nullable PartitionHandler partitionHandler,
-            int maxExpireNum) {
+            int maxExpireNum,
+            Integer expireBatchSize) {
         this(
                 expirationTime,
                 checkInterval,
@@ -92,7 +98,8 @@ public class PartitionExpire {
                 commit,
                 partitionHandler,
                 false,
-                maxExpireNum);
+                maxExpireNum,
+                expireBatchSize);
     }
 
     public List<Map<String, String>> expire(long commitIdentifier) {
@@ -148,17 +155,29 @@ public class PartitionExpire {
             // convert partition value to partition string, and limit the partition num
             expired = convertToPartitionString(expiredPartValues);
             LOG.info("Expire Partitions: {}", expired);
-            if (partitionHandler != null) {
-                try {
-                    partitionHandler.dropPartitions(expired);
-                } catch (Catalog.TableNotExistException e) {
-                    throw new RuntimeException(e);
-                }
+            if (expireBatchSize != null && expireBatchSize > 0) {
+                Lists.partition(expired, expireBatchSize)
+                        .forEach(
+                                expiredBatchPartitions ->
+                                        doBatchExpire(expiredBatchPartitions, commitIdentifier));
             } else {
-                commit.dropPartitions(expired, commitIdentifier);
+                doBatchExpire(expired, commitIdentifier);
             }
         }
         return expired;
+    }
+
+    private void doBatchExpire(
+            List<Map<String, String>> expiredBatchPartitions, long commitIdentifier) {
+        if (partitionHandler != null) {
+            try {
+                partitionHandler.dropPartitions(expiredBatchPartitions);
+            } catch (Catalog.TableNotExistException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            commit.dropPartitions(expiredBatchPartitions, commitIdentifier);
+        }
     }
 
     private List<Map<String, String>> convertToPartitionString(

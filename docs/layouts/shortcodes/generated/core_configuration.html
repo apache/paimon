@@ -708,6 +708,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether mark the done status to indicate that the data is ready when end input.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-batch-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The batch size of partition expiration. By default, all partitions are expired together when expiration,which may cause a risk of out-of-memory for multiple large size partition.Use this parameter to divide partition expiration process and mitigate memory pressure.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>

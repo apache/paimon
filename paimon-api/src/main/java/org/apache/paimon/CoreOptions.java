@@ -909,6 +909,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(100)
                     .withDescription("The default deleted num of partition expiration.");
 
+    public static final ConfigOption<Integer> PARTITION_EXPIRATION_BATCH_SIZE =
+            key("partition.expiration-batch-size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The batch size of partition expiration. "
+                                    + "By default, all partitions are expired together when expiration,"
+                                    + "which may cause a risk of out-of-memory for multiple large size partition."
+                                    + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
+
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -2453,6 +2463,10 @@ public class CoreOptions implements Serializable {
 
     public int partitionExpireMaxNum() {
         return options.get(PARTITION_EXPIRATION_MAX_NUM);
+    }
+
+    public Integer partitionExpireBatchSize() {
+        return options.get(PARTITION_EXPIRATION_BATCH_SIZE);
     }
 
     public PartitionExpireStrategy partitionExpireStrategy() {
