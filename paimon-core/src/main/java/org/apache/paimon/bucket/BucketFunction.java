@@ -37,7 +37,7 @@ public interface BucketFunction extends Serializable {
     static BucketFunction create(
             CoreOptions.BucketFunctionType bucketFunctionType, RowType bucketKeyType) {
         switch (bucketFunctionType) {
-            case PAIMON:
+            case DEFAULT:
                 return new PaimonBucketFunction();
             default:
                 throw new IllegalArgumentException(

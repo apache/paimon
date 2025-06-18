@@ -45,14 +45,14 @@ object PaimonFunctions {
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
-    new BucketFunction(BucketFunctionType.PAIMON),
+    new BucketFunction(BucketFunctionType.DEFAULT),
     MAX_PT,
     new MaxPtFunction
   )
 
   /** The bucket function type to the function name mapping */
   private val TYPE_FUNC_MAPPING = ImmutableMap.of(
-    BucketFunctionType.PAIMON,
+    BucketFunctionType.DEFAULT,
     PAIMON_BUCKET
   )
 

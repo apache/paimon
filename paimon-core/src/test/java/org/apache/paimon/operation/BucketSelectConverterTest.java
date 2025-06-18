@@ -143,6 +143,6 @@ public class BucketSelectConverterTest {
 
     private Optional<Selector> newSelector(Predicate predicate) {
         return (Optional)
-                BucketSelectConverter.create(predicate, rowType, BucketFunctionType.PAIMON);
+                BucketSelectConverter.create(predicate, rowType, BucketFunctionType.DEFAULT);
     }
 }

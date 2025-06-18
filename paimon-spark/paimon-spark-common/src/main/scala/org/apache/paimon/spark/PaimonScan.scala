@@ -58,7 +58,7 @@ case class PaimonScan(
         // todo introduce bucket transform for different bucket function type
         if (
           bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
-            .bucketFunctionType() != BucketFunctionType.PAIMON
+            .bucketFunctionType() != BucketFunctionType.DEFAULT
         ) {
           None
         } else if (bucketSpec.getBucketKeys.size() > 1) {

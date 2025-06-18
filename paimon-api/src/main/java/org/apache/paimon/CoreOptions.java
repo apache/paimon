@@ -129,12 +129,12 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<BucketFunctionType> BUCKET_FUNCTION_TYPE =
             key("bucket-function.type")
                     .enumType(BucketFunctionType.class)
-                    .defaultValue(BucketFunctionType.PAIMON)
+                    .defaultValue(BucketFunctionType.DEFAULT)
                     .withDescription("The bucket function for paimon bucket");
 
     /** Paimon bucket function type. */
     public enum BucketFunctionType {
-        PAIMON,
+        DEFAULT,
     }
 
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =

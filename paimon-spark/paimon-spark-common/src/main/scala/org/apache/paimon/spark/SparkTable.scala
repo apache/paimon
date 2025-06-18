@@ -55,7 +55,7 @@ case class SparkTable(table: Table)
 
   private def supportsV2Write: Boolean = {
     val coreOptions = new CoreOptions(table.options())
-    coreOptions.bucketFunctionType() == BucketFunctionType.PAIMON && {
+    coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
         case storeTable: FileStoreTable =>
           storeTable.bucketMode() match {
