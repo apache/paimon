@@ -121,6 +121,7 @@ public class CustomCommitListenerTest {
         @Override
         public void close() throws IOException {}
 
+        /** A mock {@link CommitListenerFactory}. */
         public static class Factory implements CommitListenerFactory {
 
             @Override
