@@ -148,6 +148,7 @@ public class ReportPartStatsListener implements CommitListener {
         }
     }
 
+    /** Factory for {@link ReportPartStatsListener}. */
     public static class Factory implements CommitListenerFactory {
 
         @Override

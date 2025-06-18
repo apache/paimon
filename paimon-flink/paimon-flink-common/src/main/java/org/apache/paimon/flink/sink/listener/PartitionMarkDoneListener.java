@@ -182,6 +182,7 @@ public class PartitionMarkDoneListener implements CommitListener {
         IOUtils.closeAllQuietly(actions);
     }
 
+    /** Factory for {@link PartitionMarkDoneListener}. */
     public static class Factory implements CommitListenerFactory {
 
         @Override
