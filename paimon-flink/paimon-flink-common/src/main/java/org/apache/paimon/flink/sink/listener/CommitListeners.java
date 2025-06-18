@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 
@@ -27,6 +28,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.COMMIT_CUSTOM_LISTENERS;
 
 /** Partition listeners. */
 public class CommitListeners implements Closeable {
@@ -69,17 +72,16 @@ public class CommitListeners implements Closeable {
         List<CommitListener> listeners = new ArrayList<>();
 
         // partition statistics reporter
-        ReportPartStatsListener.create(context.isRestored(), context.stateStore(), table)
-                .ifPresent(listeners::add);
+        new ReportPartStatsListener.Factory().create(context, table).ifPresent(listeners::add);
 
         // partition mark done
-        PartitionMarkDoneListener.create(
-                        context.getClass().getClassLoader(),
-                        context.streamingCheckpointEnabled(),
-                        context.isRestored(),
-                        context.stateStore(),
-                        table)
-                .ifPresent(listeners::add);
+        new PartitionMarkDoneListener.Factory().create(context, table).ifPresent(listeners::add);
+
+        // custom listener
+        String identifiers = Options.fromMap(table.options()).get(COMMIT_CUSTOM_LISTENERS);
+        for (String identifier : identifiers.split(",")) {
+            CommitListenerFactory.create(context, table, identifier).ifPresent(listeners::add);
+        }
 
         return new CommitListeners(listeners);
     }

@@ -16,29 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.state.BroadcastState;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.OperatorStateStore;
-import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
@@ -46,80 +40,30 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
-import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
-import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
-import static org.assertj.core.api.Assertions.assertThat;
 
-class PartitionMarkDoneTest extends TableTestBase {
+class ListenerTestUtils {
 
-    @Test
-    public void testTriggerByCompaction() throws Exception {
-        innerTest(true, true);
+    static Committer.Context createMockContext(
+            boolean streamingCheckpointEnabled, boolean isRestored) {
+        return Committer.createContext(
+                UUID.randomUUID().toString(),
+                null,
+                streamingCheckpointEnabled,
+                isRestored,
+                new MockOperatorStateStore(),
+                1,
+                1);
     }
 
-    @Test
-    public void testNotTriggerByCompaction() throws Exception {
-        innerTest(false, true);
-    }
-
-    @Test
-    public void testNotTriggerWhenRecoveryFromState() throws Exception {
-        innerTest(false, false);
-    }
-
-    private void innerTest(boolean deletionVectors, boolean partitionMarkDoneRecoverFromState)
-            throws Exception {
-        Identifier identifier = identifier("T");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("a", DataTypes.INT())
-                        .column("b", DataTypes.INT())
-                        .column("c", DataTypes.INT())
-                        .partitionKeys("a")
-                        .primaryKey("a", "b")
-                        .option(PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true")
-                        .option(PARTITION_MARK_DONE_ACTION.key(), "success-file")
-                        .option(
-                                DELETION_VECTORS_ENABLED.key(),
-                                Boolean.valueOf(deletionVectors).toString())
-                        .build();
-        catalog.createTable(identifier, schema, true);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Path location = table.location();
-        Path successFile = new Path(location, "a=0/_SUCCESS");
-        PartitionMarkDoneListener markDone =
-                PartitionMarkDoneListener.create(
-                                getClass().getClassLoader(),
-                                false,
-                                false,
-                                new MockOperatorStateStore(),
-                                table)
-                        .get();
-
-        if (!partitionMarkDoneRecoverFromState) {
-            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
-            assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
-            return;
-        }
-
-        notifyCommits(markDone, true, partitionMarkDoneRecoverFromState);
-        assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
-
-        if (!deletionVectors) {
-            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
-            assertThat(table.fileIO().exists(successFile)).isEqualTo(true);
-        }
-    }
-
-    public static void notifyCommits(PartitionMarkDoneListener markDone, boolean isCompact) {
+    static void notifyCommits(PartitionMarkDoneListener markDone, boolean isCompact) {
         notifyCommits(markDone, isCompact, true);
     }
 
-    private static void notifyCommits(
+    static void notifyCommits(
             PartitionMarkDoneListener markDone,
             boolean isCompact,
             boolean partitionMarkDoneRecoverFromState) {
@@ -151,7 +95,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         }
     }
 
-    public static class MockOperatorStateStore implements OperatorStateStore {
+    private static class MockOperatorStateStore implements OperatorStateStore {
 
         @Override
         public <K, V> BroadcastState<K, V> getBroadcastState(
@@ -201,7 +145,7 @@ class PartitionMarkDoneTest extends TableTestBase {
         }
     }
 
-    public static class MockListState<T> implements ListState<T> {
+    private static class MockListState<T> implements ListState<T> {
 
         private final List<T> backingList = new ArrayList<>();
 

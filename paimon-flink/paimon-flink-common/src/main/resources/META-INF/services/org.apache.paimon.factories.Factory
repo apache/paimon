@@ -95,3 +95,7 @@ org.apache.paimon.flink.procedure.AlterViewDialectProcedure
 org.apache.paimon.flink.procedure.CreateFunctionProcedure
 org.apache.paimon.flink.procedure.DropFunctionProcedure
 org.apache.paimon.flink.procedure.AlterFunctionProcedure
+
+### commit listener factories
+org.apache.paimon.flink.sink.listener.PartitionMarkDoneListener$Factory
+org.apache.paimon.flink.sink.listener.ReportPartStatsListener$Factory

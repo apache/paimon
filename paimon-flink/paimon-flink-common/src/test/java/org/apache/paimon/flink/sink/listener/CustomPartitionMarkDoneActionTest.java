@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
@@ -33,7 +33,8 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneTest.notifyCommits;
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.createMockContext;
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.notifyCommits;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for custom PartitionMarkDoneAction. */
@@ -62,12 +63,8 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
         // set.
         Assertions.assertThatThrownBy(
                         () ->
-                                PartitionMarkDoneListener.create(
-                                        getClass().getClassLoader(),
-                                        false,
-                                        false,
-                                        new PartitionMarkDoneTest.MockOperatorStateStore(),
-                                        table))
+                                new PartitionMarkDoneListener.Factory()
+                                        .create(createMockContext(false, false), table))
                 .hasMessageContaining(
                         String.format(
                                 "You need to set [%s] when you add [%s] mark done action in your property [%s].",
@@ -86,13 +83,10 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(identifier);
 
         PartitionMarkDoneListener markDone =
-                PartitionMarkDoneListener.create(
-                                getClass().getClassLoader(),
-                                false,
-                                false,
-                                new PartitionMarkDoneTest.MockOperatorStateStore(),
-                                table2)
-                        .get();
+                (PartitionMarkDoneListener)
+                        new PartitionMarkDoneListener.Factory()
+                                .create(createMockContext(false, false), table2)
+                                .get();
 
         notifyCommits(markDone, false);
 

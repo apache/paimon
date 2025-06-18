@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -52,7 +53,6 @@ import java.util.Set;
  */
 public class ReportPartStatsListener implements CommitListener {
 
-    @SuppressWarnings("unchecked")
     private static final ListStateDescriptor<Map<String, Long>> PENDING_REPORT_STATE_DESC =
             new ListStateDescriptor<>(
                     "pending-report-hms-partition",
@@ -141,51 +141,58 @@ public class ReportPartStatsListener implements CommitListener {
         pendingPartitionsState.update(Collections.singletonList(pendingPartitions));
     }
 
-    public static Optional<ReportPartStatsListener> create(
-            boolean isRestored, OperatorStateStore stateStore, FileStoreTable table)
-            throws Exception {
-
-        CoreOptions coreOptions = table.coreOptions();
-        Options options = coreOptions.toConfiguration();
-        if (options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis() <= 0) {
-            return Optional.empty();
-        }
-
-        if ((table.partitionKeys().isEmpty())) {
-            return Optional.empty();
-        }
-
-        if (!coreOptions.partitionedTableInMetastore()) {
-            return Optional.empty();
-        }
-
-        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
-
-        if (partitionHandler == null) {
-            return Optional.empty();
-        }
-
-        InternalRowPartitionComputer partitionComputer =
-                new InternalRowPartitionComputer(
-                        coreOptions.partitionDefaultName(),
-                        table.schema().logicalPartitionType(),
-                        table.partitionKeys().toArray(new String[0]),
-                        coreOptions.legacyPartitionName());
-
-        return Optional.of(
-                new ReportPartStatsListener(
-                        partitionComputer,
-                        new PartitionStatisticsReporter(table, partitionHandler),
-                        stateStore,
-                        isRestored,
-                        options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)
-                                .toMillis()));
-    }
-
     @Override
     public void close() throws IOException {
         if (partitionStatisticsReporter != null) {
             partitionStatisticsReporter.close();
+        }
+    }
+
+    public static class Factory implements CommitListenerFactory {
+
+        @Override
+        public String identifier() {
+            return "report-part-stats";
+        }
+
+        @Override
+        public Optional<CommitListener> create(Committer.Context context, FileStoreTable table)
+                throws Exception {
+            CoreOptions coreOptions = table.coreOptions();
+            Options options = coreOptions.toConfiguration();
+            if (options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis() <= 0) {
+                return Optional.empty();
+            }
+
+            if ((table.partitionKeys().isEmpty())) {
+                return Optional.empty();
+            }
+
+            if (!coreOptions.partitionedTableInMetastore()) {
+                return Optional.empty();
+            }
+
+            PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
+
+            if (partitionHandler == null) {
+                return Optional.empty();
+            }
+
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            coreOptions.partitionDefaultName(),
+                            table.schema().logicalPartitionType(),
+                            table.partitionKeys().toArray(new String[0]),
+                            coreOptions.legacyPartitionName());
+
+            return Optional.of(
+                    new ReportPartStatsListener(
+                            partitionComputer,
+                            new PartitionStatisticsReporter(table, partitionHandler),
+                            context.stateStore(),
+                            context.isRestored(),
+                            options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)
+                                    .toMillis()));
         }
     }
 }

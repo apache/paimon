@@ -87,6 +87,18 @@ under the License.
             <td>The blacklist contains several time periods. During these time periods, the lookup table's cache refreshing is forbidden. Blacklist format is start1-&gt;end1,start2-&gt;end2,... , and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.</td>
         </tr>
         <tr>
+            <td><h5>partition.custom-listener.#.param</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Parameter string for initializing the listener class #. Listener class should parse the parameter by itself.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.custom-listeners</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A list of partition listener classes to be called after a successful commit. Class names are connected with comma (example: com.test.ListenerA,com.sample.ListenerB).</td>
+        </tr>
+        <tr>
             <td><h5>partition.idle-time-to-done</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
