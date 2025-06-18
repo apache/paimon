@@ -23,7 +23,9 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
@@ -552,7 +554,15 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @Test
     public void testWithDeletionVectorsMaintainer() {
-        DeletionVectorsMaintainer dvMaintainer = DeletionVectorsMaintainer.factory(null).create();
+        IndexFileHandler indexFileHandler =
+                new IndexFileHandler(
+                        null,
+                        null,
+                        null,
+                        null,
+                        new DeletionVectorsIndexFile(null, null, null, true));
+        DeletionVectorsMaintainer dvMaintainer =
+                DeletionVectorsMaintainer.factory(indexFileHandler).create();
         Map<InternalRow, LookupLevels.PositionedKeyValue> lookup = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
