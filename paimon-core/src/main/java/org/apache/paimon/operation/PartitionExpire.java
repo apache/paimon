@@ -57,7 +57,7 @@ public class PartitionExpire {
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
     private int maxExpireNum;
-    private Integer expireBatchSize;
+    @Nullable private Integer expireBatchSize;
 
     public PartitionExpire(
             Duration expirationTime,
@@ -68,7 +68,7 @@ public class PartitionExpire {
             @Nullable PartitionHandler partitionHandler,
             boolean endInputCheckPartitionExpire,
             int maxExpireNum,
-            Integer expireBatchSize) {
+            @Nullable Integer expireBatchSize) {
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
         this.strategy = strategy;
