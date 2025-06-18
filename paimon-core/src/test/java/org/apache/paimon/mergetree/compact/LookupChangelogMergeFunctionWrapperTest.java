@@ -573,7 +573,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         dvMaintainer,
                         null);
 
-        // With level-0, with level-x in lookup, with level-x (x > 0) deleted in dvMaintainer
+        // With level-0, with level-x in lookup, with level-x deleted in dvMaintainer
         function.reset();
         LookupLevels.PositionedKeyValue positionedKv =
                 new LookupLevels.PositionedKeyValue(
