@@ -146,7 +146,9 @@ class PartitionMarkDoneTest extends TableTestBase {
                             new IndexIncrement(emptyList()));
         }
         committable.addFileCommittable(compactMessage);
-        markDone.notifyCommittable(singletonList(committable), partitionMarkDoneRecoverFromState);
+        if (partitionMarkDoneRecoverFromState) {
+            markDone.notifyCommittable(singletonList(committable));
+        }
     }
 
     public static class MockOperatorStateStore implements OperatorStateStore {
