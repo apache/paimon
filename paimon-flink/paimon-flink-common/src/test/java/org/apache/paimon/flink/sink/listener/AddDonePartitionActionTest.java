@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.partition.PartitionStatistics;

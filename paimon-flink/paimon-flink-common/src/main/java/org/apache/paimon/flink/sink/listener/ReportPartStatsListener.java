@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -52,7 +52,6 @@ import java.util.Set;
  */
 public class ReportPartStatsListener implements CommitListener {
 
-    @SuppressWarnings("unchecked")
     private static final ListStateDescriptor<Map<String, Long>> PENDING_REPORT_STATE_DESC =
             new ListStateDescriptor<>(
                     "pending-report-hms-partition",

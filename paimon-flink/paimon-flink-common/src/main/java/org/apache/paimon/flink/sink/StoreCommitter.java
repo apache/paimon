@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
-import org.apache.paimon.flink.sink.partition.CommitListeners;
+import org.apache.paimon.flink.sink.listener.CommitListeners;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.BucketMode;

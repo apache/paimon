@@ -515,6 +515,14 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If true, the split generation process would be performed during runtime on a Flink task, instead of on the JobManager during initialization phase.");
 
+    public static final ConfigOption<String> COMMIT_CUSTOM_LISTENERS =
+            key("commit.custom-listeners")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription(
+                            "Commit listener will be called after a successful commit. This option list custom commit "
+                                    + "listener identifiers separated by comma.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
