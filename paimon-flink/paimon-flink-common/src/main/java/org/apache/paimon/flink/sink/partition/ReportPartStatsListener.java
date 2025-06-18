@@ -50,7 +50,7 @@ import java.util.Set;
  * This listener will collect data from the newly touched partition and then decide when to trigger
  * a report based on the partition's idle time.
  */
-public class ReportPartStatsListener implements PartitionListener {
+public class ReportPartStatsListener implements CommitListener {
 
     @SuppressWarnings("unchecked")
     private static final ListStateDescriptor<Map<String, Long>> PENDING_REPORT_STATE_DESC =
@@ -85,8 +85,8 @@ public class ReportPartStatsListener implements PartitionListener {
         this.idleTime = idleTime;
     }
 
-    public void notifyCommittable(
-            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
+    @Override
+    public void notifyCommittable(List<ManifestCommittable> committables) {
         Set<String> partition = new HashSet<>();
         boolean endInput = false;
         for (ManifestCommittable committable : committables) {
@@ -136,6 +136,7 @@ public class ReportPartStatsListener implements PartitionListener {
         return result;
     }
 
+    @Override
     public void snapshotState() throws Exception {
         pendingPartitionsState.update(Collections.singletonList(pendingPartitions));
     }

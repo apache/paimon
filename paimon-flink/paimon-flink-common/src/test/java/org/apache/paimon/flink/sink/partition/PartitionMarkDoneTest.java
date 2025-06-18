@@ -91,8 +91,8 @@ class PartitionMarkDoneTest extends TableTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         Path location = table.location();
         Path successFile = new Path(location, "a=0/_SUCCESS");
-        PartitionMarkDone markDone =
-                PartitionMarkDone.create(
+        PartitionMarkDoneListener markDone =
+                PartitionMarkDoneListener.create(
                                 getClass().getClassLoader(),
                                 false,
                                 false,
@@ -115,12 +115,12 @@ class PartitionMarkDoneTest extends TableTestBase {
         }
     }
 
-    public static void notifyCommits(PartitionMarkDone markDone, boolean isCompact) {
+    public static void notifyCommits(PartitionMarkDoneListener markDone, boolean isCompact) {
         notifyCommits(markDone, isCompact, true);
     }
 
     private static void notifyCommits(
-            PartitionMarkDone markDone,
+            PartitionMarkDoneListener markDone,
             boolean isCompact,
             boolean partitionMarkDoneRecoverFromState) {
         ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
@@ -146,7 +146,9 @@ class PartitionMarkDoneTest extends TableTestBase {
                             new IndexIncrement(emptyList()));
         }
         committable.addFileCommittable(compactMessage);
-        markDone.notifyCommittable(singletonList(committable), partitionMarkDoneRecoverFromState);
+        if (partitionMarkDoneRecoverFromState) {
+            markDone.notifyCommittable(singletonList(committable));
+        }
     }
 
     public static class MockOperatorStateStore implements OperatorStateStore {
