@@ -16,17 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.COMMIT_CUSTOM_LISTENERS;
 
 /** Partition listeners. */
 public class CommitListeners implements Closeable {
@@ -80,6 +86,22 @@ public class CommitListeners implements Closeable {
                         context.stateStore(),
                         table)
                 .ifPresent(listeners::add);
+
+        // custom listeners
+        String identifiers = Options.fromMap(table.options()).get(COMMIT_CUSTOM_LISTENERS);
+        Arrays.stream(identifiers.split(","))
+                .filter(identifier -> !StringUtils.isNullOrWhitespaceOnly(identifier))
+                .map(
+                        identifier -> {
+                            try {
+                                return CommitListenerFactory.create(context, table, identifier);
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .forEach(listeners::add);
 
         return new CommitListeners(listeners);
     }

@@ -17,3 +17,5 @@ org.apache.paimon.flink.FlinkCatalogTest$TestingLogSoreRegisterFactory
 
 # Catalog lock factory
 org.apache.paimon.flink.FileSystemCatalogITCase$FileSystemCatalogDummyLockFactory
+
+org.apache.paimon.flink.sink.listener.CustomCommitListenerTest$TestPartitionCollector$Factory
