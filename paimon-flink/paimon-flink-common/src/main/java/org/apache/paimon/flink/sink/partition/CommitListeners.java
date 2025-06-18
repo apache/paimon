@@ -29,30 +29,33 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Partition listeners. */
-public class PartitionListeners implements Closeable {
+public class CommitListeners implements Closeable {
 
-    private final List<PartitionListener> listeners;
+    private final List<CommitListener> listeners;
 
-    private PartitionListeners(List<PartitionListener> listeners) {
+    private CommitListeners(List<CommitListener> listeners) {
         this.listeners = listeners;
     }
 
     public void notifyCommittable(List<ManifestCommittable> committables) {
-        for (PartitionListener trigger : listeners) {
-            trigger.notifyCommittable(committables, true);
+        for (CommitListener listener : listeners) {
+            listener.notifyCommittable(committables);
         }
     }
 
     public void notifyCommittable(
             List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
-        for (PartitionListener trigger : listeners) {
-            trigger.notifyCommittable(committables, partitionMarkDoneRecoverFromState);
+        for (CommitListener listener : listeners) {
+            if (partitionMarkDoneRecoverFromState
+                    || !(listener instanceof PartitionMarkDoneListener)) {
+                listener.notifyCommittable(committables);
+            }
         }
     }
 
     public void snapshotState() throws Exception {
-        for (PartitionListener trigger : listeners) {
-            trigger.snapshotState();
+        for (CommitListener listener : listeners) {
+            listener.snapshotState();
         }
     }
 
@@ -61,16 +64,16 @@ public class PartitionListeners implements Closeable {
         IOUtils.closeAllQuietly(listeners);
     }
 
-    public static PartitionListeners create(Committer.Context context, FileStoreTable table)
+    public static CommitListeners create(Committer.Context context, FileStoreTable table)
             throws Exception {
-        List<PartitionListener> listeners = new ArrayList<>();
+        List<CommitListener> listeners = new ArrayList<>();
 
         // partition statistics reporter
         ReportPartStatsListener.create(context.isRestored(), context.stateStore(), table)
                 .ifPresent(listeners::add);
 
         // partition mark done
-        PartitionMarkDone.create(
+        PartitionMarkDoneListener.create(
                         context.getClass().getClassLoader(),
                         context.streamingCheckpointEnabled(),
                         context.isRestored(),
@@ -78,6 +81,6 @@ public class PartitionListeners implements Closeable {
                         table)
                 .ifPresent(listeners::add);
 
-        return new PartitionListeners(listeners);
+        return new CommitListeners(listeners);
     }
 }
