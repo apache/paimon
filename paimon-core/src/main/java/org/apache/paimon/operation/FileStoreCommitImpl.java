@@ -886,6 +886,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ConflictCheck conflictCheck,
             @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
+
+        // Check if the commit has been completed. At this point, there will be no more repeated
+        // commits and just return success
+        if (retryResult != null && latestSnapshot != null) {
+            long lastLatestSnapshot = Snapshot.FIRST_SNAPSHOT_ID;
+            if (retryResult.latestSnapshot != null) {
+                lastLatestSnapshot = retryResult.latestSnapshot.id();
+            }
+            for (long i = lastLatestSnapshot + 1; i <= latestSnapshot.id(); i++) {
+                Snapshot snapshot = snapshotManager.snapshot(i);
+                if (snapshot.commitUser().equals(commitUser)
+                        && snapshot.commitIdentifier() == identifier) {
+                    return new SuccessResult();
+                }
+            }
+        }
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
 
