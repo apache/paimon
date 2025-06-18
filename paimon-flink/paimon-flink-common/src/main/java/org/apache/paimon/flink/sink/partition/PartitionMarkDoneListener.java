@@ -51,9 +51,9 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_MODE;
 
 /** Mark partition done. */
-public class PartitionMarkDone implements PartitionListener {
+public class PartitionMarkDoneListener implements CommitListener {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PartitionMarkDone.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionMarkDoneListener.class);
 
     private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
@@ -61,7 +61,7 @@ public class PartitionMarkDone implements PartitionListener {
     private final boolean waitCompaction;
     private final PartitionMarkDoneActionMode partitionMarkDoneActionMode;
 
-    public static Optional<PartitionMarkDone> create(
+    public static Optional<PartitionMarkDoneListener> create(
             ClassLoader cl,
             boolean isStreaming,
             boolean isRestored,
@@ -96,7 +96,7 @@ public class PartitionMarkDone implements PartitionListener {
                                 || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
 
         return Optional.of(
-                new PartitionMarkDone(
+                new PartitionMarkDoneListener(
                         partitionComputer,
                         trigger,
                         actions,
@@ -119,7 +119,7 @@ public class PartitionMarkDone implements PartitionListener {
         return table.partitionKeys().isEmpty();
     }
 
-    public PartitionMarkDone(
+    public PartitionMarkDoneListener(
             InternalRowPartitionComputer partitionComputer,
             PartitionMarkDoneTrigger trigger,
             List<PartitionMarkDoneAction> actions,
@@ -133,14 +133,11 @@ public class PartitionMarkDone implements PartitionListener {
     }
 
     @Override
-    public void notifyCommittable(
-            List<ManifestCommittable> committables, boolean partitionMarkDoneRecoverFromState) {
-        if (partitionMarkDoneRecoverFromState) {
-            if (partitionMarkDoneActionMode == PartitionMarkDoneActionMode.WATERMARK) {
-                markDoneByWatermark(committables);
-            } else {
-                markDoneByProcessTime(committables);
-            }
+    public void notifyCommittable(List<ManifestCommittable> committables) {
+        if (partitionMarkDoneActionMode == PartitionMarkDoneActionMode.WATERMARK) {
+            markDoneByWatermark(committables);
+        } else {
+            markDoneByProcessTime(committables);
         }
     }
 

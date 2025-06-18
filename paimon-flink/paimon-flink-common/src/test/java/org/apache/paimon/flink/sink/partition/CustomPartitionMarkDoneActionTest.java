@@ -62,7 +62,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
         // set.
         Assertions.assertThatThrownBy(
                         () ->
-                                PartitionMarkDone.create(
+                                PartitionMarkDoneListener.create(
                                         getClass().getClassLoader(),
                                         false,
                                         false,
@@ -85,8 +85,8 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
 
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(identifier);
 
-        PartitionMarkDone markDone =
-                PartitionMarkDone.create(
+        PartitionMarkDoneListener markDone =
+                PartitionMarkDoneListener.create(
                                 getClass().getClassLoader(),
                                 false,
                                 false,
