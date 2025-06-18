@@ -28,18 +28,8 @@ import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
-import org.apache.flink.api.common.state.BroadcastState;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.OperatorStateStore;
+import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 
-import javax.annotation.Nonnull;
-
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import static java.util.Collections.emptyList;
@@ -92,94 +82,6 @@ class ListenerTestUtils {
         committable.addFileCommittable(compactMessage);
         if (partitionMarkDoneRecoverFromState) {
             markDone.notifyCommittable(singletonList(committable));
-        }
-    }
-
-    private static class MockOperatorStateStore implements OperatorStateStore {
-
-        @Override
-        public <K, V> BroadcastState<K, V> getBroadcastState(
-                MapStateDescriptor<K, V> stateDescriptor) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <S> ListState<S> getListState(ListStateDescriptor<S> stateDescriptor) {
-            return new MockListState<>();
-        }
-
-        @Override
-        public <S> ListState<S> getUnionListState(ListStateDescriptor<S> stateDescriptor) {
-            throw new UnsupportedOperationException();
-        }
-
-        // @Override is skipped for compatibility with Flink 1.x.
-        public <K, V> BroadcastState<K, V> getBroadcastState(
-                org.apache.flink.api.common.state.v2.MapStateDescriptor<K, V> mapStateDescriptor)
-                throws Exception {
-            throw new UnsupportedOperationException();
-        }
-
-        // @Override is skipped for compatibility with Flink 1.x.
-        public <S> org.apache.flink.api.common.state.v2.ListState<S> getListState(
-                org.apache.flink.api.common.state.v2.ListStateDescriptor<S> listStateDescriptor)
-                throws Exception {
-            throw new UnsupportedOperationException();
-        }
-
-        // @Override is skipped for compatibility with Flink 1.x.
-        public <S> org.apache.flink.api.common.state.v2.ListState<S> getUnionListState(
-                org.apache.flink.api.common.state.v2.ListStateDescriptor<S> listStateDescriptor)
-                throws Exception {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Set<String> getRegisteredStateNames() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Set<String> getRegisteredBroadcastStateNames() {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    private static class MockListState<T> implements ListState<T> {
-
-        private final List<T> backingList = new ArrayList<>();
-
-        public MockListState() {}
-
-        @Override
-        public void update(List<T> values) {
-            this.backingList.clear();
-            this.addAll(values);
-        }
-
-        @Override
-        public void addAll(List<T> values) {
-            this.backingList.addAll(values);
-        }
-
-        @Override
-        public Iterable<T> get() {
-            return new Iterable<T>() {
-                @Nonnull
-                public Iterator<T> iterator() {
-                    return MockListState.this.backingList.iterator();
-                }
-            };
-        }
-
-        @Override
-        public void add(T value) {
-            this.backingList.add(value);
-        }
-
-        @Override
-        public void clear() {
-            this.backingList.clear();
         }
     }
 }

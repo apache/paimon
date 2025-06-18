@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.PartitionMarkDoneActionMode;
-import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
@@ -33,6 +32,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 
+import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +60,64 @@ public class PartitionMarkDoneListener implements CommitListener {
     private final List<PartitionMarkDoneAction> actions;
     private final boolean waitCompaction;
     private final PartitionMarkDoneActionMode partitionMarkDoneActionMode;
+
+    public static Optional<PartitionMarkDoneListener> create(
+            ClassLoader cl,
+            boolean isStreaming,
+            boolean isRestored,
+            OperatorStateStore stateStore,
+            FileStoreTable table)
+            throws Exception {
+        CoreOptions coreOptions = table.coreOptions();
+        Options options = coreOptions.toConfiguration();
+
+        if (disablePartitionMarkDone(isStreaming, table, options)) {
+            return Optional.empty();
+        }
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        coreOptions.partitionDefaultName(),
+                        table.schema().logicalPartitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        coreOptions.legacyPartitionName());
+
+        PartitionMarkDoneTrigger trigger =
+                PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);
+
+        List<PartitionMarkDoneAction> actions =
+                PartitionMarkDoneAction.createActions(cl, table, coreOptions);
+
+        // if batch read skip level 0 files, we should wait compaction to mark done
+        // otherwise, some data may not be readable, and there might be data delays
+        boolean waitCompaction =
+                !table.primaryKeys().isEmpty()
+                        && (coreOptions.deletionVectorsEnabled()
+                                || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
+
+        return Optional.of(
+                new PartitionMarkDoneListener(
+                        partitionComputer,
+                        trigger,
+                        actions,
+                        waitCompaction,
+                        options.get(PARTITION_MARK_DONE_MODE)));
+    }
+
+    private static boolean disablePartitionMarkDone(
+            boolean isStreaming, FileStoreTable table, Options options) {
+        boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
+        if (!isStreaming && !partitionMarkDoneWhenEndInput) {
+            return true;
+        }
+
+        Duration idleToDone = options.get(PARTITION_IDLE_TIME_TO_DONE);
+        if (isStreaming && idleToDone == null) {
+            return true;
+        }
+
+        return table.partitionKeys().isEmpty();
+    }
 
     public PartitionMarkDoneListener(
             InternalRowPartitionComputer partitionComputer,
@@ -180,70 +238,5 @@ public class PartitionMarkDoneListener implements CommitListener {
     @Override
     public void close() throws IOException {
         IOUtils.closeAllQuietly(actions);
-    }
-
-    /** Factory for {@link PartitionMarkDoneListener}. */
-    public static class Factory implements CommitListenerFactory {
-
-        @Override
-        public String identifier() {
-            return "partition-markdone";
-        }
-
-        @Override
-        public Optional<CommitListener> create(Committer.Context context, FileStoreTable table)
-                throws Exception {
-            CoreOptions coreOptions = table.coreOptions();
-            Options options = coreOptions.toConfiguration();
-
-            if (disablePartitionMarkDone(context.streamingCheckpointEnabled(), table, options)) {
-                return Optional.empty();
-            }
-
-            InternalRowPartitionComputer partitionComputer =
-                    new InternalRowPartitionComputer(
-                            coreOptions.partitionDefaultName(),
-                            table.schema().logicalPartitionType(),
-                            table.partitionKeys().toArray(new String[0]),
-                            coreOptions.legacyPartitionName());
-
-            PartitionMarkDoneTrigger trigger =
-                    PartitionMarkDoneTrigger.create(
-                            coreOptions, context.isRestored(), context.stateStore());
-
-            List<PartitionMarkDoneAction> actions =
-                    PartitionMarkDoneAction.createActions(
-                            context.getClass().getClassLoader(), table, coreOptions);
-
-            // if batch read skip level 0 files, we should wait compaction to mark done
-            // otherwise, some data may not be readable, and there might be data delays
-            boolean waitCompaction =
-                    !table.primaryKeys().isEmpty()
-                            && (coreOptions.deletionVectorsEnabled()
-                                    || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
-
-            return Optional.of(
-                    new PartitionMarkDoneListener(
-                            partitionComputer,
-                            trigger,
-                            actions,
-                            waitCompaction,
-                            options.get(PARTITION_MARK_DONE_MODE)));
-        }
-
-        private boolean disablePartitionMarkDone(
-                boolean isStreaming, FileStoreTable table, Options options) {
-            boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
-            if (!isStreaming && !partitionMarkDoneWhenEndInput) {
-                return true;
-            }
-
-            Duration idleToDone = options.get(PARTITION_IDLE_TIME_TO_DONE);
-            if (isStreaming && idleToDone == null) {
-                return true;
-            }
-
-            return table.partitionKeys().isEmpty();
-        }
     }
 }

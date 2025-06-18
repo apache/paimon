@@ -25,12 +25,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
-import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.createMockContext;
 import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.notifyCommits;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -72,10 +72,13 @@ class PartitionMarkDoneTest extends TableTestBase {
         Path location = table.location();
         Path successFile = new Path(location, "a=0/_SUCCESS");
         PartitionMarkDoneListener markDone =
-                (PartitionMarkDoneListener)
-                        new PartitionMarkDoneListener.Factory()
-                                .create(createMockContext(false, false), table)
-                                .get();
+                PartitionMarkDoneListener.create(
+                                getClass().getClassLoader(),
+                                false,
+                                false,
+                                new MockOperatorStateStore(),
+                                table)
+                        .get();
 
         if (!partitionMarkDoneRecoverFromState) {
             notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);

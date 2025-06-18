@@ -75,12 +75,19 @@ public class CommitListeners implements Closeable {
         List<CommitListener> listeners = new ArrayList<>();
 
         // partition statistics reporter
-        new ReportPartStatsListener.Factory().create(context, table).ifPresent(listeners::add);
+        ReportPartStatsListener.create(context.isRestored(), context.stateStore(), table)
+                .ifPresent(listeners::add);
 
         // partition mark done
-        new PartitionMarkDoneListener.Factory().create(context, table).ifPresent(listeners::add);
+        PartitionMarkDoneListener.create(
+                        context.getClass().getClassLoader(),
+                        context.streamingCheckpointEnabled(),
+                        context.isRestored(),
+                        context.stateStore(),
+                        table)
+                .ifPresent(listeners::add);
 
-        // custom listener
+        // custom listeners
         String identifiers = Options.fromMap(table.options()).get(COMMIT_CUSTOM_LISTENERS);
         Arrays.stream(identifiers.split(","))
                 .filter(identifier -> !StringUtils.isNullOrWhitespaceOnly(identifier))
