@@ -165,6 +165,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> TABLE_ID =
+            key("table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The full name of the table.");
+
     @ExcludeFromDocumentation("Avoid using deprecated options")
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
@@ -1807,6 +1814,10 @@ public class CoreOptions implements Serializable {
 
     public static Path path(Options options) {
         return new Path(options.get(PATH));
+    }
+
+    public static String tableId(Map<String, String> options) {
+        return options.get(TABLE_ID.key());
     }
 
     public TableType type() {
