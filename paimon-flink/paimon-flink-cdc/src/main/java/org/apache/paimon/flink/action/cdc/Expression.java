@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.StringUtils;
@@ -56,6 +56,9 @@ public interface Expression extends Serializable {
 
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
+
+    /** Compute value from given input. Input and output are serialized to string. */
+    String eval(String input, DataType inputType);
 
     /** Return name of this expression. */
     default String name() {
@@ -228,7 +231,7 @@ public interface Expression extends Serializable {
 
             DataType fieldType =
                     typeMapping.isEmpty()
-                            ? new VariantType()
+                            ? new VarCharType()
                             : checkNotNull(
                                     typeMapping.get(referencedFieldCheckForm),
                                     String.format(
@@ -371,6 +374,11 @@ public interface Expression extends Serializable {
 
             T result = converter.apply(toLocalDateTime(input));
             return String.valueOf(result);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
         }
 
         private LocalDateTime toLocalDateTime(String input) {
@@ -527,6 +535,11 @@ public interface Expression extends Serializable {
                                 input, beginInclusive, endExclusive));
             }
         }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
+        }
     }
 
     /** Truncate numeric/decimal/string value. */
@@ -564,7 +577,12 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            switch (fieldType.getTypeRoot()) {
+            return eval(input, fieldType);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            switch (inputType.getTypeRoot()) {
                 case TINYINT:
                 case SMALLINT:
                     return String.valueOf(truncateShort(width, Short.parseShort(input)));
@@ -644,6 +662,11 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             return value;
         }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return value;
+        }
     }
 
     /** Get current timestamp. */
@@ -662,6 +685,11 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
         }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
+        }
     }
 
     /** Convert string to upper case. */
@@ -674,6 +702,11 @@ public interface Expression extends Serializable {
         @Override
         public String eval(String input) {
             return StringUtils.toUpperCase(input);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
         }
 
         @Override
@@ -695,6 +728,11 @@ public interface Expression extends Serializable {
         }
 
         @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
+        }
+
+        @Override
         public String name() {
             return "lower";
         }
@@ -710,6 +748,11 @@ public interface Expression extends Serializable {
         @Override
         public String eval(String input) {
             return StringUtils.trim(input);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
         }
 
         @Override

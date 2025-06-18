@@ -25,6 +25,7 @@ import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -103,9 +104,12 @@ public abstract class AbstractRecordParser
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
+                    DataType inputType =
+                            schemaBuilder.getFieldType(computedColumn.fieldReference());
                     rowData.put(
                             computedColumn.columnName(),
-                            computedColumn.eval(rowData.get(computedColumn.fieldReference())));
+                            computedColumn.eval(
+                                    rowData.get(computedColumn.fieldReference()), inputType));
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
                 });
     }
