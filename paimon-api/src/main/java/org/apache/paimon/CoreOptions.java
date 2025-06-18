@@ -915,8 +915,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The batch size of partition expiration. "
-                                    + "By default, all partitions are expired together when expiration, "
-                                    + "which may cause a risk of out-of-memory for multiple large size partition. "
+                                    + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
                                     + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
@@ -2465,9 +2464,10 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_MAX_NUM);
     }
 
-    @Nullable
-    public Integer partitionExpireBatchSize() {
-        return options.get(PARTITION_EXPIRATION_BATCH_SIZE);
+    public int partitionExpireBatchSize() {
+        return options.get(PARTITION_EXPIRATION_BATCH_SIZE) == null
+                ? options.get(PARTITION_EXPIRATION_MAX_NUM)
+                : options.get(PARTITION_EXPIRATION_BATCH_SIZE);
     }
 
     public PartitionExpireStrategy partitionExpireStrategy() {

@@ -57,7 +57,7 @@ public class PartitionExpire {
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
     private int maxExpireNum;
-    @Nullable private Integer expireBatchSize;
+    private int expireBatchSize;
 
     public PartitionExpire(
             Duration expirationTime,
@@ -68,7 +68,7 @@ public class PartitionExpire {
             @Nullable PartitionHandler partitionHandler,
             boolean endInputCheckPartitionExpire,
             int maxExpireNum,
-            @Nullable Integer expireBatchSize) {
+            int expireBatchSize) {
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
         this.strategy = strategy;
@@ -89,7 +89,7 @@ public class PartitionExpire {
             FileStoreCommit commit,
             @Nullable PartitionHandler partitionHandler,
             int maxExpireNum,
-            Integer expireBatchSize) {
+            int expireBatchSize) {
         this(
                 expirationTime,
                 checkInterval,
@@ -155,7 +155,7 @@ public class PartitionExpire {
             // convert partition value to partition string, and limit the partition num
             expired = convertToPartitionString(expiredPartValues);
             LOG.info("Expire Partitions: {}", expired);
-            if (expireBatchSize != null && expireBatchSize > 0) {
+            if (expireBatchSize > 0 && expireBatchSize < expired.size()) {
                 Lists.partition(expired, expireBatchSize)
                         .forEach(
                                 expiredBatchPartitions ->
