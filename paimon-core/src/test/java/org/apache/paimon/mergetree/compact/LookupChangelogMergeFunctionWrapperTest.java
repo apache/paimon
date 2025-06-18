@@ -23,7 +23,9 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
@@ -546,5 +548,67 @@ public class LookupChangelogMergeFunctionWrapperTest {
         assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(3);
         kv = result.result();
         assertThat(kv.value().getInt(0)).isEqualTo(3);
+    }
+
+    @Test
+    public void testWithDeletionVectorsMaintainer() {
+        DeletionVectorsMaintainer dvMaintainer = DeletionVectorsMaintainer.factory(null).create();
+        Map<InternalRow, LookupLevels.PositionedKeyValue> lookup = new HashMap<>();
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        lookup::get,
+                        EQUALISER,
+                        LookupStrategy.from(false, true, true, true),
+                        dvMaintainer,
+                        null);
+
+        // With level-0, with level-x in lookup, with level-x (x > 0) deleted in dvMaintainer
+        function.reset();
+        LookupLevels.PositionedKeyValue positionedKv =
+                new LookupLevels.PositionedKeyValue(
+                        new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(5), "f1", 1);
+        lookup.put(row(1), positionedKv);
+        dvMaintainer.notifyNewDeletion("f1", 1);
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(INSERT);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // With level-0, with level-x in lookup, without level-x deleted in dvMaintainer
+        function.reset();
+        lookup.clear();
+        positionedKv =
+                new LookupLevels.PositionedKeyValue(
+                        new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(5), "f2", 1);
+        lookup.put(row(1), positionedKv);
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+
+        // With level-0, without level-x in lookup, without level-x deleted in dvMaintainer
+        function.reset();
+        lookup.clear();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(INSERT);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
     }
 }
