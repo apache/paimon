@@ -78,7 +78,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         this.catalog = restCatalog;
 
         // test retry commit
-        RESTCatalogServer.commit_success_throw_exception = true;
+        RESTCatalogServer.COMMIT_SUCCESS_THROW_EXCEPTION = true;
     }
 
     @AfterEach

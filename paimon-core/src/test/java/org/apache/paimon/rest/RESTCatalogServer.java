@@ -1994,7 +1994,7 @@ public class RESTCatalogServer {
         return String.format("%s-%d", identifier.getFullName(), snapshotId);
     }
 
-    public static volatile boolean commit_success_throw_exception = false;
+    public static volatile boolean COMMIT_SUCCESS_THROW_EXCEPTION = false;
 
     private MockResponse commitSnapshot(
             Identifier identifier,
@@ -2131,8 +2131,8 @@ public class RESTCatalogServer {
                                                         && partition.recordCount() <= 0);
                                 return partitions.isEmpty();
                             });
-            if (commit_success_throw_exception) {
-                commit_success_throw_exception = false;
+            if (COMMIT_SUCCESS_THROW_EXCEPTION) {
+                COMMIT_SUCCESS_THROW_EXCEPTION = false;
                 return mockResponse(
                         new ErrorResponse(
                                 ErrorResponse.RESOURCE_TYPE_TABLE, null, "Service Failure", 500),
