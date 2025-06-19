@@ -991,8 +991,9 @@ public class RESTCatalogServer {
         RESTResponse response;
         if ("GET".equals(method)) {
 
-            List<GetFunctionResponse> viewDetails = listFunctionDetails(databaseName, parameters);
-            if (!viewDetails.isEmpty()) {
+            List<GetFunctionResponse> functionsDetails =
+                    listFunctionDetails(databaseName, parameters);
+            if (!functionsDetails.isEmpty()) {
 
                 int maxResults;
                 try {
@@ -1003,7 +1004,7 @@ public class RESTCatalogServer {
                 String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
 
                 PagedList<GetFunctionResponse> pagedFunctionDetails =
-                        buildPagedEntities(viewDetails, maxResults, pageToken);
+                        buildPagedEntities(functionsDetails, maxResults, pageToken);
                 response =
                         new ListFunctionDetailsResponse(
                                 pagedFunctionDetails.getElements(),

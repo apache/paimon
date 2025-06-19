@@ -82,6 +82,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
@@ -1720,6 +1721,33 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                         "db2_rest%", null, 1, identifier3.getFullName())
                                 .getElements())
                 .containsExactlyInAnyOrder(identifier2.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db1, 1, null, null).getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier.getFullName(), identifier1.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 4, null, "func%").getElements()
+                                .stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsExactly(identifier3.getFullName());
+
+        PagedList<Function> functions = catalog.listFunctionDetailsPaged(db2, 1, null, null);
+        assertThat(
+                        functions.getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 1, functions.getNextPageToken(), null)
+                                .getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
     }
 
     @Test
