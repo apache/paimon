@@ -115,7 +115,7 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listTablesPagedGlobally(
+    public PagedList<Identifier> listTablesPagedGlobally(
             String databaseNamePattern,
             String tableNamePattern,
             Integer maxResults,
@@ -316,7 +316,7 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listViewsPagedGlobally(
+    public PagedList<Identifier> listViewsPagedGlobally(
             String databaseNamePattern,
             String viewNamePattern,
             Integer maxResults,
