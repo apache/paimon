@@ -65,8 +65,10 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
+import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
+import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
@@ -425,12 +427,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
      */
-    public PagedList<String> listTablesPagedGlobally(
+    public PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        ListTablesResponse response =
+        ListTablesGloballyResponse response =
                 client.get(
                         resourcePaths.tables(),
                         buildPagedQueryParams(
@@ -438,9 +440,9 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
-                        ListTablesResponse.class,
+                        ListTablesGloballyResponse.class,
                         restAuthFunction);
-        List<String> tables = response.getTables();
+        List<Identifier> tables = response.getTables();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
         }
@@ -1073,12 +1075,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
      */
-    public PagedList<String> listViewsPagedGlobally(
+    public PagedList<Identifier> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        ListViewsResponse response =
+        ListViewsGloballyResponse response =
                 client.get(
                         resourcePaths.views(),
                         buildPagedQueryParams(
@@ -1086,9 +1088,9 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
-                        ListViewsResponse.class,
+                        ListViewsGloballyResponse.class,
                         restAuthFunction);
-        List<String> views = response.getViews();
+        List<Identifier> views = response.getViews();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
         }
