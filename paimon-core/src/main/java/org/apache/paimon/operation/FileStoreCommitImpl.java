@@ -805,11 +805,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         String.format(
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 commitTimeout, retryCount);
-                if (retryResult.exception != null) {
-                    throw new RuntimeException(message, retryResult.exception);
-                } else {
-                    throw new RuntimeException(message);
-                }
+                throw new RuntimeException(message, retryResult.exception);
             }
 
             retryCount++;
@@ -901,7 +897,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
                 Snapshot snapshot = snapshotManager.snapshot(i);
                 if (snapshot.commitUser().equals(commitUser)
-                        && snapshot.commitIdentifier() == identifier) {
+                        && snapshot.commitIdentifier() == identifier
+                        && snapshot.commitKind() == commitKind) {
                     return new SuccessResult();
                 }
             }
@@ -1619,13 +1616,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private static class RetryResult implements CommitResult {
+    @VisibleForTesting
+    static class RetryResult implements CommitResult {
 
         private final Snapshot latestSnapshot;
         private final List<SimpleFileEntry> baseDataFiles;
         private final Exception exception;
 
-        private RetryResult(
+        public RetryResult(
                 Snapshot latestSnapshot, List<SimpleFileEntry> baseDataFiles, Exception exception) {
             this.latestSnapshot = latestSnapshot;
             this.baseDataFiles = baseDataFiles;
