@@ -452,7 +452,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newCommit(commitUser, table),
                 partitionHandler,
                 options.endInputCheckPartitionExpire(),
-                options.partitionExpireMaxNum());
+                options.partitionExpireMaxNum(),
+                options.partitionExpireBatchSize());
     }
 
     @Override

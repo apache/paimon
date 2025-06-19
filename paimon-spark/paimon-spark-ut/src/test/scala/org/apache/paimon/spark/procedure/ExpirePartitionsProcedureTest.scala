@@ -744,6 +744,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                 "CALL paimon.sys.expire_partitions(table => 'test.T', " +
                   "options => 'partition.expiration-time = 1d," +
                   " partition.expiration-max-num = 2," +
+                  " partition.expiration-batch-size = 2," +
                   " partition.timestamp-formatter = yyyy-MM-dd')"),
               Row("pt=2024-06-01") :: Row("pt=2024-06-02") :: Nil
             )

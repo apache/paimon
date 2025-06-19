@@ -47,6 +47,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Streams;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -182,6 +184,37 @@ public class PartitionExpireTest {
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
         assertThat(read()).containsExactlyInAnyOrder("abcd:12");
+    }
+
+    @Test
+    public void testBatchExpire() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+        newTable();
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.PARTITION_EXPIRATION_BATCH_SIZE.key(), "1"));
+        write("20230101", "11");
+        write("20230101", "12");
+        write("20230103", "31");
+        write("20230103", "32");
+        write("20230105", "51");
+        PartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
+
+        long overwriteSnapshotCnt =
+                Streams.stream(table.snapshotManager().snapshots())
+                        .filter(snapshot -> snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE)
+                        .count();
+        assertThat(overwriteSnapshotCnt).isEqualTo(3L);
     }
 
     @Test
