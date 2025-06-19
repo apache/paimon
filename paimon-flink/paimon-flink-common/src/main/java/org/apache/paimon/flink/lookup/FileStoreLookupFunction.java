@@ -30,7 +30,6 @@ import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
@@ -199,11 +198,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                     table, projection, path, joinKeys, getRequireCachedBucketIds());
                     LOG.info(
                             "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
-                } catch (UnsupportedOperationException ignore) {
+                } catch (UnsupportedOperationException e) {
                     LOG.info(
                             "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
-                                    + "because bucket mode isn't {}. Will create FullCacheLookupTable.",
-                            BucketMode.HASH_FIXED);
+                                    + "because {}. Will create FullCacheLookupTable.",
+                            e.getMessage());
                 }
             }
         }
