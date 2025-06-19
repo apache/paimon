@@ -1240,6 +1240,14 @@ public class CoreOptions implements Serializable {
                                                     + " reading engine requires at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
+    public static final ConfigOption<Integer> METADATA_STATS_KEEP_FIRST_N_COLUMNS =
+            key("metadata.stats-keep-first-n-columns")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "Define how many columns' stats are kept in metadata file from front to end. "
+                                    + "Default value '-1' means ignoring this config.");
+
     public static final ConfigOption<String> COMMIT_CALLBACKS =
             key("commit.callbacks")
                     .stringType()
@@ -2711,6 +2719,10 @@ public class CoreOptions implements Serializable {
 
     public boolean statsDenseStore() {
         return options.get(METADATA_STATS_DENSE_STORE);
+    }
+
+    public int statsKeepFirstNColumns() {
+        return options.get(METADATA_STATS_KEEP_FIRST_N_COLUMNS);
     }
 
     public boolean dataFileThinMode() {

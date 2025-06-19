@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
@@ -44,11 +45,15 @@ public class StatsCollectorFactories {
         Options options = coreOptions.toConfiguration();
         SimpleColStatsCollector.Factory[] modes =
                 new SimpleColStatsCollector.Factory[fields.size()];
+        int columnCount = 0;
+        int prefixColumnNum = coreOptions.statsKeepFirstNColumns();
         for (int i = 0; i < fields.size(); i++) {
+
             String field = fields.get(i);
             String fieldMode = fieldMode(options, field);
             if (fieldMode != null) {
                 modes[i] = SimpleColStatsCollector.from(fieldMode);
+                columnCount++;
             } else if (SpecialFields.isSystemField(field)
                     ||
                     // If we config DATA_FILE_THIN_MODE to true, we need to maintain the
@@ -56,7 +61,15 @@ public class StatsCollectorFactories {
                     keyNames.contains(SpecialFields.KEY_FIELD_PREFIX + field)) {
                 modes[i] = () -> new TruncateSimpleColStatsCollector(128);
             } else {
-                modes[i] = SimpleColStatsCollector.from(statsMode);
+                // Field mode has the highest priority.
+                // If field mode is not set and columnCount has exceeded prefixColumnNum ignoring
+                // system field, rest columns' stats will be set to none.
+                if (prefixColumnNum >= 0 && columnCount >= prefixColumnNum) {
+                    modes[i] = NoneSimpleColStatsCollector::new;
+                } else {
+                    modes[i] = SimpleColStatsCollector.from(statsMode);
+                }
+                columnCount++;
             }
         }
         return modes;
@@ -71,13 +84,19 @@ public class StatsCollectorFactories {
         Options options = coreOptions.toConfiguration();
         SimpleColStatsCollector.Factory[] modes =
                 new SimpleColStatsCollector.Factory[fields.size()];
+        int columnCount = 0;
+        int prefixColumnNum = coreOptions.statsKeepFirstNColumns();
         for (int i = 0; i < fields.size(); i++) {
             String field = fields.get(i);
             String fieldMode = fieldMode(options, field);
-            modes[i] =
-                    fieldMode != null
-                            ? SimpleColStatsCollector.from(fieldMode)
-                            : SimpleColStatsCollector.from(statsMode);
+            if (fieldMode != null) {
+                modes[i] = SimpleColStatsCollector.from(fieldMode);
+            } else if (prefixColumnNum >= 0 && columnCount >= prefixColumnNum) {
+                modes[i] = NoneSimpleColStatsCollector::new;
+            } else {
+                modes[i] = SimpleColStatsCollector.from(statsMode);
+            }
+            columnCount++;
         }
         return modes;
     }
