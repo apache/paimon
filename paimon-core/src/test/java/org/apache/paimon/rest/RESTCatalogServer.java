@@ -73,6 +73,7 @@ import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
+import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
@@ -1759,7 +1760,7 @@ public class RESTCatalogServer {
 
     private MockResponse functionsHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<String> functions = listFunctions(parameters);
+        List<Identifier> functions = listFunctions(parameters);
         if (!functions.isEmpty()) {
             int maxResults;
             try {
@@ -1768,27 +1769,28 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<String> pagedFunctions = buildPagedEntities(functions, maxResults, pageToken);
+            PagedList<Identifier> pagedFunctions =
+                    buildPagedEntities(functions, maxResults, pageToken);
             response =
-                    new ListFunctionsResponse(
+                    new ListFunctionsGloballyResponse(
                             pagedFunctions.getElements(), pagedFunctions.getNextPageToken());
         } else {
-            response = new ListFunctionsResponse(Collections.emptyList(), null);
+            response = new ListFunctionsGloballyResponse(Collections.emptyList(), null);
         }
         return mockResponse(response, 200);
     }
 
-    private List<String> listFunctions(Map<String, String> parameters) {
+    private List<Identifier> listFunctions(Map<String, String> parameters) {
         String namePattern = parameters.get(FUNCTION_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
-        List<String> fullFunctions = new ArrayList<>();
+        List<Identifier> fullFunctions = new ArrayList<>();
         for (Map.Entry<String, Function> entry : functionStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if ((Objects.isNull(databaseNamePattern))
                     || matchNamePattern(identifier.getDatabaseName(), databaseNamePattern)
                             && (Objects.isNull(namePattern)
                                     || matchNamePattern(identifier.getObjectName(), namePattern))) {
-                fullFunctions.add(identifier.getFullName());
+                fullFunctions.add(identifier);
             }
         }
         return fullFunctions;
@@ -2224,6 +2226,12 @@ public class RESTCatalogServer {
             return ((GetViewResponse) entity).getName();
         } else if (entity instanceof Partition) {
             return PartitionUtils.buildPartitionName(((Partition) entity).spec());
+        } else if (entity instanceof GetFunctionResponse) {
+            GetFunctionResponse functionResponse = (GetFunctionResponse) entity;
+            return functionResponse.name();
+        } else if (entity instanceof Identifier) {
+            Identifier identifier = (Identifier) entity;
+            return identifier.getFullName();
         } else {
             return entity.toString();
         }

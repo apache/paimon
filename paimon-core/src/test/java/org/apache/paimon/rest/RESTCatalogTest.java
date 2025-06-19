@@ -1713,14 +1713,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(
                         catalog.listFunctionsPagedGlobally("db2_rest%", "func%", null, null)
                                 .getElements())
-                .containsExactlyInAnyOrder(identifier3.getFullName());
+                .containsExactlyInAnyOrder(identifier3);
         assertThat(catalog.listFunctionsPagedGlobally("db2_rest%", null, 1, null).getElements())
-                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
+                .containsAnyOf(identifier2, identifier3);
         assertThat(
                         catalog.listFunctionsPagedGlobally(
                                         "db2_rest%", null, 1, identifier3.getFullName())
                                 .getElements())
-                .containsExactlyInAnyOrder(identifier2.getFullName());
+                .containsExactlyInAnyOrder(identifier2);
 
         assertThat(
                         catalog.listFunctionDetailsPaged(db1, 1, null, null).getElements().stream()
@@ -1735,19 +1735,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 .collect(Collectors.toList()))
                 .containsExactly(identifier3.getFullName());
 
-        PagedList<Function> functions = catalog.listFunctionDetailsPaged(db2, 1, null, null);
         assertThat(
-                        functions.getElements().stream()
-                                .map(f -> f.fullName())
-                                .collect(Collectors.toList()))
-                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
-
-        assertThat(
-                        catalog.listFunctionDetailsPaged(db2, 1, functions.getNextPageToken(), null)
+                        catalog.listFunctionDetailsPaged(db2, 1, identifier3.getObjectName(), null)
                                 .getElements().stream()
                                 .map(f -> f.fullName())
                                 .collect(Collectors.toList()))
-                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
+                .contains(identifier2.getFullName());
     }
 
     @Test

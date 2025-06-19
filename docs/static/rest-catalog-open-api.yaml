@@ -1535,7 +1535,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListFunctionsResponse'
+                $ref: '#/components/schemas/ListFunctionsGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -2808,6 +2808,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetViewResponse'
+        nextPageToken:
+          type: string
+    ListFunctionsGloballyResponse:
+      type: object
+      properties:
+        functions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ListFunctionsResponse:

@@ -62,6 +62,7 @@ import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
+import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
@@ -946,12 +947,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
      */
-    public PagedList<String> listFunctionsPagedGlobally(
+    public PagedList<Identifier> listFunctionsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String functionNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        ListFunctionsResponse response =
+        ListFunctionsGloballyResponse response =
                 client.get(
                         resourcePaths.functions(),
                         buildPagedQueryParams(
@@ -959,9 +960,9 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
-                        ListFunctionsResponse.class,
+                        ListFunctionsGloballyResponse.class,
                         restAuthFunction);
-        List<String> functions = response.data();
+        List<Identifier> functions = response.data();
         if (functions == null) {
             return new PagedList<>(emptyList(), null);
         }

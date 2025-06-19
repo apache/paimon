@@ -822,12 +822,12 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @return a list of the functions with provided page size under this databaseNamePattern &
-     *     functionNamePattern and next page token
+     * @return a list of the function identifier with provided page size under this
+     *     databaseNamePattern & functionNamePattern and next page token
      * @throws UnsupportedOperationException if it does not {@link #supportsListObjectsPaged()} or
      *     does not {@link #supportsListByPattern()}}.
      */
-    default PagedList<String> listFunctionsPagedGlobally(
+    default PagedList<Identifier> listFunctionsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String functionNamePattern,
             @Nullable Integer maxResults,

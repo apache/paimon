@@ -746,12 +746,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listFunctionsPagedGlobally(
+    public PagedList<Identifier> listFunctionsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String functionNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        PagedList<String> functions =
+        PagedList<Identifier> functions =
                 api.listFunctionsPagedGlobally(
                         databaseNamePattern, functionNamePattern, maxResults, pageToken);
         return new PagedList<>(functions.getElements(), functions.getNextPageToken());
