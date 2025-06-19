@@ -61,6 +61,8 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
+import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
@@ -139,6 +141,7 @@ public class RESTApi {
     public static final String DATABASE_NAME_PATTERN = "databaseNamePattern";
     public static final String TABLE_NAME_PATTERN = "tableNamePattern";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
+    public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
@@ -845,6 +848,127 @@ public class RESTApi {
                                 queryParams,
                                 ListFunctionsResponse.class,
                                 restAuthFunction));
+    }
+
+    /**
+     * List functions by page.
+     *
+     * <p>Gets an array of functions for a database. There is no guarantee of a specific ordering of
+     * the elements in the array.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<String> listFunctionsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern) {
+        ListFunctionsResponse response =
+                client.get(
+                        resourcePaths.functions(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionsResponse.class,
+                        restAuthFunction);
+        List<String> functions = response.functions();
+        if (functions == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functions, response.getNextPageToken());
+    }
+
+    /**
+     * List function details.
+     *
+     * <p>Gets an array of function details for a database. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<GetFunctionResponse> listFunctionDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern) {
+        ListFunctionDetailsResponse response =
+                client.get(
+                        resourcePaths.functionDetails(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionDetailsResponse.class,
+                        restAuthFunction);
+        List<GetFunctionResponse> functionDetails = response.data();
+        if (functionDetails == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functionDetails, response.getNextPageToken());
+    }
+
+    /**
+     * List functions for a catalog.
+     *
+     * <p>Gets an array of functions for a catalog. There is no guarantee of a specific ordering of
+     * the elements in the array.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<Identifier> listFunctionsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String functionNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        ListFunctionsGloballyResponse response =
+                client.get(
+                        resourcePaths.functions(),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionsGloballyResponse.class,
+                        restAuthFunction);
+        List<Identifier> functions = response.data();
+        if (functions == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functions, response.getNextPageToken());
     }
 
     /**

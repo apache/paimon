@@ -25,30 +25,35 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing functions. */
+/** Response for listing function details. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListFunctionsResponse implements PagedResponse<String> {
+public class ListFunctionDetailsResponse implements PagedResponse<GetFunctionResponse> {
 
-    private static final String FIELD_FUNCTIONS = "functions";
+    private static final String FIELD_FUNCTION_DETAILS = "functionDetails";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
-    @JsonProperty(FIELD_FUNCTIONS)
-    private final List<String> functions;
+    @JsonProperty(FIELD_FUNCTION_DETAILS)
+    private final List<GetFunctionResponse> functionDetails;
 
     @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
     private final String nextPageToken;
 
+    public ListFunctionDetailsResponse(
+            @JsonProperty(FIELD_FUNCTION_DETAILS) List<GetFunctionResponse> functionDetails) {
+        this(functionDetails, null);
+    }
+
     @JsonCreator
-    public ListFunctionsResponse(
-            @JsonProperty(FIELD_FUNCTIONS) List<String> functions,
+    public ListFunctionDetailsResponse(
+            @JsonProperty(FIELD_FUNCTION_DETAILS) List<GetFunctionResponse> functionDetails,
             @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
-        this.functions = functions;
+        this.functionDetails = functionDetails;
         this.nextPageToken = nextPageToken;
     }
 
-    @JsonGetter(FIELD_FUNCTIONS)
-    public List<String> functions() {
-        return this.functions;
+    @JsonGetter(FIELD_FUNCTION_DETAILS)
+    public List<GetFunctionResponse> getFunctionDetails() {
+        return this.functionDetails;
     }
 
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
@@ -57,7 +62,7 @@ public class ListFunctionsResponse implements PagedResponse<String> {
     }
 
     @Override
-    public List<String> data() {
-        return functions();
+    public List<GetFunctionResponse> data() {
+        return getFunctionDetails();
     }
 }
