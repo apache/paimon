@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.catalog.Identifier;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -27,27 +29,27 @@ import java.util.List;
 
 /** Response for listing functions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListFunctionsResponse implements PagedResponse<String> {
+public class ListFunctionsGloballyResponse implements PagedResponse<Identifier> {
 
     private static final String FIELD_FUNCTIONS = "functions";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
     @JsonProperty(FIELD_FUNCTIONS)
-    private final List<String> functions;
+    private final List<Identifier> functions;
 
     @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
     private final String nextPageToken;
 
     @JsonCreator
-    public ListFunctionsResponse(
-            @JsonProperty(FIELD_FUNCTIONS) List<String> functions,
+    public ListFunctionsGloballyResponse(
+            @JsonProperty(FIELD_FUNCTIONS) List<Identifier> functions,
             @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.functions = functions;
         this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_FUNCTIONS)
-    public List<String> functions() {
+    public List<Identifier> functions() {
         return this.functions;
     }
 
@@ -57,7 +59,7 @@ public class ListFunctionsResponse implements PagedResponse<String> {
     }
 
     @Override
-    public List<String> data() {
+    public List<Identifier> data() {
         return functions();
     }
 }

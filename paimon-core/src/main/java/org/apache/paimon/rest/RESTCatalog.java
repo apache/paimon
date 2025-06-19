@@ -30,6 +30,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -727,6 +728,53 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public PagedList<String> listFunctionsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            return api.listFunctionsPaged(databaseName, maxResults, pageToken, functionNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<Identifier> listFunctionsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String functionNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        PagedList<Identifier> functions =
+                api.listFunctionsPagedGlobally(
+                        databaseNamePattern, functionNamePattern, maxResults, pageToken);
+        return new PagedList<>(functions.getElements(), functions.getNextPageToken());
+    }
+
+    @Override
+    public PagedList<Function> listFunctionDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            PagedList<GetFunctionResponse> functions =
+                    api.listFunctionDetailsPaged(
+                            databaseName, maxResults, pageToken, functionNamePattern);
+            return new PagedList<>(
+                    functions.getElements().stream()
+                            .map(v -> v.toFunction(Identifier.create(databaseName, v.name())))
+                            .collect(Collectors.toList()),
+                    functions.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
         }
     }
 

@@ -38,6 +38,7 @@ public class ResourcePaths {
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
     protected static final String FUNCTIONS = "functions";
+    protected static final String FUNCTION_DETAILS = "function-details";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -249,6 +250,14 @@ public class ResourcePaths {
 
     public String functions(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTIONS);
+    }
+
+    public String functions() {
+        return SLASH.join(V1, prefix, FUNCTIONS);
+    }
+
+    public String functionDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), FUNCTION_DETAILS);
     }
 
     public String function(String databaseName, String functionName) {

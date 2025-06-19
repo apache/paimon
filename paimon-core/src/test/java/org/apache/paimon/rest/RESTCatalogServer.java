@@ -72,6 +72,8 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
+import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
@@ -132,11 +134,17 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTApi.DATABASE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.FUNCTION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
+import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
+import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
+import static org.apache.paimon.rest.ResourcePaths.TABLE_DETAILS;
+import static org.apache.paimon.rest.ResourcePaths.VIEWS;
+import static org.apache.paimon.rest.ResourcePaths.VIEW_DETAILS;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -292,6 +300,9 @@ public class RESTCatalogServer {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
                         return viewsHandle(parameters);
+                    } else if (StringUtils.startsWith(
+                            request.getPath(), resourcePaths.functions())) {
+                        return functionsHandle(parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -305,17 +316,19 @@ public class RESTCatalogServer {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
                         boolean isFunctions =
-                                resources.length == 2 && resources[1].startsWith("functions");
+                                resources.length == 2 && resources[1].startsWith(FUNCTIONS);
                         boolean isFunction =
-                                resources.length == 3 && resources[1].startsWith("functions");
-                        boolean isViews = resources.length == 2 && resources[1].startsWith("views");
+                                resources.length == 3 && resources[1].startsWith(FUNCTIONS);
+                        boolean isFunctionsDetails =
+                                resources.length == 2 && resources[1].startsWith(FUNCTION_DETAILS);
+                        boolean isViews = resources.length == 2 && resources[1].startsWith(VIEWS);
                         boolean isViewsDetails =
-                                resources.length == 2 && resources[1].startsWith("view-details");
+                                resources.length == 2 && resources[1].startsWith(VIEW_DETAILS);
                         boolean isTables =
                                 resources.length == 2
                                         && resources[1].startsWith(ResourcePaths.TABLES);
                         boolean isTableDetails =
-                                resources.length == 2 && resources[1].startsWith("table-details");
+                                resources.length == 2 && resources[1].startsWith(TABLE_DETAILS);
                         boolean isView =
                                 resources.length == 3
                                         && "views".equals(resources[1])
@@ -460,6 +473,9 @@ public class RESTCatalogServer {
                         } else if (isFunction) {
                             return functionApiHandler(
                                     identifier, restAuthParameter.method(), data, parameters);
+                        } else if (isFunctionsDetails) {
+                            return functionDetailsHandle(
+                                    restAuthParameter.method(), databaseName, parameters);
                         } else if (isViews) {
                             return viewsHandle(
                                     restAuthParameter.method(),
@@ -846,23 +862,40 @@ public class RESTCatalogServer {
             throws Exception {
         switch (method) {
             case "GET":
-                List<String> functions = new ArrayList<>(functionStore.keySet());
+                String namePattern = parameters.get(FUNCTION_NAME_PATTERN);
+                List<String> functions =
+                        (new ArrayList<>(functionStore.keySet()))
+                                .stream()
+                                        .map(n -> Identifier.fromString(n))
+                                        .filter(
+                                                identifier ->
+                                                        identifier
+                                                                        .getDatabaseName()
+                                                                        .equals(databaseName)
+                                                                && (Objects.isNull(namePattern)
+                                                                        || matchNamePattern(
+                                                                                identifier
+                                                                                        .getObjectName(),
+                                                                                namePattern)))
+                                        .map(i -> i.getObjectName())
+                                        .collect(Collectors.toList());
                 return generateFinalListFunctionsResponse(parameters, functions);
             case "POST":
                 CreateFunctionRequest requestBody =
                         RESTApi.fromJson(data, CreateFunctionRequest.class);
                 String functionName = requestBody.name();
-                if (!functionStore.containsKey(functionName)) {
+                Identifier identity = Identifier.create(databaseName, functionName);
+                if (!functionStore.containsKey(identity.getFullName())) {
                     Function function =
                             new FunctionImpl(
-                                    Identifier.create(databaseName, functionName),
+                                    identity,
                                     requestBody.inputParams(),
                                     requestBody.returnParams(),
                                     requestBody.isDeterministic(),
                                     requestBody.definitions(),
                                     requestBody.comment(),
                                     requestBody.options());
-                    functionStore.put(functionName, function);
+                    functionStore.put(identity.getFullName(), function);
                     return new MockResponse().setResponseCode(200);
                 } else {
                     throw new Catalog.FunctionAlreadyExistException(
@@ -876,31 +909,16 @@ public class RESTCatalogServer {
     private MockResponse functionApiHandler(
             Identifier identifier, String method, String data, Map<String, String> parameters)
             throws Exception {
-        String functionName = identifier.getObjectName();
-        if (!functionStore.containsKey(functionName)) {
+        if (!functionStore.containsKey(identifier.getFullName())) {
             throw new Catalog.FunctionNotExistException(identifier);
         }
-        Function function = functionStore.get(functionName);
+        Function function = functionStore.get(identifier.getFullName());
         switch (method) {
             case "DELETE":
-                functionStore.remove(functionName);
+                functionStore.remove(identifier.getFullName());
                 break;
             case "GET":
-                GetFunctionResponse response =
-                        new GetFunctionResponse(
-                                UUID.randomUUID().toString(),
-                                function.name(),
-                                function.inputParams().orElse(null),
-                                function.returnParams().orElse(null),
-                                function.isDeterministic(),
-                                function.definitions(),
-                                function.comment(),
-                                function.options(),
-                                "owner",
-                                1L,
-                                "owner",
-                                1L,
-                                "owner");
+                GetFunctionResponse response = toGetFunctionResponse(function);
                 return mockResponse(response, 200);
             case "POST":
                 AlterFunctionRequest requestBody =
@@ -956,19 +974,87 @@ public class RESTCatalogServer {
                 }
                 function =
                         new FunctionImpl(
-                                Identifier.create(null, functionName),
+                                identifier,
                                 function.inputParams().orElse(null),
                                 function.returnParams().orElse(null),
                                 function.isDeterministic(),
                                 newDefinitions,
                                 newComment,
                                 newOptions);
-                functionStore.put(functionName, function);
+                functionStore.put(identifier.getFullName(), function);
                 break;
             default:
                 return new MockResponse().setResponseCode(404);
         }
         return new MockResponse().setResponseCode(200);
+    }
+
+    private MockResponse functionDetailsHandle(
+            String method, String databaseName, Map<String, String> parameters) {
+        RESTResponse response;
+        if ("GET".equals(method)) {
+
+            List<GetFunctionResponse> functionsDetails =
+                    listFunctionDetails(databaseName, parameters);
+            if (!functionsDetails.isEmpty()) {
+
+                int maxResults;
+                try {
+                    maxResults = getMaxResults(parameters);
+                } catch (NumberFormatException e) {
+                    return handleInvalidMaxResults(parameters);
+                }
+                String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+
+                PagedList<GetFunctionResponse> pagedFunctionDetails =
+                        buildPagedEntities(functionsDetails, maxResults, pageToken);
+                response =
+                        new ListFunctionDetailsResponse(
+                                pagedFunctionDetails.getElements(),
+                                pagedFunctionDetails.getNextPageToken());
+            } else {
+                response = new ListFunctionDetailsResponse(Collections.emptyList(), null);
+            }
+            return mockResponse(response, 200);
+        } else {
+            return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private List<GetFunctionResponse> listFunctionDetails(
+            String databaseName, Map<String, String> parameters) {
+        String namePattern = parameters.get(FUNCTION_NAME_PATTERN);
+        return functionStore.keySet().stream()
+                .map(Identifier::fromString)
+                .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
+                .filter(
+                        identifier ->
+                                (Objects.isNull(namePattern)
+                                        || matchNamePattern(
+                                                identifier.getObjectName(), namePattern)))
+                .map(
+                        identifier -> {
+                            return toGetFunctionResponse(
+                                    functionStore.get(identifier.getFullName()));
+                        })
+                .collect(Collectors.toList());
+    }
+
+    private GetFunctionResponse toGetFunctionResponse(Function function) {
+        return new GetFunctionResponse(
+                UUID.randomUUID().toString(),
+                function.name(),
+                function.inputParams().orElse(null),
+                function.returnParams().orElse(null),
+                function.isDeterministic(),
+                function.definitions(),
+                function.comment(),
+                function.options(),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
     }
 
     private MockResponse databasesApiHandler(
@@ -1675,6 +1761,44 @@ public class RESTCatalogServer {
                 .collect(Collectors.toList());
     }
 
+    private MockResponse functionsHandle(Map<String, String> parameters) {
+        RESTResponse response;
+        List<Identifier> functions = listFunctions(parameters);
+        if (!functions.isEmpty()) {
+            int maxResults;
+            try {
+                maxResults = getMaxResults(parameters);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
+            }
+            String pageToken = parameters.get(PAGE_TOKEN);
+            PagedList<Identifier> pagedFunctions =
+                    buildPagedEntities(functions, maxResults, pageToken);
+            response =
+                    new ListFunctionsGloballyResponse(
+                            pagedFunctions.getElements(), pagedFunctions.getNextPageToken());
+        } else {
+            response = new ListFunctionsGloballyResponse(Collections.emptyList(), null);
+        }
+        return mockResponse(response, 200);
+    }
+
+    private List<Identifier> listFunctions(Map<String, String> parameters) {
+        String namePattern = parameters.get(FUNCTION_NAME_PATTERN);
+        String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+        List<Identifier> fullFunctions = new ArrayList<>();
+        for (Map.Entry<String, Function> entry : functionStore.entrySet()) {
+            Identifier identifier = Identifier.fromString(entry.getKey());
+            if ((Objects.isNull(databaseNamePattern))
+                    || matchNamePattern(identifier.getDatabaseName(), databaseNamePattern)
+                            && (Objects.isNull(namePattern)
+                                    || matchNamePattern(identifier.getObjectName(), namePattern))) {
+                fullFunctions.add(identifier);
+            }
+        }
+        return fullFunctions;
+    }
+
     private MockResponse viewsHandle(Map<String, String> parameters) {
         RESTResponse response;
         List<Identifier> views = listViews(parameters);
@@ -2106,6 +2230,12 @@ public class RESTCatalogServer {
             return ((GetViewResponse) entity).getName();
         } else if (entity instanceof Partition) {
             return PartitionUtils.buildPartitionName(((Partition) entity).spec());
+        } else if (entity instanceof GetFunctionResponse) {
+            GetFunctionResponse functionResponse = (GetFunctionResponse) entity;
+            return functionResponse.name();
+        } else if (entity instanceof Identifier) {
+            Identifier identifier = (Identifier) entity;
+            return identifier.getFullName();
         } else {
             return entity.toString();
         }

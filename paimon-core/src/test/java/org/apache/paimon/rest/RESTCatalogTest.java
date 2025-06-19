@@ -82,6 +82,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
@@ -1662,7 +1663,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 IllegalArgumentException.class,
                 () -> catalog.dropFunction(identifierWithoutAlphabet, true));
 
-        Identifier identifier = new Identifier("rest_catalog_db", "function.na_me-01");
+        Identifier identifier = Identifier.fromString("rest_catalog_db.function.na_me-01");
         Function function = MockRESTMessage.function(identifier);
 
         catalog.createFunction(identifier, function, true);
@@ -1687,6 +1688,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> catalog.dropFunction(identifier, false));
         assertThrows(
                 Catalog.FunctionNotExistException.class, () -> catalog.getFunction(identifier));
+    }
+
+    @Test
+    void testListFunctions() throws Exception {
+        String db1 = "db_rest_catalog_db";
+        String db2 = "db2_rest_catalog";
+        Identifier identifier = new Identifier(db1, "list_function");
+        Identifier identifier1 = new Identifier(db1, "function");
+        Identifier identifier2 = new Identifier(db2, "list_function");
+        Identifier identifier3 = new Identifier(db2, "function");
+        catalog.createDatabase(db1, false);
+        catalog.createDatabase(db2, false);
+        catalog.createFunction(identifier, MockRESTMessage.function(identifier), true);
+        catalog.createFunction(identifier1, MockRESTMessage.function(identifier1), true);
+        catalog.createFunction(identifier2, MockRESTMessage.function(identifier2), true);
+        catalog.createFunction(identifier3, MockRESTMessage.function(identifier3), true);
+        assertThat(catalog.listFunctionsPaged(db1, null, null, null).getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, 1, null, null).getElements())
+                .containsAnyOf(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPaged(db1, 1, identifier1.getObjectName(), null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, null, null, "func%").getElements())
+                .containsExactlyInAnyOrder(identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPagedGlobally("db2_rest%", "func%", null, null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier3);
+        assertThat(catalog.listFunctionsPagedGlobally("db2_rest%", null, 1, null).getElements())
+                .containsAnyOf(identifier2, identifier3);
+        assertThat(
+                        catalog.listFunctionsPagedGlobally(
+                                        "db2_rest%", null, 1, identifier3.getFullName())
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier2);
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db1, 1, null, null).getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier.getFullName(), identifier1.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 4, null, "func%").getElements()
+                                .stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsExactly(identifier3.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 1, identifier3.getObjectName(), null)
+                                .getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .contains(identifier2.getFullName());
     }
 
     @Test
