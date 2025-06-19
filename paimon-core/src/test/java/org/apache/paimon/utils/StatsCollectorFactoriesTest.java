@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
 import org.apache.paimon.types.CharType;
@@ -58,6 +59,29 @@ public class StatsCollectorFactoriesTest {
         assertThat(stats.length).isEqualTo(3);
         assertThat(((TruncateSimpleColStatsCollector) stats[0]).getLength()).isEqualTo(16);
         assertThat(((TruncateSimpleColStatsCollector) stats[1]).getLength()).isEqualTo(12);
+        assertThat(stats[2] instanceof FullSimpleColStatsCollector).isTrue();
+    }
+
+    @Test
+    public void testPrefixStats() {
+        RowType type =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new VarCharType(), "Someone's desc."),
+                                new DataField(1, "b", new TimestampType()),
+                                new DataField(2, "c", new CharType())));
+
+        Options options = new Options();
+        options.set(CoreOptions.METADATA_STATS_KEEP_FIRST_N_COLUMNS, 1);
+        options.set(CoreOptions.FIELDS_PREFIX + ".c." + CoreOptions.STATS_MODE_SUFFIX, "full");
+
+        SimpleColStatsCollector.Factory[] statsFactories =
+                StatsCollectorFactories.createStatsFactories(
+                        "truncate(16)", new CoreOptions(options), type.getFieldNames());
+        SimpleColStatsCollector[] stats = SimpleColStatsCollector.create(statsFactories);
+        assertThat(stats.length).isEqualTo(3);
+        assertThat(((TruncateSimpleColStatsCollector) stats[0]).getLength()).isEqualTo(16);
+        assertThat(stats[1] instanceof NoneSimpleColStatsCollector).isTrue();
         assertThat(stats[2] instanceof FullSimpleColStatsCollector).isTrue();
     }
 }
