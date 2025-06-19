@@ -235,7 +235,7 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
      *     not {@link #supportsListByPattern()}.
      */
-    default PagedList<String> listTablesPagedGlobally(
+    default PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
@@ -498,7 +498,7 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if it does not {@link #supportsListObjectsPaged()} or
      *     does not {@link #supportsListByPattern()}}.
      */
-    default PagedList<String> listViewsPagedGlobally(
+    default PagedList<Identifier> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,

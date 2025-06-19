@@ -78,8 +78,10 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
+import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
+import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -1137,34 +1139,35 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private <T> PagedList<T> buildPagedEntities(List<T> names, int maxResults, String pageToken) {
-        return buildPagedEntities(names, maxResults, pageToken, false);
+    private <T> PagedList<T> buildPagedEntities(
+            List<T> entities, int maxResults, String pageToken) {
+        return buildPagedEntities(entities, maxResults, pageToken, false);
     }
 
     private <T> PagedList<T> buildPagedEntities(
-            List<T> names, int maxResults, String pageToken, boolean desc) {
+            List<T> entities, int maxResults, String pageToken, boolean desc) {
         Comparator<Object> comparator = this::compareTo;
         if (desc) {
             comparator = comparator.reversed();
         }
-        List<T> sortedNames = names.stream().sorted(comparator).collect(Collectors.toList());
-        List<T> pagedNames = new ArrayList<>();
-        for (T sortedName : sortedNames) {
-            if (pagedNames.size() < maxResults) {
+        List<T> sortedEntities = entities.stream().sorted(comparator).collect(Collectors.toList());
+        List<T> pagedEntities = new ArrayList<>();
+        for (T sortedEntity : sortedEntities) {
+            if (pagedEntities.size() < maxResults) {
                 if (pageToken == null) {
-                    pagedNames.add(sortedName);
-                } else if (comparator.compare(sortedName, pageToken) > 0) {
-                    pagedNames.add(sortedName);
+                    pagedEntities.add(sortedEntity);
+                } else if (comparator.compare(sortedEntity, pageToken) > 0) {
+                    pagedEntities.add(sortedEntity);
                 }
             } else {
                 break;
             }
         }
-        if (maxResults > sortedNames.size() && pageToken == null) {
-            return new PagedList<>(pagedNames, null);
+        if (maxResults > sortedEntities.size() && pageToken == null) {
+            return new PagedList<>(pagedEntities, null);
         } else {
-            String nextPageToken = getNextPageTokenForEntities(pagedNames, maxResults);
-            return new PagedList<>(pagedNames, nextPageToken);
+            String nextPageToken = getNextPageTokenForEntities(pagedEntities, maxResults);
+            return new PagedList<>(pagedEntities, nextPageToken);
         }
     }
 
@@ -1379,7 +1382,7 @@ public class RESTCatalogServer {
 
     private MockResponse tablesHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<String> tables = listTables(parameters);
+        List<Identifier> tables = listTables(parameters);
         if (!tables.isEmpty()) {
             int maxResults;
             try {
@@ -1388,9 +1391,9 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<String> pagedTables = buildPagedEntities(tables, maxResults, pageToken);
+            PagedList<Identifier> pagedTables = buildPagedEntities(tables, maxResults, pageToken);
             response =
-                    new ListTablesResponse(
+                    new ListTablesGloballyResponse(
                             pagedTables.getElements(), pagedTables.getNextPageToken());
         } else {
             response = new ListTablesResponse(Collections.emptyList(), null);
@@ -1398,10 +1401,10 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private List<String> listTables(Map<String, String> parameters) {
+    private List<Identifier> listTables(Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
-        List<String> tables = new ArrayList<>();
+        List<Identifier> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if ((Objects.isNull(databaseNamePattern))
@@ -1409,7 +1412,7 @@ public class RESTCatalogServer {
                             && (Objects.isNull(tableNamePattern)
                                     || matchNamePattern(
                                             identifier.getTableName(), tableNamePattern))) {
-                tables.add(identifier.getFullName());
+                tables.add(identifier);
             }
         }
         return tables;
@@ -1798,7 +1801,7 @@ public class RESTCatalogServer {
 
     private MockResponse viewsHandle(Map<String, String> parameters) {
         RESTResponse response;
-        List<String> views = listViews(parameters);
+        List<Identifier> views = listViews(parameters);
         if (!views.isEmpty()) {
             int maxResults;
             try {
@@ -1807,19 +1810,20 @@ public class RESTCatalogServer {
                 return handleInvalidMaxResults(parameters);
             }
             String pageToken = parameters.get(PAGE_TOKEN);
-            PagedList<String> pagedViews = buildPagedEntities(views, maxResults, pageToken);
+            PagedList<Identifier> pagedViews = buildPagedEntities(views, maxResults, pageToken);
             response =
-                    new ListViewsResponse(pagedViews.getElements(), pagedViews.getNextPageToken());
+                    new ListViewsGloballyResponse(
+                            pagedViews.getElements(), pagedViews.getNextPageToken());
         } else {
             response = new ListViewsResponse(Collections.emptyList(), null);
         }
         return mockResponse(response, 200);
     }
 
-    private List<String> listViews(Map<String, String> parameters) {
+    private List<Identifier> listViews(Map<String, String> parameters) {
         String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
-        List<String> fullViews = new ArrayList<>();
+        List<Identifier> fullViews = new ArrayList<>();
         for (Map.Entry<String, View> entry : viewStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if ((Objects.isNull(databaseNamePattern))
@@ -1827,7 +1831,7 @@ public class RESTCatalogServer {
                             && (Objects.isNull(viewNamePattern)
                                     || matchNamePattern(
                                             identifier.getTableName(), viewNamePattern))) {
-                fullViews.add(identifier.getFullName());
+                fullViews.add(identifier);
             }
         }
         return fullViews;

@@ -333,7 +333,7 @@ paths:
       tags:
         - table
       summary: List tables globally
-      operationId: List tables globally
+      operationId: ListTablesGlobally
       description: list tables paged globally which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
@@ -367,7 +367,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListTablesResponse'
+                $ref: '#/components/schemas/ListTablesGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -1237,7 +1237,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListViewsResponse'
+                $ref: '#/components/schemas/ListViewsGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -2720,7 +2720,7 @@ components:
           type: array
           items:
             type: string
-            description: table name or full table name of the table. full table name format is like "db.table"
+            description: table name of the table.
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2730,6 +2730,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetTableResponse'
+        nextPageToken:
+          type: string
+    ListTablesGloballyResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            identifier:
+              $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ConfigResponse:
@@ -2798,7 +2808,7 @@ components:
           type: array
           items:
             type: string
-            description: view name or full view name of the view. full view name format is like "db.view"
+            description: view name of the view.
         nextPageToken:
           type: string
     ListViewDetailsResponse:
@@ -2817,6 +2827,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Identifier'
+    ListViewsGloballyResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            identifier:
+              $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ListFunctionsResponse:
