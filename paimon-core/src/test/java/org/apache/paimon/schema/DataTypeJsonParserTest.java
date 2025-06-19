@@ -168,6 +168,17 @@ public class DataTypeJsonParserTest {
                                                         "f1",
                                                         new BooleanType(),
                                                         "This as well.")))),
+                TestSpec.forString(
+                                "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\",\"description\":\"my_comment\",\"defaultValue\":\"55\"}]}")
+                        .expectType(
+                                new RowType(
+                                        Collections.singletonList(
+                                                new DataField(
+                                                        0,
+                                                        "f0",
+                                                        new IntType(false),
+                                                        "my_comment",
+                                                        "55")))),
 
                 // error message testing
 

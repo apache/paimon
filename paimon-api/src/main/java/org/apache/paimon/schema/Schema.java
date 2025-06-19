@@ -175,7 +175,8 @@ public class Schema {
                                 field.id(),
                                 field.name(),
                                 field.type().copy(false),
-                                field.description()));
+                                field.description(),
+                                field.defaultValue()));
             } else {
                 newFields.add(field);
             }
@@ -302,12 +303,28 @@ public class Schema {
          * @param description description of the column
          */
         public Builder column(String columnName, DataType dataType, @Nullable String description) {
+            return column(columnName, dataType, description, null);
+        }
+
+        /**
+         * Declares a column that is appended to this schema.
+         *
+         * @param columnName column name
+         * @param dataType data type of the column
+         * @param description description of the column
+         * @param defaultValue default value of the column
+         */
+        public Builder column(
+                String columnName,
+                DataType dataType,
+                @Nullable String description,
+                @Nullable String defaultValue) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
 
             int id = highestFieldId.incrementAndGet();
             DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
-            columns.add(new DataField(id, columnName, reassignDataType, description));
+            columns.add(new DataField(id, columnName, reassignDataType, description, defaultValue));
             return this;
         }
 

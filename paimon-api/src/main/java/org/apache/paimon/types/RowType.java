@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -387,8 +389,19 @@ public final class RowType extends DataType {
             return this;
         }
 
-        public Builder field(String name, DataType type, String description) {
+        public Builder field(String name, DataType type, @Nullable String description) {
             fields.add(new DataField(fieldId.incrementAndGet(), name, type, description));
+            return this;
+        }
+
+        public Builder field(
+                String name,
+                DataType type,
+                @Nullable String description,
+                @Nullable String defaultValue) {
+            fields.add(
+                    new DataField(
+                            fieldId.incrementAndGet(), name, type, description, defaultValue));
             return this;
         }
 

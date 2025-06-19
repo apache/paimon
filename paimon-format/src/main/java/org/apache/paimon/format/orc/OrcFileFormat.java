@@ -203,7 +203,8 @@ public class OrcFileFormat extends FileFormat {
                                                         f.id(),
                                                         f.name(),
                                                         refineDataType(f.type()),
-                                                        f.description()))
+                                                        f.description(),
+                                                        f.defaultValue()))
                                 .collect(Collectors.toList()));
             default:
                 return type;

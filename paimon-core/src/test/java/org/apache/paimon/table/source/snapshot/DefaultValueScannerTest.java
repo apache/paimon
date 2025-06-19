@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -84,7 +85,7 @@ public class DefaultValueScannerTest extends ScannerTestBase {
         options.set(
                 String.format(
                         "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "b", CoreOptions.DEFAULT_VALUE_SUFFIX),
+                        CoreOptions.FIELDS_PREFIX, "b", DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
                 "100");
         return createFileStoreTable(options);
     }
