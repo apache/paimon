@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -36,8 +35,6 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
-import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -50,6 +47,7 @@ import static java.util.Collections.emptyList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.createMockContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FlinkConnectorOptions.PartitionMarkDoneActionMode}. */
@@ -77,19 +75,8 @@ public class WatermarkPartitionMarkDoneTest extends TableTestBase {
 
         TableWriteImpl<?> write = table.newWrite("user1");
         TableCommitImpl commit = table.newCommit("user1");
-        OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
         StoreCommitter committer =
-                new StoreCommitter(
-                        table,
-                        commit,
-                        Committer.createContext(
-                                "user1",
-                                metricGroup,
-                                true,
-                                false,
-                                new PartitionMarkDoneTest.MockOperatorStateStore(),
-                                1,
-                                1));
+                new StoreCommitter(table, commit, createMockContext(true, false));
 
         write.write(GenericRow.of(BinaryString.fromString("2025-03-01 12"), 1, 1));
         write.write(GenericRow.of(BinaryString.fromString("2025-03-01 13"), 1, 1));

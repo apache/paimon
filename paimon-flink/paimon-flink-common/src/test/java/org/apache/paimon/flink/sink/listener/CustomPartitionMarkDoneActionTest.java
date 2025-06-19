@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
@@ -26,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +34,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneTest.notifyCommits;
+import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.notifyCommits;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for custom PartitionMarkDoneAction. */
@@ -66,7 +67,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
                                         getClass().getClassLoader(),
                                         false,
                                         false,
-                                        new PartitionMarkDoneTest.MockOperatorStateStore(),
+                                        new MockOperatorStateStore(),
                                         table))
                 .hasMessageContaining(
                         String.format(
@@ -90,7 +91,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
                                 getClass().getClassLoader(),
                                 false,
                                 false,
-                                new PartitionMarkDoneTest.MockOperatorStateStore(),
+                                new MockOperatorStateStore(),
                                 table2)
                         .get();
 

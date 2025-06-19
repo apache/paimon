@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
@@ -76,6 +77,22 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         if (bucketMode != BucketMode.HASH_FIXED && bucketMode != BucketMode.POSTPONE_MODE) {
             throw new UnsupportedOperationException(
                     "Unsupported mode for partial lookup: " + bucketMode);
+        }
+
+        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+
+        if (!coreOptions.needLookup()
+                && coreOptions.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE) {
+            throw new UnsupportedOperationException(
+                    "Only support deduplicate merge engine when table does not need lookup, but merge engine is:  "
+                            + coreOptions.mergeEngine());
+        }
+
+        if (coreOptions.mergeEngine() == CoreOptions.MergeEngine.DEDUPLICATE
+                && !coreOptions.sequenceField().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Unsupported sequence fields definition for partial lookup when use deduplicate merge engine, but sequence fields are:  "
+                            + coreOptions.sequenceField());
         }
 
         TableSchema schema = table.schema();
