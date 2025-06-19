@@ -778,12 +778,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-
-            if (alreadyCommitted(identifier, retryResult, latestSnapshot)) {
-                // already success in table
-                break;
-            }
-
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
@@ -821,26 +815,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             retryCount++;
         }
         return retryCount + 1;
-    }
-
-    private boolean alreadyCommitted(
-            long identifier, RetryResult retryResult, Snapshot latestSnapshot) {
-        // Check if the commit has been completed. At this point, there will be no more repeated
-        // commits and just return success
-        if (retryResult != null && latestSnapshot != null) {
-            long startCheckSnapshot = Snapshot.FIRST_SNAPSHOT_ID;
-            if (retryResult.latestSnapshot != null) {
-                startCheckSnapshot = retryResult.latestSnapshot.id() + 1;
-            }
-            for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
-                Snapshot snapshot = snapshotManager.snapshot(i);
-                if (snapshot.commitUser().equals(commitUser)
-                        && snapshot.commitIdentifier() == identifier) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private int tryOverwrite(
@@ -916,6 +890,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ConflictCheck conflictCheck,
             @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
+
+        // Check if the commit has been completed. At this point, there will be no more repeated
+        // commits and just return success
+        if (retryResult != null && latestSnapshot != null) {
+            long startCheckSnapshot = Snapshot.FIRST_SNAPSHOT_ID;
+            if (retryResult.latestSnapshot != null) {
+                startCheckSnapshot = retryResult.latestSnapshot.id() + 1;
+            }
+            for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
+                Snapshot snapshot = snapshotManager.snapshot(i);
+                if (snapshot.commitUser().equals(commitUser)
+                        && snapshot.commitIdentifier() == identifier) {
+                    return new SuccessResult();
+                }
+            }
+        }
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
 
@@ -1103,6 +1093,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             success = commitSnapshotImpl(newSnapshot, deltaStatistics);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
+            LOG.warn("Retry commit for exception.", e);
             return new RetryResult(latestSnapshot, baseDataFiles, e);
         }
 
