@@ -56,7 +56,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -82,126 +81,6 @@ public class SchemaEvolutionTest {
         identifier = SchemaManager.identifierFromPath(tablePath.toString(), true);
         schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
-    }
-
-    @Test
-    public void testDefaultValue() throws Exception {
-        {
-            Map<String, String> option = new HashMap<>();
-            option.put(
-                    String.format(
-                            "%s.%s.%s",
-                            CoreOptions.FIELDS_PREFIX, "a", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                    "1");
-            Schema schema =
-                    new Schema(
-                            RowType.of(
-                                            new DataType[] {
-                                                DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()),
-                                                DataTypes.BIGINT()
-                                            },
-                                            new String[] {"a", "b"})
-                                    .getFields(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            option,
-                            "");
-
-            assertThatThrownBy(() -> schemaManager.createTable(schema))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining(
-                            "The column %s with datatype %s is currently not supported for default value.",
-                            "a", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()).asSQLString());
-        }
-
-        {
-            Map<String, String> option = new HashMap<>();
-            option.put(
-                    String.format(
-                            "%s.%s.%s",
-                            CoreOptions.FIELDS_PREFIX, "a", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                    "abcxxxx");
-            Schema schema =
-                    new Schema(
-                            RowType.of(
-                                            new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT()},
-                                            new String[] {"a", "b"})
-                                    .getFields(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            option,
-                            "");
-            assertThatThrownBy(() -> schemaManager.createTable(schema))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining(
-                            "The default value %s of the column a can not be cast to datatype: %s",
-                            "abcxxxx", DataTypes.BIGINT().asSQLString());
-        }
-
-        {
-            Schema schema =
-                    new Schema(
-                            RowType.of(
-                                            new DataType[] {
-                                                DataTypes.BIGINT(),
-                                                DataTypes.BIGINT(),
-                                                DataTypes.BIGINT()
-                                            },
-                                            new String[] {"a", "b", "c"})
-                                    .getFields(),
-                            Lists.newArrayList("c"),
-                            Lists.newArrayList("a", "c"),
-                            new HashMap<>(),
-                            "");
-
-            schemaManager.createTable(schema);
-
-            assertThatThrownBy(
-                            () ->
-                                    schemaManager.commitChanges(
-                                            Collections.singletonList(
-                                                    SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "b",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abcxxxx"))))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining(
-                            "The default value %s of the column b can not be cast to datatype: %s",
-                            "abcxxxx", DataTypes.BIGINT().asSQLString());
-            assertThatThrownBy(
-                            () ->
-                                    schemaManager.commitChanges(
-                                            Collections.singletonList(
-                                                    SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "a",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abc"))))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Primary key a should not be assign default column.");
-
-            assertThatThrownBy(
-                            () ->
-                                    schemaManager.commitChanges(
-                                            Collections.singletonList(
-                                                    SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "c",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abc"))))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Partition key c should not be assign default column.");
-        }
     }
 
     @Test

@@ -23,6 +23,7 @@ import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -1589,7 +1590,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testDefaultValueWithoutPrimaryKey() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
-                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+                CoreOptions.FIELDS_PREFIX + ".rate." + DefaultValueAssigner.DEFAULT_VALUE_SUFFIX,
+                "1000");
 
         String table =
                 createTable(
@@ -1625,7 +1627,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
-                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+                CoreOptions.FIELDS_PREFIX + ".rate." + DefaultValueAssigner.DEFAULT_VALUE_SUFFIX,
+                "1000");
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());

@@ -20,12 +20,20 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
+
+import javax.annotation.Nullable;
+
+import java.util.List;
 
 /**
  * An implementation of {@link InternalRow} which provides a default value for the underlying {@link
@@ -192,5 +200,43 @@ public class DefaultValueRow implements InternalRow {
 
     public static DefaultValueRow from(InternalRow defaultValueRow) {
         return new DefaultValueRow(defaultValueRow);
+    }
+
+    @Nullable
+    public static DefaultValueRow create(RowType rowType) {
+        List<DataField> fields = rowType.getFields();
+        GenericRow row = new GenericRow(fields.size());
+        boolean containsDefaultValue = false;
+        for (int i = 0; i < fields.size(); i++) {
+            DataField dataField = fields.get(i);
+            String defaultValueStr = dataField.defaultValue();
+            if (defaultValueStr == null) {
+                continue;
+            }
+
+            containsDefaultValue = true;
+            @SuppressWarnings("unchecked")
+            CastExecutor<Object, Object> resolve =
+                    (CastExecutor<Object, Object>)
+                            CastExecutors.resolve(VarCharType.STRING_TYPE, dataField.type());
+
+            if (resolve == null) {
+                throw new RuntimeException(
+                        "Default value do not support the type of " + dataField.type());
+            }
+
+            if (defaultValueStr.startsWith("'") && defaultValueStr.endsWith("'")) {
+                defaultValueStr = defaultValueStr.substring(1, defaultValueStr.length() - 1);
+            }
+
+            Object defaultValue = resolve.cast(BinaryString.fromString(defaultValueStr));
+            row.setField(i, defaultValue);
+        }
+
+        if (!containsDefaultValue) {
+            return null;
+        }
+
+        return DefaultValueRow.from(row);
     }
 }

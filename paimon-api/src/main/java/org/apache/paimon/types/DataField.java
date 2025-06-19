@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
@@ -41,27 +42,31 @@ public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String FIELD_FORMAT_WITH_DESCRIPTION = "%s %s '%s'";
-
-    public static final String FIELD_FORMAT_NO_DESCRIPTION = "%s %s";
-
     private final int id;
-
     private final String name;
-
     private final DataType type;
-
     private final @Nullable String description;
+    private final @Nullable String defaultValue;
 
     public DataField(int id, String name, DataType dataType) {
-        this(id, name, dataType, null);
+        this(id, name, dataType, null, null);
     }
 
-    public DataField(int id, String name, DataType type, @Nullable String description) {
+    public DataField(int id, String name, DataType dataType, @Nullable String description) {
+        this(id, name, dataType, description, null);
+    }
+
+    public DataField(
+            int id,
+            String name,
+            DataType type,
+            @Nullable String description,
+            @Nullable String defaultValue) {
         this.id = id;
         this.name = name;
         this.type = type;
         this.description = description;
+        this.defaultValue = defaultValue;
     }
 
     public int id() {
@@ -76,20 +81,24 @@ public final class DataField implements Serializable {
         return type;
     }
 
-    public DataField newId(int newid) {
-        return new DataField(newid, name, type, description);
+    public DataField newId(int newId) {
+        return new DataField(newId, name, type, description, defaultValue);
     }
 
     public DataField newName(String newName) {
-        return new DataField(id, newName, type, description);
+        return new DataField(id, newName, type, description, defaultValue);
     }
 
     public DataField newType(DataType newType) {
-        return new DataField(id, name, newType, description);
+        return new DataField(id, name, newType, description, defaultValue);
     }
 
     public DataField newDescription(String newDescription) {
-        return new DataField(id, name, type, newDescription);
+        return new DataField(id, name, type, defaultValue, newDescription);
+    }
+
+    public DataField newDefaultValue(String newDefaultValue) {
+        return new DataField(id, name, type, newDefaultValue, description);
     }
 
     @Nullable
@@ -97,28 +106,29 @@ public final class DataField implements Serializable {
         return description;
     }
 
+    @Nullable
+    public String defaultValue() {
+        return defaultValue;
+    }
+
     public DataField copy() {
-        return new DataField(id, name, type.copy(), description);
+        return new DataField(id, name, type.copy(), description, defaultValue);
     }
 
     public DataField copy(boolean isNullable) {
-        return new DataField(id, name, type.copy(isNullable), description);
+        return new DataField(id, name, type.copy(isNullable), description, defaultValue);
     }
 
     public String asSQLString() {
-        return formatString(type.asSQLString());
-    }
-
-    private String formatString(String typeString) {
-        if (description == null) {
-            return String.format(FIELD_FORMAT_NO_DESCRIPTION, escapeIdentifier(name), typeString);
-        } else {
-            return String.format(
-                    FIELD_FORMAT_WITH_DESCRIPTION,
-                    escapeIdentifier(name),
-                    typeString,
-                    escapeSingleQuotes(description));
+        StringBuilder sb = new StringBuilder();
+        sb.append(escapeIdentifier(name)).append(" ").append(type.asSQLString());
+        if (StringUtils.isNotEmpty(description)) {
+            sb.append(" COMMENT '").append(escapeSingleQuotes(description)).append("'");
         }
+        if (defaultValue != null) {
+            sb.append(" DEFAULT ").append(defaultValue);
+        }
+        return sb.toString();
     }
 
     public void serializeJson(JsonGenerator generator) throws IOException {
@@ -129,6 +139,9 @@ public final class DataField implements Serializable {
         type.serializeJson(generator);
         if (description() != null) {
             generator.writeStringField("description", description());
+        }
+        if (defaultValue() != null) {
+            generator.writeStringField("defaultValue", defaultValue());
         }
         generator.writeEndObject();
     }
@@ -145,7 +158,8 @@ public final class DataField implements Serializable {
         return Objects.equals(id, field.id)
                 && Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
-                && Objects.equals(description, field.description);
+                && Objects.equals(description, field.description)
+                && Objects.equals(defaultValue, field.defaultValue);
     }
 
     public boolean equalsIgnoreFieldId(DataField other) {
@@ -157,7 +171,8 @@ public final class DataField implements Serializable {
         }
         return Objects.equals(name, other.name)
                 && type.equalsIgnoreFieldId(other.type)
-                && Objects.equals(description, other.description);
+                && Objects.equals(description, other.description)
+                && Objects.equals(defaultValue, other.defaultValue);
     }
 
     public boolean isPrunedFrom(DataField other) {
@@ -170,12 +185,13 @@ public final class DataField implements Serializable {
         return Objects.equals(id, other.id)
                 && Objects.equals(name, other.name)
                 && type.isPrunedFrom(other.type)
-                && Objects.equals(description, other.description);
+                && Objects.equals(description, other.description)
+                && Objects.equals(defaultValue, other.defaultValue);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, type, description);
+        return Objects.hash(id, name, type, description, defaultValue);
     }
 
     @Override
@@ -193,7 +209,8 @@ public final class DataField implements Serializable {
         } else if (dataField1 != null && dataField2 != null) {
             return Objects.equals(dataField1.name(), dataField2.name())
                     && Objects.equals(dataField1.type(), dataField2.type())
-                    && Objects.equals(dataField1.description(), dataField2.description());
+                    && Objects.equals(dataField1.description(), dataField2.description())
+                    && Objects.equals(dataField1.defaultValue(), dataField2.defaultValue());
         } else {
             return false;
         }

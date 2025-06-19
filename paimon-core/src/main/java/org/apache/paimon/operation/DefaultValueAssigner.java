@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
@@ -38,15 +37,23 @@ import org.apache.paimon.types.VarCharType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+
 /**
  * The field Default value assigner. note that invoke of assigning should be after merge and schema
  * evolution.
+ *
+ * @deprecated default value in reading is not recommended
  */
+@Deprecated
 public class DefaultValueAssigner {
+
+    public static final String DEFAULT_VALUE_SUFFIX = "default-value";
 
     private final RowType rowType;
     private final Map<String, String> defaultValues;
@@ -67,10 +74,6 @@ public class DefaultValueAssigner {
         List<String> requiredFieldNames = readRowType.getFieldNames();
         needToAssign = defaultValues.keySet().stream().anyMatch(requiredFieldNames::contains);
         return this;
-    }
-
-    public boolean needToAssign() {
-        return needToAssign;
     }
 
     /** assign default value for column which value is null. */
@@ -152,8 +155,21 @@ public class DefaultValueAssigner {
     }
 
     public static DefaultValueAssigner create(TableSchema schema) {
-        CoreOptions coreOptions = new CoreOptions(schema.options());
-        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
+        Map<String, String> defaultValues = getFieldDefaultValues(schema.options());
         return new DefaultValueAssigner(defaultValues, schema.logicalRowType());
+    }
+
+    private static Map<String, String> getFieldDefaultValues(Map<String, String> options) {
+        Map<String, String> defaultValues = new HashMap<>();
+        String fieldPrefix = FIELDS_PREFIX + ".";
+        String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
+        for (Map.Entry<String, String> option : options.entrySet()) {
+            String key = option.getKey();
+            if (key != null && key.startsWith(fieldPrefix) && key.endsWith(defaultValueSuffix)) {
+                String fieldName = key.replace(fieldPrefix, "").replace(defaultValueSuffix, "");
+                defaultValues.put(fieldName, option.getValue());
+            }
+        }
+        return defaultValues;
     }
 }

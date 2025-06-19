@@ -2233,6 +2233,7 @@ components:
         - $ref: '#/components/schemas/RenameColumn'
         - $ref: '#/components/schemas/DropColumn'
         - $ref: '#/components/schemas/UpdateColumnComment'
+        - $ref: '#/components/schemas/UpdateColumnDefaultValue'
         - $ref: '#/components/schemas/UpdateColumnType'
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
@@ -2247,6 +2248,7 @@ components:
           renameColumn: '#/components/schemas/RenameColumn'
           dropColumn: '#/components/schemas/DropColumn'
           updateColumnComment: '#/components/schemas/UpdateColumnComment'
+          updateColumnDefaultValue: '#/components/schemas/UpdateColumnDefaultValue'
           updateColumnType: '#/components/schemas/UpdateColumnType'
           updateColumnPosition: '#/components/schemas/UpdateColumnPosition'
           updateColumnNullability: '#/components/schemas/UpdateColumnNullability'
@@ -2338,6 +2340,19 @@ components:
           items:
             type: string
         newComment:
+          type: string
+    UpdateColumnDefaultValue:
+      allOf:
+        - $ref: '#/components/schemas/BaseSchemaChange'
+      properties:
+        action:
+          type: string
+          const: "updateColumnDefaultValue"
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newDefaultValue:
           type: string
     UpdateColumnType:
       allOf:

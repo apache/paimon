@@ -41,6 +41,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
+    public void testDefaultValue() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("CALL sys.alter_column_default_value('default.T', 'b', '5')");
+        sql("INSERT INTO T (a) VALUES (1), (2)");
+        assertThat(collectResult("SELECT * FROM T"))
+                .containsExactlyInAnyOrder("+I[1, 5]", "+I[2, 5]");
+    }
+
+    @Test
     public void testAlterBranchTable() throws Exception {
         sql(
                 "CREATE TABLE T ("

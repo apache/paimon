@@ -48,6 +48,7 @@ import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.LongType;
+import org.apache.spark.sql.types.MetadataBuilder;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.UserDefinedType;
@@ -61,6 +62,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SparkTypeUtils {
 
     private SparkTypeUtils() {}
+
+    /**
+     * Copy here from Spark ResolveDefaultColumnsUtils for old Spark versions.
+     */
+    public static final String CURRENT_DEFAULT_COLUMN_METADATA_KEY = "CURRENT_DEFAULT";
 
     public static RowType toPartitionType(Table table) {
         int[] projections = table.rowType().getFieldIndices(table.partitionKeys());
@@ -252,9 +258,17 @@ public class SparkTypeUtils {
         public DataType visit(RowType rowType) {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
             for (DataField field : rowType.getFields()) {
+                MetadataBuilder metadataBuilder = new MetadataBuilder();
+                if (field.defaultValue() != null) {
+                    metadataBuilder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, field.defaultValue());
+                }
                 StructField structField =
                         DataTypes.createStructField(
-                                field.name(), field.type().accept(this), field.type().isNullable());
+                                field.name(),
+                                field.type().accept(this),
+                                field.type().isNullable(),
+                                metadataBuilder.build()
+                                );
                 structField =
                         Optional.ofNullable(field.description())
                                 .map(structField::withComment)
@@ -329,9 +343,14 @@ public class SparkTypeUtils {
                 org.apache.paimon.types.DataType fieldType =
                         fieldResults.get(i).copy(field.nullable());
                 String comment = field.getComment().getOrElse(() -> null);
+                String defaultValue = null;
+                if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
+                    defaultValue =
+                            field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
+                }
                 newFields.add(
                         new DataField(
-                                atomicInteger.incrementAndGet(), field.name(), fieldType, comment));
+                                atomicInteger.incrementAndGet(), field.name(), fieldType, comment, defaultValue));
             }
 
             return new RowType(newFields);

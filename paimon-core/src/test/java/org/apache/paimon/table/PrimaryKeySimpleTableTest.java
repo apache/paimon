@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -1291,7 +1292,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                             "%s.%s.%s",
                                             CoreOptions.FIELDS_PREFIX,
                                             "b",
-                                            CoreOptions.DEFAULT_VALUE_SUFFIX),
+                                            DefaultValueAssigner.DEFAULT_VALUE_SUFFIX),
                                     "0");
                         });
         StreamTableWrite write = table.newWrite(commitUser);
