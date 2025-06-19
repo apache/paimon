@@ -1686,6 +1686,43 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testListFunctions() throws Exception {
+        String db1 = "db_rest_catalog_db";
+        String db2 = "db2_rest_catalog";
+        Identifier identifier = new Identifier(db1, "list_function");
+        Identifier identifier1 = new Identifier(db1, "function");
+        Identifier identifier2 = new Identifier(db2, "list_function");
+        Identifier identifier3 = new Identifier(db2, "function");
+        catalog.createDatabase(db1, false);
+        catalog.createDatabase(db2, false);
+        catalog.createFunction(identifier, MockRESTMessage.function(identifier), true);
+        catalog.createFunction(identifier1, MockRESTMessage.function(identifier1), true);
+        catalog.createFunction(identifier2, MockRESTMessage.function(identifier2), true);
+        catalog.createFunction(identifier3, MockRESTMessage.function(identifier3), true);
+        assertThat(catalog.listFunctionsPaged(db1, null, null, null).getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, 1, null, null).getElements())
+                .containsAnyOf(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPaged(db1, 1, identifier1.getObjectName(), null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, null, null, "func%").getElements())
+                .containsExactlyInAnyOrder(identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPagedGlobally("db2_rest%", "func%", null, null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier3.getFullName());
+        assertThat(catalog.listFunctionsPagedGlobally("db2_rest%", null, 1, null).getElements())
+                .containsAnyOf(identifier2.getFullName(), identifier3.getFullName());
+        assertThat(
+                        catalog.listFunctionsPagedGlobally(
+                                        "db2_rest%", null, 1, identifier3.getFullName())
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier2.getFullName());
+    }
+
+    @Test
     void testAlterFunction() throws Exception {
         Identifier identifier = new Identifier("rest_catalog_db", "alter_function_name");
         catalog.createDatabase(identifier.getDatabaseName(), false);
