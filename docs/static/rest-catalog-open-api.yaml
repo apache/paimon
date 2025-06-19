@@ -1488,7 +1488,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListViewDetailsResponse'
+                $ref: '#/components/schemas/ListFunctionDetailsResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":

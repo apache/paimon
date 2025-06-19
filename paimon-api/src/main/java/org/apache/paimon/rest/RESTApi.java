@@ -860,7 +860,7 @@ public class RESTApi {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param functionNamePattern A sql LIKE pattern (%) for view names. All functions will be
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
      * @return {@link PagedList}: elements and nextPageToken.
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
