@@ -253,7 +253,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     rollback_to \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --version <snapshot-id> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
@@ -323,7 +323,7 @@ CALL sys.remove_orphan_files(`table` => 'my_db.*', [older_than => '2023-10-31 12
     /path/to/paimon-flink-action-{{< version >}}.jar \
     remove_orphan_files \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     [--older_than <timestamp>] \
     [--dry_run <false/true>] \
@@ -338,7 +338,7 @@ To avoid deleting files that are newly added by other writing jobs, this action 
     /path/to/paimon-flink-action-{{< version >}}.jar \
     remove_orphan_files \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table T \
     --older_than '2023-10-31 12:00:00'
 ```

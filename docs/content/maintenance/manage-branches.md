@@ -60,7 +60,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     create_branch \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --branch_name <branch-name> \
     [--tag_name <tag-name>] \
@@ -111,7 +111,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     delete_branch \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --branch_name <branch-name> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
@@ -197,7 +197,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     fast_forward \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --branch_name <branch-name> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
