@@ -168,7 +168,9 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
                         "--timestamp_pattern",
                         "$dt",
                         "--table_conf",
-                        "partition.expiration-max-num=1")
+                        "partition.expiration-max-num=1",
+                        "--table_conf",
+                        "partition.expiration-batch-size=1")
                 .run();
 
         plan = table.newReadBuilder().newScan().plan();

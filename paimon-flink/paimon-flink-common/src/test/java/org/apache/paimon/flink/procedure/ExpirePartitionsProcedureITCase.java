@@ -454,6 +454,43 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testExpirePartitionsWithBatchSize() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'bucket' = '1',"
+                        + " 'partition.expiration-batch-size'='1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+
+        sql("INSERT INTO T VALUES ('a', '2024-06-01')");
+        sql("INSERT INTO T VALUES ('b', '2024-06-02')");
+        sql("INSERT INTO T VALUES ('c', '2024-06-03')");
+        // This partition never expires.
+        sql("INSERT INTO T VALUES ('Never-expire', '9999-09-09')");
+        Function<InternalRow, String> consumerReadResult =
+                (InternalRow row) -> row.getString(0) + ":" + row.getString(1);
+
+        assertThat(read(table, consumerReadResult))
+                .containsExactlyInAnyOrder(
+                        "a:2024-06-01", "b:2024-06-02", "c:2024-06-03", "Never-expire:9999-09-09");
+
+        assertThat(
+                        callExpirePartitions(
+                                "CALL sys.expire_partitions("
+                                        + "`table` => 'default.T'"
+                                        + ", expiration_time => '1 d'"
+                                        + ", timestamp_formatter => 'yyyy-MM-dd')"))
+                .containsExactlyInAnyOrder("dt=2024-06-01", "dt=2024-06-02", "dt=2024-06-03");
+
+        assertThat(read(table, consumerReadResult))
+                .containsExactlyInAnyOrder("Never-expire:9999-09-09");
+    }
+
+    @Test
     public void testExpirePartitionsLoadTablePropsFirst() throws Exception {
         sql(
                 "CREATE TABLE T ("
@@ -531,6 +568,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
                                         + "`table` => 'default.T'"
                                         + ", options => 'partition.expiration-time = 1d,"
                                         + " partition.expiration-max-num = 2, "
+                                        + " partition.expiration-batch-size = 1, "
                                         + " partition.timestamp-formatter = yyyy-MM-dd')"))
                 .containsExactlyInAnyOrder("dt=2024-06-01", "dt=2024-06-02");
 
