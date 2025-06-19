@@ -1659,7 +1659,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 IllegalArgumentException.class,
                 () -> catalog.dropFunction(identifierWithoutAlphabet, true));
 
-        Identifier identifier = new Identifier("rest_catalog_db", "function.na_me-01");
+        Identifier identifier = Identifier.fromString("rest_catalog_db.function.na_me-01");
         Function function = MockRESTMessage.function(identifier);
 
         catalog.createFunction(identifier, function, true);
