@@ -1040,7 +1040,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testExpireWithExistingTags() throws Exception {
+    public void testCommitTwiceWithDifferentKind() throws Exception {
         TestFileStore store = createStore(false);
         try (FileStoreCommitImpl commit = store.newCommit()) {
             // Append
