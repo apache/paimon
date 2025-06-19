@@ -2465,9 +2465,8 @@ public class CoreOptions implements Serializable {
     }
 
     public int partitionExpireBatchSize() {
-        return options.get(PARTITION_EXPIRATION_BATCH_SIZE) == null
-                ? options.get(PARTITION_EXPIRATION_MAX_NUM)
-                : options.get(PARTITION_EXPIRATION_BATCH_SIZE);
+        return options.getOptional(PARTITION_EXPIRATION_BATCH_SIZE)
+                .orElse(options.get(PARTITION_EXPIRATION_MAX_NUM));
     }
 
     public PartitionExpireStrategy partitionExpireStrategy() {
