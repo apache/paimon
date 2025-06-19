@@ -27,7 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing tables. */
+/** Response for listing tables globally. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListTablesGloballyResponse implements PagedResponse<Identifier> {
 

@@ -27,7 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing views. */
+/** Response for listing views globally. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListViewsGloballyResponse implements PagedResponse<Identifier> {
 

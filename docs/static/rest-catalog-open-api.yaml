@@ -333,7 +333,7 @@ paths:
       tags:
         - table
       summary: List tables globally
-      operationId: List tables globally
+      operationId: ListTablesGlobally
       description: list tables paged globally which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
