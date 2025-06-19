@@ -1419,7 +1419,7 @@ paths:
     post:
       tags:
         - function
-      summary: Create Function
+      summary: Create function
       operationId: createFunction
       parameters:
         - name: prefix
