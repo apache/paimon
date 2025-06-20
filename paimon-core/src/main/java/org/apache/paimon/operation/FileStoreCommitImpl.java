@@ -801,11 +801,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             if (System.currentTimeMillis() - startMillis > commitTimeout
                     || retryCount >= commitMaxRetries) {
-                retryResult.cleanAll();
-                throw new RuntimeException(
+                String message =
                         String.format(
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                commitTimeout, retryCount));
+                                commitTimeout, retryCount);
+                throw new RuntimeException(message, retryResult.exception);
             }
 
             retryCount++;
@@ -897,7 +897,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
                 Snapshot snapshot = snapshotManager.snapshot(i);
                 if (snapshot.commitUser().equals(commitUser)
-                        && snapshot.commitIdentifier() == identifier) {
+                        && snapshot.commitIdentifier() == identifier
+                        && snapshot.commitKind() == commitKind) {
                     return new SuccessResult();
                 }
             }
@@ -942,36 +943,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (latestSnapshot != null && conflictCheck.shouldCheck(latestSnapshot.id())) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
-            try {
-                List<BinaryRow> changedPartitions =
-                        deltaFiles.stream()
-                                .map(ManifestEntry::partition)
-                                .distinct()
-                                .collect(Collectors.toList());
-                if (retryResult != null && retryResult.latestSnapshot != null) {
-                    baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
-                    List<SimpleFileEntry> incremental =
-                            readIncrementalChanges(
-                                    retryResult.latestSnapshot, latestSnapshot, changedPartitions);
-                    if (!incremental.isEmpty()) {
-                        baseDataFiles.addAll(incremental);
-                        baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
-                    }
-                } else {
-                    baseDataFiles =
-                            readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+            List<BinaryRow> changedPartitions =
+                    deltaFiles.stream()
+                            .map(ManifestEntry::partition)
+                            .distinct()
+                            .collect(Collectors.toList());
+            if (retryResult != null && retryResult.latestSnapshot != null) {
+                baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
+                List<SimpleFileEntry> incremental =
+                        readIncrementalChanges(
+                                retryResult.latestSnapshot, latestSnapshot, changedPartitions);
+                if (!incremental.isEmpty()) {
+                    baseDataFiles.addAll(incremental);
+                    baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
                 }
-                noConflictsOrFail(
-                        latestSnapshot.commitUser(),
-                        baseDataFiles,
-                        SimpleFileEntry.from(deltaFiles),
-                        commitKind);
-            } catch (Exception e) {
-                if (retryResult != null) {
-                    retryResult.cleanAll();
-                }
-                throw e;
+            } else {
+                baseDataFiles =
+                        readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
             }
+            noConflictsOrFail(
+                    latestSnapshot.commitUser(),
+                    baseDataFiles,
+                    SimpleFileEntry.from(deltaFiles),
+                    commitKind);
         }
 
         Snapshot newSnapshot;
@@ -1022,33 +1016,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
-            boolean rewriteIndexManifest = true;
-            if (retryResult != null) {
-                deltaStatistics = retryResult.deltaStatistics;
-                deltaManifestList = retryResult.deltaManifestList;
-                changelogManifestList = retryResult.changelogManifestList;
-                if (Objects.equals(oldIndexManifest, retryResult.oldIndexManifest)) {
-                    rewriteIndexManifest = false;
-                    indexManifest = retryResult.newIndexManifest;
-                    LOG.info("Reusing index manifest {} for retry.", indexManifest);
-                } else {
-                    cleanIndexManifest(retryResult.oldIndexManifest, retryResult.newIndexManifest);
-                }
-            } else {
-                // write new delta files into manifest files
-                deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
-                deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
+            // write new delta files into manifest files
+            deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
+            deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
 
-                // write changelog into manifest files
-                if (!changelogFiles.isEmpty()) {
-                    changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
-                }
+            // write changelog into manifest files
+            if (!changelogFiles.isEmpty()) {
+                changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
             }
 
-            if (rewriteIndexManifest) {
-                indexManifest =
-                        indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
-            }
+            indexManifest =
+                    indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
 
             long latestSchemaId =
                     schemaManager
@@ -1096,9 +1074,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             properties.isEmpty() ? null : properties);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
-            if (retryResult != null) {
-                retryResult.cleanAll();
-            }
             cleanUpReuseTmpManifests(
                     deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
             cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
@@ -1110,54 +1085,57 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     e);
         }
 
-        if (commitSnapshotImpl(newSnapshot, deltaStatistics)) {
-            LOG.info(
-                    "Successfully commit snapshot {} to table {} by user {} "
-                            + "with identifier {} and kind {}.",
-                    newSnapshotId,
-                    tableName,
-                    commitUser,
-                    identifier,
-                    commitKind.name());
-            if (strictModeLastSafeSnapshot != null) {
-                strictModeLastSafeSnapshot = newSnapshot.id();
-            }
-            commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
-            return new SuccessResult();
+        boolean success;
+        try {
+            success = commitSnapshotImpl(newSnapshot, deltaStatistics);
+        } catch (Exception e) {
+            // commit exception, not sure about the situation and should not clean up the files
+            LOG.warn("Retry commit for exception.", e);
+            return new RetryResult(latestSnapshot, baseDataFiles, e);
         }
 
-        // atomic rename fails, clean up and try again
-        long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
-        LOG.warn(
-                String.format(
-                        "Atomic commit failed for snapshot #%d by user %s "
-                                + "with identifier %s and kind %s after %s seconds. "
-                                + "Clean up and try again.",
-                        newSnapshotId, commitUser, identifier, commitKind.name(), commitTime));
-        cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
-        return new RetryResult(
-                deltaStatistics,
-                deltaManifestList,
-                changelogManifestList,
-                oldIndexManifest,
-                indexManifest,
-                latestSnapshot,
-                baseDataFiles);
+        if (!success) {
+            // commit fails, should clean up the files
+            long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
+            LOG.warn(
+                    "Atomic commit failed for snapshot #{} by user {} "
+                            + "with identifier {} and kind {} after {} seconds. "
+                            + "Clean up and try again.",
+                    newSnapshotId,
+                    commitUser,
+                    identifier,
+                    commitKind.name(),
+                    commitTime);
+            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+            return new RetryResult(latestSnapshot, baseDataFiles, null);
+        }
+
+        LOG.info(
+                "Successfully commit snapshot {} to table {} by user {} "
+                        + "with identifier {} and kind {}.",
+                newSnapshotId,
+                tableName,
+                commitUser,
+                identifier,
+                commitKind.name());
+        if (strictModeLastSafeSnapshot != null) {
+            strictModeLastSafeSnapshot = newSnapshot.id();
+        }
+        commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
+        return new SuccessResult();
     }
 
     public void compactManifest() {
         int retryCount = 0;
-        ManifestCompactResult retryResult = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            retryResult = compactManifest(retryResult);
-            if (retryResult.isSuccess()) {
+            boolean success = compactManifestOnce();
+            if (success) {
                 break;
             }
 
             if (System.currentTimeMillis() - startMillis > commitTimeout
                     || retryCount >= commitMaxRetries) {
-                retryResult.cleanAll();
                 throw new RuntimeException(
                         String.format(
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
@@ -1168,56 +1146,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private ManifestCompactResult compactManifest(@Nullable ManifestCompactResult lastResult) {
+    private boolean compactManifestOnce() {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
-            return new SuccessManifestCompactResult();
+            return true;
         }
 
         List<ManifestFileMeta> mergeBeforeManifests =
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        if (lastResult != null) {
-            List<ManifestFileMeta> oldMergeBeforeManifests = lastResult.mergeBeforeManifests;
-            List<ManifestFileMeta> oldMergeAfterManifests = lastResult.mergeAfterManifests;
+        // the fist trial
+        mergeAfterManifests =
+                ManifestFileMerger.merge(
+                        mergeBeforeManifests,
+                        manifestFile,
+                        manifestTargetSize.getBytes(),
+                        1,
+                        1,
+                        partitionType,
+                        manifestReadParallelism);
 
-            Set<String> retryMergeBefore =
-                    oldMergeBeforeManifests.stream()
-                            .map(ManifestFileMeta::fileName)
-                            .collect(Collectors.toSet());
-
-            List<ManifestFileMeta> manifestsFromOther =
-                    mergeBeforeManifests.stream()
-                            .filter(m -> !retryMergeBefore.remove(m.fileName()))
-                            .collect(Collectors.toList());
-
-            if (retryMergeBefore.isEmpty()) {
-                // no manifest compact from latest failed commit to latest commit
-                mergeAfterManifests = new ArrayList<>(oldMergeAfterManifests);
-                mergeAfterManifests.addAll(manifestsFromOther);
-            } else {
-                // manifest compact happens, quit
-                lastResult.cleanAll();
-                return new SuccessManifestCompactResult();
-            }
-        } else {
-            // the fist trial
-            mergeAfterManifests =
-                    ManifestFileMerger.merge(
-                            mergeBeforeManifests,
-                            manifestFile,
-                            manifestTargetSize.getBytes(),
-                            1,
-                            1,
-                            partitionType,
-                            manifestReadParallelism);
-
-            if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
-                // no need to commit this snapshot, because no compact were happened
-                return new SuccessManifestCompactResult();
-            }
+        if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
+            // no need to commit this snapshot, because no compact were happened
+            return true;
         }
 
         Pair<String, Long> baseManifestList = manifestList.write(mergeAfterManifests);
@@ -1247,12 +1200,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.statistics(),
                         latestSnapshot.properties());
 
-        if (!commitSnapshotImpl(newSnapshot, emptyList())) {
-            return new ManifestCompactResult(
-                    baseManifestList, deltaManifestList, mergeBeforeManifests, mergeAfterManifests);
-        } else {
-            return new SuccessManifestCompactResult();
-        }
+        return commitSnapshotImpl(newSnapshot, emptyList());
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {
@@ -1668,87 +1616,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private class RetryResult implements CommitResult {
-
-        private final List<PartitionEntry> deltaStatistics;
-        private final Pair<String, Long> deltaManifestList;
-        private final Pair<String, Long> changelogManifestList;
-
-        private final String oldIndexManifest;
-        private final String newIndexManifest;
+    @VisibleForTesting
+    static class RetryResult implements CommitResult {
 
         private final Snapshot latestSnapshot;
         private final List<SimpleFileEntry> baseDataFiles;
+        private final Exception exception;
 
-        private RetryResult(
-                List<PartitionEntry> deltaStatistics,
-                Pair<String, Long> deltaManifestList,
-                Pair<String, Long> changelogManifestList,
-                String oldIndexManifest,
-                String newIndexManifest,
-                Snapshot latestSnapshot,
-                List<SimpleFileEntry> baseDataFiles) {
-            this.deltaStatistics = deltaStatistics;
-            this.deltaManifestList = deltaManifestList;
-            this.changelogManifestList = changelogManifestList;
-            this.oldIndexManifest = oldIndexManifest;
-            this.newIndexManifest = newIndexManifest;
+        public RetryResult(
+                Snapshot latestSnapshot, List<SimpleFileEntry> baseDataFiles, Exception exception) {
             this.latestSnapshot = latestSnapshot;
             this.baseDataFiles = baseDataFiles;
-        }
-
-        private void cleanAll() {
-            cleanUpReuseTmpManifests(
-                    deltaManifestList, changelogManifestList, oldIndexManifest, newIndexManifest);
+            this.exception = exception;
         }
 
         @Override
         public boolean isSuccess() {
             return false;
-        }
-    }
-
-    private class ManifestCompactResult implements CommitResult {
-
-        private final Pair<String, Long> baseManifestList;
-        private final Pair<String, Long> deltaManifestList;
-        private final List<ManifestFileMeta> mergeBeforeManifests;
-        private final List<ManifestFileMeta> mergeAfterManifests;
-
-        public ManifestCompactResult(
-                Pair<String, Long> baseManifestList,
-                Pair<String, Long> deltaManifestList,
-                List<ManifestFileMeta> mergeBeforeManifests,
-                List<ManifestFileMeta> mergeAfterManifests) {
-            this.baseManifestList = baseManifestList;
-            this.deltaManifestList = deltaManifestList;
-            this.mergeBeforeManifests = mergeBeforeManifests;
-            this.mergeAfterManifests = mergeAfterManifests;
-        }
-
-        public void cleanAll() {
-            manifestList.delete(deltaManifestList.getKey());
-            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
-        }
-
-        @Override
-        public boolean isSuccess() {
-            return false;
-        }
-    }
-
-    private class SuccessManifestCompactResult extends ManifestCompactResult {
-
-        public SuccessManifestCompactResult() {
-            super(null, null, null, null);
-        }
-
-        @Override
-        public void cleanAll() {}
-
-        @Override
-        public boolean isSuccess() {
-            return true;
         }
     }
 }
