@@ -22,14 +22,14 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.{CatalogContext, CatalogUtils, Identifier}
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.SparkSource.NAME
+import org.apache.paimon.spark.catalog.WithPaimonCatalog
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.spark.util.OptionUtils.{extractCatalogName, mergeSQLConfWithIdentifier}
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.table.FormatTable.Format
 import org.apache.paimon.table.system.AuditLogTable
-
-import org.apache.spark.sql.{DataFrame, PaimonSparkSession, SaveMode => SparkSaveMode, SparkSession, SQLContext}
+import org.apache.spark.sql.{DataFrame, PaimonSparkSession, SQLContext, SparkSession, SaveMode => SparkSaveMode}
 import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.streaming.Sink
@@ -39,7 +39,6 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Map => JMap}
-
 import scala.collection.JavaConverters._
 
 class SparkSource
@@ -83,17 +82,27 @@ class SparkSource
   }
 
   private def loadTable(options: JMap[String, String]): DataTable = {
-    val path = CoreOptions.path(options)
-    val catalogContext = CatalogContext.create(
-      Options.fromMap(
-        mergeSQLConfWithIdentifier(
-          options,
-          extractCatalogName().getOrElse(NAME),
-          Identifier.create(CatalogUtils.database(path), CatalogUtils.table(path)))),
-      PaimonSparkSession.active.sessionState.newHadoopConf()
-    )
-    val table = FileStoreTableFactory.create(catalogContext)
-    if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
+    val opts = Options.fromMap(options)
+    val table: FileStoreTable = CoreOptions.tableId(options) match {
+      case tableId: String =>
+        val catalog = PaimonSparkSession.active.sessionState.catalogManager
+          .currentCatalog
+          .asInstanceOf[WithPaimonCatalog]
+          .paimonCatalog()
+        catalog.getTable(Identifier.fromString(tableId)).asInstanceOf[FileStoreTable]
+      case _ =>
+        val path = CoreOptions.path(options)
+        val catalogContext = CatalogContext.create(
+          Options.fromMap(
+            mergeSQLConfWithIdentifier(
+              options,
+              extractCatalogName().getOrElse(NAME),
+              Identifier.create(CatalogUtils.database(path), CatalogUtils.table(path)))),
+          PaimonSparkSession.active.sessionState.newHadoopConf()
+        )
+        FileStoreTableFactory.create(catalogContext)
+    }
+    if (opts.get(SparkConnectorOptions.READ_CHANGELOG)) {
       new AuditLogTable(table)
     } else {
       table
