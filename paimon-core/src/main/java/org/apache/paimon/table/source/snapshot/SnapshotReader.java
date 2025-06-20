@@ -90,6 +90,8 @@ public interface SnapshotReader {
 
     SnapshotReader withBucket(int bucket);
 
+    SnapshotReader onlyReadRealBuckets();
+
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
 
     SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter);

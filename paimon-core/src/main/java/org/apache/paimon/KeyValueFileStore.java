@@ -236,26 +236,19 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     return Optional.empty();
                 };
 
-        KeyValueFileStoreScan scan =
-                new KeyValueFileStoreScan(
-                        newManifestsReader(scanType == ScanType.FOR_WRITE),
-                        bucketSelectConverter,
-                        snapshotManager(),
-                        schemaManager,
-                        schema,
-                        keyValueFieldsExtractor,
-                        manifestFileFactory(scanType == ScanType.FOR_WRITE),
-                        options.scanManifestParallelism(),
-                        options.deletionVectorsEnabled(),
-                        options.mergeEngine(),
-                        options.changelogProducer(),
-                        options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
-
-        if (options.bucket() == BucketMode.POSTPONE_BUCKET && scanType == ScanType.FOR_READ) {
-            scan.onlyReadRealBuckets();
-        }
-
-        return scan;
+        return new KeyValueFileStoreScan(
+                newManifestsReader(scanType == ScanType.FOR_WRITE),
+                bucketSelectConverter,
+                snapshotManager(),
+                schemaManager,
+                schema,
+                keyValueFieldsExtractor,
+                manifestFileFactory(scanType == ScanType.FOR_WRITE),
+                options.scanManifestParallelism(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine(),
+                options.changelogProducer(),
+                options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
     }
 
     @Override
