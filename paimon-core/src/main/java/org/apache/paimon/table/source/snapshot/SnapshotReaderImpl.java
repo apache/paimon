@@ -276,6 +276,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader onlyReadRealBuckets() {
+        scan.onlyReadRealBuckets();
+        return this;
+    }
+
+    @Override
     public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
         scan.withBucketFilter(bucketFilter);
         return this;
