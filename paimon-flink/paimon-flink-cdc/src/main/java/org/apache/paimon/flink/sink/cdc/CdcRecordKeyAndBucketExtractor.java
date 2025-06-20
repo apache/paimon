@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
@@ -43,6 +44,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     private final Projection bucketKeyProjection;
     private final List<DataField> trimmedPKFields;
     private final Projection trimmedPKProjection;
+    private final BucketFunction bucketFunction;
 
     private CdcRecord record;
 
@@ -71,6 +73,9 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
                 CodeGenUtils.newProjection(
                         new RowType(trimmedPKFields),
                         IntStream.range(0, trimmedPKFields.size()).toArray());
+        this.bucketFunction =
+                BucketFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
     }
 
     @Override
@@ -97,9 +102,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
             bucketKey = bucketKeyProjection.apply(projectAsInsert(record, bucketKeyFields));
         }
         if (bucket == null) {
-            bucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+            bucket = bucketFunction.bucket(bucketKey, numBuckets);
         }
         return bucket;
     }

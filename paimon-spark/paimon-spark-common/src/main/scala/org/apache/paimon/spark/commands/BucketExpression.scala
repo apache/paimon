@@ -18,16 +18,17 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
-import org.apache.paimon.spark.catalog.functions.PaimonFunctions.BUCKET
 
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow => SparkInternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
-import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, SpecificInternalRow}
+import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Literal, SpecificInternalRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction
 import org.apache.spark.sql.types.{DataType, StructField, StructType}
+import org.apache.spark.unsafe.types.UTF8String
 
 /**
  * The reason for adding it is that the current spark_catalog cannot access v2 functions, which
@@ -35,18 +36,22 @@ import org.apache.spark.sql.types.{DataType, StructField, StructType}
  * https://github.com/apache/spark/pull/50495, once it is fixed, remove this function.
  *
  * @param _children
- *   arg0: bucket number, arg1..argn bucket key
+ *   arg0: bucket function type, arg1: bucket number, arg2..argn bucket key
  */
 case class FixedBucketExpression(_children: Seq[Expression])
   extends Expression
   with CodegenFallback {
 
   val function: ScalarFunction[Int] = {
-    val inputType = StructType(_children.zipWithIndex.map {
+    val funcType = _children.head.asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString
+    val inputType = StructType(_children.tail.zipWithIndex.map {
       case (exp, pos) => StructField(s"_$pos", exp.dataType, exp.nullable)
     })
 
-    PaimonFunctions.load(BUCKET).bind(inputType).asInstanceOf[ScalarFunction[Int]]
+    PaimonFunctions
+      .load(PaimonFunctions.bucketFunctionName(BucketFunctionType.valueOf(funcType)))
+      .bind(inputType)
+      .asInstanceOf[ScalarFunction[Int]]
   }
 
   private lazy val reusedRow = new SpecificInternalRow(function.inputTypes())
@@ -54,10 +59,11 @@ case class FixedBucketExpression(_children: Seq[Expression])
   override def nullable: Boolean = function.isResultNullable
 
   override def eval(input: SparkInternalRow): Int = {
-    var i = 0
+    // skip the head
+    var i = 1
     while (i < children.length) {
       val expr = children(i)
-      reusedRow.update(i, expr.eval(input))
+      reusedRow.update(i - 1, expr.eval(input))
       i += 1
     }
 

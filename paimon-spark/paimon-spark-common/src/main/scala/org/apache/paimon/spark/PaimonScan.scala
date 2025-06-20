@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
@@ -54,7 +55,11 @@ case class PaimonScan(
     table match {
       case fileStoreTable: FileStoreTable =>
         val bucketSpec = fileStoreTable.bucketSpec()
-        if (bucketSpec.getBucketMode != BucketMode.HASH_FIXED) {
+        // todo introduce bucket transform for different bucket function type
+        if (
+          bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
+            .bucketFunctionType() != BucketFunctionType.DEFAULT
+        ) {
           None
         } else if (bucketSpec.getBucketKeys.size() > 1) {
           None

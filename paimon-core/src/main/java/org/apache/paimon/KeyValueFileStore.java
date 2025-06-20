@@ -231,7 +231,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                                     keyType.getFieldNames(),
                                     bucketKeyType.getFieldNames());
                     if (!bucketFilters.isEmpty()) {
-                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                        return BucketSelectConverter.create(
+                                and(bucketFilters), bucketKeyType, options.bucketFunctionType());
                     }
                     return Optional.empty();
                 };

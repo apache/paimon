@@ -151,7 +151,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                                     rowType.getFieldNames(),
                                     bucketKeyType.getFieldNames());
                     if (!bucketFilters.isEmpty()) {
-                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                        return BucketSelectConverter.create(
+                                and(bucketFilters), bucketKeyType, options.bucketFunctionType());
                     }
                     return Optional.empty();
                 };

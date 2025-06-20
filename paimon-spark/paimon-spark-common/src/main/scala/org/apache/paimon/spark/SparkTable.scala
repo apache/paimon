@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -53,15 +54,18 @@ case class SparkTable(table: Table)
   }
 
   private def supportsV2Write: Boolean = {
-    table match {
-      case storeTable: FileStoreTable =>
-        storeTable.bucketMode() match {
-          case HASH_FIXED => BucketFunction.supportsTable(storeTable)
-          case BUCKET_UNAWARE | POSTPONE_MODE => true
-          case _ => false
-        }
+    val coreOptions = new CoreOptions(table.options())
+    coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
+      table match {
+        case storeTable: FileStoreTable =>
+          storeTable.bucketMode() match {
+            case HASH_FIXED => BucketFunction.supportsTable(storeTable)
+            case BUCKET_UNAWARE | POSTPONE_MODE => true
+            case _ => false
+          }
 
-      case _ => false
+        case _ => false
+      }
     }
   }
 
