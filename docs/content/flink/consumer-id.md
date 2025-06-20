@@ -107,7 +107,7 @@ CALL sys.reset_consumer(
     /path/to/paimon-flink-action-{{< version >}}.jar \
     reset-consumer \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --consumer_id <consumer-id> \
     [--next_snapshot <next-snapshot-id>] \
@@ -146,7 +146,7 @@ CALL sys.clear_consumers(
     /path/to/paimon-flink-action-{{< version >}}.jar \
     clear_consumers \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     [--including_consumers <including-consumers>] \
     [--excluding_consumers <excluding-consumers>] \

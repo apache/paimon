@@ -213,7 +213,7 @@ If you have already configured oss access through Spark (Via Hadoop FileSystem),
 Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=oss://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
@@ -315,7 +315,7 @@ If you have already configured s3 access through Spark (Via Hadoop FileSystem), 
 Place `paimon-s3-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=s3://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.s3.endpoint=your-endpoint-hostname \
@@ -525,7 +525,7 @@ If you have already configured obs access through Spark (Via Hadoop FileSystem),
 Place `paimon-obs-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=obs://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.obs.endpoint=obs-endpoint-hostname \
