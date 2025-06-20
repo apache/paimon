@@ -92,7 +92,7 @@ under the License.
     </tr>
     <tr>
         <td><h5>--computed_column</h5></td>
-        <td>The definitions of computed columns. The argument field is from Kafka topic's table field name. See <a href="../overview/#computed-functions">here</a> for a complete list of configurations. </td>
+        <td>The definitions of computed columns. The argument field is from Kafka topic's table field name. See <a href="../overview/#computed-functions">here</a> for a complete list of configurations. NOTICE: It returns null if the referenced column does not exist in the source table.</td>
     </tr>
     <tr>
         <td><h5>--eager_init</h5></td>

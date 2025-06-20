@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.options.CatalogOptions;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -660,7 +662,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withPrimaryKeys("k")
                         .withComputedColumnArgs(
-                                Arrays.asList("etl_create_time=now()", "etl_update_time=now()"))
+                                Arrays.asList(
+                                        "etl_create_time=now()",
+                                        "etl_update_time=now()",
+                                        "pt=date_format(etl_update_time,yyyy-MM-dd)"))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -675,15 +680,16 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                             DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(10),
                             DataTypes.TIMESTAMP(3),
-                            DataTypes.TIMESTAMP(3)
+                            DataTypes.TIMESTAMP(3),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k", "v1", "etl_create_time", "etl_update_time"});
+                        new String[] {"k", "v1", "etl_create_time", "etl_update_time", "pt"});
 
         // INSERT
         waitForResult(
                 true,
                 Collections.singletonList(
-                        "\\+I\\[1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                        "\\+I\\[1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}\\]"),
                 table1,
                 rowType1,
                 Collections.singletonList("k"));
@@ -691,9 +697,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         List<InternalRow> data = getData("t1");
         Timestamp createTime1 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime1 = data.get(0).getTimestamp(3, 3);
+        BinaryString pt1 = data.get(0).getString(4);
+
+        DateTimeFormatter ptFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
         assertThat(createTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
         assertThat(updateTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+        assertThat(updateTime1.toLocalDateTime().format(ptFormatter)).isEqualTo(pt1.toString());
 
         Thread.sleep(1000);
 
@@ -702,7 +712,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(
                 true,
                 Collections.singletonList(
-                        "\\+I\\[1, B, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                        "\\+I\\[1, B, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}\\]"),
                 table1,
                 rowType1,
                 Collections.singletonList("k"));
@@ -710,10 +720,12 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         data = getData("t1");
         Timestamp createTime2 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime2 = data.get(0).getTimestamp(3, 3);
+        BinaryString pt2 = data.get(0).getString(4);
 
         assertThat(createTime2.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
         assertThat(updateTime2.toLocalDateTime()).isAfter(updateTime1.toLocalDateTime());
         assertThat(updateTime2.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+        assertThat(updateTime2.toLocalDateTime().format(ptFormatter)).isEqualTo(pt2.toString());
 
         Thread.sleep(1000);
 
@@ -722,7 +734,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(
                 true,
                 Collections.singletonList(
-                        "\\+I\\[1, C, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                        "\\+I\\[1, C, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}\\]"),
                 table1,
                 rowType1,
                 Collections.singletonList("k"));
@@ -730,10 +742,12 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         data = getData("t1");
         Timestamp createTime3 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime3 = data.get(0).getTimestamp(3, 3);
+        BinaryString pt3 = data.get(0).getString(4);
 
         assertThat(createTime3.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
         assertThat(updateTime3.toLocalDateTime()).isAfter(updateTime2.toLocalDateTime());
         assertThat(updateTime3.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+        assertThat(updateTime3.toLocalDateTime().format(ptFormatter)).isEqualTo(pt3.toString());
     }
 
     @Test

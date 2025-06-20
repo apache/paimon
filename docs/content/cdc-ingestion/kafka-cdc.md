@@ -214,6 +214,7 @@ To use this feature through `flink run`, run the following shell command.
     [--type_mapping to-string] \
     [--partition_keys <partition_keys>] \
     [--primary_keys <primary-keys>] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
@@ -244,7 +245,8 @@ Synchronization from one Kafka topic to Paimon database.
     --catalog_conf uri=thrift://hive-metastore:9083 \
     --table_conf bucket=4 \
     --table_conf changelog-producer=input \
-    --table_conf sink.parallelism=4
+    --table_conf sink.parallelism=4 \
+    --computed_column 'pt=date_format(event_tm, yyyyMMdd)'
 ```
 
 Synchronization from multiple Kafka topics to Paimon database.

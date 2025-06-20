@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.StringUtils;
@@ -50,11 +51,17 @@ public interface Expression extends Serializable {
     /** Return name of referenced field. */
     String fieldReference();
 
+    /** Return {@link DataType} of referenced field. */
+    DataType fieldReferenceType();
+
     /** Return {@link DataType} of computed value. */
     DataType outputType();
 
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
+
+    /** Compute value from given input. Input and output are serialized to string. */
+    String eval(String input, DataType inputType);
 
     /** Return name of this expression. */
     default String name() {
@@ -66,7 +73,7 @@ public interface Expression extends Serializable {
         YEAR(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -76,7 +83,7 @@ public interface Expression extends Serializable {
         MONTH(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -86,7 +93,7 @@ public interface Expression extends Serializable {
         DAY(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -96,7 +103,7 @@ public interface Expression extends Serializable {
         HOUR(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -106,7 +113,7 @@ public interface Expression extends Serializable {
         MINUTE(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -116,7 +123,7 @@ public interface Expression extends Serializable {
         SECOND(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return TemporalToIntConverter.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -126,7 +133,7 @@ public interface Expression extends Serializable {
         DATE_FORMAT(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return DateFormat.create(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -135,13 +142,13 @@ public interface Expression extends Serializable {
         SUBSTRING(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return substring(referencedField.field(), referencedField.literals());
                 }),
         TRUNCATE(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return truncate(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -152,7 +159,7 @@ public interface Expression extends Serializable {
         UPPER(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return new UpperExpression(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -161,7 +168,7 @@ public interface Expression extends Serializable {
         LOWER(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return new LowerExpression(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -170,7 +177,7 @@ public interface Expression extends Serializable {
         TRIM(
                 (typeMapping, caseSensitive, args) -> {
                     ReferencedField referencedField =
-                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                            ReferencedField.create(typeMapping, caseSensitive, args);
                     return new TrimExpression(
                             referencedField.field(),
                             referencedField.fieldType(),
@@ -208,16 +215,16 @@ public interface Expression extends Serializable {
     /** Referenced field in expression input parameters. */
     class ReferencedField {
         private final String field;
-        private final DataType fieldType;
+        @Nullable private final DataType fieldType;
         private final String[] literals;
 
-        private ReferencedField(String field, DataType fieldType, String[] literals) {
+        private ReferencedField(String field, @Nullable DataType fieldType, String[] literals) {
             this.field = field;
             this.fieldType = fieldType;
             this.literals = literals;
         }
 
-        public static ReferencedField checkArgument(
+        public static ReferencedField create(
                 Map<String, DataType> typeMapping, boolean caseSensitive, String... args) {
             String referencedField = args[0].trim();
             String[] literals =
@@ -226,11 +233,13 @@ public interface Expression extends Serializable {
                     StringUtils.toLowerCaseIfNeed(referencedField, caseSensitive);
 
             DataType fieldType =
-                    checkNotNull(
-                            typeMapping.get(referencedFieldCheckForm),
-                            String.format(
-                                    "Referenced field '%s' is not in given fields: %s.",
-                                    referencedFieldCheckForm, typeMapping.keySet()));
+                    typeMapping.isEmpty()
+                            ? null
+                            : checkNotNull(
+                                    typeMapping.get(referencedFieldCheckForm),
+                                    String.format(
+                                            "Referenced field '%s' is not in given fields: %s.",
+                                            referencedFieldCheckForm, typeMapping.keySet()));
             return new ReferencedField(referencedField, fieldType, literals);
         }
 
@@ -326,16 +335,22 @@ public interface Expression extends Serializable {
         private static final List<Integer> SUPPORTED_PRECISION = Arrays.asList(0, 3, 6, 9);
 
         private final String fieldReference;
-        @Nullable private final Integer precision;
+        @Nullable private DataType fieldReferenceType;
+        @Nullable private Integer precision;
 
         private transient Function<LocalDateTime, T> converter;
 
         private TemporalExpressionBase(
-                String fieldReference, DataType fieldType, @Nullable Integer precision) {
+                String fieldReference, @Nullable DataType fieldType, @Nullable Integer precision) {
             this.fieldReference = fieldReference;
+            this.fieldReferenceType = fieldType;
 
             // when the input is INTEGER_NUMERIC, the precision must be set
-            if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
+            if (fieldType != null
+                    && fieldType
+                            .getTypeRoot()
+                            .getFamilies()
+                            .contains(DataTypeFamily.INTEGER_NUMERIC)
                     && precision == null) {
                 precision = 0;
             }
@@ -354,6 +369,11 @@ public interface Expression extends Serializable {
             return fieldReference;
         }
 
+        @Override
+        public DataType fieldReferenceType() {
+            return fieldReferenceType;
+        }
+
         /** If not, this must be overridden! */
         @Override
         public DataType outputType() {
@@ -368,6 +388,21 @@ public interface Expression extends Serializable {
 
             T result = converter.apply(toLocalDateTime(input));
             return String.valueOf(result);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            if (this.fieldReferenceType == null) {
+                this.fieldReferenceType = inputType;
+
+                // when the input is INTEGER_NUMERIC, the precision must be set
+                if (inputType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
+                        && precision == null) {
+                    this.precision = 0;
+                }
+            }
+
+            return eval(input);
         }
 
         private LocalDateTime toLocalDateTime(String input) {
@@ -425,7 +460,7 @@ public interface Expression extends Serializable {
 
         private static TemporalToIntConverter create(
                 String fieldReference,
-                DataType fieldType,
+                @Nullable DataType fieldType,
                 SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier,
                 String... literals) {
             checkArgument(
@@ -505,6 +540,11 @@ public interface Expression extends Serializable {
         }
 
         @Override
+        public DataType fieldReferenceType() {
+            return new VarCharType();
+        }
+
+        @Override
         public DataType outputType() {
             return DataTypes.STRING();
         }
@@ -524,6 +564,11 @@ public interface Expression extends Serializable {
                                 input, beginInclusive, endExclusive));
             }
         }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
+        }
     }
 
     /** Truncate numeric/decimal/string value. */
@@ -532,11 +577,11 @@ public interface Expression extends Serializable {
 
         private final String fieldReference;
 
-        private final DataType fieldType;
+        @Nullable private DataType fieldType;
 
         private final int width;
 
-        TruncateComputer(String fieldReference, DataType fieldType, String literal) {
+        TruncateComputer(String fieldReference, @Nullable DataType fieldType, String literal) {
             this.fieldReference = fieldReference;
             this.fieldType = fieldType;
             try {
@@ -552,6 +597,11 @@ public interface Expression extends Serializable {
         @Override
         public String fieldReference() {
             return fieldReference;
+        }
+
+        @Override
+        public DataType fieldReferenceType() {
+            return fieldType;
         }
 
         @Override
@@ -586,6 +636,14 @@ public interface Expression extends Serializable {
                                     "Unsupported field type for truncate function: %s.",
                                     fieldType.getTypeRoot().toString()));
             }
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            if (this.fieldType == null) {
+                this.fieldType = inputType;
+            }
+            return eval(input);
         }
 
         private short truncateShort(int width, short value) {
@@ -633,12 +691,22 @@ public interface Expression extends Serializable {
         }
 
         @Override
+        public DataType fieldReferenceType() {
+            return null;
+        }
+
+        @Override
         public DataType outputType() {
             return dataType;
         }
 
         @Override
         public String eval(String input) {
+            return value;
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
             return value;
         }
     }
@@ -651,6 +719,11 @@ public interface Expression extends Serializable {
         }
 
         @Override
+        public DataType fieldReferenceType() {
+            return null;
+        }
+
+        @Override
         public DataType outputType() {
             return DataTypes.TIMESTAMP(3);
         }
@@ -658,6 +731,11 @@ public interface Expression extends Serializable {
         @Override
         public String eval(String input) {
             return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            return eval(input);
         }
     }
 
@@ -719,12 +797,14 @@ public interface Expression extends Serializable {
     abstract class NoLiteralsStringExpressionBase implements Expression {
 
         private final String fieldReference;
+        @Nullable protected DataType fieldReferenceType;
 
         public NoLiteralsStringExpressionBase(
-                String fieldReference, DataType fieldType, String... literals) {
+                String fieldReference, @Nullable DataType fieldType, String... literals) {
             this.fieldReference = fieldReference;
+            this.fieldReferenceType = fieldType;
             checkArgument(
-                    fieldType.getTypeRoot() == DataTypeRoot.VARCHAR,
+                    fieldType == null || fieldType.getTypeRoot() == DataTypeRoot.VARCHAR,
                     String.format(
                             "'%s' expression only supports type root of '%s', but found '%s'.",
                             name(), DataTypeRoot.VARCHAR, fieldType.getTypeRoot()));
@@ -743,6 +823,24 @@ public interface Expression extends Serializable {
         @Override
         public String fieldReference() {
             return fieldReference;
+        }
+
+        @Override
+        public DataType fieldReferenceType() {
+            return fieldReferenceType;
+        }
+
+        @Override
+        public String eval(String input, DataType inputType) {
+            if (this.fieldReferenceType == null) {
+                checkArgument(
+                        inputType.getTypeRoot() == DataTypeRoot.VARCHAR,
+                        String.format(
+                                "'%s' expression only supports type root of '%s', but found '%s'.",
+                                name(), DataTypeRoot.VARCHAR, inputType.getTypeRoot()));
+                this.fieldReferenceType = inputType;
+            }
+            return eval(input);
         }
     }
 }
