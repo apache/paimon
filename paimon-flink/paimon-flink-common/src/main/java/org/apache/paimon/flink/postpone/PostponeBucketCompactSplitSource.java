@@ -47,8 +47,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -67,8 +65,6 @@ import java.util.regex.Pattern;
 public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSource<Split> {
 
     private static final long serialVersionUID = 1L;
-    private static final Logger LOG =
-            LoggerFactory.getLogger(PostponeBucketCompactSplitSource.class);
 
     private final FileStoreTable table;
     private final Map<String, String> partitionSpec;

@@ -270,6 +270,7 @@ public class CompactAction extends TableActionBase {
             Iterator<ManifestEntry> it =
                     table.newSnapshotReader()
                             .withPartitionFilter(Collections.singletonList(partition))
+                            .onlyReadRealBuckets()
                             .readFileIterator();
             if (it.hasNext()) {
                 bucketNum = it.next().totalBuckets();

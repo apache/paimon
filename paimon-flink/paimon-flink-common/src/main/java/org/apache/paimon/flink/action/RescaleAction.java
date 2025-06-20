@@ -147,6 +147,7 @@ public class RescaleAction extends TableActionBase {
                         .newSnapshotReader()
                         .withSnapshot(snapshot)
                         .withPartitionFilter(partition)
+                        .onlyReadRealBuckets()
                         .readFileIterator();
         Preconditions.checkArgument(
                 it.hasNext(),

@@ -672,6 +672,60 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 .containsExactlyInAnyOrder("+I[1, 2025-06-11T16:35:45.123456789]", "+I[2, null]");
     }
 
+    @Timeout(TIMEOUT)
+    @Test
+    public void testNoneChangelogProducer() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(500)
+                        .build();
+        String createCatalog =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        sEnv.executeSql(createCatalog);
+        sEnv.executeSql("USE CATALOG mycat");
+        sEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'changelog-producer' = 'none',\n"
+                        + "  'scan.remove-normalize' = 'true',\n"
+                        + "  'continuous.discovery-interval' = '1ms'\n"
+                        + ")");
+
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(1)
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+        bEnv.executeSql(createCatalog);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (1, 100)").await();
+        bEnv.executeSql("INSERT INTO T VALUES (1, 101), (3, 31)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        assertThat(collect(bEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 101]", "+I[2, 20]", "+I[3, 31]");
+        TableResult streamingSelect =
+                sEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id' = '1') */");
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+        assertThat(collect(client, it, 5))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 10]", "+I[2, 20]", "+I[1, 100]", "+I[1, 101]", "+I[3, 31]");
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {

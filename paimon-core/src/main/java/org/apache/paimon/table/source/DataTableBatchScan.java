@@ -23,6 +23,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -46,10 +47,15 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         super(schema, options, snapshotReader, queryAuth);
+
         this.hasNext = true;
         this.defaultValueAssigner = DefaultValueAssigner.create(schema);
+
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
+        }
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
+            snapshotReader.onlyReadRealBuckets();
         }
     }
 
