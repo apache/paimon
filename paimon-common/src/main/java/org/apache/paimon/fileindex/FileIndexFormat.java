@@ -202,8 +202,8 @@ public final class FileIndexFormat {
         private int calculateHeadLength(Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo)
                 throws IOException {
             // magic 8 bytes, version 4 bytes, head length 4 bytes,
-            // column size 4 bytes, body info start&end 8 bytes per
-            // column-index, index type size 4 bytes per column, redundant length 4 bytes;
+            // column number 4 bytes, body info start&length 8 bytes per
+            // column-index, index number size 4 bytes per column, redundant length 4 bytes;
             int baseLength =
                     8
                             + 4
