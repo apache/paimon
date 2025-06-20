@@ -63,12 +63,14 @@ public class DeletionVectorsMaintainer {
      * @param fileName The name of the file where the deletion occurred.
      * @param position The row position within the file that has been deleted.
      */
-    public void notifyNewDeletion(String fileName, long position) {
+    public boolean notifyNewDeletion(String fileName, long position) {
         DeletionVector deletionVector =
                 deletionVectors.computeIfAbsent(fileName, k -> createNewDeletionVector());
-        if (deletionVector.checkedDelete(position)) {
-            modified = true;
+        boolean modified = deletionVector.checkedDelete(position);
+        if (modified) {
+            this.modified = true;
         }
+        return modified;
     }
 
     /**
