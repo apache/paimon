@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.FileStoreCommitImpl.RetryResult;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -83,6 +84,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -1035,6 +1037,44 @@ public class FileStoreCommitTest {
             assertThat(snapshotProps).isNotNull();
             assertThat(snapshotProps).isEqualTo(expectedProps);
         }
+    }
+
+    @Test
+    public void testCommitTwiceWithDifferentKind() throws Exception {
+        TestFileStore store = createStore(false);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            // Append
+            Snapshot firstLatest = store.snapshotManager().latestSnapshot();
+            commit.tryCommitOnce(
+                    null,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    0,
+                    null,
+                    Collections.emptyMap(),
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.APPEND,
+                    firstLatest,
+                    mustConflictCheck(),
+                    null);
+            // Compact
+            commit.tryCommitOnce(
+                    new RetryResult(firstLatest, Collections.emptyList(), null),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    0,
+                    null,
+                    Collections.emptyMap(),
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.COMPACT,
+                    store.snapshotManager().latestSnapshot(),
+                    mustConflictCheck(),
+                    null);
+        }
+        long id = store.snapshotManager().latestSnapshot().id();
+        assertThat(id).isEqualTo(2);
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)

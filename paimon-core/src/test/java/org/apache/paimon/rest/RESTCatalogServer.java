@@ -1994,6 +1994,8 @@ public class RESTCatalogServer {
         return String.format("%s-%d", identifier.getFullName(), snapshotId);
     }
 
+    public static volatile boolean commitSuccessThrowException = false;
+
     private MockResponse commitSnapshot(
             Identifier identifier,
             String tableId,
@@ -2013,6 +2015,10 @@ public class RESTCatalogServer {
         TableSnapshot tableSnapshot;
         try {
             boolean success = commit.commit(snapshot, branchName, Collections.emptyList());
+            if (!success) {
+                return mockResponse(new CommitTableResponse(success), 200);
+            }
+
             // update snapshot and stats
             tableSnapshot =
                     tableLatestSnapshotStore.compute(
@@ -2125,6 +2131,13 @@ public class RESTCatalogServer {
                                                         && partition.recordCount() <= 0);
                                 return partitions.isEmpty();
                             });
+            if (commitSuccessThrowException) {
+                commitSuccessThrowException = false;
+                return mockResponse(
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TABLE, null, "Service Failure", 500),
+                        500);
+            }
             CommitTableResponse response = new CommitTableResponse(success);
             return mockResponse(response, 200);
         } catch (Exception e) {
