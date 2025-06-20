@@ -28,8 +28,6 @@ import java.util.Optional;
 /** Factory for {@link CommitListener}. */
 public interface CommitListenerFactory extends Factory {
 
-    String identifier();
-
     Optional<CommitListener> create(Committer.Context context, FileStoreTable table)
             throws Exception;
 
