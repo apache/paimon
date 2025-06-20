@@ -239,7 +239,8 @@ public class ManifestsTable implements ReadonlyTable {
         ManifestList manifestList =
                 new ManifestList.Factory(
                                 dataTable.fileIO(),
-                                FileFormat.manifestFormat(options),
+                                FileFormat.manifestFormat(
+                                        dataTable.fileIO().storageOptions(), options),
                                 options.manifestCompression(),
                                 fileStorePathFactory,
                                 null)

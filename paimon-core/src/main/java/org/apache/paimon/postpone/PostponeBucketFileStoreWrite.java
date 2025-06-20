@@ -120,7 +120,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                                 : writeId));
         this.options = new CoreOptions(newOptions);
 
-        FileFormat fileFormat = fileFormat(this.options);
+        FileFormat fileFormat = fileFormat(fileIO.storageOptions(), this.options);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,

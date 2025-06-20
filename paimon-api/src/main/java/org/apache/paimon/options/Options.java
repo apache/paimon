@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.Public;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -45,6 +46,8 @@ import static org.apache.paimon.options.OptionsUtils.removePrefixMap;
 @Public
 @ThreadSafe
 public class Options implements Serializable {
+
+    public static final Options EMPTY_OPTIONS = new Options(Collections.emptyMap());
 
     private static final long serialVersionUID = 1L;
 

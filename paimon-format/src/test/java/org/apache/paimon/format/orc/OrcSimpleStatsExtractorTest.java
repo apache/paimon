@@ -48,7 +48,7 @@ public class OrcSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("orc", new Options());
+        return FileFormat.fromIdentifier("orc", new Options(), new Options());
     }
 
     @Override

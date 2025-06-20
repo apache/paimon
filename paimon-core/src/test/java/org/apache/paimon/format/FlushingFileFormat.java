@@ -37,7 +37,7 @@ public class FlushingFileFormat extends FileFormat {
 
     public FlushingFileFormat(String identifier) {
         super(identifier);
-        this.format = FileFormat.fromIdentifier(identifier, new Options());
+        this.format = FileFormat.fromIdentifier(identifier, Options.EMPTY_OPTIONS, new Options());
     }
 
     @Override

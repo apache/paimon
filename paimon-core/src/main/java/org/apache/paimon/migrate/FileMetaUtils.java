@@ -136,7 +136,10 @@ public class FileMetaUtils {
                             options.statsMode(), options, rowTypeWithSchemaId.getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.fromIdentifier(format, options.toConfiguration())
+                    FileFormat.fromIdentifier(
+                                    format,
+                                    table.fileIO().storageOptions(),
+                                    options.toConfiguration())
                             .createStatsExtractor(rowTypeWithSchemaId, factories)
                             .orElseThrow(
                                     () ->
@@ -251,7 +254,8 @@ public class FileMetaUtils {
                 StatsCollectorFactories.createStatsFactories(
                         options.statsMode(), options, table.rowType().getFieldNames());
 
-        return FileFormat.fromIdentifier(format, options.toConfiguration())
+        return FileFormat.fromIdentifier(
+                        format, table.fileIO().storageOptions(), options.toConfiguration())
                 .createStatsExtractor(table.rowType(), factories)
                 .orElseThrow(
                         () ->

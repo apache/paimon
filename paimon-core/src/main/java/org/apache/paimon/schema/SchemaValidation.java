@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -86,6 +87,11 @@ public class SchemaValidation {
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
 
+    @VisibleForTesting
+    public static void validateTableSchema(TableSchema schema) {
+        validateTableSchema(Options.EMPTY_OPTIONS, schema);
+    }
+
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
      *
@@ -93,7 +99,7 @@ public class SchemaValidation {
      *
      * @param schema the schema to be validated
      */
-    public static void validateTableSchema(TableSchema schema) {
+    public static void validateTableSchema(Options storageOptions, TableSchema schema) {
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
 
@@ -146,7 +152,8 @@ public class SchemaValidation {
                         + CHANGELOG_NUM_RETAINED_MAX.key());
 
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
+                FileFormat.fromIdentifier(
+                        options.formatType(), storageOptions, new Options(schema.options()));
         fileFormat.validateDataFields(new RowType(schema.fields()));
 
         // Check column names in schema

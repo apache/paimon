@@ -32,6 +32,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
@@ -222,6 +223,7 @@ public class KeyValueFileWriterFactory {
                             valueType,
                             fileFormat,
                             format2PathFactory,
+                            fileIO.storageOptions(),
                             options);
             return new KeyValueFileWriterFactory(
                     fileIO, schemaId, context, suggestedFileSize, options);
@@ -241,6 +243,7 @@ public class KeyValueFileWriterFactory {
         private final Map<String, FileFormat> formatFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
+        private final Options storageOptions;
         private final BinaryRow partition;
         private final int bucket;
         private final RowType keyType;
@@ -257,12 +260,14 @@ public class KeyValueFileWriterFactory {
                 RowType valueType,
                 FileFormat defaultFileFormat,
                 Function<String, FileStorePathFactory> parentFactories,
+                Options storageOptions,
                 CoreOptions options) {
             this.partition = partition;
             this.bucket = bucket;
             this.keyType = keyType;
             this.valueType = valueType;
             this.parentFactories = parentFactories;
+            this.storageOptions = storageOptions;
             this.options = options;
             this.thinModeEnabled =
                     options.dataFileThinMode() && supportsThinMode(keyType, valueType);
@@ -387,7 +392,10 @@ public class KeyValueFileWriterFactory {
 
         private FileFormat fileFormat(String format) {
             return formatFactory.computeIfAbsent(
-                    format, k -> FileFormat.fromIdentifier(format, options.toConfiguration()));
+                    format,
+                    k ->
+                            FileFormat.fromIdentifier(
+                                    format, storageOptions, options.toConfiguration()));
         }
     }
 
