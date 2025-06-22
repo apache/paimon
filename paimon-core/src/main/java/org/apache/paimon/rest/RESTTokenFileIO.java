@@ -62,7 +62,7 @@ public class RESTTokenFileIO implements FileIO {
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .expireAfterAccess(30, TimeUnit.MINUTES)
-                    .maximumSize(100)
+                    .maximumSize(1000)
                     .removalListener(
                             (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
