@@ -76,10 +76,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     /**
      * Ignores the check that the written partition must have the same number of buckets with the
      * table option.
-     *
-     * <p>TODO: to support writing partitions with different total buckets, we'll also need a
-     * special {@link org.apache.paimon.table.sink.ChannelComputer} and {@link
-     * org.apache.paimon.table.sink.KeyAndBucketExtractor} to deal with different bucket numbers.
      */
     void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck);
 

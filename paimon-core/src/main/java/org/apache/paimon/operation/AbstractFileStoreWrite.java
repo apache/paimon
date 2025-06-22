@@ -427,11 +427,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         Snapshot previousSnapshot =
                 ignorePreviousFiles ? null : snapshotManager.latestSnapshotFromFileSystem();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        int totalBuckets;
+        int totalBuckets = numBuckets;
         if (previousSnapshot != null) {
             totalBuckets = scanExistingFileMetas(previousSnapshot, partition, bucket, restoreFiles);
-        } else {
-            totalBuckets = getDefaultBucketNum(partition);
         }
 
         IndexMaintainer<T> indexMaintainer =
@@ -478,7 +476,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             List<DataFileMeta> existingFileMetas) {
         List<ManifestEntry> files =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        int totalBuckets = getDefaultBucketNum(partition);
+        int totalBuckets = numBuckets;
         for (ManifestEntry entry : files) {
             if (!ignoreNumBucketCheck && entry.totalBuckets() != numBuckets) {
                 String partInfo =
@@ -500,12 +498,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             existingFileMetas.add(entry.file());
         }
         return totalBuckets;
-    }
-
-    // TODO see comments on FileStoreWrite#withIgnoreNumBucketCheck for what is needed to support
-    //  writing partitions with different buckets
-    public int getDefaultBucketNum(BinaryRow partition) {
-        return numBuckets;
     }
 
     private ExecutorService compactExecutor() {
