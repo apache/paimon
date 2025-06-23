@@ -501,6 +501,24 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         assertThrows(RuntimeException.class, () -> table.createTag("2023-07-18", 1));
     }
 
+    @Test
+    public void testAutoExpireTagWithoutDashes() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES);
+        options.set(TAG_NUM_RETAINED_MAX, 1);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("20230717");
+
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-19T12:12:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("20230718");
+    }
+
     private long localZoneMills(String timestamp) {
         return LocalDateTime.parse(timestamp)
                 .atZone(ZoneId.systemDefault())
