@@ -19,6 +19,7 @@
 package org.apache.paimon.operation.write;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 
 import javax.annotation.Nullable;
@@ -29,16 +30,22 @@ import java.util.List;
 public class RestoreFiles {
 
     private final @Nullable Snapshot snapshot;
-    private final @Nullable List<DataFileMeta> dataFiles;
     private final @Nullable Integer totalBuckets;
+    private final @Nullable List<DataFileMeta> dataFiles;
+    private final @Nullable IndexFileMeta dynamicBucketIndex;
+    private final @Nullable List<IndexFileMeta> deleteVectorsIndex;
 
     public RestoreFiles(
             @Nullable Snapshot snapshot,
+            @Nullable Integer totalBuckets,
             @Nullable List<DataFileMeta> dataFiles,
-            @Nullable Integer totalBuckets) {
+            @Nullable IndexFileMeta dynamicBucketIndex,
+            @Nullable List<IndexFileMeta> deleteVectorsIndex) {
         this.snapshot = snapshot;
-        this.dataFiles = dataFiles;
         this.totalBuckets = totalBuckets;
+        this.dataFiles = dataFiles;
+        this.dynamicBucketIndex = dynamicBucketIndex;
+        this.deleteVectorsIndex = deleteVectorsIndex;
     }
 
     @Nullable
@@ -46,16 +53,26 @@ public class RestoreFiles {
         return snapshot;
     }
 
-    public List<DataFileMeta> dataFiles() {
-        return dataFiles;
-    }
-
     @Nullable
     public Integer totalBuckets() {
         return totalBuckets;
     }
 
+    public List<DataFileMeta> dataFiles() {
+        return dataFiles;
+    }
+
+    @Nullable
+    public IndexFileMeta dynamicBucketIndex() {
+        return dynamicBucketIndex;
+    }
+
+    @Nullable
+    public List<IndexFileMeta> deleteVectorsIndex() {
+        return deleteVectorsIndex;
+    }
+
     public static RestoreFiles empty() {
-        return new RestoreFiles(null, null, null);
+        return new RestoreFiles(null, null, null, null, null);
     }
 }

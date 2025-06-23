@@ -19,14 +19,16 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -40,7 +42,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -61,6 +62,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.paimon.shade.guava30.com.google.common.base.MoreObjects.firstNonNull;
 import static org.apache.paimon.utils.FileStorePathFactory.getPartitionComputer;
 
 /**
@@ -73,7 +75,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     private final int writerNumberMax;
-    @Nullable private final IndexMaintainer.Factory<T> indexFactory;
+    @Nullable private final DynamicBucketIndexMaintainer.Factory dbMaintainerFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
     private final int numBuckets;
     private final RowType partitionType;
@@ -96,13 +98,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected AbstractFileStoreWrite(
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
             CoreOptions options,
             RowType partitionType) {
-        this.restore = new FileSystemWriteRestore(options, snapshotManager, scan);
-        this.indexFactory = indexFactory;
+        IndexFileHandler indexFileHandler = null;
+        if (dbMaintainerFactory != null) {
+            indexFileHandler = dbMaintainerFactory.indexFileHandler();
+        } else if (dvMaintainerFactory != null) {
+            indexFileHandler = dvMaintainerFactory.indexFileHandler();
+        }
+        this.restore = new FileSystemWriteRestore(options, snapshotManager, scan, indexFileHandler);
+        this.dbMaintainerFactory = dbMaintainerFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
         this.numBuckets = options.bucket();
         this.partitionType = partitionType;
@@ -149,8 +157,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
         container.writer.write(data);
-        if (container.indexMaintainer != null) {
-            container.indexMaintainer.notifyNewRecord(data);
+        if (container.dynamicBucketMaintainer != null) {
+            container.dynamicBucketMaintainer.notifyNewRecord((KeyValue) data);
         }
     }
 
@@ -210,8 +218,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
                 List<IndexFileMeta> newIndexFiles = new ArrayList<>();
-                if (writerContainer.indexMaintainer != null) {
-                    newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
+                if (writerContainer.dynamicBucketMaintainer != null) {
+                    newIndexFiles.addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
                 }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
@@ -343,7 +351,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
                                 writerContainer.writer.maxSequenceNumber(),
-                                writerContainer.indexMaintainer,
+                                writerContainer.dynamicBucketMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
                                 increment));
             }
@@ -419,24 +427,24 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot previousSnapshot = null;
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
-        int totalBuckets = numBuckets;
+        RestoreFiles restored = RestoreFiles.empty();
         if (!ignorePreviousFiles) {
-            Pair<Snapshot, Integer> restorePair =
-                    scanExistingFileMetas(partition, bucket, restoreFiles);
-            previousSnapshot = restorePair.getLeft();
-            totalBuckets = restorePair.getRight();
+            restored = scanExistingFileMetas(partition, bucket);
         }
 
-        IndexMaintainer<T> indexMaintainer =
-                indexFactory == null
+        DynamicBucketIndexMaintainer indexMaintainer =
+                dbMaintainerFactory == null
                         ? null
-                        : indexFactory.createOrRestore(previousSnapshot, partition, bucket);
+                        : dbMaintainerFactory.create(restored.dynamicBucketIndex());
         DeletionVectorsMaintainer deletionVectorsMaintainer =
                 dvMaintainerFactory == null
                         ? null
-                        : dvMaintainerFactory.createOrRestore(previousSnapshot, partition, bucket);
+                        : dvMaintainerFactory.create(restored.deleteVectorsIndex());
+
+        List<DataFileMeta> restoreFiles = new ArrayList<>();
+        if (restored.dataFiles() != null) {
+            restoreFiles.addAll(restored.dataFiles());
+        }
         RecordWriter<T> writer =
                 createWriter(
                         partition.copy(),
@@ -447,9 +455,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         compactExecutor(),
                         deletionVectorsMaintainer);
         notifyNewWriter(writer);
+
+        Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
-                totalBuckets,
+                firstNonNull(restored.totalBuckets(), numBuckets),
                 indexMaintainer,
                 deletionVectorsMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
@@ -466,13 +476,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return this;
     }
 
-    private Pair<Snapshot, Integer> scanExistingFileMetas(
-            BinaryRow partition, int bucket, List<DataFileMeta> existingFileMetas) {
-        RestoreFiles restored = restore.restore(partition, bucket);
-        Snapshot previousSnapshot = restored.snapshot();
-        if (restored.dataFiles() != null) {
-            existingFileMetas.addAll(restored.dataFiles());
-        }
+    private RestoreFiles scanExistingFileMetas(BinaryRow partition, int bucket) {
+        RestoreFiles restored =
+                restore.restoreFiles(
+                        partition,
+                        bucket,
+                        dbMaintainerFactory != null,
+                        dvMaintainerFactory != null);
         Integer restoredTotalBuckets = restored.totalBuckets();
         int totalBuckets = numBuckets;
         if (restoredTotalBuckets != null) {
@@ -494,7 +504,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
                             partInfo, numBuckets, totalBuckets));
         }
-        return Pair.of(previousSnapshot, totalBuckets);
+        return restored;
     }
 
     private ExecutorService compactExecutor() {
@@ -534,7 +544,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public static class WriterContainer<T> {
         public final RecordWriter<T> writer;
         public final int totalBuckets;
-        @Nullable public final IndexMaintainer<T> indexMaintainer;
+        @Nullable public final DynamicBucketIndexMaintainer dynamicBucketMaintainer;
         @Nullable public final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
@@ -542,12 +552,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         protected WriterContainer(
                 RecordWriter<T> writer,
                 int totalBuckets,
-                @Nullable IndexMaintainer<T> indexMaintainer,
+                @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
-            this.indexMaintainer = indexMaintainer;
+            this.dynamicBucketMaintainer = dynamicBucketMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;

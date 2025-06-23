@@ -16,12 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.sink.TableWriteOperator;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
@@ -46,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -62,7 +66,8 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     private Map<String, Long> latestCommittedIdentifiers;
 
     private volatile Snapshot snapshot;
-    private volatile FileStoreScan scan;
+    private volatile FileStoreScan dataFileScan;
+    private volatile IndexFileHandler indexFileHandler;
 
     public WriteOperatorCoordinator(FileStoreTable table) {
         this.table = table;
@@ -73,27 +78,47 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         if (!latestSnapshot.isPresent()) {
             return;
         }
-        if (scan == null) {
-            scan = table.store().newScan();
+        if (dataFileScan == null) {
+            dataFileScan = table.store().newScan();
             if (table.coreOptions().manifestDeleteFileDropStats()) {
-                scan.dropStats();
+                dataFileScan.dropStats();
             }
         }
+        if (indexFileHandler == null) {
+            indexFileHandler = table.store().newIndexFileHandler();
+        }
         snapshot = latestSnapshot.get();
-        scan.withSnapshot(snapshot);
+        dataFileScan.withSnapshot(snapshot);
     }
 
     private synchronized ScanCoordinationResponse scanDataFiles(ScanCoordinationRequest request)
             throws IOException {
-        if (scan == null) {
-            return new ScanCoordinationResponse(null, null, null);
+        if (snapshot == null) {
+            return new ScanCoordinationResponse(null, null, null, null, null);
         }
+
         BinaryRow partition = deserializeBinaryRow(request.partition());
         int bucket = request.bucket();
+
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
+        List<ManifestEntry> entries =
+                dataFileScan.withPartitionBucket(partition, bucket).plan().files();
         Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
-        return new ScanCoordinationResponse(snapshot, restoreFiles, totalBuckets);
+
+        IndexFileMeta dynamicBucketIndex = null;
+        if (request.scanDynamicBucketIndex()) {
+            dynamicBucketIndex =
+                    indexFileHandler.scanHashIndex(snapshot, partition, bucket).orElse(null);
+        }
+
+        List<IndexFileMeta> deleteVectorsIndex = null;
+        if (request.scanDeleteVectorsIndex()) {
+            deleteVectorsIndex =
+                    indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
+        }
+
+        return new ScanCoordinationResponse(
+                snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
     }
 
     private synchronized LatestIdentifierResponse latestCommittedIdentifier(
@@ -142,6 +167,9 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
                         } else if (request instanceof LatestIdentifierRequest) {
                             future.complete(
                                     latestCommittedIdentifier((LatestIdentifierRequest) request));
+                        } else {
+                            throw new UnsupportedOperationException(
+                                    "Unsupported request type: " + request);
                         }
                     } catch (Exception e) {
                         future.completeExceptionally(e);
@@ -152,9 +180,9 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
 
     @Override
     public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> resultFuture) {
-        // refresh latest snapshot for scan
+        // refresh latest snapshot for data & index files scan
         refreshOrCreateScan();
-        // refresh latest committed identifiers
+        // refresh latest committed identifiers for all users
         latestCommittedIdentifiers.clear();
     }
 

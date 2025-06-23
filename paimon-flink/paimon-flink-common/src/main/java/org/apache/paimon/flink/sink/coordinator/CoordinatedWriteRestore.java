@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.write.RestoreFiles;
@@ -61,16 +61,28 @@ public class CoordinatedWriteRestore implements WriteRestore {
     }
 
     @Override
-    public RestoreFiles restore(BinaryRow partition, int bucket) {
+    public RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex) {
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(partition), bucket);
+                new ScanCoordinationRequest(
+                        serializeBinaryRow(partition),
+                        bucket,
+                        scanDynamicBucketIndex,
+                        scanDeleteVectorsIndex);
         try {
             SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
             ScanCoordinationResponse response =
                     (ScanCoordinationResponse)
                             gateway.sendRequestToCoordinator(operatorID, serializedRequest).get();
             return new RestoreFiles(
-                    response.snapshot(), response.extractDataFiles(), response.totalBuckets());
+                    response.snapshot(),
+                    response.totalBuckets(),
+                    response.extractDataFiles(),
+                    response.extractDynamicBucketIndex(),
+                    response.extractDeletionVectorsIndex());
         } catch (IOException | ExecutionException | InterruptedException e) {
             throw new RuntimeException(e);
         }

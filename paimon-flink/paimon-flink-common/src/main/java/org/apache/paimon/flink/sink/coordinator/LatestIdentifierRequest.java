@@ -16,22 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.coordinator;
 
-import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
+import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 
-/** Write response to get latest identifier for user. */
-public class LatestIdentifierResponse implements CoordinationResponse {
+/** Write request to get latest identifier for user. */
+public class LatestIdentifierRequest implements CoordinationRequest {
 
     private static final long serialVersionUID = 1L;
 
-    private final long latestIdentifier;
+    private final String user;
 
-    public LatestIdentifierResponse(long latestIdentifier) {
-        this.latestIdentifier = latestIdentifier;
+    public LatestIdentifierRequest(String user) {
+        this.user = user;
     }
 
-    public long latestIdentifier() {
-        return latestIdentifier;
+    public String user() {
+        return user;
     }
 }

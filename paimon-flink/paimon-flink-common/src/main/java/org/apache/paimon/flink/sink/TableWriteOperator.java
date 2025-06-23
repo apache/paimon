@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
+import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.operation.write.WriteRestore;
 import org.apache.paimon.options.Options;

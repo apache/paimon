@@ -23,8 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.HashIndexMaintainer;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -164,9 +163,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             String commitUser,
             @Nullable ManifestCacheFilter manifestFilter,
             @Nullable Integer writeId) {
-        IndexMaintainer.Factory<KeyValue> indexFactory = null;
+        DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
-            indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
+            indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
         }
         DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
         if (options.deletionVectorsEnabled()) {

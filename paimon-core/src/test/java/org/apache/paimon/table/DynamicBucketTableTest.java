@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.index.HashIndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -51,11 +51,11 @@ public class DynamicBucketTableTest extends TableTestBase {
         Table table = getTableDefault();
         BatchWriteBuilderImpl builder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
         TableWriteImpl batchTableWrite = (TableWriteImpl) builder.withOverwrite().newWrite();
-        HashIndexMaintainer indexMaintainer =
-                (HashIndexMaintainer)
+        DynamicBucketIndexMaintainer indexMaintainer =
+                (DynamicBucketIndexMaintainer)
                         ((AbstractFileStoreWrite<?>) (batchTableWrite.getWrite()))
                                 .createWriterContainer(BinaryRow.EMPTY_ROW, 0, true)
-                                .indexMaintainer;
+                                .dynamicBucketMaintainer;
 
         assertThat(indexMaintainer.isEmpty()).isTrue();
         Pair<InternalRow, Integer> rowWithBucket = data(0);

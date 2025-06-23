@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 
@@ -27,10 +27,18 @@ public class ScanCoordinationRequest implements CoordinationRequest {
 
     private final byte[] partition;
     private final int bucket;
+    private final boolean scanDynamicBucketIndex;
+    private final boolean scanDeleteVectorsIndex;
 
-    public ScanCoordinationRequest(byte[] partition, int bucket) {
+    public ScanCoordinationRequest(
+            byte[] partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex) {
         this.partition = partition;
         this.bucket = bucket;
+        this.scanDynamicBucketIndex = scanDynamicBucketIndex;
+        this.scanDeleteVectorsIndex = scanDeleteVectorsIndex;
     }
 
     public byte[] partition() {
@@ -39,5 +47,13 @@ public class ScanCoordinationRequest implements CoordinationRequest {
 
     public int bucket() {
         return bucket;
+    }
+
+    public boolean scanDynamicBucketIndex() {
+        return scanDynamicBucketIndex;
+    }
+
+    public boolean scanDeleteVectorsIndex() {
+        return scanDeleteVectorsIndex;
     }
 }

@@ -28,6 +28,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -36,13 +37,18 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVectorsMaintainer}. */
@@ -56,8 +62,7 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
-        DeletionVectorsMaintainer dvMaintainer =
-                factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
+        DeletionVectorsMaintainer dvMaintainer = factory.create(emptyList());
         assertThat(dvMaintainer.bitmap64).isEqualTo(bitmap64);
 
         dvMaintainer.notifyNewDeletion("f1", 1);
@@ -107,7 +112,9 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         commit.commit(Collections.singletonList(commitMessage));
 
         Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-        dvMaintainer = factory.createOrRestore(latestSnapshot, BinaryRow.EMPTY_ROW, 0);
+        List<IndexFileMeta> indexFiles =
+                fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, BinaryRow.EMPTY_ROW, 0);
+        dvMaintainer = factory.create(indexFiles);
         DeletionVector deletionVector2 = dvMaintainer.deletionVectorOf("f1").get();
         assertThat(deletionVector2.isDeleted(1)).isTrue();
         assertThat(deletionVector2.isDeleted(2)).isFalse();
@@ -129,7 +136,9 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         commit.commit(Collections.singletonList(commitMessage));
 
         latestSnapshot = table.snapshotManager().latestSnapshot();
-        dvMaintainer = factory.createOrRestore(latestSnapshot, BinaryRow.EMPTY_ROW, 0);
+        indexFiles =
+                fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, BinaryRow.EMPTY_ROW, 0);
+        dvMaintainer = factory.create(indexFiles);
         DeletionVector deletionVector3 = dvMaintainer.deletionVectorOf("f1").get();
         assertThat(deletionVector3.isDeleted(1)).isTrue();
         assertThat(deletionVector3.isDeleted(2)).isTrue();
@@ -142,8 +151,7 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
-        DeletionVectorsMaintainer dvMaintainer =
-                factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
+        DeletionVectorsMaintainer dvMaintainer = factory.create(emptyList());
 
         File indexDir = new File(tempPath.toFile(), "/default.db/T/index");
 
@@ -209,8 +217,13 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         initIndexHandler(!bitmap64);
         DeletionVectorsMaintainer.Factory factory2 =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
-        DeletionVectorsMaintainer dvMaintainer2 =
-                factory2.createOrRestore(table.latestSnapshot().get(), BinaryRow.EMPTY_ROW, 0);
+        List<IndexFileMeta> indexFiles =
+                fileHandler.scan(
+                        table.latestSnapshot().get(),
+                        DELETION_VECTORS_INDEX,
+                        BinaryRow.EMPTY_ROW,
+                        0);
+        DeletionVectorsMaintainer dvMaintainer2 = factory2.create(indexFiles);
         dvMaintainer2.notifyNewDeletion("f1", 10);
         dvMaintainer2.notifyNewDeletion("f3", 1);
         dvMaintainer2.notifyNewDeletion("f3", 3);
@@ -263,5 +276,21 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
         table = table.copy(options);
         fileHandler = table.store().newIndexFileHandler();
+    }
+
+    public static DeletionVectorsMaintainer createOrRestore(
+            DeletionVectorsMaintainer.Factory factory,
+            @Nullable Snapshot snapshot,
+            BinaryRow partition) {
+        IndexFileHandler handler = factory.indexFileHandler();
+        List<IndexFileMeta> indexFiles =
+                snapshot == null
+                        ? Collections.emptyList()
+                        : handler.scanEntries(snapshot, DELETION_VECTORS_INDEX, partition).stream()
+                                .map(IndexManifestEntry::indexFile)
+                                .collect(Collectors.toList());
+        Map<String, DeletionVector> deletionVectors =
+                new HashMap<>(handler.readAllDeletionVectors(indexFiles));
+        return factory.create(deletionVectors);
     }
 }

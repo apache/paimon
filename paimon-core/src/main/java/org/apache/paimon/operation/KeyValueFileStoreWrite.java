@@ -34,7 +34,7 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -129,8 +129,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
-            @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
+            @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
+            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
             String tableName) {
@@ -139,8 +139,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 scan,
                 options,
                 partitionType,
-                indexFactory,
-                deletionVectorsMaintainerFactory,
+                dbMaintainerFactory,
+                dvMaintainerFactory,
                 tableName);
         this.fileIO = fileIO;
         this.partitionType = partitionType;

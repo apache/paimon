@@ -31,7 +31,11 @@ public interface WriteRestore {
 
     long latestCommittedIdentifier(String user);
 
-    RestoreFiles restore(BinaryRow partition, int bucket);
+    RestoreFiles restoreFiles(
+            BinaryRow partition,
+            int bucket,
+            boolean scanDynamicBucketIndex,
+            boolean scanDeleteVectorsIndex);
 
     @Nullable
     static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {

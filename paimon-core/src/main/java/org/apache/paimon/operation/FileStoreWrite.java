@@ -22,7 +22,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -157,7 +157,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
         protected final long maxSequenceNumber;
-        @Nullable protected final IndexMaintainer<T> indexMaintainer;
+        @Nullable protected final DynamicBucketIndexMaintainer indexMaintainer;
         @Nullable protected final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final CommitIncrement commitIncrement;
 
@@ -169,7 +169,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
                 long maxSequenceNumber,
-                @Nullable IndexMaintainer<T> indexMaintainer,
+                @Nullable DynamicBucketIndexMaintainer indexMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
