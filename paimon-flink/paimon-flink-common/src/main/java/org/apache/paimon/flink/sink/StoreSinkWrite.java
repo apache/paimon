@@ -89,7 +89,6 @@ public interface StoreSinkWrite {
                 IOManager ioManager,
                 @Nullable MemorySegmentPool memoryPool,
                 @Nullable MetricGroup metricGroup);
-        //                @Nullable TaskOperatorEventGateway gateway);
     }
 
     /** Provider of {@link StoreSinkWrite} that uses given write buffer. */

@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -428,31 +429,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         int totalBuckets = numBuckets;
         if (!ignorePreviousFiles) {
-            RestoreFiles restored = restore.restore(partition, bucket);
-            previousSnapshot = restored.snapshot();
-            if (restored.dataFiles() != null) {
-                restoreFiles.addAll(restored.dataFiles());
-            }
-            Integer restoredTotalBuckets = restored.totalBuckets();
-            if (restoredTotalBuckets != null) {
-                totalBuckets = restoredTotalBuckets;
-            }
-            if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-                String partInfo =
-                        partitionType.getFieldCount() > 0
-                                ? "partition "
-                                        + getPartitionComputer(
-                                                        partitionType,
-                                                        PARTITION_DEFAULT_NAME.defaultValue(),
-                                                        legacyPartitionName)
-                                                .generatePartValues(partition)
-                                : "table";
-                throw new RuntimeException(
-                        String.format(
-                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                                partInfo, numBuckets, totalBuckets));
-            }
+            Pair<Snapshot, Integer> restorePair =
+                    scanExistingFileMetas(partition, bucket, restoreFiles);
+            previousSnapshot = restorePair.getLeft();
+            totalBuckets = restorePair.getRight();
         }
 
         IndexMaintainer<T> indexMaintainer =
@@ -490,6 +470,37 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
         this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
         return this;
+    }
+
+    private Pair<Snapshot, Integer> scanExistingFileMetas(
+            BinaryRow partition, int bucket, List<DataFileMeta> existingFileMetas) {
+        RestoreFiles restored = restore.restore(partition, bucket);
+        Snapshot previousSnapshot = restored.snapshot();
+        if (restored.dataFiles() != null) {
+            existingFileMetas.addAll(restored.dataFiles());
+        }
+        Integer restoredTotalBuckets = restored.totalBuckets();
+        int totalBuckets = numBuckets;
+        if (restoredTotalBuckets != null) {
+            totalBuckets = restoredTotalBuckets;
+        }
+        if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
+            String partInfo =
+                    partitionType.getFieldCount() > 0
+                            ? "partition "
+                                    + getPartitionComputer(
+                                                    partitionType,
+                                                    PARTITION_DEFAULT_NAME.defaultValue(),
+                                                    legacyPartitionName)
+                                            .generatePartValues(partition)
+                            : "table";
+            throw new RuntimeException(
+                    String.format(
+                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                    + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                            partInfo, numBuckets, totalBuckets));
+        }
+        return Pair.of(previousSnapshot, totalBuckets);
     }
 
     private ExecutorService compactExecutor() {
