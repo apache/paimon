@@ -18,12 +18,13 @@
 
 package org.apache.paimon.flink.lookup.partitioner;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -50,6 +51,8 @@ public class BucketIdExtractor implements Serializable {
 
     private final List<String> bucketKeyFieldNames;
 
+    private BucketFunction bucketFunction;
+
     private Projection bucketKeyProjection;
 
     public BucketIdExtractor(
@@ -72,11 +75,15 @@ public class BucketIdExtractor implements Serializable {
         if (bucketKeyProjection == null) {
             bucketKeyProjection = generateBucketKeyProjection();
         }
+        if (bucketFunction == null) {
+            bucketFunction =
+                    BucketFunction.create(
+                            new CoreOptions(tableSchema.options()),
+                            tableSchema.logicalBucketKeyType());
+        }
         FlinkRowWrapper internalRow = new FlinkRowWrapper(joinKeyRow);
         BinaryRow bucketKey = bucketKeyProjection.apply(internalRow);
-        int bucket =
-                KeyAndBucketExtractor.bucket(
-                        KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+        int bucket = bucketFunction.bucket(bucketKey, numBuckets);
         checkState(bucket < numBuckets);
         return bucket;
     }
