@@ -18,26 +18,20 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
+import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 
-/** Write request to initial data files for partition and bucket. */
-public class WriteCoordinationRequest implements CoordinationRequest {
+/** Write response to get latest identifier for user. */
+public class LatestIdentifierResponse implements CoordinationResponse {
 
     private static final long serialVersionUID = 1L;
 
-    private final byte[] partition;
-    private final int bucket;
+    private final long latestIdentifier;
 
-    public WriteCoordinationRequest(byte[] partition, int bucket) {
-        this.partition = partition;
-        this.bucket = bucket;
+    public LatestIdentifierResponse(long latestIdentifier) {
+        this.latestIdentifier = latestIdentifier;
     }
 
-    public byte[] partition() {
-        return partition;
-    }
-
-    public int bucket() {
-        return bucket;
+    public long latestIdentifier() {
+        return latestIdentifier;
     }
 }

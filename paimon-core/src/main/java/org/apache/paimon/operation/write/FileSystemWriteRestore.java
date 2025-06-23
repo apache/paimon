@@ -47,6 +47,14 @@ public class FileSystemWriteRestore implements WriteRestore {
     }
 
     @Override
+    public long latestCommittedIdentifier(String user) {
+        return snapshotManager
+                .latestSnapshotOfUserFromFilesystem(user)
+                .map(Snapshot::commitIdentifier)
+                .orElse(Long.MIN_VALUE);
+    }
+
+    @Override
     public RestoreFiles restore(BinaryRow partition, int bucket) {
         // NOTE: don't use snapshotManager.latestSnapshot() here,
         // because we don't want to flood the catalog with high concurrency

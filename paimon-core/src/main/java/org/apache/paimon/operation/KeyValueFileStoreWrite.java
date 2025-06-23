@@ -422,7 +422,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
-        return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
+        return createConflictAwareWriterCleanChecker(commitUser, restore);
     }
 
     @Override

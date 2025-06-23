@@ -29,6 +29,8 @@ import java.util.List;
 /** Restore for write to restore data files by partition and bucket from file system. */
 public interface WriteRestore {
 
+    long latestCommittedIdentifier(String user);
+
     RestoreFiles restore(BinaryRow partition, int bucket);
 
     @Nullable

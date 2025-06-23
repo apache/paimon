@@ -47,13 +47,27 @@ public class CoordinatedWriteRestore implements WriteRestore {
     }
 
     @Override
-    public RestoreFiles restore(BinaryRow partition, int bucket) {
-        WriteCoordinationRequest request =
-                new WriteCoordinationRequest(serializeBinaryRow(partition), bucket);
+    public long latestCommittedIdentifier(String user) {
+        LatestIdentifierRequest request = new LatestIdentifierRequest(user);
         try {
             SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
-            WriteCoordinationResponse response =
-                    (WriteCoordinationResponse)
+            LatestIdentifierResponse response =
+                    (LatestIdentifierResponse)
+                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get();
+            return response.latestIdentifier();
+        } catch (IOException | ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public RestoreFiles restore(BinaryRow partition, int bucket) {
+        ScanCoordinationRequest request =
+                new ScanCoordinationRequest(serializeBinaryRow(partition), bucket);
+        try {
+            SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
+            ScanCoordinationResponse response =
+                    (ScanCoordinationResponse)
                             gateway.sendRequestToCoordinator(operatorID, serializedRequest).get();
             return new RestoreFiles(
                     response.snapshot(), response.extractDataFiles(), response.totalBuckets());

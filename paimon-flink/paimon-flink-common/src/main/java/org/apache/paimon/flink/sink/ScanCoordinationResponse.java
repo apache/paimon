@@ -31,7 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Write response to initial data files for partition and bucket. */
-public class WriteCoordinationResponse implements CoordinationResponse {
+public class ScanCoordinationResponse implements CoordinationResponse {
 
     private static final long serialVersionUID = 1L;
 
@@ -39,7 +39,7 @@ public class WriteCoordinationResponse implements CoordinationResponse {
     @Nullable private final List<byte[]> dataFiles;
     @Nullable private final Integer totalBuckets;
 
-    public WriteCoordinationResponse(
+    public ScanCoordinationResponse(
             @Nullable Snapshot snapshot,
             @Nullable List<DataFileMeta> dataFiles,
             @Nullable Integer totalBuckets)

@@ -40,8 +40,10 @@ import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
@@ -57,6 +59,7 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     private final FileStoreTable table;
 
     private ThreadPoolExecutor executor;
+    private Map<String, Long> latestCommittedIdentifiers;
 
     private volatile Snapshot snapshot;
     private volatile FileStoreScan scan;
@@ -80,22 +83,37 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         scan.withSnapshot(snapshot);
     }
 
-    private synchronized WriteCoordinationResponse scanDataFiles(WriteCoordinationRequest request)
+    private synchronized ScanCoordinationResponse scanDataFiles(ScanCoordinationRequest request)
             throws IOException {
         if (scan == null) {
-            return new WriteCoordinationResponse(null, null, null);
+            return new ScanCoordinationResponse(null, null, null);
         }
         BinaryRow partition = deserializeBinaryRow(request.partition());
         int bucket = request.bucket();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
         Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
-        return new WriteCoordinationResponse(snapshot, restoreFiles, totalBuckets);
+        return new ScanCoordinationResponse(snapshot, restoreFiles, totalBuckets);
+    }
+
+    private synchronized LatestIdentifierResponse latestCommittedIdentifier(
+            LatestIdentifierRequest request) {
+        String user = request.user();
+        long identifier =
+                latestCommittedIdentifiers.computeIfAbsent(
+                        user,
+                        k ->
+                                table.snapshotManager()
+                                        .latestSnapshotOfUser(user)
+                                        .map(Snapshot::commitIdentifier)
+                                        .orElse(Long.MIN_VALUE));
+        return new LatestIdentifierResponse(identifier);
     }
 
     @Override
     public void start() throws Exception {
         executor = createCachedThreadPool(1, "WriteCoordinator");
+        latestCommittedIdentifiers = new ConcurrentHashMap<>();
         CoreOptions options = table.coreOptions();
         MemorySize cacheMemory =
                 options.toConfiguration().get(SINK_WRITER_COORDINATOR_CACHE_MEMORY);
@@ -118,10 +136,14 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         CompletableFuture<CoordinationResponse> future = new CompletableFuture<>();
         executor.execute(
                 () -> {
-                    WriteCoordinationRequest writeRequest = (WriteCoordinationRequest) request;
                     try {
-                        future.complete(scanDataFiles(writeRequest));
-                    } catch (IOException e) {
+                        if (request instanceof ScanCoordinationRequest) {
+                            future.complete(scanDataFiles((ScanCoordinationRequest) request));
+                        } else if (request instanceof LatestIdentifierRequest) {
+                            future.complete(
+                                    latestCommittedIdentifier((LatestIdentifierRequest) request));
+                        }
+                    } catch (Exception e) {
                         future.completeExceptionally(e);
                     }
                 });
@@ -130,7 +152,10 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
 
     @Override
     public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> resultFuture) {
+        // refresh latest snapshot for scan
         refreshOrCreateScan();
+        // refresh latest committed identifiers
+        latestCommittedIdentifiers.clear();
     }
 
     @Override

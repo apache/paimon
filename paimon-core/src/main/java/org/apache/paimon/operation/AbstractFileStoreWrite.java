@@ -72,7 +72,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
-    protected final SnapshotManager snapshotManager;
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
@@ -83,7 +82,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
-    private WriteRestore restore;
+    protected WriteRestore restore;
     private ExecutorService lazyCompactExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
@@ -102,7 +101,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             String tableName,
             CoreOptions options,
             RowType partitionType) {
-        this.snapshotManager = snapshotManager;
         this.restore = new FileSystemWriteRestore(options, snapshotManager, scan);
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
@@ -269,12 +267,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected static <T>
             Function<WriterContainer<T>, Boolean> createConflictAwareWriterCleanChecker(
-                    String commitUser, SnapshotManager snapshotManager) {
-        long latestCommittedIdentifier =
-                snapshotManager
-                        .latestSnapshotOfUserFromFilesystem(commitUser)
-                        .map(Snapshot::commitIdentifier)
-                        .orElse(Long.MIN_VALUE);
+                    String commitUser, WriteRestore restore) {
+        long latestCommittedIdentifier = restore.latestCommittedIdentifier(commitUser);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Latest committed identifier is {}", latestCommittedIdentifier);
         }
