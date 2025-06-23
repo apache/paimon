@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
@@ -26,6 +27,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
 public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
@@ -45,7 +48,12 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator.Factory(
-                table, logSinkFunction, writeProvider, commitUser);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new RowDataStoreWriteOperator.CoordinatedFactory(
+                        table, logSinkFunction, writeProvider, commitUser)
+                : new RowDataStoreWriteOperator.Factory(
+                        table, logSinkFunction, writeProvider, commitUser);
     }
 }

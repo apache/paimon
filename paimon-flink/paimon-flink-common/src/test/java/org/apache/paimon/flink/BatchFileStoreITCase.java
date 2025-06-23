@@ -60,6 +60,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteRestoreCoordinator() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS PK (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT) WITH ('bucket' = '2')");
+        batchSql("ALTER TABLE PK SET ('sink.writer-coordinator.enabled' = 'true')");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        assertThat(batchSql("SELECT * FROM PK"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, 33, 333));
+    }
+
+    @Test
     public void testAQEWithWriteManifest() {
         batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");

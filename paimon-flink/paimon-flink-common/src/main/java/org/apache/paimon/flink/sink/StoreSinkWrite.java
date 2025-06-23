@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.operation.write.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -38,6 +39,8 @@ import java.util.List;
 
 /** Helper class of {@link PrepareCommitOperator} for different types of paimon sinks. */
 public interface StoreSinkWrite {
+
+    void setWriteRestore(WriteRestore writeRestore);
 
     @Nullable
     SinkRecord write(InternalRow rowData) throws Exception;
@@ -86,6 +89,7 @@ public interface StoreSinkWrite {
                 IOManager ioManager,
                 @Nullable MemorySegmentPool memoryPool,
                 @Nullable MetricGroup metricGroup);
+        //                @Nullable TaskOperatorEventGateway gateway);
     }
 
     /** Provider of {@link StoreSinkWrite} that uses given write buffer. */

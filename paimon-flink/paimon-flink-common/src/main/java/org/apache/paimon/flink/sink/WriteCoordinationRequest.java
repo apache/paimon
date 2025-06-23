@@ -16,17 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.write.WriteRestore;
+import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 
-/** Inner {@link TableWrite} contains overwrite setter. */
-public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
+/** Write request to initial data files for partition and bucket. */
+public class WriteCoordinationRequest implements CoordinationRequest {
 
-    InnerTableWrite withWriteRestore(WriteRestore writeRestore);
+    private static final long serialVersionUID = 1L;
 
-    InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
+    private final byte[] partition;
+    private final int bucket;
 
-    // we detect whether in streaming mode, and do some optimization
-    InnerTableWrite withExecutionMode(boolean isStreamingMode);
+    public WriteCoordinationRequest(byte[] partition, int bucket) {
+        this.partition = partition;
+        this.bucket = bucket;
+    }
+
+    public byte[] partition() {
+        return partition;
+    }
+
+    public int bucket() {
+        return bucket;
+    }
 }

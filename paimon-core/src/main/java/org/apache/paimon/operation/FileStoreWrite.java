@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.write.WriteRestore;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.CommitIncrement;
@@ -47,6 +48,8 @@ import java.util.concurrent.ExecutorService;
  * @param <T> type of record to write.
  */
 public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<T>>> {
+
+    FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore);
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
 

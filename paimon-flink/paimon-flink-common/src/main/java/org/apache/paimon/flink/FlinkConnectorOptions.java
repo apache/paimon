@@ -523,6 +523,20 @@ public class FlinkConnectorOptions {
                             "Commit listener will be called after a successful commit. This option list custom commit "
                                     + "listener identifiers separated by comma.");
 
+    public static final ConfigOption<Boolean> SINK_WRITER_COORDINATOR_ENABLED =
+            key("sink.writer-coordinator.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable sink writer coordinator to plan data files in Job Manager.");
+
+    public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
+            key("sink.writer-coordinator.cache-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription(
+                            "Controls the cache memory of writer coordinator to cache manifest files in Job Manager.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

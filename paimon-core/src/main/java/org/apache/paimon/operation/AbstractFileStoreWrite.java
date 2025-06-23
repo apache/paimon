@@ -29,10 +29,12 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.write.FileSystemWriteRestore;
+import org.apache.paimon.operation.write.RestoreFiles;
+import org.apache.paimon.operation.write.WriteRestore;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
@@ -70,7 +72,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     protected final SnapshotManager snapshotManager;
-    private final FileStoreScan scan;
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
@@ -81,6 +82,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
+    private WriteRestore restore;
     private ExecutorService lazyCompactExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
@@ -100,13 +102,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             CoreOptions options,
             RowType partitionType) {
         this.snapshotManager = snapshotManager;
-        this.scan = scan;
-        // Statistic is useless in writer
-        if (options.manifestDeleteFileDropStats()) {
-            if (this.scan != null) {
-                this.scan.dropStats();
-            }
-        }
+        this.restore = new FileSystemWriteRestore(options, snapshotManager, scan);
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
         this.numBuckets = options.bucket();
@@ -115,6 +111,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.tableName = tableName;
         this.writerNumberMax = options.writeMaxWritersToSpill();
         this.legacyPartitionName = options.legacyPartitionName();
+    }
+
+    @Override
+    public FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore) {
+        this.restore = writeRestore;
+        return this;
     }
 
     @Override
@@ -422,14 +424,35 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        // NOTE: don't use snapshotManager.latestSnapshot() here,
-        // because we don't want to flood the catalog with high concurrency
-        Snapshot previousSnapshot =
-                ignorePreviousFiles ? null : snapshotManager.latestSnapshotFromFileSystem();
+        Snapshot previousSnapshot = null;
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         int totalBuckets = numBuckets;
-        if (previousSnapshot != null) {
-            totalBuckets = scanExistingFileMetas(previousSnapshot, partition, bucket, restoreFiles);
+        if (!ignorePreviousFiles) {
+            RestoreFiles restored = restore.restore(partition, bucket);
+            previousSnapshot = restored.snapshot();
+            if (restored.dataFiles() != null) {
+                restoreFiles.addAll(restored.dataFiles());
+            }
+            Integer restoredTotalBuckets = restored.totalBuckets();
+            if (restoredTotalBuckets != null) {
+                totalBuckets = restoredTotalBuckets;
+            }
+            if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
+                String partInfo =
+                        partitionType.getFieldCount() > 0
+                                ? "partition "
+                                        + getPartitionComputer(
+                                                        partitionType,
+                                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                                        legacyPartitionName)
+                                                .generatePartValues(partition)
+                                : "table";
+                throw new RuntimeException(
+                        String.format(
+                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                partInfo, numBuckets, totalBuckets));
+            }
         }
 
         IndexMaintainer<T> indexMaintainer =
@@ -467,37 +490,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
         this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
         return this;
-    }
-
-    private int scanExistingFileMetas(
-            Snapshot snapshot,
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> existingFileMetas) {
-        List<ManifestEntry> files =
-                scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        int totalBuckets = numBuckets;
-        for (ManifestEntry entry : files) {
-            if (!ignoreNumBucketCheck && entry.totalBuckets() != numBuckets) {
-                String partInfo =
-                        partitionType.getFieldCount() > 0
-                                ? "partition "
-                                        + getPartitionComputer(
-                                                        partitionType,
-                                                        PARTITION_DEFAULT_NAME.defaultValue(),
-                                                        legacyPartitionName)
-                                                .generatePartValues(partition)
-                                : "table";
-                throw new RuntimeException(
-                        String.format(
-                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                                partInfo, numBuckets, entry.totalBuckets()));
-            }
-            totalBuckets = entry.totalBuckets();
-            existingFileMetas.add(entry.file());
-        }
-        return totalBuckets;
     }
 
     private ExecutorService compactExecutor() {

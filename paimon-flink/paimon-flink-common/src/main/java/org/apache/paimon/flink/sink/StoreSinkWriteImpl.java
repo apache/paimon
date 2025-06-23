@@ -28,6 +28,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.write.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -168,6 +169,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     public void withCompactExecutor(ExecutorService compactExecutor) {
         write.withCompactExecutor(compactExecutor);
+    }
+
+    @Override
+    public void setWriteRestore(WriteRestore writeRestore) {
+        write.withWriteRestore(writeRestore);
     }
 
     @Override
