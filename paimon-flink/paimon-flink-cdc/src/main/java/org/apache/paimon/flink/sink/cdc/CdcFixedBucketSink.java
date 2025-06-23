@@ -22,9 +22,12 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /**
  * A {@link FlinkSink} for fixed-bucket table which accepts {@link CdcRecord} and waits for a schema
@@ -41,6 +44,11 @@ public class CdcFixedBucketSink extends FlinkWriteSink<CdcRecord> {
     @Override
     protected OneInputStreamOperatorFactory<CdcRecord, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcRecordStoreWriteOperator.Factory(table, writeProvider, commitUser);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new CdcRecordStoreWriteOperator.CoordinatedFactory(
+                        table, writeProvider, commitUser)
+                : new CdcRecordStoreWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }
