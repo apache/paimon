@@ -145,4 +145,39 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
       }
     }
   }
+
+  test("Paimon Branch: read with scan.fallback-branch") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (
+            |    dt STRING NOT NULL,
+            |    name STRING NOT NULL,
+            |    amount BIGINT
+            |) PARTITIONED BY (dt)
+            |""".stripMargin)
+
+      sql("ALTER TABLE T SET TBLPROPERTIES ('k1' = 'v1')")
+      sql("ALTER TABLE T SET TBLPROPERTIES ('k2' = 'v2')")
+
+      sql("CALL sys.create_branch('test.T', 'test')")
+      sql("ALTER TABLE T SET TBLPROPERTIES ('scan.fallback-branch' = 'test')")
+
+      sql(
+        "INSERT INTO `T$branch_test` VALUES ('20240725', 'apple', 4), ('20240725', 'peach', 10), ('20240726', 'cherry', 3), ('20240726', 'pear', 6)")
+      sql("INSERT INTO T VALUES ('20240725', 'apple', 5), ('20240725', 'banana', 7)")
+
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY amount"),
+        Seq(
+          Row("20240726", "cherry", 3),
+          Row("20240725", "apple", 5),
+          Row("20240726", "pear", 6),
+          Row("20240725", "banana", 7)))
+
+      sql("ALTER TABLE T UNSET TBLPROPERTIES ('scan.fallback-branch')")
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY amount"),
+        Seq(Row("20240725", "apple", 5), Row("20240725", "banana", 7)))
+    }
+  }
 }
