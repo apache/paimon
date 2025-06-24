@@ -18,20 +18,8 @@
 
 package org.apache.paimon.flink.sink.coordinator;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.TableWriteOperator;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.write.WriteRestore;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SegmentsCache;
 
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
@@ -40,18 +28,9 @@ import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /**
@@ -63,88 +42,16 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     private final FileStoreTable table;
 
     private ThreadPoolExecutor executor;
-    private Map<String, Long> latestCommittedIdentifiers;
-
-    private volatile Snapshot snapshot;
-    private volatile FileStoreScan dataFileScan;
-    private volatile IndexFileHandler indexFileHandler;
+    private TableWriteCoordinator coordinator;
 
     public WriteOperatorCoordinator(FileStoreTable table) {
         this.table = table;
     }
 
-    private synchronized void refreshOrCreateScan() {
-        Optional<Snapshot> latestSnapshot = table.latestSnapshot();
-        if (!latestSnapshot.isPresent()) {
-            return;
-        }
-        if (dataFileScan == null) {
-            dataFileScan = table.store().newScan();
-            if (table.coreOptions().manifestDeleteFileDropStats()) {
-                dataFileScan.dropStats();
-            }
-        }
-        if (indexFileHandler == null) {
-            indexFileHandler = table.store().newIndexFileHandler();
-        }
-        snapshot = latestSnapshot.get();
-        dataFileScan.withSnapshot(snapshot);
-    }
-
-    private synchronized ScanCoordinationResponse scanDataFiles(ScanCoordinationRequest request)
-            throws IOException {
-        if (snapshot == null) {
-            return new ScanCoordinationResponse(null, null, null, null, null);
-        }
-
-        BinaryRow partition = deserializeBinaryRow(request.partition());
-        int bucket = request.bucket();
-
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
-        List<ManifestEntry> entries =
-                dataFileScan.withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
-
-        IndexFileMeta dynamicBucketIndex = null;
-        if (request.scanDynamicBucketIndex()) {
-            dynamicBucketIndex =
-                    indexFileHandler.scanHashIndex(snapshot, partition, bucket).orElse(null);
-        }
-
-        List<IndexFileMeta> deleteVectorsIndex = null;
-        if (request.scanDeleteVectorsIndex()) {
-            deleteVectorsIndex =
-                    indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        }
-
-        return new ScanCoordinationResponse(
-                snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
-    }
-
-    private synchronized LatestIdentifierResponse latestCommittedIdentifier(
-            LatestIdentifierRequest request) {
-        String user = request.user();
-        long identifier =
-                latestCommittedIdentifiers.computeIfAbsent(
-                        user,
-                        k ->
-                                table.snapshotManager()
-                                        .latestSnapshotOfUser(user)
-                                        .map(Snapshot::commitIdentifier)
-                                        .orElse(Long.MIN_VALUE));
-        return new LatestIdentifierResponse(identifier);
-    }
-
     @Override
     public void start() throws Exception {
         executor = createCachedThreadPool(1, "WriteCoordinator");
-        latestCommittedIdentifiers = new ConcurrentHashMap<>();
-        CoreOptions options = table.coreOptions();
-        MemorySize cacheMemory =
-                options.toConfiguration().get(SINK_WRITER_COORDINATOR_CACHE_MEMORY);
-        SegmentsCache<Path> manifestCache = SegmentsCache.create(cacheMemory, Long.MAX_VALUE);
-        table.setManifestCache(manifestCache);
-        refreshOrCreateScan();
+        coordinator = new TableWriteCoordinator(table);
     }
 
     @Override
@@ -163,10 +70,12 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
                 () -> {
                     try {
                         if (request instanceof ScanCoordinationRequest) {
-                            future.complete(scanDataFiles((ScanCoordinationRequest) request));
+                            future.complete(coordinator.scan((ScanCoordinationRequest) request));
                         } else if (request instanceof LatestIdentifierRequest) {
                             future.complete(
-                                    latestCommittedIdentifier((LatestIdentifierRequest) request));
+                                    new LatestIdentifierResponse(
+                                            coordinator.latestCommittedIdentifier(
+                                                    ((LatestIdentifierRequest) request).user())));
                         } else {
                             throw new UnsupportedOperationException(
                                     "Unsupported request type: " + request);
@@ -180,10 +89,7 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
 
     @Override
     public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> resultFuture) {
-        // refresh latest snapshot for data & index files scan
-        refreshOrCreateScan();
-        // refresh latest committed identifiers for all users
-        latestCommittedIdentifiers.clear();
+        coordinator.checkpoint();
     }
 
     @Override
