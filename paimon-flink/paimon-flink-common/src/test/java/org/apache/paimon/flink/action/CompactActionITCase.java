@@ -92,6 +92,56 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
+    public void testCompactWhenSkipLevel0() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        // in dv mode or merge-engine = first-row, batch read will skip level-0
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            tableOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        } else {
+            tableOptions.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+        }
+        tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+
+        FileStoreTable table =
+                prepareTable(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                rowData(2, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+        assertThat(table.newScan().plan().splits().size()).isEqualTo(0);
+
+        runAction(false);
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(3);
+        for (DataSplit split : splits) {
+            if (split.partition().getInt(1) == 15) {
+                // compacted
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            } else {
+                // not compacted
+                assertThat(split.dataFiles().size()).isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
     public void testStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");

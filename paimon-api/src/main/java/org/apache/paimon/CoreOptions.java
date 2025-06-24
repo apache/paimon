@@ -1112,6 +1112,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The mode of streaming read that specifies to read the data of table file or log.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
+            key("batch-scan-mode")
+                    .enumType(BatchScanMode.class)
+                    .defaultValue(BatchScanMode.NONE)
+                    .withDescription(
+                            "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
+                                    + "dedicated internal streaming scan.");
+
     public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
             key("consumer.expiration-time")
                     .durationType()
@@ -3055,6 +3064,34 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         StreamScanMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
+
+    /** Inner batch scan mode for some internal requirements. */
+    public enum BatchScanMode implements DescribedEnum {
+        NONE("none", "No requirement."),
+        COMPACT("compact", "Compaction for batch mode.");
+
+        private final String value;
+        private final String description;
+
+        BatchScanMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
