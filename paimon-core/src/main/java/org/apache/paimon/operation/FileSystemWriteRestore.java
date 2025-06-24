@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation.write;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
@@ -25,7 +25,6 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;

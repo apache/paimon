@@ -25,7 +25,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.write.WriteRestore;
+import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.io.IOException;

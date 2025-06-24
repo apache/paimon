@@ -60,6 +60,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
@@ -87,6 +88,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         tableDefaultProperties = new HashMap<>();
         if (random.nextBoolean()) {
             tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "5m");
+        }
+        if (random.nextBoolean()) {
+            tableDefaultProperties.put(SINK_WRITER_COORDINATOR_ENABLED.key(), "true");
         }
     }
 

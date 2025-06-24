@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.operation.write.WriteRestore;
+import org.apache.paimon.operation.WriteRestore;
 
 /** Inner {@link TableWrite} contains overwrite setter. */
 public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {

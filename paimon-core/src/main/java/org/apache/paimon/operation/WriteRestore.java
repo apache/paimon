@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation.write;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;

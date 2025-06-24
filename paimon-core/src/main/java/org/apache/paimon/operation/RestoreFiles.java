@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation.write;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.index.IndexFileMeta;
@@ -58,6 +58,7 @@ public class RestoreFiles {
         return totalBuckets;
     }
 
+    @Nullable
     public List<DataFileMeta> dataFiles() {
         return dataFiles;
     }

@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.sink.coordinator;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.operation.write.RestoreFiles;
-import org.apache.paimon.operation.write.WriteRestore;
+import org.apache.paimon.operation.RestoreFiles;
+import org.apache.paimon.operation.WriteRestore;
 
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
