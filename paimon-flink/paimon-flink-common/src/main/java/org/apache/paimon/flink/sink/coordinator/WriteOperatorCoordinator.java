@@ -29,6 +29,7 @@ import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -88,8 +89,16 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     }
 
     @Override
-    public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> resultFuture) {
+    public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> result) {
         coordinator.checkpoint();
+        executor.execute(
+                () -> {
+                    try {
+                        result.complete(new byte[0]);
+                    } catch (Throwable throwable) {
+                        result.completeExceptionally(new CompletionException(throwable));
+                    }
+                });
     }
 
     @Override

@@ -433,14 +433,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 dbMaintainerFactory == null
                         ? null
                         : dbMaintainerFactory.create(restored.dynamicBucketIndex());
-        DeletionVectorsMaintainer deletionVectorsMaintainer =
+        DeletionVectorsMaintainer dvMaintainer =
                 dvMaintainerFactory == null
                         ? null
                         : dvMaintainerFactory.create(restored.deleteVectorsIndex());
 
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
-        if (restored.dataFiles() != null) {
-            restoreFiles.addAll(restored.dataFiles());
+        List<DataFileMeta> restoreFiles = restored.dataFiles();
+        if (restoreFiles == null) {
+            restoreFiles = new ArrayList<>();
         }
         RecordWriter<T> writer =
                 createWriter(
@@ -450,7 +450,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         getMaxSequenceNumber(restoreFiles),
                         null,
                         compactExecutor(),
-                        deletionVectorsMaintainer);
+                        dvMaintainer);
         notifyNewWriter(writer);
 
         Snapshot previousSnapshot = restored.snapshot();
@@ -458,7 +458,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 writer,
                 firstNonNull(restored.totalBuckets(), numBuckets),
                 indexMaintainer,
-                deletionVectorsMaintainer,
+                dvMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
     }
 
