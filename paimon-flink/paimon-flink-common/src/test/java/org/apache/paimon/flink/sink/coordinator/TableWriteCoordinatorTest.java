@@ -26,7 +26,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -34,17 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class TableWriteCoordinatorTest extends TableTestBase {
 
-    @Test
-    public void testLatestIdentifierAndScan1() throws Exception {
-        innerTestLatestIdentifierAndScan(true);
-    }
-
-    @Test
-    public void testLatestIdentifierAndScan2() throws Exception {
-        innerTestLatestIdentifierAndScan(false);
-    }
-
-    private void innerTestLatestIdentifierAndScan(boolean initSnapshot) throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLatestIdentifierAndScan(boolean initSnapshot) throws Exception {
         Identifier identifier = new Identifier("db", "table");
         Schema schema = Schema.newBuilder().column("f0", DataTypes.INT()).build();
         catalog.createDatabase("db", false);
