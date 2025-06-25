@@ -579,8 +579,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
                 new LookupLevels.PositionedKeyValue(
                         new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(5), "f1", 1);
         lookup.put(row(1), positionedKv);
+        // Simulation scenario: (file:"f1", pos: 1) has been deleted
         dvMaintainer.notifyNewDeletion("f1", 1);
         function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        // notifyNewDeletion will return 'false' because (file:"f1", pos: 1) has been deleted
         ChangelogResult result = function.getResult();
         assertThat(result).isNotNull();
         List<KeyValue> changelogs = result.changelogs();
@@ -598,7 +600,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
                 new LookupLevels.PositionedKeyValue(
                         new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(5), "f2", 1);
         lookup.put(row(1), positionedKv);
+        // Simulation scenario: (file:"f2", pos: 2) has been deleted but not (file:"f2", pos: 1)
+        dvMaintainer.notifyNewDeletion("f2", 2);
         function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        // notifyNewDeletion will return 'true' because (file:"f2", pos: 1) has not been deleted
         result = function.getResult();
         assertThat(result).isNotNull();
         kv = result.result();
@@ -613,6 +618,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
         result = function.getResult();
         assertThat(result).isNotNull();
+        // NotifyNewDeletion will not be called
         kv = result.result();
         assertThat(kv).isNotNull();
         assertThat(kv.value().getInt(0)).isEqualTo(2);
