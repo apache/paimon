@@ -585,14 +585,8 @@ public class ParquetFileReader implements Closeable {
             List<ConsecutivePartList> allParts, ChunkListBuilder builder) throws IOException {
 
         if (shouldUseVectoredIo(allParts)) {
-            try {
-                readVectored(allParts, builder);
-                return;
-            } catch (IllegalArgumentException | UnsupportedOperationException e) {
-                // Either the arguments are wrong or somehow this is being invoked against
-                // a hadoop release which doesn't have the API and yet somehow it got here.
-                LOG.warn("readVectored() failed; falling back to normal IO against {}", f, e);
-            }
+            readVectored(allParts, builder);
+            return;
         }
         for (ConsecutivePartList consecutiveChunks : allParts) {
             consecutiveChunks.readAll(f, builder);
