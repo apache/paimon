@@ -32,6 +32,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_C
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA;
 
 /** Base {@link ActionFactory} for synchronizing into one Paimon table. */
 public abstract class SyncTableActionFactoryBase
@@ -75,6 +76,12 @@ public abstract class SyncTableActionFactoryBase
         if (params.has(TYPE_MAPPING)) {
             String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        if (params.has(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA)) {
+            boolean flag =
+                    Boolean.parseBoolean(params.get(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA));
+            action.usePKeysFromSourceForPaimonSchema(flag);
         }
     }
 }
