@@ -113,6 +113,7 @@ public class TableWriteCoordinator {
         Snapshot latestSnapshotOfUser = snapshotOptional.get();
         if (snapshot == null || latestSnapshotOfUser.id() > snapshot.id()) {
             snapshot = latestSnapshotOfUser;
+            scan.withSnapshot(snapshot);
         }
         return latestSnapshotOfUser.commitIdentifier();
     }

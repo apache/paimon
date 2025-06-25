@@ -63,10 +63,11 @@ class TableWriteCoordinatorTest extends TableTestBase {
         String commitUser = latest.commitUser();
         coordinator.latestCommittedIdentifier(commitUser);
 
-        // scan
+        // scan should scan snapshot 2
         ScanCoordinationRequest request =
                 new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(latest.id());
+        assertThat(scan.extractDataFiles().size()).isEqualTo(initSnapshot ? 2 : 1);
     }
 }
