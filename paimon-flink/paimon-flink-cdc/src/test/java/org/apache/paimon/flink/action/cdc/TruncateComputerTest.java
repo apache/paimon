@@ -113,8 +113,8 @@ public class TruncateComputerTest {
             String expected = (String) testData[i][4];
 
             Expression.TruncateComputer truncateComputer =
-                    new Expression.TruncateComputer(field, dataType, literal);
-            assertThat(truncateComputer.eval(value)).isEqualTo(expected);
+                    new Expression.TruncateComputer(field, literal);
+            assertThat(truncateComputer.eval(value, dataType)).isEqualTo(expected);
         }
     }
 
@@ -123,17 +123,17 @@ public class TruncateComputerTest {
         String fieldReference = "computedColumnField";
         DataType dataType = new CharType(true, 5);
         Expression.TruncateComputer truncateComputer =
-                new Expression.TruncateComputer(fieldReference, dataType, "7");
+                new Expression.TruncateComputer(fieldReference, "7");
 
-        assertThatThrownBy(() -> truncateComputer.eval("abcde"))
+        assertThatThrownBy(() -> truncateComputer.eval("abcde", dataType))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
                         "Invalid width value for truncate function: 7, expected less than or equal to 5.");
 
         DataType notSupportedDataType = new BooleanType();
         Expression.TruncateComputer notSupportTruncateComputer =
-                new Expression.TruncateComputer(fieldReference, notSupportedDataType, "7");
-        assertThatThrownBy(() -> notSupportTruncateComputer.eval("true"))
+                new Expression.TruncateComputer(fieldReference, "7");
+        assertThatThrownBy(() -> notSupportTruncateComputer.eval("true", notSupportedDataType))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported field type for truncate function: BOOLEAN");
     }
