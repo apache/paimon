@@ -155,12 +155,14 @@ public interface MongoVersionStrategy {
                 });
         computedColumns.forEach(
                 computedColumn -> {
-                    String columnName = computedColumn.columnName();
                     String fieldReference = computedColumn.fieldReference();
-                    String computedValue = computedColumn.eval(parsedRow.get(fieldReference));
+                    String result =
+                            computedColumn.eval(
+                                    parsedRow.get(fieldReference),
+                                    schemaBuilder.getFieldType(fieldReference));
 
-                    resultMap.put(columnName, computedValue);
-                    schemaBuilder.column(columnName, computedColumn.columnType());
+                    resultMap.put(computedColumn.columnName(), result);
+                    schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
                 });
         return resultMap;
     }

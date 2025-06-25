@@ -241,6 +241,8 @@ public class PostgresRecordParser
 
         Map<String, DebeziumEvent.Field> fields = schema.beforeAndAfterFields();
 
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+        DataType dataType = DataTypes.STRING();
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
@@ -267,13 +269,16 @@ public class PostgresRecordParser
                 } else {
                     newValue = Base64.getEncoder().encodeToString(bigEndian);
                 }
+                dataType = DataTypes.BINARY(bigEndian.length);
             } else if (("bytes".equals(postgresSqlType) && className == null)) {
                 // binary, varbinary
                 newValue = new String(Base64.getDecoder().decode(oldValue));
+                dataType = DataTypes.BYTES();
             } else if ("bytes".equals(postgresSqlType) && decimalLogicalName().equals(className)) {
                 // numeric, decimal
                 try {
-                    new BigDecimal(oldValue);
+                    BigDecimal tmp = new BigDecimal(oldValue);
+                    dataType = DataTypes.DECIMAL(tmp.precision(), tmp.scale());
                 } catch (NumberFormatException e) {
                     throw new IllegalArgumentException(
                             "Invalid big decimal value "
@@ -290,11 +295,13 @@ public class PostgresRecordParser
             else if (Date.SCHEMA_NAME.equals(className)) {
                 // date
                 newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
+                dataType = DataTypes.DATE();
             } else if (Timestamp.SCHEMA_NAME.equals(className)) {
                 // timestamp (precision 0-3)
                 LocalDateTime localDateTime =
                         DateTimeUtils.toLocalDateTime(Long.parseLong(oldValue), ZoneOffset.UTC);
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
+                dataType = DataTypes.TIMESTAMP(3);
             } else if (MicroTimestamp.SCHEMA_NAME.equals(className)) {
                 // timestamp (precision 4-6)
                 long microseconds = Long.parseLong(oldValue);
@@ -308,11 +315,13 @@ public class PostgresRecordParser
                                 .atZone(ZoneOffset.UTC)
                                 .toLocalDateTime();
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
+                dataType = DataTypes.TIMESTAMP(6);
             } else if (ZonedTimestamp.SCHEMA_NAME.equals(className)) {
                 // timestamptz
                 LocalDateTime localDateTime =
                         Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
+                dataType = DataTypes.TIMESTAMP(6);
             } else if (MicroTime.SCHEMA_NAME.equals(className)) {
                 long microseconds = Long.parseLong(oldValue);
                 long microsecondsPerSecond = 1_000_000;
@@ -325,6 +334,7 @@ public class PostgresRecordParser
                                 .atZone(ZoneOffset.UTC)
                                 .toLocalTime()
                                 .toString();
+                dataType = DataTypes.TIME(6);
             } else if ("array".equals(postgresSqlType)) {
                 ArrayNode arrayNode = (ArrayNode) objectValue;
                 List<String> newArrayValues = new ArrayList<>();
@@ -339,6 +349,7 @@ public class PostgresRecordParser
                 } catch (JsonProcessingException e) {
                     LOG.error("Failed to convert array to JSON.", e);
                 }
+                dataType = DataTypes.ARRAY(DataTypes.STRING());
             }
 
             resultMap.put(fieldName, newValue);
@@ -346,9 +357,11 @@ public class PostgresRecordParser
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+            String result =
+                    computedColumn.eval(resultMap.get(computedColumn.fieldReference()), dataType);
+            resultMap.put(computedColumn.columnName(), result);
+
+            schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

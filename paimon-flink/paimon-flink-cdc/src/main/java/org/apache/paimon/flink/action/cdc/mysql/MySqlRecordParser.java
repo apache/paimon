@@ -42,6 +42,7 @@ import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.ConfigOption;
@@ -235,10 +236,17 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
         Map<String, DebeziumEvent.Field> fields = schema.beforeAndAfterFields();
 
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue().type();
+
+            Tuple3<String, Integer, Integer> typeInfo = MySqlTypeUtils.getTypeInfo(mySqlType);
+            schemaBuilder.column(
+                    fieldName,
+                    MySqlTypeUtils.toDataType(typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping));
+
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
                 continue;
@@ -259,9 +267,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+            DataType dataType = schemaBuilder.getFieldType(computedColumn.fieldReference());
+            String result =
+                    computedColumn.eval(resultMap.get(computedColumn.fieldReference()), dataType);
+            resultMap.put(computedColumn.columnName(), result);
+
+            schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
