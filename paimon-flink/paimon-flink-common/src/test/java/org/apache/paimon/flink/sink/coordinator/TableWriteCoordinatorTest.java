@@ -26,12 +26,14 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TableWriteCoordinatorTest extends TableTestBase {
 
@@ -62,5 +64,16 @@ class TableWriteCoordinatorTest extends TableTestBase {
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(latest.id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(initSnapshot ? 2 : 1);
+    }
+
+    @Test
+    public void testNoManifestCache() throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        catalog.createDatabase("db", false);
+        createTable(identifier);
+        FileStoreTable table = getTable(identifier);
+        table.setManifestCache(null);
+        assertThatThrownBy(() -> new TableWriteCoordinator(table))
+                .isInstanceOf(NullPointerException.class);
     }
 }

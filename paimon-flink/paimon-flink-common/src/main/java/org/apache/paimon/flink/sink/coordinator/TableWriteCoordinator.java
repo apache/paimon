@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
@@ -53,6 +54,7 @@ public class TableWriteCoordinator {
 
     public TableWriteCoordinator(FileStoreTable table) {
         this.table = table;
+        checkNotNull(table.getManifestCache());
         this.latestCommittedIdentifiers = new ConcurrentHashMap<>();
         this.scan = table.store().newScan();
         if (table.coreOptions().manifestDeleteFileDropStats()) {
