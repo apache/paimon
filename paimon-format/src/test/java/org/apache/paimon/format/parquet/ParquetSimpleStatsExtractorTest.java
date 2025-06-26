@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleColStatsExtractorTest;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -47,7 +48,7 @@ public class ParquetSimpleStatsExtractorTest extends SimpleColStatsExtractorTest
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("parquet", new Options(), new Options());
+        return FileFormat.fromIdentifier("parquet", LocalFileIO.create(), new Options());
     }
 
     @Override

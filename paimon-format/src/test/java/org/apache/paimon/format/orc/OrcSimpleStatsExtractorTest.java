@@ -21,6 +21,7 @@ package org.apache.paimon.format.orc;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStatsExtractorTest;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -48,7 +49,7 @@ public class OrcSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("orc", new Options(), new Options());
+        return FileFormat.fromIdentifier("orc", LocalFileIO.create(), new Options());
     }
 
     @Override
