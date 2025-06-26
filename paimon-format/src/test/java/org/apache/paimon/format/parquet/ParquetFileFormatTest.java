@@ -49,7 +49,8 @@ public class ParquetFileFormatTest {
         Options options = new Options();
         options.set(parquetKey, "hello");
         options.set(otherKey, "test");
-        FormatContext context = new FormatContext(LocalFileIO.create(),options, 1024, 1024, 2, null);
+        FormatContext context =
+                new FormatContext(LocalFileIO.create(), options, 1024, 1024, 2, null);
 
         Options actual = new ParquetFileFormat(context).getOptions();
         assertThat(actual.get(parquetKey)).isEqualTo("hello");
