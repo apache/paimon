@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
@@ -85,7 +86,8 @@ public class IcebergOptions {
                     .intType()
                     .defaultValue(0)
                     .withDescription(
-                            "The number of old metadata files to keep after each table commit");
+                            "The number of old metadata files to keep after each table commit. "
+                                    + "For rest-catalog, it will keep 1 old metadata at least.");
 
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
@@ -153,7 +155,17 @@ public class IcebergOptions {
                     .defaultValue(false)
                     .withDescription("Skip updating Hive stats.");
 
-    public static Map<String, String> icebergRestConfig(Map<String, String> options) {
+    private final Options options;
+
+    public IcebergOptions(Map<String, String> options) {
+        this(Options.fromMap(options));
+    }
+
+    public IcebergOptions(Options options) {
+        this.options = options;
+    }
+
+    public Map<String, String> icebergRestConfig() {
         Map<String, String> restConfig = new HashMap<>();
         options.keySet()
                 .forEach(
@@ -168,6 +180,14 @@ public class IcebergOptions {
                             }
                         });
         return restConfig;
+    }
+
+    public boolean deleteAfterCommitEnabled() {
+        return options.get(METADATA_DELETE_AFTER_COMMIT);
+    }
+
+    public int previousVersionsMax() {
+        return options.get(METADATA_PREVIOUS_VERSIONS_MAX);
     }
 
     /** Where to store Iceberg metadata. */

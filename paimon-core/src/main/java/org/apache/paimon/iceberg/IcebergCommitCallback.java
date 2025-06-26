@@ -622,7 +622,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         if (metadataCommitter != null) {
             metadataCommitter.commitMetadata(metadataPath, baseMetadataPath);
-            metadataCommitter.commitMetadata(metadata, null);
+            metadataCommitter.commitMetadata(metadata, baseMetadata);
         }
     }
 
