@@ -121,6 +121,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         store().setManifestCache(manifestCache);
     }
 
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestCache() {
+        return manifestCache;
+    }
+
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;

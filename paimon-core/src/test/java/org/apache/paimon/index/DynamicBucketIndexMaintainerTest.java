@@ -42,8 +42,8 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link HashIndexMaintainer}. */
-public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
+/** Test for {@link DynamicBucketIndexMaintainer}. */
+public class DynamicBucketIndexMaintainerTest extends PrimaryKeyTableTestBase {
 
     private IndexFileHandler fileHandler;
     private StreamWriteBuilder writeBuilder;

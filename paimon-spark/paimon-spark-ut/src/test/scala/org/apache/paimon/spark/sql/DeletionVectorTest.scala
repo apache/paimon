@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
+import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer, DeletionVectorsMaintainerTest}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -715,8 +715,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
       partitions: Seq[BinaryRow]): Map[String, DeletionVector] = {
     partitions.flatMap {
       partition =>
-        dvMaintainerFactory
-          .createOrRestore(table.snapshotManager().latestSnapshot(), partition)
+        DeletionVectorsMaintainerTest
+          .createOrRestore(
+            dvMaintainerFactory,
+            table.snapshotManager().latestSnapshot(),
+            partition
+          )
           .deletionVectors()
           .asScala
     }.toMap

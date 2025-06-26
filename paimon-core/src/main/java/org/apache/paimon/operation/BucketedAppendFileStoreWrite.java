@@ -101,6 +101,6 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
 
     @Override
     protected Function<WriterContainer<InternalRow>, Boolean> createWriterCleanChecker() {
-        return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
+        return createConflictAwareWriterCleanChecker(commitUser, restore);
     }
 }
