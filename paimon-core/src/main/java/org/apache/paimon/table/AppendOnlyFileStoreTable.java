@@ -108,7 +108,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         return new AbstractDataTableRead(schema()) {
 
             @Override
-            public InnerTableRead withFilter(Predicate predicate) {
+            protected InnerTableRead innerWithFilter(Predicate predicate) {
                 read.withFilter(predicate);
                 return this;
             }

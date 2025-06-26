@@ -65,7 +65,7 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withFilter(Predicate predicate) {
+    protected InnerTableRead innerWithFilter(Predicate predicate) {
         fullPhaseMergeRead.withFilter(predicate);
         incrementalDiffRead.withFilter(predicate);
         return this;
