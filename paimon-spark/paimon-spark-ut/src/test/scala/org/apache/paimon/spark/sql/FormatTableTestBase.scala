@@ -58,6 +58,26 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Format table: show partitions") {
+    for (format <- Seq("csv", "orc", "parquet", "json")) {
+      withTable("t") {
+        sql(s"CREATE TABLE t (id INT, p1 INT, p2 STRING) USING $format PARTITIONED BY (p1, p2)")
+        sql("INSERT INTO t VALUES (1, 1, '1')")
+        sql("INSERT INTO t VALUES (2, 1, '1')")
+        sql("INSERT INTO t VALUES (3, 2, '1')")
+        sql("INSERT INTO t VALUES (3, 2, '2')")
+
+        checkAnswer(
+          spark.sql("SHOW PARTITIONS T"),
+          Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+
+        checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p1=1)"), Seq(Row("p1=1/p2=1")))
+
+        checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
+      }
+    }
+  }
+
   test("Format table: CTAS with partitioned table") {
     withTable("t1", "t2") {
       sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
