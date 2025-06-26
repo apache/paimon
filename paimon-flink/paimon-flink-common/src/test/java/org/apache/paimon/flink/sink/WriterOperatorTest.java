@@ -26,6 +26,8 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -33,6 +35,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -54,12 +57,15 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -158,8 +164,9 @@ public class WriterOperatorTest {
         harness.close();
     }
 
-    @Test
-    public void testAsyncLookupWithFailure() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLookupWithFailure(boolean lookupWait) throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
@@ -173,9 +180,8 @@ public class WriterOperatorTest {
                 createFileStoreTable(
                         rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
 
-        // we don't wait for compaction because this is async lookup test
         RowDataStoreWriteOperator.Factory operatorFactory =
-                getAsyncLookupWriteOperatorFactory(fileStoreTable, false);
+                getLookupWriteOperatorFactory(fileStoreTable, lookupWait);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
                 createHarness(operatorFactory);
 
@@ -195,19 +201,24 @@ public class WriterOperatorTest {
         harness.notifyOfCompletedCheckpoint(1);
         commitAll(harness, commit, 1);
 
-        // apply changes but does not wait for compaction
+        // apply changes but does not wait for compaction (lookupWait == false)
+        // or does not commit compact result
         harness.processElement(GenericRow.of(1, 10, 101), 11);
         harness.processElement(GenericRow.of(3, 30, 301), 13);
         harness.prepareSnapshotPreBarrier(2);
         OperatorSubtaskState state = harness.snapshot(2, 20);
         harness.notifyOfCompletedCheckpoint(2);
-        commitAll(harness, commit, 2);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            commitAll(harness, commit, 2);
+        } else {
+            commitAppend(harness, commit, 2);
+        }
 
         // operator is closed due to failure
         harness.close();
 
         // re-create operator from state, this time wait for compaction to check result
-        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        operatorFactory = getLookupWriteOperatorFactory(fileStoreTable, true);
         harness = createHarness(operatorFactory);
         harness.setup(serializer);
         harness.initializeState(state);
@@ -262,7 +273,7 @@ public class WriterOperatorTest {
                         rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
 
         RowDataStoreWriteOperator.Factory operatorFactory =
-                getAsyncLookupWriteOperatorFactory(fileStoreTable, false);
+                getLookupWriteOperatorFactory(fileStoreTable, false);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
                 createHarness(operatorFactory);
 
@@ -293,7 +304,7 @@ public class WriterOperatorTest {
         harness.close();
 
         // restore operator to trigger gentle lookup compaction
-        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        operatorFactory = getLookupWriteOperatorFactory(fileStoreTable, true);
         harness = createHarness(operatorFactory);
         harness.setup(serializer);
         harness.initializeState(state);
@@ -326,7 +337,7 @@ public class WriterOperatorTest {
         assertThat(actual).isEmpty();
 
         // restore operator to force trigger gentle lookup compaction
-        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        operatorFactory = getLookupWriteOperatorFactory(fileStoreTable, true);
         harness = createHarness(operatorFactory);
         harness.setup(serializer);
         harness.initializeState(state);
@@ -534,13 +545,13 @@ public class WriterOperatorTest {
                 commitUser);
     }
 
-    private RowDataStoreWriteOperator.Factory getAsyncLookupWriteOperatorFactory(
+    private RowDataStoreWriteOperator.Factory getLookupWriteOperatorFactory(
             FileStoreTable fileStoreTable, boolean waitCompaction) {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
                 null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                        new AsyncLookupSinkWrite(
+                        new LookupSinkWrite(
                                 table,
                                 commitUser,
                                 state,
@@ -564,6 +575,30 @@ public class WriterOperatorTest {
                     ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
             assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
             commitMessages.add((CommitMessage) committable.wrappedCommittable());
+        }
+        commit.commit(commitIdentifier, commitMessages);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void commitAppend(
+            OneInputStreamOperatorTestHarness<InternalRow, Committable> harness,
+            TableCommitImpl commit,
+            long commitIdentifier) {
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        while (!harness.getOutput().isEmpty()) {
+            Committable committable =
+                    ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
+            assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
+            CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+            CommitMessageImpl newMessage =
+                    new CommitMessageImpl(
+                            message.partition(),
+                            message.bucket(),
+                            message.totalBuckets(),
+                            message.newFilesIncrement(),
+                            CompactIncrement.emptyIncrement(),
+                            new IndexIncrement(Collections.emptyList()));
+            commitMessages.add(newMessage);
         }
         commit.commit(commitIdentifier, commitMessages);
     }

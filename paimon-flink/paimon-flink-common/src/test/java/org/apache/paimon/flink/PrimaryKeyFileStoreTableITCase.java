@@ -66,7 +66,10 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
-    private static final int TIMEOUT = 480;
+    // This test is to discover unknown consistency bugs.
+    // When this test fails, look carefully into its core reason.
+    // Do not simply increase the timeout and pretend that everything is OK.
+    private static final int TIMEOUT = 180;
     private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyFileStoreTableITCase.class);
 
     // ------------------------------------------------------------------------

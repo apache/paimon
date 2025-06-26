@@ -143,10 +143,10 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (coreOptions.laziedLookup()) {
+        if (coreOptions.needLookup()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
-                return new AsyncLookupSinkWrite(
+                return new LookupSinkWrite(
                         table,
                         commitUser,
                         state,
