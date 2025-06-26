@@ -54,7 +54,7 @@ public class BulkFileFormatTest {
     public FileFormat createFileFormat(String format, String codec) {
         Options tableOptions = new Options();
         tableOptions.setString(format + ".codec", codec);
-        return FileFormat.fromIdentifier(format, Options.EMPTY_OPTIONS, tableOptions);
+        return FileFormat.fromIdentifier(format, LocalFileIO.create(), tableOptions);
     }
 
     public void testFormatWriteRead(

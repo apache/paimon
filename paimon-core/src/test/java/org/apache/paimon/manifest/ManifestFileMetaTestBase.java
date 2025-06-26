@@ -26,6 +26,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
@@ -46,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class ManifestFileMetaTestBase {
 
     protected final FileFormat avro =
-            FileFormat.fromIdentifier("avro", Options.EMPTY_OPTIONS, new Options());
+            FileFormat.fromIdentifier("avro", LocalFileIO.create(), new Options());
     protected String manifestFileNameTemplate = "%d-%d";
 
     protected ManifestEntry makeEntry(boolean isAdd, String fileName) {

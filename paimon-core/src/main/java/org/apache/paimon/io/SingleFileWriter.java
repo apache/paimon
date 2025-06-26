@@ -67,9 +67,16 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.path = path;
         this.converter = converter;
 
-        try {
-            writer = factory.create(path, compression);
-        } catch (UnsupportedOperationException e) {
+        if (factory.pushFileIOToWriter()) {
+            try {
+                writer = factory.create(path, fileIO, compression);
+            } catch (IOException e) {
+                LOG.warn(
+                        "Failed to open the bulk writer, closing the output stream and throw the error.",
+                        e);
+                throw new UncheckedIOException(e);
+            }
+        } else {
             try {
                 out = fileIO.newOutputStream(path, false);
                 if (asyncWrite) {
@@ -85,11 +92,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 }
                 throw new UncheckedIOException(ioException);
             }
-        } catch (IOException e) {
-            LOG.warn(
-                    "Failed to open the bulk writer, closing the output stream and throw the error.",
-                    e);
-            throw new UncheckedIOException(e);
         }
 
         this.recordCount = 0;

@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
@@ -33,7 +34,7 @@ public interface FileFormatFactory {
 
     /** the format context. */
     class FormatContext {
-        private final Options storageOptions;
+        private final FileIO fileIO;
         private final Options options;
         private final int readBatchSize;
         private final int writeBatchSize;
@@ -42,23 +43,23 @@ public interface FileFormatFactory {
 
         @VisibleForTesting
         public FormatContext(Options options, int readBatchSize, int writeBatchSize) {
-            this(new Options(), options, readBatchSize, writeBatchSize, 1, null);
+            this(null, options, readBatchSize, writeBatchSize, 1, null);
         }
 
         @VisibleForTesting
         public FormatContext(
-                Options storageOptions, Options options, int readBatchSize, int writeBatchSize) {
-            this(storageOptions, options, readBatchSize, writeBatchSize, 1, null);
+                FileIO fileIO, Options options, int readBatchSize, int writeBatchSize) {
+            this(fileIO, options, readBatchSize, writeBatchSize, 1, null);
         }
 
         public FormatContext(
-                Options storageOptions,
+                FileIO fileIO,
                 Options options,
                 int readBatchSize,
                 int writeBatchSize,
                 int zstdLevel,
                 @Nullable MemorySize blockSize) {
-            this.storageOptions = storageOptions;
+            this.fileIO = fileIO;
             this.options = options;
             this.readBatchSize = readBatchSize;
             this.writeBatchSize = writeBatchSize;
@@ -66,8 +67,8 @@ public interface FileFormatFactory {
             this.blockSize = blockSize;
         }
 
-        public Options getStorageOptions() {
-            return storageOptions;
+        public FileIO fileIO() {
+            return fileIO;
         }
 
         public Options options() {

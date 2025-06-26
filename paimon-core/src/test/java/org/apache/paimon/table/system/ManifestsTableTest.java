@@ -83,7 +83,7 @@ public class ManifestsTableTest extends TableTestBase {
                         fileIO,
                         FileFormat.fromIdentifier(
                                 CoreOptions.MANIFEST_FORMAT.defaultValue().toString(),
-                                Options.EMPTY_OPTIONS,
+                                fileIO,
                                 new Options()),
                         "zstd",
                         createNonPartFactory(tablePath),

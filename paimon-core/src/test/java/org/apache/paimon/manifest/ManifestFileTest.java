@@ -50,7 +50,7 @@ public class ManifestFileTest {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
     private final FileFormat avro =
-            FileFormat.fromIdentifier("avro", Options.EMPTY_OPTIONS, new Options());
+            FileFormat.fromIdentifier("avro", LocalFileIO.create(), new Options());
 
     @TempDir java.nio.file.Path tempDir;
 

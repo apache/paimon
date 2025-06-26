@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
@@ -37,7 +38,7 @@ public class FlushingFileFormat extends FileFormat {
 
     public FlushingFileFormat(String identifier) {
         super(identifier);
-        this.format = FileFormat.fromIdentifier(identifier, Options.EMPTY_OPTIONS, new Options());
+        this.format = FileFormat.fromIdentifier(identifier, LocalFileIO.create(), new Options());
     }
 
     @Override

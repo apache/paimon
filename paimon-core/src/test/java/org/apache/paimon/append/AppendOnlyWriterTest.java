@@ -643,7 +643,7 @@ public class AppendOnlyWriterTest {
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(AVRO, Options.EMPTY_OPTIONS, Options.EMPTY_OPTIONS);
+                FileFormat.fromIdentifier(AVRO, LocalFileIO.create(), new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         BucketedAppendCompactManager compactManager =
                 new BucketedAppendCompactManager(

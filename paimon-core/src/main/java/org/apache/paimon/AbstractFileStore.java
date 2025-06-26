@@ -201,7 +201,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 fileIO,
                 schemaManager,
                 partitionType,
-                FileFormat.manifestFormat(fileIO.storageOptions(), options),
+                FileFormat.manifestFormat(fileIO, options),
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
@@ -216,7 +216,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected ManifestList.Factory manifestListFactory(boolean forWrite) {
         return new ManifestList.Factory(
                 fileIO,
-                FileFormat.manifestFormat(fileIO.storageOptions(), options),
+                FileFormat.manifestFormat(fileIO, options),
                 options.manifestCompression(),
                 pathFactory(),
                 forWrite ? writeManifestCache : readManifestCache);
@@ -226,7 +226,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public IndexManifestFile.Factory indexManifestFileFactory() {
         return new IndexManifestFile.Factory(
                 fileIO,
-                FileFormat.manifestFormat(fileIO.storageOptions(), options),
+                FileFormat.manifestFormat(fileIO, options),
                 options.manifestCompression(),
                 pathFactory(),
                 readManifestCache);

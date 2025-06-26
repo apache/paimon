@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -77,12 +78,11 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
-    public static FileFormat fromIdentifier(
-            String identifier, Options storageOptions, Options options) {
+    public static FileFormat fromIdentifier(String identifier, FileIO fileIO, Options options) {
         return fromIdentifier(
                 normalizeFileFormat(identifier),
                 new FormatContext(
-                        storageOptions,
+                        fileIO,
                         options,
                         options.get(CoreOptions.READ_BATCH_SIZE),
                         options.get(CoreOptions.WRITE_BATCH_SIZE),
@@ -108,13 +108,13 @@ public abstract class FileFormat {
         return new Options(result);
     }
 
-    public static FileFormat fileFormat(Options storageOptions, CoreOptions options) {
+    public static FileFormat fileFormat(FileIO fileIO, CoreOptions options) {
         return FileFormat.fromIdentifier(
-                options.fileFormatString(), storageOptions, options.toConfiguration());
+                options.fileFormatString(), fileIO, options.toConfiguration());
     }
 
-    public static FileFormat manifestFormat(Options storageOptions, CoreOptions options) {
+    public static FileFormat manifestFormat(FileIO fileIO, CoreOptions options) {
         return FileFormat.fromIdentifier(
-                options.manifestFormatString(), storageOptions, options.toConfiguration());
+                options.manifestFormatString(), fileIO, options.toConfiguration());
     }
 }
