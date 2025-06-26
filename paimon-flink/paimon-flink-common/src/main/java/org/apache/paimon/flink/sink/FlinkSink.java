@@ -141,22 +141,22 @@ public abstract class FlinkSink<T> implements Serializable {
                             metricGroup);
                 };
             }
-        }
 
-        if (coreOptions.needLookup()) {
-            return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
-                assertNoSinkMaterializer.run();
-                return new LookupSinkWrite(
-                        table,
-                        commitUser,
-                        state,
-                        ioManager,
-                        ignorePreviousFiles,
-                        waitCompaction,
-                        isStreaming,
-                        memoryPool,
-                        metricGroup);
-            };
+            if (coreOptions.needLookup()) {
+                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                    assertNoSinkMaterializer.run();
+                    return new LookupSinkWrite(
+                            table,
+                            commitUser,
+                            state,
+                            ioManager,
+                            ignorePreviousFiles,
+                            waitCompaction,
+                            isStreaming,
+                            memoryPool,
+                            metricGroup);
+                };
+            }
         }
 
         return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
