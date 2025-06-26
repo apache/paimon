@@ -52,7 +52,7 @@ public class RowIdSequenceIterator {
         Range range = ranges.get((int) currentPage);
         long value = range.getStart() + currentPos;
         currentPos++;
-        if (currentPos >= range.getEnd()) {
+        if (range.getStart() + currentPos >= range.getEnd()) {
             currentPage++;
             currentPos = 0L;
         }
