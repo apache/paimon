@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
+import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumTypeUtils;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -42,7 +43,6 @@ import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.ConfigOption;
@@ -242,10 +242,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
             String fieldName = field.getKey();
             String mySqlType = field.getValue().type();
 
-            Tuple3<String, Integer, Integer> typeInfo = MySqlTypeUtils.getTypeInfo(mySqlType);
-            schemaBuilder.column(
-                    fieldName,
-                    MySqlTypeUtils.toDataType(typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping));
+            schemaBuilder.column(fieldName, DebeziumTypeUtils.toDataType(mySqlType));
 
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
