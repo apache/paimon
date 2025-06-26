@@ -441,7 +441,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
-                                Filter.alwaysTrue(),
                                 createEntryRowFilter().and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
