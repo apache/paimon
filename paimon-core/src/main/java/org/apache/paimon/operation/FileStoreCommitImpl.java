@@ -1145,7 +1145,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         for (ManifestEntry entry : deltaFiles) {
             if (entry.file().rowIdSequence() == null) {
                 long rowCount = entry.file().rowCount();
-                maxRowId = startRowId + rowCount;
+                maxRowId = start + rowCount;
                 entry.file().setRowIdSequence(new RowIdSequence(start, maxRowId));
                 start = maxRowId;
             }
