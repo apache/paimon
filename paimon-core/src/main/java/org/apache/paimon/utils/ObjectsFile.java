@@ -159,14 +159,20 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected Pair<String, Long> writeWithoutRolling(Iterator<T> records) {
         Path path = pathFactory.newPath();
-        try {
-            try (FormatWriter writer = writerFactory.create(path, compression)) {
-                while (records.hasNext()) {
-                    writer.addElement(serializer.toRow(records.next()));
+        if (writerFactory.pushFileIOToWriter()) {
+            try {
+                try (FormatWriter writer = writerFactory.create(path, compression)) {
+                    while (records.hasNext()) {
+                        writer.addElement(serializer.toRow(records.next()));
+                    }
                 }
+                return Pair.of(path.getName(), fileIO.getFileSize(path));
+            } catch (IOException ioException) {
+                throw new UncheckedIOException(
+                        "Failed to open the bulk writer, closing the output stream and throw the error.",
+                        ioException);
             }
-            return Pair.of(path.getName(), fileIO.getFileSize(path));
-        } catch (UnsupportedOperationException unsupportedOperationException) {
+        } else {
             try {
                 PositionOutputStream out = fileIO.newOutputStream(path, false);
                 long pos;
@@ -186,10 +192,6 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
                 throw new RuntimeException(
                         "Exception occurs when writing records to " + path + ". Clean up.", e);
             }
-        } catch (IOException ioException) {
-            throw new UncheckedIOException(
-                    "Failed to open the bulk writer, closing the output stream and throw the error.",
-                    ioException);
         }
     }
 
