@@ -60,6 +60,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowIdSequence;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -905,6 +906,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
+        long newRowIdStart =
+                latestSnapshot == null
+                        ? 0L
+                        : latestSnapshot.nextRowId() == null ? 0L : latestSnapshot.nextRowId();
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
@@ -977,6 +982,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        long nextRowId = newRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1011,6 +1017,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType,
                             manifestReadParallelism);
             baseManifestList = manifestList.write(mergeAfterManifests);
+
+            // assign row id to those who don't have
+            nextRowId = assignRowId(newRowIdStart, deltaFiles);
 
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
@@ -1071,7 +1080,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             currentWatermark,
                             statsFileName,
                             // if empty properties, just set to null
-                            properties.isEmpty() ? null : properties);
+                            properties.isEmpty() ? null : properties,
+                            nextRowId);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpReuseTmpManifests(
@@ -1123,6 +1133,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
         return new SuccessResult();
+    }
+
+    private long assignRowId(long startRowId, List<ManifestEntry> deltaFiles) {
+        if (deltaFiles.isEmpty()) {
+            return startRowId;
+        }
+        // assign row id for new files
+        long start = startRowId;
+        long maxRowId = startRowId;
+        for (ManifestEntry entry : deltaFiles) {
+            if (entry.file().rowIdSequence() == null) {
+                long rowCount = entry.file().rowCount();
+                maxRowId = startRowId + rowCount;
+                entry.file().setRowIdSequence(new RowIdSequence(start, maxRowId));
+                start = maxRowId;
+            }
+        }
+        return maxRowId;
     }
 
     public void compactManifest() {
@@ -1198,7 +1226,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         0L,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        latestSnapshot.properties());
+                        latestSnapshot.properties(),
+                        latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }

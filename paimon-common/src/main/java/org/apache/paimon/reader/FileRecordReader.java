@@ -18,6 +18,9 @@
 
 package org.apache.paimon.reader;
 
+import org.apache.paimon.utils.RowIdSequence;
+import org.apache.paimon.utils.RowIdSequenceIterator;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -28,4 +31,27 @@ public interface FileRecordReader<T> extends RecordReader<T> {
     @Override
     @Nullable
     FileRecordIterator<T> readBatch() throws IOException;
+
+    @Override
+    default FileRecordReader<T> withRowId(RowIdSequence rowIdSequence) {
+        final RowIdSequenceIterator rowIdSequenceIterator =
+                new RowIdSequenceIterator(rowIdSequence);
+        FileRecordReader<T> thisReader = this;
+        return new FileRecordReader<T>() {
+            @Nullable
+            @Override
+            public FileRecordIterator<T> readBatch() throws IOException {
+                FileRecordIterator<T> iterator = thisReader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return iterator.withRowId(rowIdSequenceIterator);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
 }

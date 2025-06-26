@@ -37,6 +37,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     private RowType readType;
     private boolean executeFilter = false;
+    protected boolean withRowId = false;
     private Predicate predicate;
     private final TableSchema schema;
 
@@ -48,6 +49,11 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     public abstract void applyReadType(RowType readType);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
+
+    public InnerTableRead withRowId() {
+        this.withRowId = true;
+        return this;
+    }
 
     @Override
     public TableRead withIOManager(IOManager ioManager) {

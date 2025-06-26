@@ -408,6 +408,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null);
         tagManager.createTag(
                 snapshot1,
@@ -431,6 +432,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         0L,
                         Snapshot.CommitKind.APPEND,
                         1000,
+                        null,
                         null,
                         null,
                         null,

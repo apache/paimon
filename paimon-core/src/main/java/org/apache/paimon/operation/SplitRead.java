@@ -44,6 +44,8 @@ public interface SplitRead<T> {
 
     SplitRead<T> withFilter(@Nullable Predicate predicate);
 
+    SplitRead<T> withRowId(boolean withRowId);
+
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(DataSplit split) throws IOException;
 
@@ -71,6 +73,12 @@ public interface SplitRead<T> {
             @Override
             public SplitRead<R> withFilter(@Nullable Predicate predicate) {
                 read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withRowId(boolean withRowId) {
+                read.withRowId(withRowId);
                 return this;
             }
 

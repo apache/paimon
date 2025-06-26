@@ -161,6 +161,7 @@ public class IndexBootstrapTest extends TableTestBase {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 

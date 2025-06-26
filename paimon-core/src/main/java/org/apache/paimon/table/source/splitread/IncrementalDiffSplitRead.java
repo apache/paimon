@@ -84,6 +84,12 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withRowId(boolean withRowId) {
+        mergeRead.withRowId(withRowId);
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         RecordReader<KeyValue> reader =
                 readDiff(

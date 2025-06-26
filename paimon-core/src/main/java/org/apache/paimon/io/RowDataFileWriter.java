@@ -28,6 +28,8 @@ import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RowIdSequence;
+import org.apache.paimon.utils.RowIdSequenceBuilder;
 
 import javax.annotation.Nullable;
 
@@ -49,6 +51,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final boolean isExternalPath;
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
+    @Nullable private final RowIdSequenceBuilder rowIdSequenceBuilder;
     private final FileSource fileSource;
 
     public RowDataFileWriter(
@@ -62,7 +65,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            @Nullable RowIdSequenceBuilder rowIdSequenceBuilder) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
@@ -72,6 +76,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
         this.fileSource = fileSource;
+        this.rowIdSequenceBuilder = rowIdSequenceBuilder;
     }
 
     @Override
@@ -80,6 +85,9 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         // add row to index if needed
         if (dataFileIndexWriter != null) {
             dataFileIndexWriter.write(row);
+        }
+        if (rowIdSequenceBuilder != null) {
+            rowIdSequenceBuilder.more();
         }
         seqNumCounter.add(1L);
     }
@@ -102,6 +110,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
         String externalPath = isExternalPath ? path.toString() : null;
+        RowIdSequence rowIdSequence =
+                rowIdSequenceBuilder == null ? null : rowIdSequenceBuilder.build();
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileSize,
@@ -116,6 +126,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),
-                externalPath);
+                externalPath,
+                rowIdSequence);
     }
 }

@@ -54,6 +54,10 @@ public interface InnerTableRead extends TableRead {
         return this;
     }
 
+    default InnerTableRead withRowId() {
+        return this;
+    }
+
     @Override
     default TableRead executeFilter() {
         return this;

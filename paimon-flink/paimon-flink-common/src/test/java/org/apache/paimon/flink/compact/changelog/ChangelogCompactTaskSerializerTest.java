@@ -101,6 +101,7 @@ public class ChangelogCompactTaskSerializerTest {
                 0L,
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 }

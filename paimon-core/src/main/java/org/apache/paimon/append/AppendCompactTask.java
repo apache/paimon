@@ -33,6 +33,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowIdSequence;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,6 +53,15 @@ public class AppendCompactTask {
     public AppendCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         Preconditions.checkArgument(files != null);
         this.partition = partition;
+        files.sort(
+                (f1, f2) -> {
+                    RowIdSequence f1RowId = f1.rowIdSequence();
+                    RowIdSequence f2RowId = f2.rowIdSequence();
+                    if (f1RowId == null || f2RowId == null) {
+                        return 0; // If either is null, we cannot compare, so keep original order.
+                    }
+                    return f1RowId.compareTo(f2RowId);
+                });
         compactBefore = new ArrayList<>(files);
         compactAfter = new ArrayList<>();
     }

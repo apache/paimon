@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.RowIdSequence;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
@@ -59,7 +60,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.embeddedIndex(),
                 meta.fileSource().map(FileSource::toByteValue).orElse(null),
                 toStringArrayData(meta.valueStatsCols()),
-                meta.externalPath().map(BinaryString::fromString).orElse(null));
+                meta.externalPath().map(BinaryString::fromString).orElse(null),
+                meta.rowIdSequence() == null ? null : meta.rowIdSequence().serialize());
     }
 
     @Override
@@ -82,6 +84,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(14) ? null : row.getBinary(14),
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
-                row.isNullAt(17) ? null : row.getString(17).toString());
+                row.isNullAt(17) ? null : row.getString(17).toString(),
+                row.isNullAt(18) ? null : RowIdSequence.deserialize(row.getBinary(18)));
     }
 }

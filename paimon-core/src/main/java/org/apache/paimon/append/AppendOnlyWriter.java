@@ -300,7 +300,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 fileIndexOptions,
                 FileSource.APPEND,
                 asyncFileWrite,
-                statsDenseStore);
+                statsDenseStore,
+                null);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

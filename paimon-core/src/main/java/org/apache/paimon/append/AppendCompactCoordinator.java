@@ -252,7 +252,14 @@ public class AppendCompactCoordinator {
             // we don't know how many parallel compact works there should be, so in order to pack
             // better, we will sort them first
             ArrayList<DataFileMeta> files = new ArrayList<>(toCompact);
-            files.sort(Comparator.comparingLong(DataFileMeta::fileSize));
+            boolean allContainsRowId =
+                    files.stream().allMatch(file -> file.rowIdSequence() != null);
+            if (allContainsRowId) {
+                // sort by rowIdSequence, so that we can combine small row id sequences
+                files.sort((f1, f2) -> f1.rowIdSequence().compareTo(f2.rowIdSequence()));
+            } else {
+                files.sort(Comparator.comparingLong(DataFileMeta::fileSize));
+            }
 
             List<List<DataFileMeta>> result = new ArrayList<>();
             FileBin fileBin = new FileBin();
