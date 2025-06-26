@@ -126,8 +126,9 @@ execution.checkpointing.timeout = 60 min
 ## Write Initialize
 
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
-here (For example, writing a large number of partitions simultaneously), you can use `write-manifest-cache` to cache
-the read manifest data to accelerate initialization.
+here (For example, writing a large number of partitions simultaneously), you can use `sink.writer-coordinator.enabled`
+to use a Flink coordinator to cache the read manifest data to accelerate initialization. The cache memory for coordinator
+is `sink.writer-coordinator.cache-memory`, default is 1GB in Job Manager.
 
 ## Write Memory
 
