@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactSortOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -248,7 +249,7 @@ public abstract class FlinkSink<T> implements Serializable {
                 written, options.get(SINK_WRITER_CPU), options.get(SINK_WRITER_MEMORY));
 
         if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
-            SingleOutputStreamOperator<Committable> newWritten =
+            SingleOutputStreamOperator<Committable> beforeSort =
                     written.transform(
                                     "Changelog Compact Coordinator",
                                     new EitherTypeInfo<>(
@@ -259,8 +260,15 @@ public abstract class FlinkSink<T> implements Serializable {
                                     "Changelog Compact Worker",
                                     new CommittableTypeInfo(),
                                     new ChangelogCompactWorkerOperator(table));
-            forwardParallelism(newWritten, written);
-            written = newWritten;
+            forwardParallelism(beforeSort, written);
+
+            written =
+                    beforeSort
+                            .transform(
+                                    "Changelog Sort by Creation Time",
+                                    new CommittableTypeInfo(),
+                                    new ChangelogCompactSortOperator())
+                            .forceNonParallel();
         }
 
         return written;
