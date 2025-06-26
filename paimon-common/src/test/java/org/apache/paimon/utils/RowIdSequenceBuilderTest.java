@@ -27,6 +27,7 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/** Tests for {@link RowIdSequenceBuilder}. */
 public class RowIdSequenceBuilderTest {
 
     @Test

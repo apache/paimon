@@ -18,10 +18,11 @@
 
 package org.apache.paimon.utils;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 import java.util.List;
 
+/** Row id sequence fetcher. */
 public class RowIdSequenceIterator {
 
     private final boolean allNull;

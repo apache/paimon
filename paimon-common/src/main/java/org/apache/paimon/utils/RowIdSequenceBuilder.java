@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/** Build row id sequence from ranges. */
 public class RowIdSequenceBuilder {
 
     private final List<Range> allExistingRanges;
