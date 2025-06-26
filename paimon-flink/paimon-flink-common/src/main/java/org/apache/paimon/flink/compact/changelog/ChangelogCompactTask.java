@@ -40,7 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -50,7 +49,6 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.function.BiConsumer;
@@ -148,37 +146,37 @@ public class ChangelogCompactTask implements Serializable {
 
         Semaphore semaphore = new Semaphore((int) bufferSize.getBytes());
         BlockingQueue<ReadTask> finishedTasks = new LinkedBlockingQueue<>();
-        List<Future<?>> futures =
-                ThreadPoolUtils.submitAllTasks(
-                        executor,
-                        t -> {
-                            // Why not create `finishedTasks` as a blocking queue and use it to
-                            // limit the total size of bytes awaiting to be copied? Because finished
-                            // tasks are added after their contents are read, so even if
-                            // `finishedTasks` is full, each thread can still read one more file,
-                            // and the limit will become `bytesInThreads + bufferSize`, not just
-                            // `bufferSize`.
-                            try {
-                                semaphore.acquire((int) t.meta.fileSize());
-                                t.readFully();
-                                finishedTasks.put(t);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                throw new RuntimeException(e);
-                            }
-                        },
-                        tasks);
+        ThreadPoolUtils.submitAllTasks(
+                executor,
+                t -> {
+                    // Why not create `finishedTasks` as a blocking queue and use it to limit the
+                    // total size of bytes awaiting to be copied? Because finished tasks are added
+                    // after their contents are read, so even if `finishedTasks` is full, each
+                    // thread can still read one more file, and the limit will become
+                    // `bytesInThreads + bufferSize`, not just `bufferSize`.
+                    try {
+                        semaphore.acquire((int) t.meta.fileSize());
+                        t.readFully();
+                        finishedTasks.put(t);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(e);
+                    }
+                },
+                tasks);
 
         OutputStream outputStream = new OutputStream();
         List<Result> results = new ArrayList<>();
         for (int i = 0; i < tasks.size(); i++) {
             // copy all files into a new big file
             ReadTask task = finishedTasks.take();
+            if (task.exception != null) {
+                throw task.exception;
+            }
             write(task, outputStream, results);
             semaphore.release((int) task.meta.fileSize());
         }
         outputStream.out.close();
-        ThreadPoolUtils.awaitAllFutures(futures);
 
         return produceNewCommittables(results, table, pathFactory, outputStream.path);
     }
@@ -316,6 +314,7 @@ public class ChangelogCompactTask implements Serializable {
         private final DataFileMeta meta;
 
         private byte[] result = null;
+        private Exception exception = null;
 
         private ReadTask(
                 FileStoreTable table,
@@ -334,8 +333,8 @@ public class ChangelogCompactTask implements Serializable {
             try {
                 result = IOUtils.readFully(table.fileIO().newInputStream(path), true);
                 table.fileIO().deleteQuietly(path);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            } catch (Exception e) {
+                exception = e;
             }
         }
     }

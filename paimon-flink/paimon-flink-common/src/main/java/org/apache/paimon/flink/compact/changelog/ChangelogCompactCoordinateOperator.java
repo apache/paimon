@@ -56,6 +56,7 @@ public class ChangelogCompactCoordinateOperator
 
     private transient long checkpointId;
     private transient Map<BinaryRow, PartitionChangelog> partitionChangelogs;
+    private transient Map<BinaryRow, Integer> numBuckets;
 
     public ChangelogCompactCoordinateOperator(CoreOptions options) {
         this.options = options;
@@ -67,6 +68,7 @@ public class ChangelogCompactCoordinateOperator
 
         checkpointId = Long.MIN_VALUE;
         partitionChangelogs = new LinkedHashMap<>();
+        numBuckets = new LinkedHashMap<>();
     }
 
     public void processElement(StreamRecord<Committable> record) {
@@ -83,6 +85,8 @@ public class ChangelogCompactCoordinateOperator
             output.collect(new StreamRecord<>(Either.Left(record.getValue())));
             return;
         }
+
+        numBuckets.put(message.partition(), message.totalBuckets());
 
         // Changelog files are not stored in an LSM tree,
         // so we can regard them as files without primary keys.
@@ -145,10 +149,12 @@ public class ChangelogCompactCoordinateOperator
         output.collect(new StreamRecord<>(Either.Left(newCommittable)));
     }
 
+    @Override
     public void prepareSnapshotPreBarrier(long checkpointId) {
         emitAllPartitionsChangelogCompactTask();
     }
 
+    @Override
     public void endInput() {
         emitAllPartitionsChangelogCompactTask();
     }
@@ -174,7 +180,7 @@ public class ChangelogCompactCoordinateOperator
                         new CommitMessageImpl(
                                 partition,
                                 entry.getKey(),
-                                options.bucket(),
+                                numBuckets.get(partition),
                                 new DataIncrement(
                                         Collections.emptyList(),
                                         Collections.emptyList(),
@@ -187,7 +193,7 @@ public class ChangelogCompactCoordinateOperator
                         new CommitMessageImpl(
                                 partition,
                                 entry.getKey(),
-                                options.bucket(),
+                                numBuckets.get(partition),
                                 DataIncrement.emptyIncrement(),
                                 new CompactIncrement(
                                         Collections.emptyList(),
@@ -204,7 +210,7 @@ public class ChangelogCompactCoordinateOperator
                                     new ChangelogCompactTask(
                                             checkpointId,
                                             partition,
-                                            options.bucket(),
+                                            numBuckets.get(partition),
                                             partitionChangelog.newFileChangelogFiles,
                                             partitionChangelog.compactChangelogFiles))));
         }
@@ -216,6 +222,7 @@ public class ChangelogCompactCoordinateOperator
         for (BinaryRow partition : partitions) {
             emitPartitionChangelogCompactTask(partition);
         }
+        numBuckets.clear();
     }
 
     private static class PartitionChangelog {
