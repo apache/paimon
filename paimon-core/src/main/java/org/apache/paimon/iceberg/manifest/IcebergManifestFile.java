@@ -105,7 +105,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                         + "manifest_entry_data_file:r2,"
                         + "r2_partition:r102");
         FileFormat manifestFileAvro =
-                FileFormat.fromIdentifier("avro", table.fileIO().storageOptions(), avroOptions);
+                FileFormat.fromIdentifier("avro", table.fileIO(), avroOptions);
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,

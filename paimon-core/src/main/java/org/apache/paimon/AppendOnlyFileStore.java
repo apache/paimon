@@ -84,7 +84,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schemaManager,
                 schema,
                 rowType,
-                FileFormatDiscover.of(fileIO.storageOptions(), options),
+                FileFormatDiscover.of(fileIO, options),
                 pathFactory(),
                 options.fileIndexReadEnabled());
     }
