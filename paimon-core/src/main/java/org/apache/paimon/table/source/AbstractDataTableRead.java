@@ -51,6 +51,14 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     @Override
+    public final InnerTableRead withFilter(Predicate predicate) {
+        this.predicate = predicate;
+        return innerWithFilter(predicate);
+    }
+
+    protected abstract InnerTableRead innerWithFilter(Predicate predicate);
+
+    @Override
     public TableRead executeFilter() {
         this.executeFilter = true;
         return this;
@@ -80,14 +88,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
         return reader;
     }
-
-    @Override
-    public final InnerTableRead withFilter(Predicate predicate) {
-        this.predicate = predicate;
-        return innerWithFilter(predicate);
-    }
-
-    protected abstract InnerTableRead innerWithFilter(Predicate predicate);
 
     private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {
         if (predicate == null) {
