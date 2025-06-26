@@ -25,7 +25,6 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
@@ -113,11 +112,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public KeyValueFileStoreScan newScan() {
-        return newScan(ScanType.FOR_READ);
-    }
-
-    @Override
     public MergeFileSplitRead newRead() {
         return new MergeFileSplitRead(
                 options,
@@ -155,14 +149,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null, null);
+        return newWrite(commitUser, null);
     }
 
     @Override
-    public AbstractFileStoreWrite<KeyValue> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
+    public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
         DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
@@ -185,7 +176,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     this::pathFactory,
                     newReaderFactoryBuilder(),
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     options,
                     tableName,
                     writeId);
@@ -205,7 +196,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     pathFactory(),
                     this::pathFactory,
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     indexFactory,
                     deletionVectorsMaintainerFactory,
                     options,
@@ -215,7 +206,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    protected KeyValueFileStoreScan newScan(ScanType scanType) {
+    public KeyValueFileStoreScan newScan() {
         BucketMode bucketMode = bucketMode();
         BucketSelectConverter bucketSelectConverter =
                 keyFilter -> {
@@ -237,13 +228,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 };
 
         return new KeyValueFileStoreScan(
-                newManifestsReader(scanType == ScanType.FOR_WRITE),
+                newManifestsReader(),
                 bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 keyValueFieldsExtractor,
-                manifestFileFactory(scanType == ScanType.FOR_WRITE),
+                manifestFileFactory(),
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
                 options.mergeEngine(),

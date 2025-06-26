@@ -338,19 +338,13 @@ public class FlinkSinkBuilder {
             boolean isStreaming = isStreaming(input);
             boolean isAdaptiveParallelismEnabled =
                     AdaptiveParallelism.isEnabled(input.getExecutionEnvironment());
-            boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
             boolean hashDynamicMode = table.bucketMode() == BucketMode.HASH_DYNAMIC;
             if (parallelismUndefined
                     && !isStreaming
                     && isAdaptiveParallelismEnabled
-                    && (writeMCacheEnabled || hashDynamicMode)) {
+                    && hashDynamicMode) {
                 List<String> messages = new ArrayList<>();
-                if (writeMCacheEnabled) {
-                    messages.add("Write Manifest Cache");
-                }
-                if (hashDynamicMode) {
-                    messages.add("Dynamic Bucket Mode");
-                }
+                messages.add("Dynamic Bucket Mode");
 
                 String parallelismSource;
                 if (input.getParallelism() > 0) {

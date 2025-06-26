@@ -24,7 +24,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -62,7 +61,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
@@ -88,7 +86,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Filter<ManifestEntry> manifestEntryFilter = null;
     private Filter<String> fileNameFilter = null;
 
-    private ManifestCacheFilter manifestCacheFilter = null;
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;
 
@@ -162,13 +159,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionBucket(BinaryRow partition, int bucket) {
-        if (manifestCacheFilter != null && manifestFileFactory.isCacheEnabled()) {
-            checkArgument(
-                    manifestCacheFilter.test(partition, bucket),
-                    String.format(
-                            "This is a bug! The partition %s and bucket %s is filtered!",
-                            partition, bucket));
-        }
         withPartitionFilter(Collections.singletonList(partition));
         withBucket(bucket);
         return this;
@@ -213,12 +203,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter) {
         this.manifestEntryFilter = filter;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
-        this.manifestCacheFilter = manifestFilter;
         return this;
     }
 
@@ -457,7 +441,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
-                                createCacheRowFilter(),
+                                Filter.alwaysTrue(),
                                 createEntryRowFilter().and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
@@ -476,23 +460,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     protected ManifestEntry dropStats(ManifestEntry entry) {
         return entry.copyWithoutStats();
-    }
-
-    /**
-     * According to the {@link ManifestCacheFilter}, entry that needs to be cached will be retained,
-     * so the entry that will not be accessed in the future will not be cached.
-     *
-     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
-     */
-    private Filter<InternalRow> createCacheRowFilter() {
-        if (manifestCacheFilter == null) {
-            return Filter.alwaysTrue();
-        }
-
-        Function<InternalRow, BinaryRow> partitionGetter =
-                ManifestEntrySerializer.partitionGetter();
-        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
-        return row -> manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
     }
 
     /**

@@ -50,7 +50,7 @@ public class CdcAppendTableWriteOperator extends CdcRecordStoreWriteOperator {
             StoreSinkWriteState.StateValueFilter stateFilter) {
         // No conflicts will occur in append only unaware bucket writer, so no state
         // is needed.
-        return new NoopStoreSinkWriteState(subtaskId, stateFilter);
+        return new NoopStoreSinkWriteState(subtaskId);
     }
 
     @Override

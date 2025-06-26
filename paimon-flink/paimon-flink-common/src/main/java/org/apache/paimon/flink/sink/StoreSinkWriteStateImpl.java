@@ -90,11 +90,6 @@ public class StoreSinkWriteStateImpl implements StoreSinkWriteState {
     }
 
     @Override
-    public StoreSinkWriteState.StateValueFilter stateValueFilter() {
-        return stateValueFilter;
-    }
-
-    @Override
     public @Nullable List<StoreSinkWriteState.StateValue> get(String tableName, String key) {
         Map<String, List<StoreSinkWriteState.StateValue>> innerMap = map.get(tableName);
         return innerMap == null ? null : innerMap.get(key);
