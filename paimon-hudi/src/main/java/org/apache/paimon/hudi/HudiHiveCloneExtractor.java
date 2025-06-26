@@ -48,12 +48,26 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** A {@link HiveCloneExtractor} for Hudi tables. */
 public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
     private static final Logger LOG = LoggerFactory.getLogger(HudiHiveCloneExtractor.class);
+    private static final Set<String> HUDI_METADATA_FIELDS =
+            Arrays.stream(HoodieRecord.HoodieMetadataField.values())
+                    .map(HoodieRecord.HoodieMetadataField::getFieldName)
+                    .collect(Collectors.toSet());
 
     @Override
     public boolean matches(Table table) {
-        return table.getParameters()
+        if (table.getParameters()
                 .getOrDefault("spark.sql.sources.provider", "")
-                .equalsIgnoreCase("hudi");
+                .equalsIgnoreCase("hudi")) {
+            return true;
+        }
+        // For Hudi version < 0.9, there is no spark-sql support. So we need to check Hudi fields to
+        // determine if it is a Hudi table.
+        for (FieldSchema field : table.getSd().getCols()) {
+            if (HUDI_METADATA_FIELDS.contains(field.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -61,13 +75,9 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
             IMetaStoreClient client, Table hiveTable, String database, String table)
             throws Exception {
         List<FieldSchema> fields = client.getSchema(database, table);
-        Set<String> hudiMetadataFields =
-                Arrays.stream(HoodieRecord.HoodieMetadataField.values())
-                        .map(HoodieRecord.HoodieMetadataField::getFieldName)
-                        .collect(Collectors.toSet());
         List<FieldSchema> resultFields =
                 fields.stream()
-                        .filter(f -> !hudiMetadataFields.contains(f.getName()))
+                        .filter(f -> !HUDI_METADATA_FIELDS.contains(f.getName()))
                         .collect(Collectors.toList());
         LOG.info(
                 "Hudi table {}.{} with total field count {}, and result field count {} after filter",
