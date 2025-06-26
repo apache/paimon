@@ -125,7 +125,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         }
     }
 
-    @Override
     public Options storageOptions() {
         return hadoopOptions;
     }

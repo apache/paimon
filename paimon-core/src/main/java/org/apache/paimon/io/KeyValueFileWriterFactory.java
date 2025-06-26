@@ -66,13 +66,12 @@ public class KeyValueFileWriterFactory {
     private final FileIndexOptions fileIndexOptions;
 
     private KeyValueFileWriterFactory(
-            FileIO fileIO,
             long schemaId,
             FileWriterContextFactory formatContext,
             long suggestedFileSize,
             CoreOptions options) {
-        this.fileIO = fileIO;
         this.schemaId = schemaId;
+        this.fileIO = formatContext.fileIO;
         this.keyType = formatContext.keyType;
         this.valueType = formatContext.valueType;
         this.formatContext = formatContext;
@@ -224,8 +223,7 @@ public class KeyValueFileWriterFactory {
                             format2PathFactory,
                             fileIO,
                             options);
-            return new KeyValueFileWriterFactory(
-                    fileIO, schemaId, context, suggestedFileSize, options);
+            return new KeyValueFileWriterFactory(schemaId, context, suggestedFileSize, options);
         }
     }
 
