@@ -251,8 +251,7 @@ public class FileMetaUtils {
                 StatsCollectorFactories.createStatsFactories(
                         options.statsMode(), options, table.rowType().getFieldNames());
 
-        return FileFormat.fromIdentifier(
-                        format, table.fileIO().storageOptions(), options.toConfiguration())
+        return FileFormat.fromIdentifier(format, table.fileIO(), options.toConfiguration())
                 .createStatsExtractor(table.rowType(), factories)
                 .orElseThrow(
                         () ->
