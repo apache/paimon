@@ -25,12 +25,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
@@ -43,7 +41,6 @@ import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -51,8 +48,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -72,8 +67,6 @@ import org.apache.iceberg.data.Record;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
-import org.apache.iceberg.types.Types;
-import org.apache.iceberg.util.StructLikeSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1235,48 +1228,5 @@ public class IcebergCompatibilityTest {
         }
         result.close();
         return actual;
-    }
-
-    private void validateIcebergResult(List<Object[]> expected) throws Exception {
-        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
-        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
-        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
-
-        Types.StructType type = icebergTable.schema().asStruct();
-
-        StructLikeSet actualSet = StructLikeSet.create(type);
-        StructLikeSet expectSet = StructLikeSet.create(type);
-
-        try (CloseableIterable<Record> reader = IcebergGenerics.read(icebergTable).build()) {
-            reader.forEach(actualSet::add);
-        }
-        expectSet.addAll(
-                expected.stream().map(r -> icebergRecord(type, r)).collect(Collectors.toList()));
-
-        assertThat(actualSet).isEqualTo(expectSet);
-    }
-
-    private org.apache.iceberg.data.GenericRecord icebergRecord(
-            Types.StructType type, Object[] row) {
-        org.apache.iceberg.data.GenericRecord record =
-                org.apache.iceberg.data.GenericRecord.create(type);
-        for (int i = 0; i < row.length; i++) {
-            record.set(i, row[i]);
-        }
-        return record;
-    }
-
-    private List<String> getPaimonResult(FileStoreTable paimonTable) throws Exception {
-        List<Split> splits = paimonTable.newReadBuilder().newScan().plan().splits();
-        TableRead read = paimonTable.newReadBuilder().newRead();
-        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
-            List<String> result = new ArrayList<>();
-            recordReader.forEachRemaining(
-                    row ->
-                            result.add(
-                                    DataFormatTestUtil.toStringWithRowKind(
-                                            row, paimonTable.rowType())));
-            return result;
-        }
     }
 }
