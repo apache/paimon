@@ -942,8 +942,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 table.fileIO().deleteQuietly(listPath);
             }
-            deleteApplicableMetadataFiles(snapshotId);
         }
+        deleteApplicableMetadataFiles(snapshotId);
     }
 
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
