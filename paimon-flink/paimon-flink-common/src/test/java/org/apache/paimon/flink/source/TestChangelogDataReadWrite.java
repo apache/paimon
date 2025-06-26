@@ -98,7 +98,7 @@ public class TestChangelogDataReadWrite {
     private final String commitUser;
 
     public TestChangelogDataReadWrite(String root) {
-        this.avro = FileFormat.fromIdentifier("avro", new Options(), new Options());
+        this.avro = FileFormat.fromIdentifier("avro", LocalFileIO.create(), new Options());
         this.tablePath = new Path(root);
         this.pathFactory =
                 new FileStorePathFactory(
@@ -146,7 +146,7 @@ public class TestChangelogDataReadWrite {
                         schemaManager,
                         schema,
                         VALUE_TYPE,
-                        FileFormatDiscover.of(fileIO.storageOptions(), options),
+                        FileFormatDiscover.of(fileIO, options),
                         pathFactory,
                         options.fileIndexReadEnabled());
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
