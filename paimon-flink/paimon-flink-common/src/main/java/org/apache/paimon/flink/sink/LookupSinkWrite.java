@@ -32,17 +32,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * {@link StoreSinkWrite} for tables with lookup changelog producer and {@link
- * org.apache.paimon.CoreOptions#LOOKUP_WAIT} set to false.
- */
-public class AsyncLookupSinkWrite extends StoreSinkWriteImpl {
+/** {@link StoreSinkWrite} for tables with lookup changelog producer . */
+public class LookupSinkWrite extends StoreSinkWriteImpl {
 
+    // keep this state name for compatibility reasons
     private static final String ACTIVE_BUCKETS_STATE_NAME = "paimon_async_lookup_active_buckets";
 
     private final String tableName;
 
-    public AsyncLookupSinkWrite(
+    public LookupSinkWrite(
             FileStoreTable table,
             String commitUser,
             StoreSinkWriteState state,
