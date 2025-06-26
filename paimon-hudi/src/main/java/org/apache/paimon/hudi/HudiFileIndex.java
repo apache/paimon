@@ -181,18 +181,17 @@ public class HudiFileIndex {
 
     private List<String> extractPartitionValues(String partitionPath) {
         String[] paths = partitionPath.split(StoragePath.SEPARATOR);
-        // TODO: because we only support table in HMS, the partition is hive-style by default
-        // pt1=v1/pt2=v2
         List<String> partitionValues = new ArrayList<>();
         Arrays.stream(paths)
                 .forEach(
                         p -> {
                             String[] kv = p.split("=");
                             if (kv.length == 2) {
+                                // partition path in form of pt1=v1/pt2=v2
                                 partitionValues.add(kv[1]);
                             } else {
-                                throw new RuntimeException(
-                                        "Wrong hudi partition path: " + partitionPath);
+                                // partition path in form of v1/v2
+                                partitionValues.add(kv[0]);
                             }
                         });
         return partitionValues;
