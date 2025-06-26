@@ -29,6 +29,7 @@ import org.apache.paimon.flink.sink.RowWithBucketChannelComputer;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
@@ -50,6 +51,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.crosspartition.IndexBootstrap.bootstrapType;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CROSS_PARTITION_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 
@@ -66,7 +68,12 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
     @Override
     protected OneInputStreamOperatorFactory<Tuple2<InternalRow, Integer>, Committable>
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new DynamicBucketRowWriteOperator.CoordinatedFactory(
+                        table, writeProvider, commitUser)
+                : new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
     }
 
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {

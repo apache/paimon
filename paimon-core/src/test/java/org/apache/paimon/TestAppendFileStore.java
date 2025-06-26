@@ -130,7 +130,9 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
-        return factory.createOrRestore(latestSnapshot, partition, bucket);
+        List<IndexFileMeta> indexFiles =
+                fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
+        return factory.create(indexFiles);
     }
 
     public CommitMessageImpl writeDVIndexFiles(

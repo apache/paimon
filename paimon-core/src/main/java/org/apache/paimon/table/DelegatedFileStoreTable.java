@@ -138,6 +138,12 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
         wrapped.setManifestCache(manifestCache);
     }
 
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestCache() {
+        return wrapped.getManifestCache();
+    }
+
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         wrapped.setSnapshotCache(cache);

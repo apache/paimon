@@ -56,6 +56,9 @@ public interface FileStoreTable extends DataTable {
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
+    @Nullable
+    SegmentsCache<Path> getManifestCache();
+
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     void setStatsCache(Cache<String, Statistics> cache);

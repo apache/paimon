@@ -303,6 +303,18 @@ under the License.
             <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
         </tr>
         <tr>
+            <td><h5>sink.writer-coordinator.cache-memory</h5></td>
+            <td style="word-wrap: break-word;">1 gb</td>
+            <td>MemorySize</td>
+            <td>Controls the cache memory of writer coordinator to cache manifest files in Job Manager.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-coordinator.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable sink writer coordinator to plan data files in Job Manager.</td>
+        </tr>
+        <tr>
             <td><h5>sink.writer-cpu</h5></td>
             <td style="word-wrap: break-word;">1.0</td>
             <td>Double</td>

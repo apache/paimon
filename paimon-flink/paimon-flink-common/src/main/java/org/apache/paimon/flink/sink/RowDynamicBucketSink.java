@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -32,6 +33,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /** Sink for dynamic bucket table. */
 public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
@@ -62,6 +65,11 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<Tuple2<InternalRow, Integer>, Committable>
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new DynamicBucketRowWriteOperator.CoordinatedFactory(
+                        table, writeProvider, commitUser)
+                : new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }

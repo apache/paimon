@@ -16,17 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.flink.sink.coordinator;
 
-import org.apache.paimon.operation.WriteRestore;
+import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 
-/** Inner {@link TableWrite} contains overwrite setter. */
-public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
+/** Write response to get latest identifier for user. */
+public class LatestIdentifierResponse implements CoordinationResponse {
 
-    InnerTableWrite withWriteRestore(WriteRestore writeRestore);
+    private static final long serialVersionUID = 1L;
 
-    InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
+    private final long latestIdentifier;
 
-    // we detect whether in streaming mode, and do some optimization
-    InnerTableWrite withExecutionMode(boolean isStreamingMode);
+    public LatestIdentifierResponse(long latestIdentifier) {
+        this.latestIdentifier = latestIdentifier;
+    }
+
+    public long latestIdentifier() {
+        return latestIdentifier;
+    }
 }

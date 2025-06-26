@@ -283,4 +283,39 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             return RowDataStoreWriteOperator.class;
         }
     }
+
+    /** {@link CoordinatedFactory} of {@link RowDataStoreWriteOperator}. */
+    public static class CoordinatedFactory
+            extends TableWriteOperator.CoordinatedFactory<InternalRow> {
+
+        @Nullable private final LogSinkFunction logSinkFunction;
+
+        public CoordinatedFactory(
+                FileStoreTable table,
+                @Nullable LogSinkFunction logSinkFunction,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+            this.logSinkFunction = logSinkFunction;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends TableWriteOperator<InternalRow>> T createStreamOperatorImpl(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new RowDataStoreWriteOperator(
+                            parameters,
+                            table,
+                            logSinkFunction,
+                            storeSinkWriteProvider,
+                            initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return RowDataStoreWriteOperator.class;
+        }
+    }
 }

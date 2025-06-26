@@ -16,25 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.flink.sink.coordinator;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
+import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 
-import javax.annotation.Nullable;
+/** Write request to get latest identifier for user. */
+public class LatestIdentifierRequest implements CoordinationRequest {
 
-import java.util.List;
+    private static final long serialVersionUID = 1L;
 
-/** Maintainer to maintain index. */
-public interface IndexMaintainer<T> {
+    private final String user;
 
-    void notifyNewRecord(T record);
+    public LatestIdentifierRequest(String user) {
+        this.user = user;
+    }
 
-    List<IndexFileMeta> prepareCommit();
-
-    /** Factory to restore {@link IndexMaintainer}. */
-    interface Factory<T> {
-        IndexMaintainer<T> createOrRestore(
-                @Nullable Snapshot snapshot, BinaryRow partition, int bucket);
+    public String user() {
+        return user;
     }
 }

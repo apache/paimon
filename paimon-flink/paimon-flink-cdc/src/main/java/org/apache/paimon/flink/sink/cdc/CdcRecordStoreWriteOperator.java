@@ -167,4 +167,31 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
             return CdcRecordStoreWriteOperator.class;
         }
     }
+
+    /** {@link StreamOperatorFactory} of {@link CdcRecordStoreWriteOperator}. */
+    public static class CoordinatedFactory
+            extends TableWriteOperator.CoordinatedFactory<CdcRecord> {
+
+        public CoordinatedFactory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends TableWriteOperator<CdcRecord>> T createStreamOperatorImpl(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new CdcRecordStoreWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CdcRecordStoreWriteOperator.class;
+        }
+    }
 }

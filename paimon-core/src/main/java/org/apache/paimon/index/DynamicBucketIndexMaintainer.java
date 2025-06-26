@@ -19,7 +19,6 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -33,31 +32,22 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
-/** An {@link IndexMaintainer} for dynamic bucket to maintain key hashcode in a bucket. */
-public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
+/** An Index Maintainer for dynamic bucket to maintain key hashcode in a bucket. */
+public class DynamicBucketIndexMaintainer {
 
     private final IndexFileHandler fileHandler;
     private final IntHashSet hashcode;
 
     private boolean modified;
 
-    private HashIndexMaintainer(
-            IndexFileHandler fileHandler,
-            @Nullable Snapshot snapshot,
-            BinaryRow partition,
-            int bucket) {
+    private DynamicBucketIndexMaintainer(
+            IndexFileHandler fileHandler, @Nullable IndexFileMeta restoredFile) {
         this.fileHandler = fileHandler;
         IntHashSet hashcode = new IntHashSet();
-        if (snapshot != null) {
-            Optional<IndexFileMeta> indexFile =
-                    fileHandler.scanHashIndex(snapshot, partition, bucket);
-            if (indexFile.isPresent()) {
-                IndexFileMeta file = indexFile.get();
-                hashcode = new IntHashSet((int) file.rowCount());
-                restore(fileHandler, hashcode, file);
-            }
+        if (restoredFile != null) {
+            hashcode = new IntHashSet((int) restoredFile.rowCount());
+            restore(fileHandler, hashcode, restoredFile);
         }
         this.hashcode = hashcode;
         this.modified = false;
@@ -77,7 +67,6 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         }
     }
 
-    @Override
     public void notifyNewRecord(KeyValue record) {
         InternalRow key = record.key();
         if (!(key instanceof BinaryRow)) {
@@ -89,7 +78,6 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         }
     }
 
-    @Override
     public List<IndexFileMeta> prepareCommit() {
         if (modified) {
             IndexFileMeta entry =
@@ -105,8 +93,8 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         return hashcode.size() == 0;
     }
 
-    /** Factory to restore {@link HashIndexMaintainer}. */
-    public static class Factory implements IndexMaintainer.Factory<KeyValue> {
+    /** Factory to restore {@link DynamicBucketIndexMaintainer}. */
+    public static class Factory {
 
         private final IndexFileHandler handler;
 
@@ -114,10 +102,12 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
             this.handler = handler;
         }
 
-        @Override
-        public IndexMaintainer<KeyValue> createOrRestore(
-                @Nullable Snapshot snapshot, BinaryRow partition, int bucket) {
-            return new HashIndexMaintainer(handler, snapshot, partition, bucket);
+        public IndexFileHandler indexFileHandler() {
+            return handler;
+        }
+
+        public DynamicBucketIndexMaintainer create(@Nullable IndexFileMeta restoredFile) {
+            return new DynamicBucketIndexMaintainer(handler, restoredFile);
         }
     }
 }

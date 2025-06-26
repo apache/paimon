@@ -32,6 +32,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
+import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
@@ -87,6 +88,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                         .collect(Collectors.toList());
         this.notNullFieldIndex = rowType.getFieldIndices(notNullColumnNames);
         this.defaultValueRow = DefaultValueRow.create(rowType);
+    }
+
+    @Override
+    public InnerTableWrite withWriteRestore(WriteRestore writeRestore) {
+        this.write.withWriteRestore(writeRestore);
+        return this;
     }
 
     @Override
