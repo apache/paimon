@@ -27,7 +27,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
@@ -259,7 +258,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 changelogManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
-                DefaultValueAssigner.create(tableSchema),
                 store().pathFactory(),
                 name(),
                 store().newIndexFileHandler());

@@ -102,7 +102,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    protected InnerTableRead innerWithFilter(Predicate predicate) {
+    public InnerTableRead withFilter(Predicate predicate) {
         initialized().forEach(r -> r.withFilter(predicate));
         this.predicate = predicate;
         return this;
