@@ -369,6 +369,12 @@ public class WithRowIdTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader onlyReadRealBuckets() {
+            wrapped.onlyReadRealBuckets();
+            return this;
+        }
+
+        @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
             wrapped.withBucketFilter(bucketFilter);
             return this;
