@@ -384,4 +384,23 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       Seq(Row(2, "2024-12-16"), Row(4, "2024-12-18"))
     )
   }
+
+  test("Paimon delete: delete with metadata column") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |    id BIGINT,
+                 |    c1 STRING)
+                 |TBLPROPERTIES ('bucket' = '1', 'bucket-key' = 'id', 'file.format'='avro')
+                 |""".stripMargin)
+    spark.sql("insert into table T values(1, 'a')")
+
+    val paths = spark.sql("SELECT __paimon_file_path FROM T").collect()
+    assert(paths.length == 1)
+
+    val path = paths(0).getString(0)
+    spark.sql(s"delete from T where __paimon_file_path = '$path'")
+
+    val paths2 = spark.sql("SELECT __paimon_file_path FROM T").collect()
+    assert(paths2.length == 0)
+  }
 }

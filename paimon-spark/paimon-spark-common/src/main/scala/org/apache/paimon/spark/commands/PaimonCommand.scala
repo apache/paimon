@@ -164,12 +164,9 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
     assert(sparkTable.table.isInstanceOf[FileStoreTable])
     val knownSplitsTable =
       KnownSplitsTable.create(sparkTable.table.asInstanceOf[FileStoreTable], splits.toArray)
-    // We re-plan the relation to skip analyze phase, so we should append all
-    // metadata columns manually and let Spark do column pruning during optimization.
+    // We re-plan the relation to skip analyze phase, so we should let Spark do column pruning during optimization.
     relation.copy(
-      table = relation.table.asInstanceOf[SparkTable].copy(table = knownSplitsTable),
-      output = relation.output ++ sparkTable.metadataColumns.map(
-        _.asInstanceOf[PaimonMetadataColumn].toAttribute)
+      table = relation.table.asInstanceOf[SparkTable].copy(table = knownSplitsTable)
     )
   }
 
