@@ -69,7 +69,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         if (factory.pushFileIOToWriter()) {
             try {
-                writer = factory.create(path, fileIO, compression);
+                writer = factory.create(path, compression);
             } catch (IOException e) {
                 LOG.warn(
                         "Failed to open the bulk writer, closing the output stream and throw the error.",

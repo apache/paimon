@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 
@@ -50,12 +49,11 @@ public interface FormatWriterFactory {
      * Creates a writer that writes to the given stream.
      *
      * @param path The output path to write the encoded data to.
-     * @param fileIO The file IO to use for writing.
      * @param compression the compression value.
      * @throws IOException Thrown if the writer cannot be opened, or if the output stream throws an
      *     exception.
      */
-    default FormatWriter create(Path path, FileIO fileIO, String compression) throws IOException {
+    default FormatWriter create(Path path, String compression) throws IOException {
         throw new UnsupportedOperationException("Not implement.");
     }
 }
