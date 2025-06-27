@@ -115,7 +115,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         }
     }
 
-    public Options storageOptions() {
+    public Options hadoopOptions() {
         return hadoopOptions;
     }
 
