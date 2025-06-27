@@ -137,6 +137,8 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
+Note that this optimization only takes effect when the join keys contain all the bucket keys.
+
 ## Dynamic Partition
 
 In traditional data warehouses, each partition often maintains the latest full data, so this partition table only 
