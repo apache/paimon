@@ -33,6 +33,7 @@ public interface FileFormatFactory {
 
     /** the format context. */
     class FormatContext {
+
         private final Options options;
         private final int readBatchSize;
         private final int writeBatchSize;
