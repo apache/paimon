@@ -78,17 +78,19 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
         executor.execute(
                 () -> {
                     try {
+                        CoordinationResponse response;
                         if (request instanceof ScanCoordinationRequest) {
-                            future.complete(coordinator.scan((ScanCoordinationRequest) request));
+                            response = coordinator.scan((ScanCoordinationRequest) request);
                         } else if (request instanceof LatestIdentifierRequest) {
-                            future.complete(
+                            response =
                                     new LatestIdentifierResponse(
                                             coordinator.latestCommittedIdentifier(
-                                                    ((LatestIdentifierRequest) request).user())));
+                                                    ((LatestIdentifierRequest) request).user()));
                         } else {
                             throw new UnsupportedOperationException(
                                     "Unsupported request type: " + request);
                         }
+                        future.complete(CoordinationResponseUtils.wrap(response));
                     } catch (Exception e) {
                         future.completeExceptionally(e);
                     }
