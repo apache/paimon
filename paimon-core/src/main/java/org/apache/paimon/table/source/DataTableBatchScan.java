@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -33,8 +32,6 @@ import java.util.List;
 
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
-
-    private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
     private boolean hasNext;
@@ -49,7 +46,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         super(schema, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-        this.defaultValueAssigner = DefaultValueAssigner.create(schema);
 
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
@@ -62,7 +58,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         super.withFilter(predicate);
-        snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
+        snapshotReader.withFilter(predicate);
         return this;
     }
 
