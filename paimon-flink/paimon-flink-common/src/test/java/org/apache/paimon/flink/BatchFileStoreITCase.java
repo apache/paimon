@@ -98,19 +98,6 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAQEWithWriteManifest() {
-        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
-        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
-        assertThat(batchSql("SELECT * FROM T"))
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111),
-                        Row.of(2, 22, 222),
-                        Row.of(1, 11, 111),
-                        Row.of(2, 22, 222));
-    }
-
-    @Test
     public void testAQEWithDynamicBucket() {
         batchSql("CREATE TABLE IF NOT EXISTS D_T (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT)");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");

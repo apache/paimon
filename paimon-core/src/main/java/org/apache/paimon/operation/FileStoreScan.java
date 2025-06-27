@@ -22,7 +22,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -79,8 +78,6 @@ public interface FileStoreScan {
     FileStoreScan enableValueFilter();
 
     FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
-
-    FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
     FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter);
 

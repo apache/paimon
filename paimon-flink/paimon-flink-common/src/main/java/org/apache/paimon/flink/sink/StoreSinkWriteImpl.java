@@ -141,11 +141,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
 
         TableWriteImpl<?> tableWrite =
-                table.newWrite(
-                                commitUser,
-                                (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket),
-                                state.getSubtaskId())
+                table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)

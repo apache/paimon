@@ -530,13 +530,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 
-    public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
-            key("write-manifest-cache")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(0))
-                    .withDescription(
-                            "Cache size for reading manifest files for write initialization.");
-
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
                     .intType()
@@ -1866,10 +1859,6 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
-    }
-
-    public MemorySize writeManifestCache() {
-        return options.get(WRITE_MANIFEST_CACHE);
     }
 
     public String partitionDefaultName() {
