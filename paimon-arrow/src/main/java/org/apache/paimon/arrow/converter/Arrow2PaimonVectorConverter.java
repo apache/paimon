@@ -46,6 +46,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
@@ -528,8 +529,11 @@ public interface Arrow2PaimonVectorConverter {
         @Override
         public Arrow2PaimonVectorConverter visit(RowType rowType) {
             final List<Arrow2PaimonVectorConverter> convertors = new ArrayList<>();
+            final List<String> names = new ArrayList<>();
+            List<DataField> fields = rowType.getFields();
             for (int i = 0; i < rowType.getFields().size(); i++) {
                 convertors.add(rowType.getTypeAt(i).accept(this));
+                names.add(fields.get(i).name());
             }
 
             return vector ->
@@ -542,10 +546,15 @@ public interface Arrow2PaimonVectorConverter {
                             if (!inited) {
                                 List<FieldVector> children =
                                         ((StructVector) vector).getChildrenFromFields();
-                                ColumnVector[] vectors = new ColumnVector[children.size()];
-                                for (int i = 0; i < children.size(); i++) {
-                                    vectors[i] = convertors.get(i).convertVector(children.get(i));
+                                ColumnVector[] vectors = new ColumnVector[convertors.size()];
+
+                                for (FieldVector child : children) {
+                                    int index = names.indexOf(child.getName());
+                                    if (index != -1) {
+                                        vectors[index] = convertors.get(index).convertVector(child);
+                                    }
                                 }
+
                                 this.vectorizedColumnBatch = new VectorizedColumnBatch(vectors);
                                 inited = true;
                             }

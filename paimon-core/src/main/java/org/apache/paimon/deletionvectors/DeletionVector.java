@@ -41,7 +41,7 @@ import static org.apache.paimon.deletionvectors.Bitmap64DeletionVector.toLittleE
  * The DeletionVector can efficiently record the positions of rows that are deleted in a file, which
  * can then be used to filter out deleted rows when processing the file.
  */
-public interface DeletionVector {
+public interface DeletionVector extends DeletionVectorJudger {
 
     /**
      * Marks the row at the specified position as deleted.
@@ -71,14 +71,6 @@ public interface DeletionVector {
             return true;
         }
     }
-
-    /**
-     * Checks if the row at the specified position is marked as deleted.
-     *
-     * @param position The position of the row to check.
-     * @return true if the row is marked as deleted, false otherwise.
-     */
-    boolean isDeleted(long position);
 
     /**
      * Determines if the deletion vector is empty, indicating no deletions.
