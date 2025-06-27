@@ -90,7 +90,13 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected void dropDatabaseImpl(String name) {
-        uncheck(() -> fileIO.delete(newDatabasePath(name), true));
+        Path databasePath = newDatabasePath(name);
+        if (!uncheck(() -> fileIO.delete(databasePath, true))) {
+            throw new RuntimeException(
+                    String.format(
+                            "Delete database failed, " + "database: %s, location: %s",
+                            name, databasePath));
+        }
     }
 
     @Override
@@ -152,7 +158,10 @@ public class FileSystemCatalog extends AbstractCatalog {
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
         Path fromPath = getTableLocation(fromTable);
         Path toPath = getTableLocation(toTable);
-        uncheck(() -> fileIO.rename(fromPath, toPath));
+        if (!uncheck(() -> fileIO.rename(fromPath, toPath))) {
+            throw new RuntimeException(
+                    String.format("Failed to rename table %s to table %s.", fromTable, toTable));
+        }
     }
 
     @Override
