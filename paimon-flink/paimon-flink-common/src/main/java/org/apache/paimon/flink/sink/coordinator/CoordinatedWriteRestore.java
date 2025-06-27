@@ -52,8 +52,8 @@ public class CoordinatedWriteRestore implements WriteRestore {
         try {
             SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
             LatestIdentifierResponse response =
-                    (LatestIdentifierResponse)
-                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get();
+                    CoordinationResponseUtils.unwrap(
+                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get());
             return response.latestIdentifier();
         } catch (IOException | ExecutionException | InterruptedException e) {
             throw new RuntimeException(e);
@@ -75,8 +75,8 @@ public class CoordinatedWriteRestore implements WriteRestore {
         try {
             SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
             ScanCoordinationResponse response =
-                    (ScanCoordinationResponse)
-                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get();
+                    CoordinationResponseUtils.unwrap(
+                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get());
             return new RestoreFiles(
                     response.snapshot(),
                     response.totalBuckets(),
