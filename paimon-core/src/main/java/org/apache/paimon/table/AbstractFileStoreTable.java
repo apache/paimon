@@ -345,7 +345,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(fileIO, newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema);
 
         return copy(newTableSchema);
     }
@@ -357,7 +357,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> options = tableSchema.options();
             TableSchema newTableSchema = optionalLatestSchema.get();
             newTableSchema = newTableSchema.copy(options);
-            SchemaValidation.validateTableSchema(fileIO, newTableSchema);
+            SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);
         } else {
             return this;

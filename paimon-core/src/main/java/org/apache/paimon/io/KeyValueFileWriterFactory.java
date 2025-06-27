@@ -66,12 +66,13 @@ public class KeyValueFileWriterFactory {
     private final FileIndexOptions fileIndexOptions;
 
     private KeyValueFileWriterFactory(
+            FileIO fileIO,
             long schemaId,
             FileWriterContextFactory formatContext,
             long suggestedFileSize,
             CoreOptions options) {
+        this.fileIO = fileIO;
         this.schemaId = schemaId;
-        this.fileIO = formatContext.fileIO;
         this.keyType = formatContext.keyType;
         this.valueType = formatContext.valueType;
         this.formatContext = formatContext;
@@ -221,9 +222,9 @@ public class KeyValueFileWriterFactory {
                             valueType,
                             fileFormat,
                             format2PathFactory,
-                            fileIO,
                             options);
-            return new KeyValueFileWriterFactory(schemaId, context, suggestedFileSize, options);
+            return new KeyValueFileWriterFactory(
+                    fileIO, schemaId, context, suggestedFileSize, options);
         }
     }
 
@@ -240,7 +241,6 @@ public class KeyValueFileWriterFactory {
         private final Map<String, FileFormat> formatFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
-        private final FileIO fileIO;
         private final BinaryRow partition;
         private final int bucket;
         private final RowType keyType;
@@ -257,14 +257,12 @@ public class KeyValueFileWriterFactory {
                 RowType valueType,
                 FileFormat defaultFileFormat,
                 Function<String, FileStorePathFactory> parentFactories,
-                FileIO fileIO,
                 CoreOptions options) {
             this.partition = partition;
             this.bucket = bucket;
             this.keyType = keyType;
             this.valueType = valueType;
             this.parentFactories = parentFactories;
-            this.fileIO = fileIO;
             this.options = options;
             this.thinModeEnabled =
                     options.dataFileThinMode() && supportsThinMode(keyType, valueType);
@@ -389,8 +387,7 @@ public class KeyValueFileWriterFactory {
 
         private FileFormat fileFormat(String format) {
             return formatFactory.computeIfAbsent(
-                    format,
-                    k -> FileFormat.fromIdentifier(format, fileIO, options.toConfiguration()));
+                    format, k -> FileFormat.fromIdentifier(format, options.toConfiguration()));
         }
     }
 

@@ -26,7 +26,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -98,7 +97,7 @@ public class TestChangelogDataReadWrite {
     private final String commitUser;
 
     public TestChangelogDataReadWrite(String root) {
-        this.avro = FileFormat.fromIdentifier("avro", LocalFileIO.create(), new Options());
+        this.avro = FileFormat.fromIdentifier("avro", new Options());
         this.tablePath = new Path(root);
         this.pathFactory =
                 new FileStorePathFactory(
@@ -118,8 +117,7 @@ public class TestChangelogDataReadWrite {
     }
 
     public KeyValueTableRead createReadWithKey() {
-        FileIO fileIO = LocalFileIO.create();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         CoreOptions options = new CoreOptions(new HashMap<>());
         TableSchema schema = schemaManager.schema(0);
         MergeFileSplitRead read =
@@ -146,7 +144,7 @@ public class TestChangelogDataReadWrite {
                         schemaManager,
                         schema,
                         VALUE_TYPE,
-                        FileFormatDiscover.of(fileIO, options),
+                        FileFormatDiscover.of(options),
                         pathFactory,
                         options.fileIndexReadEnabled());
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);

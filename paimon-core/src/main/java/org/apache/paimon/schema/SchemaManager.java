@@ -924,7 +924,7 @@ public class SchemaManager implements Serializable {
 
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
-        SchemaValidation.validateTableSchema(fileIO, newSchema);
+        SchemaValidation.validateTableSchema(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());

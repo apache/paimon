@@ -19,7 +19,6 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
@@ -34,7 +33,6 @@ public interface FileFormatFactory {
 
     /** the format context. */
     class FormatContext {
-        private final FileIO fileIO;
         private final Options options;
         private final int readBatchSize;
         private final int writeBatchSize;
@@ -43,32 +41,20 @@ public interface FileFormatFactory {
 
         @VisibleForTesting
         public FormatContext(Options options, int readBatchSize, int writeBatchSize) {
-            this(null, options, readBatchSize, writeBatchSize, 1, null);
-        }
-
-        @VisibleForTesting
-        public FormatContext(
-                FileIO fileIO, Options options, int readBatchSize, int writeBatchSize) {
-            this(fileIO, options, readBatchSize, writeBatchSize, 1, null);
+            this(options, readBatchSize, writeBatchSize, 1, null);
         }
 
         public FormatContext(
-                FileIO fileIO,
                 Options options,
                 int readBatchSize,
                 int writeBatchSize,
                 int zstdLevel,
                 @Nullable MemorySize blockSize) {
-            this.fileIO = fileIO;
             this.options = options;
             this.readBatchSize = readBatchSize;
             this.writeBatchSize = writeBatchSize;
             this.zstdLevel = zstdLevel;
             this.blockSize = blockSize;
-        }
-
-        public FileIO fileIO() {
-            return fileIO;
         }
 
         public Options options() {

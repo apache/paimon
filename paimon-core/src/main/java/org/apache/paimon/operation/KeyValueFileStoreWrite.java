@@ -156,7 +156,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema,
                         keyType,
                         valueType,
-                        FileFormatDiscover.of(fileIO, options),
+                        FileFormatDiscover.of(options),
                         pathFactory,
                         extractor,
                         options);
@@ -167,7 +167,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema.id(),
                         keyType,
                         valueType,
-                        fileFormat(fileIO, options),
+                        fileFormat(options),
                         createFormatPathFactories(options, formatPathFactory),
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;

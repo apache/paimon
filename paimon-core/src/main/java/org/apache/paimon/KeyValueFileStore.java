@@ -136,7 +136,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schema,
                 valueType,
-                FileFormatDiscover.of(fileIO, options),
+                FileFormatDiscover.of(options),
                 pathFactory(),
                 options.fileIndexReadEnabled());
     }
@@ -148,7 +148,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schema,
                 keyType,
                 valueType,
-                FileFormatDiscover.of(fileIO, options),
+                FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor,
                 options);

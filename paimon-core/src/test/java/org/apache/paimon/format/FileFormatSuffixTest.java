@@ -74,8 +74,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null);
-        FileFormat fileFormat =
-                FileFormat.fromIdentifier(format, LocalFileIO.create(), new Options());
+        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter appendOnlyWriter =

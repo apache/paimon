@@ -19,7 +19,6 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.FileIO;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -30,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @ThreadSafe
 public interface FileFormatDiscover {
 
-    static FileFormatDiscover of(FileIO fileIO, CoreOptions options) {
+    static FileFormatDiscover of(CoreOptions options) {
         Map<String, FileFormat> formats = new ConcurrentHashMap<>();
         return new FileFormatDiscover() {
 
@@ -40,7 +39,7 @@ public interface FileFormatDiscover {
             }
 
             private FileFormat create(String identifier) {
-                return FileFormat.fromIdentifier(identifier, fileIO, options.toConfiguration());
+                return FileFormat.fromIdentifier(identifier, options.toConfiguration());
             }
         };
     }

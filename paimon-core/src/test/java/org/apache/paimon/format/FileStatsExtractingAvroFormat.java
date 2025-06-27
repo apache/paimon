@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -37,7 +36,7 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     public FileStatsExtractingAvroFormat() {
         super("avro");
-        avro = FileFormat.fromIdentifier("avro", LocalFileIO.create(), new Options());
+        avro = FileFormat.fromIdentifier("avro", new Options());
     }
 
     @Override

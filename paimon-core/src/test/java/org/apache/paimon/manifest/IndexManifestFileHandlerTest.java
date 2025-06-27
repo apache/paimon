@@ -46,7 +46,7 @@ public class IndexManifestFileHandlerTest {
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
                                 fileStore.fileIO(),
-                                FileFormat.manifestFormat(fileStore.fileIO(), fileStore.options()),
+                                FileFormat.manifestFormat(fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
                                 null)
@@ -81,7 +81,7 @@ public class IndexManifestFileHandlerTest {
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
                                 fileStore.fileIO(),
-                                FileFormat.manifestFormat(fileStore.fileIO(), fileStore.options()),
+                                FileFormat.manifestFormat(fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
                                 null)

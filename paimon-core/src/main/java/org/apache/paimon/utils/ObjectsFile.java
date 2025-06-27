@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -159,9 +160,10 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected Pair<String, Long> writeWithoutRolling(Iterator<T> records) {
         Path path = pathFactory.newPath();
-        if (writerFactory.pushFileIOToWriter()) {
+        if (writerFactory instanceof SupportsDirectWrite) {
             try {
-                try (FormatWriter writer = writerFactory.create(path, compression)) {
+                try (FormatWriter writer =
+                        ((SupportsDirectWrite) writerFactory).create(fileIO, path, compression)) {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
                     }

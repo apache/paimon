@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.AsyncPositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -67,9 +68,9 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.path = path;
         this.converter = converter;
 
-        if (factory.pushFileIOToWriter()) {
+        if (factory instanceof SupportsDirectWrite) {
             try {
-                writer = factory.create(path, compression);
+                writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
             } catch (IOException e) {
                 LOG.warn(
                         "Failed to open the bulk writer, closing the output stream and throw the error.",
