@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -156,19 +157,29 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     protected Pair<String, Long> writeWithoutRolling(Iterator<T> records) {
         Path path = pathFactory.newPath();
         try {
-            PositionOutputStream out = fileIO.newOutputStream(path, false);
-            long pos;
-            try {
-                try (FormatWriter writer = writerFactory.create(out, compression)) {
+            if (writerFactory instanceof SupportsDirectWrite) {
+                try (FormatWriter writer =
+                        ((SupportsDirectWrite) writerFactory).create(fileIO, path, compression)) {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
                     }
                 }
-            } finally {
-                pos = out.getPos();
-                out.close();
+                return Pair.of(path.getName(), fileIO.getFileSize(path));
+            } else {
+                PositionOutputStream out = fileIO.newOutputStream(path, false);
+                long pos;
+                try {
+                    try (FormatWriter writer = writerFactory.create(out, compression)) {
+                        while (records.hasNext()) {
+                            writer.addElement(serializer.toRow(records.next()));
+                        }
+                    }
+                } finally {
+                    pos = out.getPos();
+                    out.close();
+                }
+                return Pair.of(path.getName(), pos);
             }
-            return Pair.of(path.getName(), pos);
         } catch (Throwable e) {
             fileIO.deleteQuietly(path);
             throw new RuntimeException(

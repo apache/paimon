@@ -115,6 +115,10 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         }
     }
 
+    public Options hadoopOptions() {
+        return hadoopOptions;
+    }
+
     @Override
     protected AliyunOSSFileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
         final String scheme = path.toUri().getScheme();
