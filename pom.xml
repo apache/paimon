@@ -71,7 +71,6 @@ under the License.
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-hudi</module>
         <module>paimon-api</module>
-        <module>paimon-iceberg</module>
     </modules>
 
     <properties>

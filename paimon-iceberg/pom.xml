@@ -45,7 +45,7 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
-            <scope>core</scope>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -219,21 +219,6 @@ under the License.
             <artifactId>jakarta.servlet-api</artifactId>
             <version>6.1.0</version>
             <scope>test</scope>
-        </dependency>
-
-        <!-- others -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.18.2</version>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-core</artifactId>
-            <version>2.18.2</version>
-            <scope>compile</scope>
         </dependency>
 
     </dependencies>
