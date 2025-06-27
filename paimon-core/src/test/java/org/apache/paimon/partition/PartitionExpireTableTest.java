@@ -19,6 +19,7 @@
 package org.apache.paimon.partition;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.schema.Schema;
@@ -28,11 +29,15 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.Collections;
 
 import static org.apache.paimon.CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIMESTAMP_FORMATTER;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIMESTAMP_PATTERN;
 import static org.apache.paimon.partition.CustomPartitionExpirationFactory.TABLE_EXPIRE_PARTITIONS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -64,5 +69,60 @@ class PartitionExpireTableTest extends TableTestBase {
         } finally {
             TABLE_EXPIRE_PARTITIONS.remove(path);
         }
+    }
+
+    @Test
+    public void testValuesTimeExpireDefault() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(PARTITION_EXPIRATION_STRATEGY.key(), "values-time");
+        schemaBuilder.option(PARTITION_EXPIRATION_TIME.key(), "1 d");
+        schemaBuilder.option(END_INPUT_CHECK_PARTITION_EXPIRE.key(), "true");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        LocalDate day1 = LocalDate.now().minusDays(2);
+        LocalDate day2 = LocalDate.now().minusDays(1);
+        LocalDate day3 = LocalDate.now();
+        GenericRow row1 = GenericRow.of(1, BinaryString.fromString(day1.toString()));
+        GenericRow row2 = GenericRow.of(2, BinaryString.fromString(day2.toString()));
+        GenericRow row3 = GenericRow.of(3, BinaryString.fromString(day3.toString()));
+
+        Table table = catalog.getTable(identifier());
+        write(table, row1);
+        write(table, row2);
+
+        write(table, row3);
+        assertThat(read(table)).containsExactlyInAnyOrder(row2, row3);
+    }
+
+    @Test
+    public void testValuesTimeExpireCustom() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(PARTITION_EXPIRATION_STRATEGY.key(), "values-time");
+        schemaBuilder.option(PARTITION_EXPIRATION_TIME.key(), "1 H");
+        schemaBuilder.option(END_INPUT_CHECK_PARTITION_EXPIRE.key(), "true");
+        schemaBuilder.option(PARTITION_EXPIRATION_TIMESTAMP_PATTERN.key(), "$pt:59:59");
+        schemaBuilder.option(PARTITION_EXPIRATION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd HH:mm:ss");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        LocalDate day = LocalDate.now();
+        int hour1 = LocalTime.now().minusHours(2).getHour();
+        int hour2 = LocalTime.now().minusHours(1).getHour();
+        int hour3 = LocalTime.now().getHour();
+
+        GenericRow row1 = GenericRow.of(1, BinaryString.fromString(day + " " + hour1));
+        GenericRow row2 = GenericRow.of(2, BinaryString.fromString(day + " " + hour2));
+        GenericRow row3 = GenericRow.of(3, BinaryString.fromString(day + " " + hour3));
+
+        Table table = catalog.getTable(identifier());
+        write(table, row1);
+        write(table, row2);
+        write(table, row3);
+        assertThat(read(table)).containsExactlyInAnyOrder(row2, row3);
     }
 }
