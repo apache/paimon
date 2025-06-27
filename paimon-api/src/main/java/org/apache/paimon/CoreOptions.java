@@ -2549,11 +2549,15 @@ public class CoreOptions implements Serializable {
     }
 
     public String partitionExpireTimestampFormatter() {
-        return options.get(PARTITION_EXPIRATION_TIMESTAMP_FORMATTER);
+        return options.get(PARTITION_EXPIRATION_TIMESTAMP_FORMATTER) != null
+                ? options.get(PARTITION_EXPIRATION_TIMESTAMP_FORMATTER)
+                : partitionTimestampFormatter();
     }
 
     public String partitionExpireTimestampPattern() {
-        return options.get(PARTITION_EXPIRATION_TIMESTAMP_PATTERN);
+        return options.get(PARTITION_EXPIRATION_TIMESTAMP_PATTERN) != null
+                ? options.get(PARTITION_EXPIRATION_TIMESTAMP_PATTERN)
+                : partitionTimestampPattern();
     }
 
     public String httpReportMarkDoneActionUrl() {
