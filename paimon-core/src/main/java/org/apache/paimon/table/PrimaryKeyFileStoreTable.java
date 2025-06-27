@@ -24,7 +24,6 @@ import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
@@ -152,18 +151,15 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null, null);
+        return newWrite(commitUser, null);
     }
 
     @Override
-    public TableWriteImpl<KeyValue> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
+    public TableWriteImpl<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
-                store().newWrite(commitUser, manifestFilter, writeId),
+                store().newWrite(commitUser, writeId),
                 createRowKeyExtractor(),
                 (record, rowKind) ->
                         kv.replace(

@@ -102,8 +102,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     }
 
     public List<T> read(String fileName, @Nullable Long fileSize) {
-        return read(
-                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
+        return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public List<T> readWithIOException(String fileName) throws IOException {
@@ -112,8 +111,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
             throws IOException {
-        return readWithIOException(
-                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Filter.alwaysTrue());
+        return readWithIOException(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public boolean exists(String fileName) {
@@ -127,11 +125,10 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     public List<T> read(
             String fileName,
             @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter,
             Filter<T> readTFilter) {
         try {
-            return readWithIOException(fileName, fileSize, loadFilter, readFilter, readTFilter);
+            return readWithIOException(fileName, fileSize, readFilter, readTFilter);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read " + fileName, e);
         }
@@ -140,13 +137,12 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     private List<T> readWithIOException(
             String fileName,
             @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter,
             Filter<T> readTFilter)
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, loadFilter, readFilter, readTFilter);
+            return cache.read(path, fileSize, readFilter, readTFilter);
         }
 
         return readFromIterator(

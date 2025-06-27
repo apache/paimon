@@ -22,7 +22,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
@@ -73,11 +72,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
-    public AppendOnlyFileStoreScan newScan() {
-        return newScan(ScanType.FOR_READ);
-    }
-
-    @Override
     public RawFileSplitRead newRead() {
         return new RawFileSplitRead(
                 fileIO,
@@ -91,14 +85,11 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BaseAppendFileStoreWrite newWrite(String commitUser) {
-        return newWrite(commitUser, null, null);
+        return newWrite(commitUser, null);
     }
 
     @Override
-    public BaseAppendFileStoreWrite newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
+    public BaseAppendFileStoreWrite newWrite(String commitUser, @Nullable Integer writeId) {
         DeletionVectorsMaintainer.Factory dvMaintainerFactory =
                 options.deletionVectorsEnabled()
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
@@ -112,7 +103,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     partitionType,
                     pathFactory(),
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     options,
                     dvMaintainerFactory,
                     tableName);
@@ -126,7 +117,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     partitionType,
                     pathFactory(),
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     options,
                     dvMaintainerFactory,
                     tableName);
@@ -134,7 +125,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
-    protected AppendOnlyFileStoreScan newScan(ScanType scanType) {
+    public AppendOnlyFileStoreScan newScan() {
         BucketSelectConverter bucketSelectConverter =
                 predicate -> {
                     if (bucketMode() != BucketMode.HASH_FIXED) {
@@ -158,12 +149,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 };
 
         return new AppendOnlyFileStoreScan(
-                newManifestsReader(scanType == ScanType.FOR_WRITE),
+                newManifestsReader(),
                 bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
-                manifestFileFactory(scanType == ScanType.FOR_WRITE),
+                manifestFileFactory(),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled());
     }

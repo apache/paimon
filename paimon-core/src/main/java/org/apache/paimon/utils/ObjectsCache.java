@@ -70,11 +70,7 @@ public class ObjectsCache<K, V> {
     }
 
     public List<V> read(
-            K key,
-            @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter,
-            Filter<V> readVFilter)
+            K key, @Nullable Long fileSize, Filter<InternalRow> readFilter, Filter<V> readVFilter)
             throws IOException {
         Segments segments = cache.getIfPresents(key);
         if (segments != null) {
@@ -90,7 +86,7 @@ public class ObjectsCache<K, V> {
                 fileSize = fileSizeFunction.apply(key);
             }
             if (fileSize <= cache.maxElementSize()) {
-                segments = readSegments(key, fileSize, loadFilter);
+                segments = readSegments(key, fileSize);
                 cache.put(key, segments);
                 return readFromSegments(segments, readFilter, readVFilter);
             } else {
@@ -124,7 +120,7 @@ public class ObjectsCache<K, V> {
         }
     }
 
-    private Segments readSegments(K key, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
+    private Segments readSegments(K key, @Nullable Long fileSize) {
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         try (CloseableIterator<InternalRow> iterator = reader.apply(key, fileSize)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
@@ -134,9 +130,7 @@ public class ObjectsCache<K, V> {
                     new SimpleCollectingOutputView(segments, segmentSource, cache.pageSize());
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
-                if (loadFilter.test(row)) {
-                    formatSerializer.serializeToPages(row, output);
-                }
+                formatSerializer.serializeToPages(row, output);
             }
             return new Segments(segments, output.getCurrentPositionInSegment());
         } catch (Exception e) {

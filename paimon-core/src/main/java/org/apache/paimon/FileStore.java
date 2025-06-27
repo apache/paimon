@@ -21,7 +21,6 @@ package org.apache.paimon;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.ChangelogDeletion;
@@ -88,10 +87,7 @@ public interface FileStore<T> {
 
     FileStoreWrite<T> newWrite(String commitUser);
 
-    FileStoreWrite<T> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId);
+    FileStoreWrite<T> newWrite(String commitUser, @Nullable Integer writeId);
 
     FileStoreCommit newCommit(String commitUser, FileStoreTable table);
 

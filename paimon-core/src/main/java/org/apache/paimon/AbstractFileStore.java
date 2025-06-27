@@ -38,7 +38,6 @@ import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
@@ -97,7 +96,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final RowType partitionType;
     protected final CatalogEnvironment catalogEnvironment;
 
-    @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
 
@@ -116,9 +114,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.options = options;
         this.partitionType = partitionType;
         this.catalogEnvironment = catalogEnvironment;
-        this.writeManifestCache =
-                SegmentsCache.create(
-                        options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
     }
 
     @Override
@@ -193,10 +188,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public ManifestFile.Factory manifestFileFactory() {
-        return manifestFileFactory(false);
-    }
-
-    protected ManifestFile.Factory manifestFileFactory(boolean forWrite) {
         return new ManifestFile.Factory(
                 fileIO,
                 schemaManager,
@@ -205,21 +196,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                forWrite ? writeManifestCache : readManifestCache);
+                readManifestCache);
     }
 
     @Override
     public ManifestList.Factory manifestListFactory() {
-        return manifestListFactory(false);
-    }
-
-    protected ManifestList.Factory manifestListFactory(boolean forWrite) {
         return new ManifestList.Factory(
                 fileIO,
                 FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
-                forWrite ? writeManifestCache : readManifestCache);
+                readManifestCache);
     }
 
     @Override
@@ -256,12 +243,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 new StatsFile(fileIO, pathFactory().statsFileFactory()));
     }
 
-    protected ManifestsReader newManifestsReader(boolean forWrite) {
+    protected ManifestsReader newManifestsReader() {
         return new ManifestsReader(
                 partitionType,
                 options.partitionDefaultName(),
                 snapshotManager(),
-                manifestListFactory(forWrite));
+                manifestListFactory());
     }
 
     @Override
@@ -277,14 +264,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
         return schemaManager.mergeSchema(rowType, allowExplicitCast);
-    }
-
-    protected abstract FileStoreScan newScan(ScanType scanType);
-
-    protected enum ScanType {
-        FOR_READ,
-        FOR_WRITE,
-        FOR_COMMIT
     }
 
     @Override
@@ -308,7 +287,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(ScanType.FOR_COMMIT),
+                newScan(),
                 options.bucket(),
                 options.manifestTargetSize(),
                 options.manifestFullCompactionThresholdSize(),
@@ -448,7 +427,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 expirationTime,
                 checkInterval,
                 expireStrategy,
-                newScan(ScanType.FOR_COMMIT),
+                newScan(),
                 newCommit(commitUser, table),
                 partitionHandler,
                 options.endInputCheckPartitionExpire(),
