@@ -29,6 +29,8 @@ import javax.annotation.Nullable;
  */
 public interface IcebergMetadataCommitter {
 
+    String identifier();
+
     void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath);
 
     void commitMetadata(

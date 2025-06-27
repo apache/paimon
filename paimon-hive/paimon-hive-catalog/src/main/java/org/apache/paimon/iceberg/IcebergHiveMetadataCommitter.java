@@ -119,6 +119,11 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
     }
 
     @Override
+    public String identifier() {
+        return "hive";
+    }
+
+    @Override
     public void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath) {
         try {
             commitMetadataImpl(newMetadataPath, baseMetadataPath);
@@ -129,7 +134,9 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     @Override
     public void commitMetadata(
-            IcebergMetadata icebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {}
+            IcebergMetadata icebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
+        throw new UnsupportedOperationException();
+    }
 
     private void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
             throws Exception {
