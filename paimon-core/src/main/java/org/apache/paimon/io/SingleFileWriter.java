@@ -78,14 +78,14 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 }
                 writer = factory.create(out, compression);
             }
-        } catch (IOException ioException) {
+        } catch (IOException e) {
             LOG.warn(
                     "Failed to open the bulk writer, closing the output stream and throw the error.",
-                    ioException);
+                    e);
             if (out != null) {
                 abort();
             }
-            throw new UncheckedIOException(ioException);
+            throw new UncheckedIOException(e);
         }
 
         this.recordCount = 0;
