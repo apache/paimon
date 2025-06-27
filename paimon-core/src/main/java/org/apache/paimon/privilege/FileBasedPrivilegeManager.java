@@ -384,6 +384,7 @@ public class FileBasedPrivilegeManager implements PrivilegeManager {
     private void createUserTable() {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
         Path tableRoot = new Path(warehouse, USER_TABLE_DIR);
         SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
         try {
