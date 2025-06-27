@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -146,6 +147,22 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
         assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
+    }
+
+    @Test
+    void testHeaderOptions() throws Exception {
+        options.set(HEADER_PREFIX + "User-Agent", "test");
+        RESTCatalog restCatalog = initCatalog(false);
+
+        Map<String, String> parameters = new HashMap<>();
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter("/path", parameters, "method", "data");
+        Map<String, String> headers = restCatalog.api().authFunction().apply(restAuthParameter);
+        assertEquals(headers.get("User-Agent"), "test");
+
+        RESTCatalog restCatalog2 = restCatalog.catalogLoader().load();
+        Map<String, String> headers2 = restCatalog2.api().authFunction().apply(restAuthParameter);
+        assertEquals(headers2.get("User-Agent"), "test");
     }
 
     private void testDlfAuth(RESTCatalog restCatalog) throws Exception {

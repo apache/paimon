@@ -170,13 +170,13 @@ public class RESTApi {
         this.client = new HttpClient(options.get(RESTCatalogOptions.URI));
         AuthProvider authProvider = createAuthProvider(options);
         Map<String, String> baseHeaders = Collections.emptyMap();
+        baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
         if (configRequired) {
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
                             ? ImmutableMap.of(WAREHOUSE.key(), RESTUtil.encodeString(warehouse))
                             : ImmutableMap.of();
-            baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
             options =
                     new Options(
                             client.get(
