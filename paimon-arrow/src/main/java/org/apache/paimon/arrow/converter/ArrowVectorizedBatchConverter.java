@@ -22,8 +22,8 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.deletionvectors.ApplyDeletionFileRecordIterator;
-import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionFileRecordIterator;
+import org.apache.paimon.deletionvectors.DeletionVectorJudger;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.utils.IntArrayList;
@@ -61,14 +61,14 @@ public class ArrowVectorizedBatchConverter extends ArrowBatchConverter {
         }
     }
 
-    public void reset(ApplyDeletionFileRecordIterator iterator) {
+    public void reset(DeletionFileRecordIterator iterator) {
         this.iterator = iterator;
 
         FileRecordIterator<InternalRow> innerIterator = iterator.iterator();
         this.batch = ((VectorizedRecordIterator) innerIterator).batch();
 
         try {
-            DeletionVector deletionVector = iterator.deletionVector();
+            DeletionVectorJudger deletionVector = iterator.deletionVector();
             int originNumRows = this.batch.getNumRows();
             IntArrayList picked = new IntArrayList(originNumRows);
             for (int i = 0; i < originNumRows; i++) {
