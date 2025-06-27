@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Tests for reading and writing file store in batch jobs. */
 public class FileStoreBatchE2eTest extends E2eTestBase {
@@ -80,13 +81,17 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         // no infer parallelism, e2e will fail due to less resources
         String paimonDdl =
-                "CREATE TABLE IF NOT EXISTS ts_table (\n"
-                        + "    dt VARCHAR,\n"
-                        + "    hr VARCHAR,\n"
-                        + "    person VARCHAR,\n"
-                        + "    category VARCHAR,\n"
-                        + "    price INT\n"
-                        + ") PARTITIONED BY (dt, hr);";
+                String.format(
+                        "CREATE TABLE IF NOT EXISTS ts_table (\n"
+                                + "    dt VARCHAR,\n"
+                                + "    hr VARCHAR,\n"
+                                + "    person VARCHAR,\n"
+                                + "    category VARCHAR,\n"
+                                + "    price INT\n"
+                                + ") PARTITIONED BY (dt, hr) WITH (\n"
+                                + "  'sink.writer-coordinator.enabled' = '%s'\n"
+                                + ");",
+                        ThreadLocalRandom.current().nextBoolean());
 
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));
