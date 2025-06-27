@@ -117,6 +117,10 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
     @Test
     public void testSyncTable() throws Exception {
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        boolean useCoordinator =
+                flinkVersion.compareTo("1.15") > 0 && ThreadLocalRandom.current().nextBoolean();
+
         runAction(
                 ACTION_SYNC_TABLE,
                 "pt",
@@ -129,7 +133,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         "bucket",
                         "2",
                         "sink.writer-coordinator.enabled",
-                        String.valueOf(ThreadLocalRandom.current().nextBoolean())));
+                        String.valueOf(useCoordinator)));
 
         try (Connection conn = getMySqlConnection();
                 Statement statement = conn.createStatement()) {

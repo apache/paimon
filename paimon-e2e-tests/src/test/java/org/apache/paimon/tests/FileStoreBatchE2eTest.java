@@ -79,6 +79,9 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         String useCatalogCmd = "USE CATALOG ts_catalog;";
 
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        boolean useCoordinator =
+                flinkVersion.compareTo("1.15") > 0 && ThreadLocalRandom.current().nextBoolean();
         // no infer parallelism, e2e will fail due to less resources
         String paimonDdl =
                 String.format(
@@ -91,7 +94,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                                 + ") PARTITIONED BY (dt, hr) WITH (\n"
                                 + "  'sink.writer-coordinator.enabled' = '%s'\n"
                                 + ");",
-                        ThreadLocalRandom.current().nextBoolean());
+                        useCoordinator);
 
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));
