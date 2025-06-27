@@ -33,6 +33,7 @@ public class DebeziumTypeUtils {
     private static final String INT64 = "INT64";
     private static final String FLOAT32 = "FLOAT32";
     private static final String FLOAT64 = "FLOAT64";
+    private static final String DOUBLE = "DOUBLE";
     private static final String STRING = "STRING";
 
     public static DataType toDataType(String type) {
@@ -50,6 +51,7 @@ public class DebeziumTypeUtils {
             case FLOAT32:
                 return DataTypes.FLOAT();
             case FLOAT64:
+            case DOUBLE:
                 return DataTypes.DOUBLE();
             case STRING:
                 return DataTypes.STRING();
