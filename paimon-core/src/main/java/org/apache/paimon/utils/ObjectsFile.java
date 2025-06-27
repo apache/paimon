@@ -160,8 +160,8 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected Pair<String, Long> writeWithoutRolling(Iterator<T> records) {
         Path path = pathFactory.newPath();
-        if (writerFactory instanceof SupportsDirectWrite) {
-            try {
+        try {
+            if (writerFactory instanceof SupportsDirectWrite) {
                 try (FormatWriter writer =
                         ((SupportsDirectWrite) writerFactory).create(fileIO, path, compression)) {
                     while (records.hasNext()) {
@@ -169,13 +169,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
                     }
                 }
                 return Pair.of(path.getName(), fileIO.getFileSize(path));
-            } catch (IOException ioException) {
-                throw new UncheckedIOException(
-                        "Failed to open the bulk writer, closing the output stream and throw the error.",
-                        ioException);
-            }
-        } else {
-            try {
+            } else {
                 PositionOutputStream out = fileIO.newOutputStream(path, false);
                 long pos;
                 try {
@@ -189,11 +183,11 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
                     out.close();
                 }
                 return Pair.of(path.getName(), pos);
-            } catch (Throwable e) {
-                fileIO.deleteQuietly(path);
-                throw new RuntimeException(
-                        "Exception occurs when writing records to " + path + ". Clean up.", e);
             }
+        } catch (Throwable e) {
+            fileIO.deleteQuietly(path);
+            throw new RuntimeException(
+                    "Exception occurs when writing records to " + path + ". Clean up.", e);
         }
     }
 

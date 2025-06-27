@@ -68,31 +68,24 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.path = path;
         this.converter = converter;
 
-        if (factory instanceof SupportsDirectWrite) {
-            try {
+        try {
+            if (factory instanceof SupportsDirectWrite) {
                 writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
-            } catch (IOException e) {
-                LOG.warn(
-                        "Failed to open the bulk writer, closing the output stream and throw the error.",
-                        e);
-                throw new UncheckedIOException(e);
-            }
-        } else {
-            try {
+            } else {
                 out = fileIO.newOutputStream(path, false);
                 if (asyncWrite) {
                     out = new AsyncPositionOutputStream(out);
                 }
                 writer = factory.create(out, compression);
-            } catch (IOException ioException) {
-                LOG.warn(
-                        "Failed to open the bulk writer, closing the output stream and throw the error.",
-                        ioException);
-                if (out != null) {
-                    abort();
-                }
-                throw new UncheckedIOException(ioException);
             }
+        } catch (IOException ioException) {
+            LOG.warn(
+                    "Failed to open the bulk writer, closing the output stream and throw the error.",
+                    ioException);
+            if (out != null) {
+                abort();
+            }
+            throw new UncheckedIOException(ioException);
         }
 
         this.recordCount = 0;
