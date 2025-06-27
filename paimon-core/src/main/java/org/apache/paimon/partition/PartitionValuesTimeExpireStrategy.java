@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.List;
@@ -49,8 +50,8 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
 
     public PartitionValuesTimeExpireStrategy(CoreOptions options, RowType partitionType) {
         super(partitionType);
-        String timePattern = options.partitionTimestampPattern();
-        String timeFormatter = options.partitionTimestampFormatter();
+        String timePattern = options.partitionExpireTimestampPattern();
+        String timeFormatter = options.partitionExpireTimestampFormatter();
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
     }
 
@@ -78,7 +79,8 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
         public boolean test(BinaryRow partition) {
             Object[] array = convertPartition(partition);
             try {
-                LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
+                LocalDateTime partTime =
+                        timeExtractor.extract(partitionKeys, Arrays.asList(array), LocalTime.MAX);
                 return expireDateTime.isAfter(partTime);
             } catch (DateTimeParseException e) {
                 LOG.warn(

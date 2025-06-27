@@ -920,7 +920,45 @@ public class CoreOptions implements Serializable {
                             "The batch size of partition expiration. "
                                     + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
                                     + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
+    public static final ConfigOption<String> PARTITION_EXPIRATION_TIMESTAMP_FORMATTER =
+            key("partition.expiration.timestamp-formatter")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The formatter to format timestamp from string. It can be used"
+                                                    + " with 'partition.expiration.timestamp-pattern' to create a formatter"
+                                                    + " using the specified value.")
+                                    .list(
+                                            text(
+                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
+                                            text(
+                                                    "Supports multiple partition fields like '$year-$month-$day $hour:59:59'."),
+                                            text(
+                                                    "The timestamp-formatter is compatible with Java's DateTimeFormatter."))
+                                    .build());
 
+    public static final ConfigOption<String> PARTITION_EXPIRATION_TIMESTAMP_PATTERN =
+            key("partition.expiration.timestamp-pattern")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "You can specify a pattern to get a timestamp from partition to expire. "
+                                                    + "The formatter pattern is defined by 'partition.expiration.timestamp-formatter'.")
+                                    .list(
+                                            text("By default, read from the first field."),
+                                            text(
+                                                    "If the timestamp in the partition is a single field called 'dt', you can use '$dt'."),
+                                            text(
+                                                    "If it is spread across multiple fields for year, month, day, and hour,"
+                                                            + " you can use '$year-$month-$day $hour:59:59'."),
+                                            text(
+                                                    "If the timestamp is in fields dt and hour, you can use '$dt "
+                                                            + "$hour:59:59'."))
+                                    .build());
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -2508,6 +2546,14 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public String partitionExpireTimestampFormatter() {
+        return options.get(PARTITION_EXPIRATION_TIMESTAMP_FORMATTER);
+    }
+
+    public String partitionExpireTimestampPattern() {
+        return options.get(PARTITION_EXPIRATION_TIMESTAMP_PATTERN);
     }
 
     public String httpReportMarkDoneActionUrl() {
