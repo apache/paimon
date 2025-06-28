@@ -71,10 +71,10 @@ pygmentsUseClasses = true
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["stable", "https://paimon.apache.org/docs/1.0"],
+    ["stable", "https://paimon.apache.org/docs/1.2"],
+    ["1.2", "https://paimon.apache.org/docs/1.2"],
+    ["1.1", "https://paimon.apache.org/docs/1.1"],
     ["1.0", "https://paimon.apache.org/docs/1.0"],
-    ["0.9", "https://paimon.apache.org/docs/0.9"],
-    ["0.8", "https://paimon.apache.org/docs/0.8"],
   ]
 
   BookSection = '/'
