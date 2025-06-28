@@ -21,6 +21,10 @@ package org.apache.paimon.flink.action.cdc.mysql.format;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import io.debezium.time.Timestamp;
+
+import javax.annotation.Nullable;
+
 /** Converts from Debezium type to {@link DataType}. */
 public class DebeziumTypeUtils {
 
@@ -33,10 +37,10 @@ public class DebeziumTypeUtils {
     private static final String INT64 = "INT64";
     private static final String FLOAT32 = "FLOAT32";
     private static final String FLOAT64 = "FLOAT64";
-    private static final String DOUBLE = "DOUBLE";
     private static final String STRING = "STRING";
+    private static final String DOUBLE = "DOUBLE";
 
-    public static DataType toDataType(String type) {
+    public static DataType toDataType(String type, @Nullable String className) {
         switch (type.toUpperCase()) {
             case BOOLEAN:
                 return DataTypes.BOOLEAN();
@@ -47,6 +51,9 @@ public class DebeziumTypeUtils {
             case INT32:
                 return DataTypes.INT();
             case INT64:
+                if (Timestamp.SCHEMA_NAME.equals(className)) {
+                    return DataTypes.TIMESTAMP();
+                }
                 return DataTypes.BIGINT();
             case FLOAT32:
                 return DataTypes.FLOAT();
