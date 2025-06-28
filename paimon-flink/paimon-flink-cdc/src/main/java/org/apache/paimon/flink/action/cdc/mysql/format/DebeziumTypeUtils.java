@@ -21,9 +21,16 @@ package org.apache.paimon.flink.action.cdc.mysql.format;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import io.debezium.time.Date;
+import io.debezium.time.MicroTime;
+import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
+import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import javax.annotation.Nullable;
+
+import java.math.BigDecimal;
 
 /** Converts from Debezium type to {@link DataType}. */
 public class DebeziumTypeUtils {
@@ -40,21 +47,49 @@ public class DebeziumTypeUtils {
     private static final String STRING = "STRING";
     private static final String DOUBLE = "DOUBLE";
 
-    public static DataType toDataType(String type, @Nullable String className) {
+    public static DataType toDataType(String type, @Nullable String className, String rawValue) {
+        DataType dataType;
         switch (type.toUpperCase()) {
             case BOOLEAN:
                 return DataTypes.BOOLEAN();
             case BYTES:
-                return DataTypes.BYTES();
+                if (Decimal.LOGICAL_NAME.equals(className)) {
+                    try {
+                        BigDecimal temp = new BigDecimal(rawValue);
+                        dataType = DataTypes.DECIMAL(temp.precision(), temp.scale());
+                    } catch (NumberFormatException e) {
+                        throw new IllegalArgumentException(
+                                "Invalid big decimal value "
+                                        + rawValue
+                                        + ". Make sure that in the `customConverterConfigs` "
+                                        + "of the JsonDebeziumDeserializationSchema you created, set '"
+                                        + JsonConverterConfig.DECIMAL_FORMAT_CONFIG
+                                        + "' to 'numeric'",
+                                e);
+                    }
+                } else {
+                    dataType = DataTypes.BYTES();
+                }
+                return dataType;
             case INT16:
                 return DataTypes.SMALLINT();
             case INT32:
+                if (Date.SCHEMA_NAME.equals(className)) {
+                    return DataTypes.DATE();
+                }
                 return DataTypes.INT();
             case INT64:
-                if (Timestamp.SCHEMA_NAME.equals(className)) {
-                    return DataTypes.TIMESTAMP();
+                if (MicroTime.SCHEMA_NAME.equals(className)) {
+                    dataType = DataTypes.TIME();
+                } else if (Timestamp.SCHEMA_NAME.equals(className)) {
+                    dataType = DataTypes.TIMESTAMP(3);
+                } else if (MicroTimestamp.SCHEMA_NAME.equals(className)) {
+                    dataType = DataTypes.TIMESTAMP(6);
+                } else {
+                    dataType = DataTypes.BIGINT();
                 }
-                return DataTypes.BIGINT();
+
+                return dataType;
             case FLOAT32:
                 return DataTypes.FLOAT();
             case FLOAT64:

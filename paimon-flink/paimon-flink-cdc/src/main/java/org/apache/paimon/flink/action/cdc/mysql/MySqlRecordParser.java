@@ -243,14 +243,15 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
             String mySqlType = field.getValue().type();
             String className = field.getValue().name();
 
-            schemaBuilder.column(fieldName, DebeziumTypeUtils.toDataType(mySqlType, className));
-
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
                 continue;
             }
 
             String oldValue = objectValue.asText();
+            schemaBuilder.column(
+                    fieldName, DebeziumTypeUtils.toDataType(mySqlType, className, oldValue));
+
             String newValue =
                     DebeziumSchemaUtils.transformRawValue(
                             oldValue,
