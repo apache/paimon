@@ -206,6 +206,7 @@ public class ArrowFormatWriterTest {
     //            }
     //        }
     //
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteWithExternalAllocator(boolean allocationFailed) {
