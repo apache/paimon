@@ -91,6 +91,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private int[][] outerProjection;
 
     private boolean forceKeepDelete = false;
+    private boolean withRowId = false;
 
     public MergeFileSplitRead(
             CoreOptions options,
@@ -241,6 +242,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
+    public SplitRead<KeyValue> withRowId(boolean withRowId) {
+        this.withRowId = withRowId;
+        return this;
+    }
+
+    @Override
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             throw new IllegalArgumentException("This read cannot accept split with before files.");
@@ -274,9 +281,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory overlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForKeys, withRowId);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForAll, withRowId);
 
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
@@ -316,7 +325,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         bucket,
                         DeletionVector.factory(fileIO, files, deletionFiles),
                         true,
-                        onlyFilterKey ? filtersForKeys : filtersForAll);
+                        onlyFilterKey ? filtersForKeys : filtersForAll,
+                        withRowId);
         List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
             suppliers.add(() -> readerFactory.createRecordReader(file));

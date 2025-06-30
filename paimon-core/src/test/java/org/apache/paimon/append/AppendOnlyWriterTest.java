@@ -732,6 +732,7 @@ public class AppendOnlyWriterTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 }

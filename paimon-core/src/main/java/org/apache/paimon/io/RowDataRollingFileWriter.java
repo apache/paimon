@@ -30,6 +30,9 @@ import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.RowIdSequenceBuilder;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 
@@ -49,7 +52,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            @Nullable RowIdSequenceBuilder rowIdSequenceBuilder) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -64,7 +68,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                pathFactory.isExternalPath()),
+                                pathFactory.isExternalPath(),
+                                rowIdSequenceBuilder),
                 targetFileSize);
     }
 
