@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -163,52 +164,49 @@ public class ArrowFormatWriterTest {
             vectorSchemaRoot.close();
         }
     }
-    //
-    //    @Test
-    //    public void testArrowBundleRecords() {
-    //        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
-    //            List<InternalRow> list = new ArrayList<>();
-    //            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
-    //
-    //            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
-    //                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i),
-    // i));
-    //            }
-    //            for (int i = 0; i < 1000; i++) {
-    //                list.add(GenericRow.of(randomRowValues(null)));
-    //            }
-    //
-    //            list.forEach(writer::write);
-    //
-    //            writer.flush();
-    //            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
-    //
-    //            Iterator<InternalRow> iterator =
-    //                    new ArrowBundleRecords(vectorSchemaRoot, PRIMITIVE_TYPE, true).iterator();
-    //            for (int i = 0; i < 1000; i++) {
-    //                InternalRow actual = iterator.next();
-    //                InternalRow expectec = list.get(i);
-    //
-    //                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-    //                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
-    //                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
-    //                }
-    //            }
-    //            vectorSchemaRoot.close();
-    //        }
-    //    }
-    //
-    //        @Test
-    //        public void testCWriter() {
-    //            try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096,
-    // true)) {
-    //                writeAndCheck(writer);
-    //            }
-    //        }
-    //
+
+    @Test
+    public void testArrowBundleRecords() {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
+            List<InternalRow> list = new ArrayList<>();
+            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+            }
+            for (int i = 0; i < 1000; i++) {
+                list.add(GenericRow.of(randomRowValues(null)));
+            }
+
+            list.forEach(writer::write);
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            Iterator<InternalRow> iterator =
+                    new ArrowBundleRecords(vectorSchemaRoot, PRIMITIVE_TYPE, true).iterator();
+            for (int i = 0; i < 1000; i++) {
+                InternalRow actual = iterator.next();
+                InternalRow expectec = list.get(i);
+
+                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+                }
+            }
+            vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testCWriter() {
+        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
+            writeAndCheck(writer);
+        }
+    }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false})
+    @ValueSource(booleans = {false, true})
     public void testWriteWithExternalAllocator(boolean allocationFailed) {
         long maxAllocation = allocationFailed ? 1024L : Long.MAX_VALUE;
         try (RootAllocator rootAllocator = new RootAllocator();
@@ -254,7 +252,6 @@ public class ArrowFormatWriterTest {
             }
         }
         vectorSchemaRoot.close();
-        writer.release();
     }
 
     private Object[] randomRowValues(boolean[] nullable) {
