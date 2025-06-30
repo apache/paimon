@@ -29,10 +29,15 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -193,29 +198,30 @@ public class ArrowFormatWriterTest {
     //        }
     //    }
     //
-    //    @Test
-    //    public void testCWriter() {
-    //        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
-    //            writeAndCheck(writer);
-    //        }
-    //    }
-    //
-    //    @ParameterizedTest
-    //    @ValueSource(booleans = {false, true})
-    //    public void testWriteWithExternalAllocator(boolean allocationFailed) {
-    //        long maxAllocation = allocationFailed ? 1024L : Long.MAX_VALUE;
-    //        try (RootAllocator rootAllocator = new RootAllocator();
-    //                BufferAllocator allocator =
-    //                        rootAllocator.newChildAllocator("paimonWriter", 0, maxAllocation);
-    //                ArrowFormatCWriter writer =
-    //                        new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true, allocator)) {
-    //            writeAndCheck(writer);
-    //        } catch (OutOfMemoryException e) {
-    //            if (!allocationFailed) {
-    //                throw e;
+    //        @Test
+    //        public void testCWriter() {
+    //            try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096,
+    // true)) {
+    //                writeAndCheck(writer);
     //            }
     //        }
-    //    }
+    //
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriteWithExternalAllocator(boolean allocationFailed) {
+        long maxAllocation = allocationFailed ? 1024L : Long.MAX_VALUE;
+        try (RootAllocator rootAllocator = new RootAllocator();
+                BufferAllocator allocator =
+                        rootAllocator.newChildAllocator("paimonWriter", 0, maxAllocation);
+                ArrowFormatCWriter writer =
+                        new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true, allocator)) {
+            writeAndCheck(writer);
+        } catch (OutOfMemoryException e) {
+            if (!allocationFailed) {
+                throw e;
+            }
+        }
+    }
 
     private void writeAndCheck(ArrowFormatCWriter writer) {
         List<InternalRow> list = new ArrayList<>();
