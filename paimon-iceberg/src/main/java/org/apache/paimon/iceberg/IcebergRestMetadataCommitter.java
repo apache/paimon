@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.IcebergSnapshotRefType;
 import org.apache.iceberg.MetadataUpdate;
 import org.apache.iceberg.Schema;
@@ -38,6 +39,7 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.UpdateRequirement;
+import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableCommit;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -57,6 +59,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.iceberg.CatalogUtil.ICEBERG_CATALOG_TYPE;
 import static org.apache.iceberg.TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED;
 import static org.apache.iceberg.TableProperties.METADATA_PREVIOUS_VERSIONS_MAX;
 
@@ -105,7 +108,10 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                         IcebergSchema.create(table.schemaManager().schema(0)).toJson());
 
         try {
-            this.restCatalog = initRestCatalog(restConfigs);
+            Configuration hadoopConf = new Configuration();
+            hadoopConf.setClassLoader(IcebergRestMetadataCommitter.class.getClassLoader());
+
+            this.restCatalog = initRestCatalog(restConfigs, hadoopConf);
         } catch (Exception e) {
             throw new RuntimeException("Fail to initialize iceberg rest catalog.", e);
         }
@@ -154,8 +160,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
                 boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
-                if (metadata.lastSequenceNumber() == 0
-                        && metadata.currentSnapshot().snapshotId() == -1) {
+                if (metadata.lastSequenceNumber() == 0 && metadata.currentSnapshot() == null) {
                     // treat the iceberg table as a newly created table
                     LOG.info(
                             "lastSequenceNumber is 0 and currentSnapshotId is -1 for the existed iceberg table, "
@@ -257,12 +262,10 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         return updates;
     }
 
-    private RESTCatalog initRestCatalog(Map<String, String> restConfigs) {
-        RESTCatalog catalog = new RESTCatalog();
-        catalog.setConf(new Configuration());
-        catalog.initialize(REST_CATALOG_NAME, restConfigs);
-
-        return catalog;
+    private RESTCatalog initRestCatalog(Map<String, String> restConfigs, Configuration conf) {
+        restConfigs.put(ICEBERG_CATALOG_TYPE, "rest");
+        Catalog catalog = CatalogUtil.buildIcebergCatalog(REST_CATALOG_NAME, restConfigs, conf);
+        return (RESTCatalog) catalog;
     }
 
     // -------------------------------------------------------------------------------------
