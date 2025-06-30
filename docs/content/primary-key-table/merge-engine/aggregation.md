@@ -119,11 +119,11 @@ Current supported aggregate functions and data types are:
 
 ### rbm32
   The rbm32 function aggregates multiple serialized 32-bit RoaringBitmap into a single RoaringBitmap.
-  It supports VARBINARY data type.
+  It supports VARBINARY data type which must be serialized 32-bit RoaringBitmap.
 
 ### rbm64
   The rbm64 function aggregates multiple serialized 64-bit Roaring64Bitmap into a single Roaring64Bitmap.
-  It supports VARBINARY data type.
+  It supports VARBINARY data type which must be serialized 64-bit RoaringBitmap.
 
 ### nested_update
   The nested_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
