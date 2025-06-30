@@ -208,6 +208,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -271,6 +272,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -339,6 +341,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -390,6 +393,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -458,6 +462,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -491,6 +496,7 @@ public class ArrowBatchConverterTest {
 
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -557,6 +563,7 @@ public class ArrowBatchConverterTest {
                 arrowWriter.close();
             }
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -634,6 +641,7 @@ public class ArrowBatchConverterTest {
             assertThat(readPks).isEqualTo(expectedPks);
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -722,6 +730,7 @@ public class ArrowBatchConverterTest {
             assertThat(readPks).isEqualTo(expectedPks);
             arrowWriter.close();
         }
+        iterator.releaseBatch();
     }
 
     @TestTemplate
@@ -792,6 +801,7 @@ public class ArrowBatchConverterTest {
             assertThat(readPks).isEqualTo(expectedPks);
             arrowBatchConverter.close();
         }
+        iterator.releaseBatch();
     }
 
     private Set<Integer> getDeletedPks(int numRows) {
