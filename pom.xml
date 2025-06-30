@@ -112,7 +112,7 @@ under the License.
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
-        <arrow.version>14.0.0</arrow.version>
+        <arrow.version>15.0.0</arrow.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
