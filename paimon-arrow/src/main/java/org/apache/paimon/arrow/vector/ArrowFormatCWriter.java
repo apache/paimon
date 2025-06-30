@@ -57,10 +57,13 @@ public class ArrowFormatCWriter implements AutoCloseable {
         return realWriter.write(currentRow);
     }
 
-    public ArrowCStruct flush() {
-        realWriter.flush();
+    public ArrowCStruct toCStruct() {
         VectorSchemaRoot vectorSchemaRoot = realWriter.getVectorSchemaRoot();
         return ArrowUtils.serializeToCStruct(vectorSchemaRoot, array, schema);
+    }
+
+    public void flush() {
+        realWriter.flush();
     }
 
     public void reset() {
