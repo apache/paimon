@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactSortOperator;
@@ -29,8 +27,6 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SerializableRunnable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.operators.SlotSharingGroup;
@@ -46,7 +42,6 @@ import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 
 import javax.annotation.Nullable;
 
@@ -56,9 +51,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -90,89 +83,6 @@ public abstract class FlinkSink<T> implements Serializable {
     public FlinkSink(FileStoreTable table, boolean ignorePreviousFiles) {
         this.table = table;
         this.ignorePreviousFiles = ignorePreviousFiles;
-    }
-
-    private StoreSinkWrite.Provider createWriteProvider(
-            CheckpointConfig checkpointConfig, boolean isStreaming, boolean hasSinkMaterializer) {
-        SerializableRunnable assertNoSinkMaterializer =
-                () ->
-                        Preconditions.checkArgument(
-                                !hasSinkMaterializer,
-                                String.format(
-                                        "Sink materializer must not be used with Paimon sink. "
-                                                + "Please set '%s' to '%s' in Flink's config.",
-                                        ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE
-                                                .key(),
-                                        ExecutionConfigOptions.UpsertMaterialize.NONE.name()));
-
-        Options options = table.coreOptions().toConfiguration();
-        ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
-        boolean waitCompaction;
-        CoreOptions coreOptions = table.coreOptions();
-        if (coreOptions.writeOnly()) {
-            waitCompaction = false;
-        } else {
-            waitCompaction = coreOptions.prepareCommitWaitCompaction();
-            int deltaCommits = -1;
-            if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
-                deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
-            } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
-                long fullCompactionThresholdMs =
-                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
-                deltaCommits =
-                        (int)
-                                (fullCompactionThresholdMs
-                                        / checkpointConfig.getCheckpointInterval());
-            }
-
-            if (changelogProducer == ChangelogProducer.FULL_COMPACTION || deltaCommits >= 0) {
-                int finalDeltaCommits = Math.max(deltaCommits, 1);
-                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
-                    assertNoSinkMaterializer.run();
-                    return new GlobalFullCompactionSinkWrite(
-                            table,
-                            commitUser,
-                            state,
-                            ioManager,
-                            ignorePreviousFiles,
-                            waitCompaction,
-                            finalDeltaCommits,
-                            isStreaming,
-                            memoryPool,
-                            metricGroup);
-                };
-            }
-
-            if (coreOptions.needLookup()) {
-                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
-                    assertNoSinkMaterializer.run();
-                    return new LookupSinkWrite(
-                            table,
-                            commitUser,
-                            state,
-                            ioManager,
-                            ignorePreviousFiles,
-                            waitCompaction,
-                            isStreaming,
-                            memoryPool,
-                            metricGroup);
-                };
-            }
-        }
-
-        return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
-            assertNoSinkMaterializer.run();
-            return new StoreSinkWriteImpl(
-                    table,
-                    commitUser,
-                    state,
-                    ioManager,
-                    ignorePreviousFiles,
-                    waitCompaction,
-                    isStreaming,
-                    memoryPool,
-                    metricGroup);
-        };
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
@@ -223,9 +133,11 @@ public abstract class FlinkSink<T> implements Serializable {
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
                         new CommittableTypeInfo(),
                         createWriteOperatorFactory(
-                                createWriteProvider(
+                                StoreSinkWrite.createWriteProvider(
+                                        table,
                                         env.getCheckpointConfig(),
                                         isStreaming,
+                                        ignorePreviousFiles,
                                         hasSinkMaterializer(input)),
                                 commitUser));
         if (parallelism == null) {
