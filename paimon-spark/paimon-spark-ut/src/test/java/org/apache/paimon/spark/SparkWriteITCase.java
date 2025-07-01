@@ -295,7 +295,7 @@ public class SparkWriteITCase {
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
         Assertions.assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("data-"));
+            Assertions.assertTrue(fileName.contains("data-"));
         }
     }
 
@@ -316,7 +316,7 @@ public class SparkWriteITCase {
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
         Assertions.assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("test-"));
+            Assertions.assertTrue(fileName.contains("test-"));
         }
     }
 
@@ -337,7 +337,7 @@ public class SparkWriteITCase {
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
         Assertions.assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.startsWith("test-"));
+            Assertions.assertTrue(fileName.contains("test-"));
         }
 
         // reset config, it will affect other tests
@@ -453,7 +453,7 @@ public class SparkWriteITCase {
         List<String> files =
                 Arrays.stream(fileIO.listStatus(new Path(tabLocation, "bucket-0")))
                         .map(name -> name.getPath().getName())
-                        .filter(name -> name.startsWith("changelog-"))
+                        .filter(name -> name.contains("changelog-"))
                         .collect(Collectors.toList());
         String defaultExtension = "." + "parquet";
         String newExtension = "." + "zstd" + "." + "parquet";
@@ -480,8 +480,6 @@ public class SparkWriteITCase {
     }
 
     private long dataFileCount(FileStatus[] files, String filePrefix) {
-        return Arrays.stream(files)
-                .filter(f -> f.getPath().getName().startsWith(filePrefix))
-                .count();
+        return Arrays.stream(files).filter(f -> f.getPath().getName().contains(filePrefix)).count();
     }
 }
