@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
-import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
@@ -27,14 +26,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
-
-import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -42,12 +34,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final BucketSelectConverter bucketSelectConverter;
     private final SimpleStatsEvolutions simpleStatsEvolutions;
 
-    private final boolean fileIndexReadEnabled;
-
     private Predicate filter;
-
-    // just cache.
-    private final Map<Long, Predicate> dataFilterMapping = new ConcurrentHashMap<>();
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
@@ -64,11 +51,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                scanManifestParallelism);
+                scanManifestParallelism,
+                fileIndexReadEnabled);
         this.bucketSelectConverter = bucketSelectConverter;
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
-        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -92,32 +79,13 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().valueStatsCols());
 
         return filter.test(
-                        entry.file().rowCount(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts())
-                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+                entry.file().rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
-    private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
-        if (embeddedIndexBytes == null) {
-            return true;
-        }
-
-        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
-
-        Predicate dataPredicate =
-                dataFilterMapping.computeIfAbsent(
-                        entry.file().schemaId(),
-                        id ->
-                                simpleStatsEvolutions.tryDevolveFilter(
-                                        entry.file().schemaId(), filter));
-
-        try (FileIndexPredicate predicate =
-                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
-            return predicate.evaluate(dataPredicate).remain();
-        } catch (IOException e) {
-            throw new RuntimeException("Exception happens while checking predicate.", e);
-        }
+    @Override
+    protected Predicate convertFilter(ManifestEntry entry) {
+        return filter == null
+                ? null
+                : simpleStatsEvolutions.tryDevolveFilter(entry.file().schemaId(), filter);
     }
 }

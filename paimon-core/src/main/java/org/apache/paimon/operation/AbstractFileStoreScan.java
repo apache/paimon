@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
@@ -37,6 +38,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -44,6 +46,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -89,13 +92,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;
 
+    private final boolean fileIndexReadEnabled;
+    // just cache.
+    private final Map<Long, Predicate> dataFilterMapping = new ConcurrentHashMap<>();
+
     public AbstractFileStoreScan(
             ManifestsReader manifestsReader,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            @Nullable Integer parallelism) {
+            @Nullable Integer parallelism,
+            boolean fileIndexReadEnabled) {
         this.manifestsReader = manifestsReader;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
@@ -104,6 +112,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.tableSchemas = new ConcurrentHashMap<>();
         this.parallelism = parallelism;
         this.dropStats = false;
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     @Override
@@ -415,6 +424,31 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
 
+    private boolean filterByFileIndex(ManifestEntry entry) {
+        return !fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry);
+    }
+
+    private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
+        if (embeddedIndexBytes == null) {
+            return true;
+        }
+
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+        try (FileIndexPredicate predicate =
+                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
+            Predicate dataPredicate =
+                    dataFilterMapping.computeIfAbsent(
+                            entry.file().schemaId(), id -> convertFilter(entry));
+            return predicate.evaluate(dataPredicate).remain();
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
+        }
+    }
+
+    // convert filter if schema evolved
+    @Nullable
+    protected abstract Predicate convertFilter(ManifestEntry entry);
+
     protected boolean wholeBucketFilterEnabled() {
         return false;
     }
@@ -446,7 +480,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
-                                                && filterByStats(entry));
+                                                && filterByStats(entry)
+                                                && filterByFileIndex(entry));
         if (dropStats) {
             List<ManifestEntry> copied = new ArrayList<>(entries.size());
             for (ManifestEntry entry : entries) {
