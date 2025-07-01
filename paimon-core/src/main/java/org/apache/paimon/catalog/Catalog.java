@@ -1029,12 +1029,17 @@ public interface Catalog extends AutoCloseable {
 
     /** Exception for trying to operate on the database that doesn't have permission. */
     class DatabaseNoPermissionException extends RuntimeException {
-        private static final String MSG = "Database %s has no permission.";
+        private static final String MSG = "Database %s has no permission. Cause by %s.";
 
         private final String database;
 
         public DatabaseNoPermissionException(String database, Throwable cause) {
-            super(String.format(MSG, database), cause);
+            super(
+                    String.format(
+                            MSG,
+                            database,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.database = database;
         }
 
@@ -1093,12 +1098,17 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
-        private static final String MSG = "Table %s has no permission.";
+        private static final String MSG = "Table %s has no permission. Cause by %s.";
 
         private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.identifier = identifier;
         }
 
