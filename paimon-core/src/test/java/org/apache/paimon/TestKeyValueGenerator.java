@@ -29,7 +29,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -38,6 +37,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.TestingSchemaManager;
 
 import javax.annotation.Nullable;
 
@@ -318,7 +318,7 @@ public class TestKeyValueGenerator {
                         "");
         Map<Long, TableSchema> schemas = new HashMap<>();
         schemas.put(tableSchema.id(), tableSchema);
-        return new SchemaEvolutionTableTestBase.TestingSchemaManager(path, schemas);
+        return new TestingSchemaManager(path, schemas);
     }
 
     public void sort(List<KeyValue> kvs) {

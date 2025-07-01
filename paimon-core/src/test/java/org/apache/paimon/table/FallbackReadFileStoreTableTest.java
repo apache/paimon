@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -42,12 +44,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.table.SchemaEvolutionTableTestBase.rowData;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FallbackReadFileStoreTable}. */
@@ -174,5 +176,17 @@ public class FallbackReadFileStoreTableTest {
                         tablePath,
                         new SchemaManager(fileIO, tablePath, branchName).latest().get())
                 .copy(options.toMap());
+    }
+
+    private static InternalRow rowData(Object... values) {
+        List<Object> valueList = new ArrayList<>(values.length);
+        for (Object value : values) {
+            if (value instanceof String) {
+                valueList.add(BinaryString.fromString((String) value));
+            } else {
+                valueList.add(value);
+            }
+        }
+        return GenericRow.of(valueList.toArray(new Object[0]));
     }
 }
