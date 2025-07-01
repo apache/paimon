@@ -1034,7 +1034,12 @@ public interface Catalog extends AutoCloseable {
         private final String database;
 
         public DatabaseNoPermissionException(String database, Throwable cause) {
-            super(String.format(MSG, database, cause.getMessage()), cause);
+            super(
+                    String.format(
+                            MSG,
+                            database,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.database = database;
         }
 
@@ -1098,7 +1103,12 @@ public interface Catalog extends AutoCloseable {
         private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName(), cause.getMessage()), cause);
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.identifier = identifier;
         }
 
