@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** Test for ComputedColumnUtils. */
 public class ComputedColumnUtilsTest {
     @Test
-    public void test() {
+    public void testSortComputedColumns() {
         List<ComputedColumn> columns =
                 Arrays.asList(
                         new ComputedColumn("A", Expression.substring("B", "1")),

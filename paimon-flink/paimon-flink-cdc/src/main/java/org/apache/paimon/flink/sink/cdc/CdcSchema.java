@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /** A schema change message from the CDC source. */
 public class CdcSchema implements Serializable {
@@ -193,7 +192,7 @@ public class CdcSchema implements Serializable {
 
         /** Returns an instance of an unresolved {@link CdcSchema}. */
         public CdcSchema build() {
-            List<DataField> fields = columns.values().stream().collect(Collectors.toList());
+            List<DataField> fields = new ArrayList<>(columns.values());
             return new CdcSchema(fields, primaryKeys, comment);
         }
     }
