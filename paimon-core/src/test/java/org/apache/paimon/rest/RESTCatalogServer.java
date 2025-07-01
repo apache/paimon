@@ -1963,11 +1963,11 @@ public class RESTCatalogServer {
                     Catalog.ColumnNotExistException {
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-            TableSchema schema = tableMetadata.schema();
-            if (isFormatTable(schema.toSchema())) {
-                throw new UnsupportedOperationException("Only data table support alter table.");
-            }
             try {
+                TableSchema schema = tableMetadata.schema();
+                if (isFormatTable(schema.toSchema())) {
+                    return;
+                }
                 catalog.alterTable(identifier, changes, false);
                 FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
                 TableSchema newSchema = table.schema();
