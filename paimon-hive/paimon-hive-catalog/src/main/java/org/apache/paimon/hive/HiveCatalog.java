@@ -1422,6 +1422,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case TEXT:
                 return "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
@@ -1439,6 +1440,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case TEXT:
             case JSON:
                 return "org.apache.hadoop.mapred.TextInputFormat";
             case PARQUET:
@@ -1455,6 +1457,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case TEXT:
             case JSON:
                 return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
             case PARQUET:

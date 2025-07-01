@@ -156,6 +156,14 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     }
 
     @Test
+    public void testFlinkCreateTextFormatTable() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE flink_text_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='text')")
+                .await();
+        doTestCSVFormatTable("flink_text_table");
+    }
+
+    @Test
     public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE flink_csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv', 'field-delimiter'=';')");

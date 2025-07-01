@@ -39,6 +39,8 @@ import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.factories.FactoryUtil.FORMAT;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.table.FormatTable.Format.CSV;
+import static org.apache.paimon.table.FormatTable.Format.TEXT;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 /** A {@link CatalogTable} to represent format table. */
@@ -91,7 +93,9 @@ public class FormatCatalogTable implements CatalogTable {
     public Map<String, String> getOptions() {
         if (cachedOptions == null) {
             cachedOptions = new HashMap<>();
-            String format = table.format().name().toLowerCase();
+            String paimonFormat = table.format().name().toLowerCase();
+            boolean isTextFormat = paimonFormat.contains(TEXT.name().toLowerCase());
+            String format = isTextFormat ? CSV.name().toLowerCase() : paimonFormat;
             Map<String, String> options = table.options();
             options.forEach(
                     (k, v) -> {
@@ -99,8 +103,12 @@ public class FormatCatalogTable implements CatalogTable {
                             cachedOptions.put(k, v);
                         }
                     });
-            if (options.containsKey(FIELD_DELIMITER.key())) {
-                cachedOptions.put("csv.field-delimiter", options.get(FIELD_DELIMITER.key()));
+            if (isTextFormat) {
+                cachedOptions.put("csv.field-delimiter", "\u0001");
+            } else {
+                if (options.containsKey(FIELD_DELIMITER.key())) {
+                    cachedOptions.put("csv.field-delimiter", options.get(FIELD_DELIMITER.key()));
+                }
             }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());

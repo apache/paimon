@@ -62,6 +62,7 @@ import org.apache.spark.sql.execution.PartitionedCSVTable;
 import org.apache.spark.sql.execution.PartitionedJsonTable;
 import org.apache.spark.sql.execution.PartitionedOrcTable;
 import org.apache.spark.sql.execution.PartitionedParquetTable;
+import org.apache.spark.sql.execution.PartitionedTextTable;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
 import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
@@ -537,6 +538,15 @@ public class SparkCatalog extends SparkBaseCatalog
                     partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.JSON) {
             return new PartitionedJsonTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    JsonFileFormat.class,
+                    partitionSchema);
+        } else if (formatTable.format() == FormatTable.Format.TEXT) {
+            return new PartitionedTextTable(
                     ident.name(),
                     spark,
                     dsOptions,

@@ -28,6 +28,7 @@ import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
+import org.apache.spark.sql.execution.datasources.v2.text.TextTable
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -224,6 +225,27 @@ class PartitionedJsonTable(
     fallbackFileFormat: Class[_ <: FileFormat],
     override val partitionSchema_ : StructType)
   extends JsonTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
+
+  override lazy val fileIndex: PartitioningAwareFileIndex = {
+    PaimonFormatTable.createFileIndex(
+      options,
+      sparkSession,
+      paths,
+      userSpecifiedSchema,
+      partitionSchema())
+  }
+}
+
+class PartitionedTextTable(
+    name: String,
+    sparkSession: SparkSession,
+    options: CaseInsensitiveStringMap,
+    paths: Seq[String],
+    userSpecifiedSchema: Option[StructType],
+    fallbackFileFormat: Class[_ <: FileFormat],
+    override val partitionSchema_ : StructType)
+  extends TextTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
