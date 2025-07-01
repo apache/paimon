@@ -309,7 +309,7 @@ public class FormatReaderMapping {
                     tableSchema.id() == dataSchema.id()
                             ? filters
                             : SchemaEvolutionUtil.devolveDataFilters(
-                                    tableSchema.fields(), dataSchema.fields(), filters);
+                                    tableSchema.fields(), dataSchema.fields(), filters, false);
 
             // Skip pushing down partition filters to reader.
             return excludePredicateWithFields(

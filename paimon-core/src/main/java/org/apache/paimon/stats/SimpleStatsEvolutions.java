@@ -18,6 +18,7 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -44,13 +45,20 @@ public class SimpleStatsEvolutions {
     private final List<DataField> tableDataFields;
     private final AtomicReference<List<DataField>> tableFields;
     private final ConcurrentMap<Long, SimpleStatsEvolution> evolutions;
+    private final boolean isKeyStats;
 
     public SimpleStatsEvolutions(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
+        this(schemaFields, tableSchemaId, false);
+    }
+
+    public SimpleStatsEvolutions(
+            Function<Long, List<DataField>> schemaFields, long tableSchemaId, boolean isKeyStats) {
         this.schemaFields = schemaFields;
         this.tableSchemaId = tableSchemaId;
         this.tableDataFields = schemaFields.apply(tableSchemaId);
         this.tableFields = new AtomicReference<>();
         this.evolutions = new ConcurrentHashMap<>();
+        this.isKeyStats = isKeyStats;
     }
 
     public SimpleStatsEvolution getOrCreate(long dataSchemaId) {
@@ -87,8 +95,14 @@ public class SimpleStatsEvolutions {
                         SchemaEvolutionUtil.devolveDataFilters(
                                 schemaFields.apply(tableSchemaId),
                                 schemaFields.apply(dataSchemaId),
-                                Collections.singletonList(filter)));
+                                Collections.singletonList(filter),
+                                isKeyStats));
         return devolved.isEmpty() ? null : devolved.get(0);
+    }
+
+    // Stats filter is unsafe if it should be devolved and the devolving is unsafe
+    public boolean statsFilterUnsafe(ManifestEntry entry, Predicate statsFilter) {
+        return tryDevolveFilter(entry.file().schemaId(), statsFilter) == null;
     }
 
     public List<DataField> tableDataFields() {

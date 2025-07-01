@@ -415,6 +415,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
 
+    protected boolean filterByFileIndex(ManifestEntry entry) {
+        return true;
+    }
+
     protected boolean wholeBucketFilterEnabled() {
         return false;
     }
@@ -446,7 +450,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
-                                                && filterByStats(entry));
+                                                && filterByStats(entry)
+                                                && filterByFileIndex(entry));
         if (dropStats) {
             List<ManifestEntry> copied = new ArrayList<>(entries.size());
             for (ManifestEntry entry : entries) {

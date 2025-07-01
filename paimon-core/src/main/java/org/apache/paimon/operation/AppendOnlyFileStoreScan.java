@@ -67,7 +67,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 scanManifestParallelism);
         this.bucketSelectConverter = bucketSelectConverter;
         this.simpleStatsEvolutions =
-                new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
+                new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id(), false);
         this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
@@ -80,7 +80,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        if (filter == null) {
+        if (filter == null || simpleStatsEvolutions.statsFilterUnsafe(entry, filter)) {
             return true;
         }
 
@@ -92,11 +92,12 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().valueStatsCols());
 
         return filter.test(
-                        entry.file().rowCount(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts())
-                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+                entry.file().rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+    }
+
+    @Override
+    protected boolean filterByFileIndex(ManifestEntry entry) {
+        return !fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry);
     }
 
     private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
