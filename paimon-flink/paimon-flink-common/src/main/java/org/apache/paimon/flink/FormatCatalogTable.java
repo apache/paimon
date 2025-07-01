@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.FormatTable.Format;
 
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -92,27 +93,30 @@ public class FormatCatalogTable implements CatalogTable {
     @Override
     public Map<String, String> getOptions() {
         if (cachedOptions == null) {
-            cachedOptions = new HashMap<>();
-            String paimonFormat = table.format().name().toLowerCase();
-            boolean isTextFormat = paimonFormat.contains(TEXT.name().toLowerCase());
-            String format = isTextFormat ? CSV.name().toLowerCase() : paimonFormat;
             Map<String, String> options = table.options();
-            options.forEach(
-                    (k, v) -> {
-                        if (k.startsWith(format + ".")) {
-                            cachedOptions.put(k, v);
-                        }
-                    });
-            if (isTextFormat) {
-                cachedOptions.put("csv.field-delimiter", "\u0001");
-            } else {
-                if (options.containsKey(FIELD_DELIMITER.key())) {
-                    cachedOptions.put("csv.field-delimiter", options.get(FIELD_DELIMITER.key()));
-                }
-            }
+            cachedOptions = new HashMap<>();
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());
-            cachedOptions.put(FORMAT.key(), format);
+            Format format = FormatTable.parseFormat(table.format().name());
+            switch (format) {
+                case TEXT:
+                    cachedOptions.put(FORMAT.key(), CSV.name().toLowerCase());
+                    cachedOptions.put("csv.field-delimiter", "\u0001");
+                    break;
+                case CSV:
+                    if (options.containsKey(FIELD_DELIMITER.key())) {
+                        cachedOptions.put(
+                                "csv.field-delimiter", options.get(FIELD_DELIMITER.key()));
+                    }
+                default:
+                    options.forEach(
+                            (k, v) -> {
+                                if (k.startsWith(format + ".")) {
+                                    cachedOptions.put(k, v);
+                                }
+                            });
+                    break;
+            }
         }
         return cachedOptions;
     }
