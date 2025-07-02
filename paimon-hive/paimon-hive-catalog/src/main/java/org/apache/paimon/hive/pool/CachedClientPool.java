@@ -81,14 +81,16 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.key = extractKey(clientClassName, options.get(CLIENT_POOL_CACHE_KEYS), conf);
         this.clientClassName = clientClassName;
         init();
-        // set ugi information to hms client
-        try {
-            run(client -> null);
-        } catch (TException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+        // Set UGI information to HMS client only when no SASL
+        if (!conf.getBoolean("hive.metastore.sasl.enabled", false)) {
+            try {
+                run(client -> null);
+            } catch (TException e) {
+                throw new RuntimeException(e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
         }
     }
 
