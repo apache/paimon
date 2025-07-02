@@ -112,6 +112,8 @@ public interface FileStoreTable extends DataTable {
     /** TODO: this method is weird, old options will overwrite new options. */
     FileStoreTable copyWithLatestSchema();
 
+    FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions);
+
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 

@@ -106,6 +106,12 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
+        return new LookupFileStoreTable(
+                wrapped.copyFileIODynamicOptions(dynamicOptions), lookupScanMode);
+    }
+
+    @Override
     public FileStoreTable switchToBranch(String branchName) {
         wrapped.switchToBranch(branchName);
         return this;

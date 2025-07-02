@@ -289,6 +289,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
+        return new PrivilegedFileStoreTable(
+                wrapped.copyFileIODynamicOptions(dynamicOptions), privilegeChecker, identifier);
+    }
+
+    @Override
     public PrivilegedFileStoreTable switchToBranch(String branchName) {
         return new PrivilegedFileStoreTable(
                 wrapped.switchToBranch(branchName), privilegeChecker, identifier);

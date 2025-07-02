@@ -369,6 +369,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
+        FileIO fileIO = this.fileIO.copy(dynamicOptions);
+        AbstractFileStoreTable copied =
+                tableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, path, tableSchema, catalogEnvironment)
+                        : new PrimaryKeyFileStoreTable(
+                                fileIO, path, tableSchema, catalogEnvironment);
+        return setCacheForCopy(copied);
+    }
+
+    @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         AbstractFileStoreTable copied =
                 newTableSchema.primaryKeys().isEmpty()
@@ -376,6 +388,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                 fileIO, path, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, path, newTableSchema, catalogEnvironment);
+        return setCacheForCopy(copied);
+    }
+
+    private FileStoreTable setCacheForCopy(FileStoreTable copied) {
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }

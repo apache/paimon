@@ -74,6 +74,14 @@ public interface FileIO extends Serializable, Closeable {
     void configure(CatalogContext context);
 
     /**
+     * Set dynamic filesystem options and construct a new FileIO. Usually used for job-level
+     * settings.
+     */
+    default FileIO copy(Map<String, String> dynamicOptions) {
+        return this;
+    }
+
+    /**
      * Opens an SeekableInputStream at the indicated Path.
      *
      * @param path the file to open

@@ -214,6 +214,14 @@ public interface ObjectTable extends FileStoreTable {
         }
 
         @Override
+        public ObjectTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
+            return new ObjectTableImpl(
+                    wrapped.copyFileIODynamicOptions(dynamicOptions),
+                    objectFileIO.copy(dynamicOptions),
+                    objectLocation);
+        }
+
+        @Override
         public ObjectTable switchToBranch(String branchName) {
             return new ObjectTableImpl(
                     wrapped.switchToBranch(branchName), objectFileIO, objectLocation);

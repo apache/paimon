@@ -74,6 +74,7 @@ import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT_FULL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_BOUNDED;
@@ -191,7 +192,6 @@ public abstract class AbstractFlinkTableFactory
 
     Table buildPaimonTable(DynamicTableFactory.Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
-        Table table;
 
         Map<String, String> dynamicOptions = getDynamicConfigOptions(context);
         dynamicOptions.forEach(
@@ -225,7 +225,12 @@ public abstract class AbstractFlinkTableFactory
                 throw new RuntimeException(e);
             }
         }
-        table = fileStoreTable.copyWithoutTimeTravel(newOptions);
+
+        FileStoreTable table = fileStoreTable.copyWithoutTimeTravel(newOptions);
+
+        if (Options.fromMap(table.options()).get(FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED)) {
+            table = table.copyFileIODynamicOptions(getAllOptions(context));
+        }
 
         // notice that the Paimon table schema must be the same with the Flink's
         Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
@@ -292,18 +297,7 @@ public abstract class AbstractFlinkTableFactory
      * @return The dynamic options of this target table.
      */
     static Map<String, String> getDynamicConfigOptions(DynamicTableFactory.Context context) {
-
-        ReadableConfig config = context.getConfiguration();
-
-        Map<String, String> conf;
-
-        if (config instanceof Configuration) {
-            conf = ((Configuration) config).toMap();
-        } else if (config instanceof TableConfig) {
-            conf = ((TableConfig) config).getConfiguration().toMap();
-        } else {
-            throw new IllegalArgumentException("Unexpected config: " + config.getClass());
-        }
+        Map<String, String> conf = getAllOptions(context);
 
         String template =
                 String.format(
@@ -323,5 +317,16 @@ public abstract class AbstractFlinkTableFactory
                     optionsFromTableConfig);
         }
         return optionsFromTableConfig;
+    }
+
+    static Map<String, String> getAllOptions(DynamicTableFactory.Context context) {
+        ReadableConfig config = context.getConfiguration();
+        if (config instanceof Configuration) {
+            return ((Configuration) config).toMap();
+        } else if (config instanceof TableConfig) {
+            return ((TableConfig) config).getConfiguration().toMap();
+        } else {
+            throw new IllegalArgumentException("Unexpected config: " + config.getClass());
+        }
     }
 }
