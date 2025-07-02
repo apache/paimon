@@ -169,7 +169,10 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
         for (int i = 0; i < partitions.size(); i++) {
             BinaryRow partition = partitions.get(i);
             Object newField = fieldGetters.get(level).getFieldOrNull(partition);
-            Preconditions.checkNotNull(newField);
+            // if newField is null, it's the default partition
+            if (newField == null) {
+                newField = "__DEFAULT_PARTITION__";
+            }
             if (lastField == null || !lastField.equals(newField)) {
                 lastField = newField;
                 if (currentDistinct.addAndGet(1) > 1) {

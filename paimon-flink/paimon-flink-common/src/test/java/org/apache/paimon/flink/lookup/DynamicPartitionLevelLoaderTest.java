@@ -36,7 +36,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +44,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -75,9 +73,8 @@ public class DynamicPartitionLevelLoaderTest {
     @Test
     public void testGetMaxPartitions() throws Exception {
         List<String> partitionKeys = Arrays.asList("pt1", "pt2", "pt3");
-        table = createFileStoreTable(partitionKeys, Collections.emptyMap());
-        RowDataToObjectArrayConverter partitionConverter =
-                new RowDataToObjectArrayConverter(table.rowType().project(table.partitionKeys()));
+        List<String> primaryKeys = Arrays.asList("pt1", "pt2", "pt3", "k");
+        table = createFileStoreTable(partitionKeys, primaryKeys, Collections.emptyMap());
 
         TableWriteImpl<?> write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
@@ -129,12 +126,59 @@ public class DynamicPartitionLevelLoaderTest {
         commit.close();
     }
 
+    @Test
+    public void testGetMaxPartitionsWhenNullPartition() throws Exception {
+        List<String> partitionKeys = Arrays.asList("pt1", "pt2", "pt3");
+        table =
+                createFileStoreTable(
+                        partitionKeys, Collections.emptyList(), Collections.emptyMap());
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, 1, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, 2, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, null, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), null, 1, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2024"), 15, 1, 1, 1L));
+        write.write(GenericRow.of(null, 16, 1, 1, 1L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(FlinkConnectorOptions.SCAN_PARTITIONS.key(), "pt1=max_pt(),pt2=max_pt()");
+        table = table.copy(customOptions);
+
+        DynamicPartitionLevelLoader partitionLoader =
+                (DynamicPartitionLevelLoader) PartitionLoader.of(table);
+        partitionLoader.open();
+        List<BinaryRow> partitions = partitionLoader.getMaxPartitions();
+        assertThat(partitions.size()).isEqualTo(3);
+        assertThat(partitionsToString(partitions))
+                .hasSameElementsAs(Arrays.asList("2025/15/2", "2025/15/1", "2025/15/null"));
+
+        write.write(GenericRow.of(BinaryString.fromString("2026"), null, null, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2026"), null, 1, 1, 1L));
+        commit.commit(2, write.prepareCommit(true, 2));
+        partitionLoader = (DynamicPartitionLevelLoader) PartitionLoader.of(table);
+        partitionLoader.open();
+        partitions = partitionLoader.getMaxPartitions();
+        assertThat(partitions.size()).isEqualTo(2);
+        assertThat(partitionsToString(partitions))
+                .hasSameElementsAs(Arrays.asList("2026/null/1", "2026/null/null"));
+
+        write.close();
+        commit.close();
+    }
+
     private FileStoreTable createFileStoreTable(
-            List<String> partitionKeys, Map<String, String> customOptions) throws Exception {
+            List<String> partitionKeys, List<String> primaryKeys, Map<String, String> customOptions)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options(customOptions);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        if (primaryKeys.isEmpty()) {
+            conf.set(CoreOptions.BUCKET_KEY.key(), "k");
+        }
 
         RowType rowType =
                 RowType.of(
@@ -146,8 +190,6 @@ public class DynamicPartitionLevelLoaderTest {
                             DataTypes.BIGINT()
                         },
                         new String[] {"pt1", "pt2", "pt3", "k", "v"});
-        List<String> primaryKeys = new ArrayList<>(partitionKeys);
-        primaryKeys.add("k");
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), "");
         TableSchema tableSchema = schemaManager.createTable(schema);
