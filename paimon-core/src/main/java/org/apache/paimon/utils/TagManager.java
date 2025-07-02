@@ -141,12 +141,14 @@ public class TagManager {
             @Nullable Duration timeRetained,
             @Nullable List<TagCallback> callbacks) {
 
-        List<String> autoTags = getSnapshotAutoTags(snapshot);
-        if (!autoTags.isEmpty()) {
-            throw new RuntimeException(
-                    String.format(
-                            "Snapshot %s is already auto-tagged with %s.",
-                            snapshot.id(), autoTags));
+        if (isAutoTag(tagName)) {
+            List<String> autoTags = getSnapshotAutoTags(snapshot);
+            if (!autoTags.isEmpty()) {
+                throw new RuntimeException(
+                        String.format(
+                                "Snapshot %s is already auto-tagged with %s.",
+                                snapshot.id(), autoTags));
+            }
         }
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
@@ -454,6 +456,11 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'. This is unexpected.",
                         taggedSnapshot.id()));
+    }
+
+    private boolean isAutoTag(String tagName) {
+        TagPeriodHandler periodHandler = TagPeriodHandler.create(coreOptions);
+        return periodHandler.isAutoTag(tagName);
     }
 
     private List<String> getSnapshotAutoTags(Snapshot snapshot) {
