@@ -1474,7 +1474,6 @@ public abstract class CatalogTestBase {
                         anyCauseMatches(
                                 Catalog.ColumnNotExistException.class,
                                 "Column non_existing_col does not exist in the test_db.test_table table."));
-        ;
 
         // drop comment
         catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.updateComment(null)), false);
