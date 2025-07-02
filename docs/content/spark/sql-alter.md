@@ -81,7 +81,7 @@ ALTER TABLE catalog.database.test1 RENAME to catalog.database.test2;
 ```
 
 {{< hint info >}}
-If you use object storage, such as S3 or OSS, please use this syntax carefully, because the renaming of object storage is not atomic, and only partial files may be moved in case of failure.
+If you use object storage without REST Catalog, such as S3 or OSS, please use this syntax carefully, because the renaming of object storage is not atomic, and only partial files may be moved in case of failure.
 {{< /hint >}}
 
 ## Adding New Columns
