@@ -25,9 +25,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -35,22 +32,18 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** Dynamic partition for lookup. */
-public class DynamicPartitionLoader extends PartitionLoader {
-
-    private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionLoader.class);
+public abstract class DynamicPartitionLoader extends PartitionLoader {
 
     private static final long serialVersionUID = 2L;
 
-    private final Duration refreshInterval;
-    private final int maxPartitionNum;
+    protected final Duration refreshInterval;
 
-    private transient Comparator<InternalRow> comparator;
-    private transient LocalDateTime lastRefresh;
+    protected transient Comparator<InternalRow> comparator;
+    protected transient LocalDateTime lastRefresh;
 
-    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval, int maxPartitionNum) {
+    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval) {
         super(table);
         this.refreshInterval = refreshInterval;
-        this.maxPartitionNum = maxPartitionNum;
     }
 
     @Override
@@ -62,70 +55,17 @@ public class DynamicPartitionLoader extends PartitionLoader {
         this.lastRefresh = null;
     }
 
-    @Override
-    public boolean checkRefresh() {
-        if (lastRefresh != null
-                && !lastRefresh.plus(refreshInterval).isBefore(LocalDateTime.now())) {
-            return false;
-        }
+    protected abstract List<BinaryRow> getMaxPartitions();
 
-        LOG.info(
-                "DynamicPartitionLoader(maxPartitionNum={},table={}) refreshed after {} second(s), refreshing",
-                maxPartitionNum,
-                table.name(),
-                refreshInterval.toMillis() / 1000);
-
-        List<BinaryRow> newPartitions = getMaxPartitions();
-        lastRefresh = LocalDateTime.now();
-
-        if (newPartitions.size() != partitions.size()) {
-            partitions = newPartitions;
-            logNewPartitions();
-            return true;
-        } else {
-            for (int i = 0; i < newPartitions.size(); i++) {
-                if (comparator.compare(newPartitions.get(i), partitions.get(i)) != 0) {
-                    partitions = newPartitions;
-                    logNewPartitions();
-                    return true;
-                }
-            }
-            LOG.info(
-                    "DynamicPartitionLoader(maxPartitionNum={},table={}) didn't find new partitions.",
-                    maxPartitionNum,
-                    table.name());
-            return false;
-        }
-    }
-
-    private void logNewPartitions() {
-        String partitionsStr =
-                partitions.stream()
-                        .map(
-                                partition ->
-                                        InternalRowPartitionComputer.partToSimpleString(
-                                                table.rowType().project(table.partitionKeys()),
-                                                partition,
-                                                "-",
-                                                200))
-                        .collect(Collectors.joining(","));
-        LOG.info(
-                "DynamicPartitionLoader(maxPartitionNum={},table={}) finds new partitions: {}.",
-                maxPartitionNum,
-                table.name(),
-                partitionsStr);
-    }
-
-    private List<BinaryRow> getMaxPartitions() {
-        List<BinaryRow> newPartitions =
-                table.newReadBuilder().newScan().listPartitions().stream()
-                        .sorted(comparator.reversed())
-                        .collect(Collectors.toList());
-
-        if (newPartitions.size() <= maxPartitionNum) {
-            return newPartitions;
-        } else {
-            return newPartitions.subList(0, maxPartitionNum);
-        }
+    protected String partitionsToString(List<BinaryRow> partitions) {
+        return partitions.stream()
+                .map(
+                        partition ->
+                                InternalRowPartitionComputer.partToSimpleString(
+                                        table.rowType().project(table.partitionKeys()),
+                                        partition,
+                                        "-",
+                                        200))
+                .collect(Collectors.joining(","));
     }
 }

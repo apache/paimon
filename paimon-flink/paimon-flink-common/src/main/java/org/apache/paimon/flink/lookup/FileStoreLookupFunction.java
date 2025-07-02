@@ -114,7 +114,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         this.table = table;
-        this.partitionLoader = DynamicPartitionLoader.of(table);
+        this.partitionLoader = PartitionLoader.of(table);
 
         // join keys are based on projection fields
         RowType rowType = table.rowType();

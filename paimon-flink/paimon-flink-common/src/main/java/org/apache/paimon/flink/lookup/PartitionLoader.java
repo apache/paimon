@@ -44,8 +44,8 @@ public abstract class PartitionLoader implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final String MAX_PT = "max_pt()";
-    private static final String MAX_TWO_PT = "max_two_pt()";
+    protected static final String MAX_PT = "max_pt()";
+    protected static final String MAX_TWO_PT = "max_two_pt()";
 
     protected final FileStoreTable table;
     private final RowDataToObjectArrayConverter partitionConverter;
@@ -128,12 +128,22 @@ public abstract class PartitionLoader implements Serializable {
         }
 
         if (maxPartitionNum == -1) {
+            if (scanPartitions.contains(MAX_PT)) {
+                Duration refresh =
+                        options.get(
+                                FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
+                return new DynamicPartitionLevelLoader(
+                        table,
+                        refresh,
+                        ParameterUtils.parseCommaSeparatedKeyValues(scanPartitions));
+            }
+
             return new StaticPartitionLoader(
                     table, ParameterUtils.getPartitions(scanPartitions.split(";")));
         } else {
             Duration refresh =
                     options.get(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
-            return new DynamicPartitionLoader(table, refresh, maxPartitionNum);
+            return new DynamicPartitionNumberLoader(table, refresh, maxPartitionNum);
         }
     }
 }
