@@ -77,13 +77,10 @@ class HiveTableUtils {
                 format = Format.JSON;
             } else {
                 format = Format.CSV;
-                if (!options.contains(FIELD_DELIMITER)) {
-                    options.set(
-                            FIELD_DELIMITER,
-                            serdeInfo
-                                    .getParameters()
-                                    .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
-                }
+                // hive default field delimiter is '\u0001'
+                options.set(
+                    FIELD_DELIMITER,
+                    serdeInfo.getParameters().getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
             }
         } else {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
