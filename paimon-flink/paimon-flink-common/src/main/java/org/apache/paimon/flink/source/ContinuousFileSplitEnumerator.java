@@ -69,6 +69,8 @@ public class ContinuousFileSplitEnumerator
 
     protected final StreamTableScan scan;
 
+    protected final int splitMaxPerTask;
+
     protected final SplitAssigner splitAssigner;
 
     protected final ConsumerProgressCalculator consumerProgressCalculator;
@@ -104,8 +106,9 @@ public class ContinuousFileSplitEnumerator
         this.readersAwaitingSplit = new LinkedHashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
-        this.splitAssigner = createSplitAssigner(unawareBucket);
+        this.splitMaxPerTask = splitMaxPerTask;
         this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
+        this.splitAssigner = createSplitAssigner(unawareBucket);
         this.shuffleBucketWithPartition = shuffleBucketWithPartition;
         addSplits(remainSplits);
 
@@ -311,7 +314,8 @@ public class ContinuousFileSplitEnumerator
     protected SplitAssigner createSplitAssigner(boolean unawareBucket) {
         return unawareBucket
                 ? new FIFOSplitAssigner(Collections.emptyList())
-                : new PreAssignSplitAssigner(1, context, Collections.emptyList());
+                : new PreAssignSplitAssigner(
+                        this.splitMaxPerTask, context, Collections.emptyList());
     }
 
     protected boolean noMoreSplits() {
