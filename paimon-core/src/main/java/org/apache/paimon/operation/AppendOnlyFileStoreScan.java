@@ -111,7 +111,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().schemaId(),
                         id ->
                                 simpleStatsEvolutions.tryDevolveFilter(
-                                        entry.file().schemaId(), filter));
+                                        entry.file().schemaId(), filter, false));
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {

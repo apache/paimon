@@ -86,23 +86,25 @@ public class SimpleStatsEvolutions {
     }
 
     @Nullable
-    public Predicate tryDevolveFilter(long dataSchemaId, Predicate filter) {
+    public Predicate tryDevolveFilter(long dataSchemaId, Predicate filter, boolean nullSafe) {
         if (tableSchemaId == dataSchemaId) {
             return filter;
         }
         List<Predicate> devolved =
                 Objects.requireNonNull(
                         SchemaEvolutionUtil.devolveDataFilters(
-                                schemaFields.apply(tableSchemaId),
+                                tableDataFields,
                                 schemaFields.apply(dataSchemaId),
                                 Collections.singletonList(filter),
-                                isKeyStats));
+                                isKeyStats,
+                                nullSafe));
         return devolved.isEmpty() ? null : devolved.get(0);
     }
 
     // Stats filter is unsafe if it should be devolved and the devolving is unsafe
+    // null safe: it's safe if the predicate field is added later and filter it on the old schema
     public boolean statsFilterUnsafe(ManifestEntry entry, Predicate statsFilter) {
-        return tryDevolveFilter(entry.file().schemaId(), statsFilter) == null;
+        return tryDevolveFilter(entry.file().schemaId(), statsFilter, true) == null;
     }
 
     public List<DataField> tableDataFields() {

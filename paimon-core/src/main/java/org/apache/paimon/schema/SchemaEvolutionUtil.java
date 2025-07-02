@@ -133,6 +133,7 @@ public class SchemaEvolutionUtil {
      * @param dataFields the underlying data fields
      * @param filters the filters
      * @param isKeyFilter whether the filter is for system _KEY_ fields
+     * @param nullSafe whether to return predicate if the predicate field name isn't in dataFields
      * @return the data filters
      */
     @Nullable
@@ -140,7 +141,8 @@ public class SchemaEvolutionUtil {
             List<DataField> tableFields,
             List<DataField> dataFields,
             List<Predicate> filters,
-            boolean isKeyFilter) {
+            boolean isKeyFilter,
+            boolean nullSafe) {
         if (filters == null) {
             return null;
         }
@@ -163,7 +165,7 @@ public class SchemaEvolutionUtil {
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
-                        return Optional.empty();
+                        return nullSafe ? Optional.of(predicate) : Optional.empty();
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(

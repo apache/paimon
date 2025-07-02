@@ -158,7 +158,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                             entry.file().schemaId(),
                             id ->
                                     fieldValueStatsConverters.tryDevolveFilter(
-                                            entry.file().schemaId(), valueFilter));
+                                            entry.file().schemaId(), valueFilter, false));
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
