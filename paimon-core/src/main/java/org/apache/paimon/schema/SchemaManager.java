@@ -289,7 +289,10 @@ public class SchemaManager implements Serializable {
                                             new Catalog.TableNotExistException(
                                                     identifierFromPath(
                                                             tableRoot.toString(), true, branch)));
-            TableSchema newTableSchema = generateTableSchema(oldTableSchema, changes, hasSnapshots);
+            LazyField<Identifier> lazyIdentifier =
+                    new LazyField<>(() -> identifierFromPath(tableRoot.toString(), true, branch));
+            TableSchema newTableSchema =
+                    generateTableSchema(oldTableSchema, changes, hasSnapshots, lazyIdentifier);
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
@@ -301,8 +304,11 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public TableSchema generateTableSchema(
-            TableSchema oldTableSchema, List<SchemaChange> changes, LazyField<Boolean> hasSnapshots)
+    public static TableSchema generateTableSchema(
+            TableSchema oldTableSchema,
+            List<SchemaChange> changes,
+            LazyField<Boolean> hasSnapshots,
+            LazyField<Identifier> lazyIdentifier)
             throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
         Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
         Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
@@ -351,16 +357,15 @@ public class SchemaManager implements Serializable {
                         addColumn.dataType().isNullable(),
                         "Column %s cannot specify NOT NULL in the %s table.",
                         String.join(".", addColumn.fieldNames()),
-                        identifierFromPath(tableRoot.toString(), true, branch).getFullName());
+                        lazyIdentifier.get().getFullName());
                 int id = highestFieldId.incrementAndGet();
                 DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
-
-                new NestedColumnModifier(addColumn.fieldNames()) {
+                new NestedColumnModifier(addColumn.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
                             int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnAlreadyExistException {
-                        assertColumnNotExists(newFields, fieldName);
+                        assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
                         DataField dataField =
                                 new DataField(id, fieldName, dataType, addColumn.description());
@@ -386,14 +391,14 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
-                new NestedColumnModifier(rename.fieldNames()) {
+                new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
                             int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnNotExistException,
                                     Catalog.ColumnAlreadyExistException {
-                        assertColumnExists(newFields, fieldName);
-                        assertColumnNotExists(newFields, rename.newName());
+                        assertColumnExists(newFields, fieldName, lazyIdentifier);
+                        assertColumnNotExists(newFields, rename.newName(), lazyIdentifier);
                         for (int i = 0; i < newFields.size(); i++) {
                             DataField field = newFields.get(i);
                             if (!field.name().equals(fieldName)) {
@@ -415,12 +420,12 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
-                new NestedColumnModifier(drop.fieldNames()) {
+                new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
                             int depth, List<DataField> newFields, String fieldName)
                             throws Catalog.ColumnNotExistException {
-                        assertColumnExists(newFields, fieldName);
+                        assertColumnExists(newFields, fieldName, lazyIdentifier);
                         newFields.removeIf(f -> f.name().equals(fieldName));
                         if (newFields.isEmpty()) {
                             throw new IllegalArgumentException("Cannot drop all fields in table");
@@ -467,7 +472,8 @@ public class SchemaManager implements Serializable {
                                             update.fieldNames().length),
                                     field.description(),
                                     field.defaultValue());
-                        });
+                        },
+                        lazyIdentifier);
             } else if (change instanceof UpdateColumnNullability) {
                 UpdateColumnNullability update = (UpdateColumnNullability) change;
                 if (update.fieldNames().length == 1
@@ -499,7 +505,8 @@ public class SchemaManager implements Serializable {
                                             update.fieldNames().length),
                                     field.description(),
                                     field.defaultValue());
-                        });
+                        },
+                        lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
                 updateNestedColumn(
@@ -511,7 +518,8 @@ public class SchemaManager implements Serializable {
                                         field.name(),
                                         field.type(),
                                         update.newDescription(),
-                                        field.defaultValue()));
+                                        field.defaultValue()),
+                        lazyIdentifier);
             } else if (change instanceof UpdateColumnPosition) {
                 UpdateColumnPosition update = (UpdateColumnPosition) change;
                 SchemaChange.Move move = update.move();
@@ -527,7 +535,8 @@ public class SchemaManager implements Serializable {
                                         field.name(),
                                         field.type(),
                                         field.description(),
-                                        update.newDefaultValue()));
+                                        update.newDefaultValue()),
+                        lazyIdentifier);
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
             }
@@ -561,7 +570,7 @@ public class SchemaManager implements Serializable {
     // the maxDepth will be based on updateFieldNames
     // which in the case will be [v, element, value, element],
     // so maxDepth is 4 and return DataType will be INT
-    private DataType getRootType(DataType type, int currDepth, int maxDepth) {
+    private static DataType getRootType(DataType type, int currDepth, int maxDepth) {
         if (currDepth == maxDepth - 1) {
             return type;
         }
@@ -579,7 +588,7 @@ public class SchemaManager implements Serializable {
     // ex: ARRAY<MAP<STRING, ARRAY<INT>>> -> ARRAY<MAP<STRING, ARRAY<BIGINT>>>
     // here we only need to update type of ARRAY<INT> to ARRAY<BIGINT> and rest of the type
     // remains same. This function achieves this.
-    private DataType getArrayMapTypeWithTargetTypeRoot(
+    private static DataType getArrayMapTypeWithTargetTypeRoot(
             DataType source, DataType target, int currDepth, int maxDepth) {
         if (currDepth == maxDepth - 1) {
             return target;
@@ -607,7 +616,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void assertNullabilityChange(
+    private static void assertNullabilityChange(
             boolean oldNullability,
             boolean newNullability,
             String fieldName,
@@ -622,7 +631,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public void applyMove(List<DataField> newFields, SchemaChange.Move move) {
+    public static void applyMove(List<DataField> newFields, SchemaChange.Move move) {
         Map<String, Integer> map = new HashMap<>();
         for (int i = 0; i < newFields.size(); i++) {
             map.put(newFields.get(i).name(), i);
@@ -671,7 +680,7 @@ public class SchemaManager implements Serializable {
     }
 
     // Utility method to move a field within the list, handling range checks
-    private void moveField(List<DataField> newFields, int fromIndex, int toIndex) {
+    private static void moveField(List<DataField> newFields, int fromIndex, int toIndex) {
         if (fromIndex < 0 || fromIndex >= newFields.size() || toIndex < 0) {
             return;
         }
@@ -768,12 +777,14 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private abstract class NestedColumnModifier {
+    private abstract static class NestedColumnModifier {
 
         private final String[] updateFieldNames;
+        private final LazyField<Identifier> identifier;
 
-        private NestedColumnModifier(String[] updateFieldNames) {
+        private NestedColumnModifier(String[] updateFieldNames, LazyField<Identifier> identifier) {
             this.updateFieldNames = updateFieldNames;
+            this.identifier = identifier;
         }
 
         private void updateIntermediateColumn(
@@ -816,7 +827,7 @@ public class SchemaManager implements Serializable {
             }
 
             throw new Catalog.ColumnNotExistException(
-                    identifierFromPath(tableRoot.toString(), true, branch),
+                    identifier.get(),
                     String.join(".", Arrays.asList(updateFieldNames).subList(0, depth + 1)));
         }
 
@@ -863,7 +874,8 @@ public class SchemaManager implements Serializable {
                 int depth, List<DataField> newFields, String fieldName)
                 throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException;
 
-        protected void assertColumnExists(List<DataField> newFields, String fieldName)
+        protected void assertColumnExists(
+                List<DataField> newFields, String fieldName, LazyField<Identifier> lazyIdentifier)
                 throws Catalog.ColumnNotExistException {
             for (DataField field : newFields) {
                 if (field.name().equals(fieldName)) {
@@ -871,17 +883,16 @@ public class SchemaManager implements Serializable {
                 }
             }
             throw new Catalog.ColumnNotExistException(
-                    identifierFromPath(tableRoot.toString(), true, branch),
-                    getLastFieldName(fieldName));
+                    lazyIdentifier.get(), getLastFieldName(fieldName));
         }
 
-        protected void assertColumnNotExists(List<DataField> newFields, String fieldName)
+        protected void assertColumnNotExists(
+                List<DataField> newFields, String fieldName, LazyField<Identifier> lazyIdentifier)
                 throws Catalog.ColumnAlreadyExistException {
             for (DataField field : newFields) {
                 if (field.name().equals(fieldName)) {
                     throw new Catalog.ColumnAlreadyExistException(
-                            identifierFromPath(tableRoot.toString(), true, branch),
-                            getLastFieldName(fieldName));
+                            lazyIdentifier.get(), getLastFieldName(fieldName));
                 }
             }
         }
@@ -896,12 +907,13 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void updateNestedColumn(
+    private static void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
-            BiFunction<DataField, Integer, DataField> updateFunc)
+            BiFunction<DataField, Integer, DataField> updateFunc,
+            LazyField<Identifier> lazyIdentifier)
             throws Catalog.ColumnNotExistException, Catalog.ColumnAlreadyExistException {
-        new NestedColumnModifier(updateFieldNames) {
+        new NestedColumnModifier(updateFieldNames, lazyIdentifier) {
             @Override
             protected void updateLastColumn(int depth, List<DataField> newFields, String fieldName)
                     throws Catalog.ColumnNotExistException {
@@ -916,8 +928,7 @@ public class SchemaManager implements Serializable {
                 }
 
                 throw new Catalog.ColumnNotExistException(
-                        identifierFromPath(tableRoot.toString(), true, branch),
-                        String.join(".", updateFieldNames));
+                        lazyIdentifier.get(), String.join(".", updateFieldNames));
             }
         }.updateIntermediateColumn(newFields, 0);
     }
