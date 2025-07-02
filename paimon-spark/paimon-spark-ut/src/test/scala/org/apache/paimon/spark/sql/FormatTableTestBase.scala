@@ -117,4 +117,12 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       }
     }
   }
+
+  test("Format table: field delimiter in HMS") {
+    withTable("t1") {
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('field-delimiter' ';')")
+      val row = sql("SHOW CREATE TABLE t1").collect()(0)
+      assert(row.toString().contains("'field-delimiter' = ';'"))
+    }
+  }
 }
