@@ -1073,6 +1073,11 @@ public class HiveCatalog extends AbstractCatalog {
         Table table = newHmsTable(identifier, tblProperties, provider, externalTable);
         updateHmsTable(table, identifier, tableSchema, provider, location);
 
+        String fieldDelimiter = coreOptions.toConfiguration().get(FIELD_DELIMITER);
+        if (fieldDelimiter != null) {
+            table.getSd().getSerdeInfo().getParameters().put(FIELD_DELIM, fieldDelimiter);
+        }
+
         return table;
     }
 

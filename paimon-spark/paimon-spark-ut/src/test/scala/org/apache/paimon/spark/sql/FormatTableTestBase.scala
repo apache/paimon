@@ -24,6 +24,7 @@ import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.utils.CompressUtils
 
+import org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM
 import org.apache.spark.sql.Row
 
 abstract class FormatTableTestBase extends PaimonHiveTestBase {
@@ -115,6 +116,15 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         fileIO.deleteQuietly(new Path(file))
         checkAnswer(sql("SELECT * FROM compress_t"), Row(1, 2, 3))
       }
+    }
+  }
+
+  test("Format table: field delimiter in HMS") {
+    withTable("t1") {
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('field-delimiter' ';')")
+      val hmsClient = getHmsClient(paimonCatalog)
+      val table = hmsClient.getTable(hiveDbName, "t1")
+      assert(table.getSd.getSerdeInfo.getParameters.get(FIELD_DELIM).equals(";"))
     }
   }
 }
