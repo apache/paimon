@@ -2010,6 +2010,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Override
+    protected boolean supportsAlterFormatTable() {
+        return true;
+    }
+
+    @Override
     protected boolean supportPartitions() {
         return true;
     }

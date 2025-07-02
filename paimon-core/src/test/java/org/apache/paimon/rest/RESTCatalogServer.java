@@ -85,6 +85,7 @@ import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -93,6 +94,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.view.View;
@@ -1963,11 +1965,25 @@ public class RESTCatalogServer {
                     Catalog.ColumnNotExistException {
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-            TableSchema schema = tableMetadata.schema();
-            if (isFormatTable(schema.toSchema())) {
-                throw new UnsupportedOperationException("Only data table support alter table.");
-            }
             try {
+                TableSchema schema = tableMetadata.schema();
+                if (isFormatTable(schema.toSchema())) {
+                    TableSchema newSchema =
+                            SchemaManager.generateTableSchema(
+                                    schema,
+                                    changes,
+                                    new LazyField<>(() -> false),
+                                    new LazyField<>(() -> identifier));
+                    TableMetadata newTableMetadata =
+                            createTableMetadata(
+                                    identifier,
+                                    newSchema.id(),
+                                    newSchema.toSchema(),
+                                    tableMetadata.uuid(),
+                                    tableMetadata.isExternal());
+                    tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+                    return;
+                }
                 catalog.alterTable(identifier, changes, false);
                 FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
                 TableSchema newSchema = table.schema();
