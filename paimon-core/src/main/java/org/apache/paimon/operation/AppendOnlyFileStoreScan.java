@@ -92,12 +92,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().valueStatsCols());
 
         return filter.test(
-                entry.file().rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
-    }
-
-    @Override
-    protected boolean filterByFileIndex(ManifestEntry entry) {
-        return !fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry);
+                        entry.file().rowCount(),
+                        stats.minValues(),
+                        stats.maxValues(),
+                        stats.nullCounts())
+                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
     }
 
     private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
