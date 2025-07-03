@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -118,12 +119,23 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
     }
 
     @Override
+    public String identifier() {
+        return "hive";
+    }
+
+    @Override
     public void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath) {
         try {
             commitMetadataImpl(newMetadataPath, baseMetadataPath);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public void commitMetadata(
+            IcebergMetadata icebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
+        throw new UnsupportedOperationException();
     }
 
     private void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
