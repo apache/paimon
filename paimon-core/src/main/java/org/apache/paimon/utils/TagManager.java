@@ -30,6 +30,7 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
+import org.apache.paimon.tag.TagTimeExtractor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -458,15 +459,27 @@ public class TagManager {
                         taggedSnapshot.id()));
     }
 
+    /**
+     * @param tagName
+     * @return true only if auto-tag enabled and the name is in right format
+     */
     private boolean isAutoTag(String tagName) {
+        TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(coreOptions);
+        if (extractor == null) {
+            return false;
+        }
         TagPeriodHandler periodHandler = TagPeriodHandler.create(coreOptions);
         return periodHandler.isAutoTag(tagName);
     }
 
+    /**
+     * @param snapshot
+     * @return the auto-tag names of the snapshot, empty if auto-tag is not enabled
+     */
     private List<String> getSnapshotAutoTags(Snapshot snapshot) {
-        CoreOptions.TagCreationMode mode = coreOptions.tagCreationMode();
+        TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(coreOptions);
         // no auto-tagging, no auto-tags
-        if (mode == CoreOptions.TagCreationMode.NONE) {
+        if (extractor == null) {
             return Collections.emptyList();
         }
 
