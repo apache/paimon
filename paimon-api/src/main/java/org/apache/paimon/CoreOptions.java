@@ -932,7 +932,7 @@ public class CoreOptions implements Serializable {
                                                     + " using the specified value.")
                                     .list(
                                             text(
-                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
+                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd 23:59:59'."),
                                             text(
                                                     "Supports multiple partition fields like '$year-$month-$day $hour:59:59'."),
                                             text(
