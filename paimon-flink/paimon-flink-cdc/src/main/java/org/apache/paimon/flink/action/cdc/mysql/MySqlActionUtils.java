@@ -101,7 +101,8 @@ public class MySqlActionUtils {
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            String compositePrimaryKey)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
@@ -131,7 +132,8 @@ public class MySqlActionUtils {
                                                 tableName,
                                                 tableComment,
                                                 typeMapping,
-                                                toPaimonTypeVisitor());
+                                                toPaimonTypeVisitor(),
+                                                compositePrimaryKey);
                                 mySqlSchemasInfo.addSchema(identifier, schema);
                             } else {
                                 excludedTables.add(identifier);
