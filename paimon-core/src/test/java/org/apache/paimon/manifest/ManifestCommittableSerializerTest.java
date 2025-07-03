@@ -116,6 +116,7 @@ public class ManifestCommittableSerializerTest {
                 0L,
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 }

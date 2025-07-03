@@ -70,6 +70,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
+    private final boolean withRowId;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -81,7 +82,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
-            DeletionVector.Factory dvFactory) {
+            DeletionVector.Factory dvFactory,
+            boolean withRowId) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -93,14 +95,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
+        this.withRowId = withRowId;
     }
 
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
+        RecordReader<KeyValue> reader;
         if (file.fileSize() >= asyncThreshold && file.fileName().endsWith(".orc")) {
-            return new AsyncRecordReader<>(() -> createRecordReader(file, false, 2));
+            reader = new AsyncRecordReader<>(() -> createRecordReader(file, false, 2));
+        } else {
+            reader = createRecordReader(file, true, null);
         }
-        return createRecordReader(file, true, null);
+
+        return withRowId ? reader.withRowId(file.rowIdSequence()) : reader;
     }
 
     private FileRecordReader<KeyValue> createRecordReader(
@@ -240,7 +247,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
-            return build(partition, bucket, dvFactory, true, Collections.emptyList());
+            return build(partition, bucket, dvFactory, true, Collections.emptyList(), false);
         }
 
         public KeyValueFileReaderFactory build(
@@ -248,7 +255,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 int bucket,
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
-                @Nullable List<Predicate> filters) {
+                @Nullable List<Predicate> filters,
+                boolean withRowId) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             Function<TableSchema, List<DataField>> fieldsExtractor =
                     schema -> {
@@ -271,7 +279,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,
-                    dvFactory);
+                    dvFactory,
+                    withRowId);
         }
 
         public FileIO fileIO() {

@@ -41,7 +41,9 @@ import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.RowIdSequenceBuilder;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
@@ -55,8 +57,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 
@@ -155,9 +159,21 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             return Collections.emptyList();
         }
         Exception collectedExceptions = null;
+        List<Range> ranges =
+                toCompact.stream()
+                        .map(DataFileMeta::rowIdSequence)
+                        .filter(Objects::nonNull)
+                        .flatMap(r -> r.ranges().stream())
+                        .collect(Collectors.toList());
+        // if ranges is empty, we can not create RowIdSequenceBuilder
+        RowIdSequenceBuilder rowIdSequenceBuilder =
+                ranges.size() == toCompact.size() ? new RowIdSequenceBuilder(ranges) : null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        new LongCounter(toCompact.get(0).minSequenceNumber()),
+                        rowIdSequenceBuilder);
         List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
             dvFactories = new ArrayList<>(toCompact.size());
@@ -183,7 +199,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(
-            BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+            BinaryRow partition,
+            int bucket,
+            LongCounter seqNumCounter,
+            @Nullable RowIdSequenceBuilder rowIdSequenceBuilder) {
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
@@ -197,7 +216,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 fileIndexOptions,
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
-                options.statsDenseStore());
+                options.statsDenseStore(),
+                rowIdSequenceBuilder);
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

@@ -20,6 +20,7 @@ package org.apache.paimon.reader;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.RowIdSequenceIterator;
 
 import javax.annotation.Nullable;
 
@@ -66,6 +67,12 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                 return function.apply(next);
             }
 
+            @Nullable
+            @Override
+            public Long rowId() {
+                return thisIterator.rowId();
+            }
+
             @Override
             public void releaseBatch() {
                 thisIterator.releaseBatch();
@@ -89,6 +96,12 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
 
             @Nullable
             @Override
+            public Long rowId() {
+                return thisIterator.rowId();
+            }
+
+            @Nullable
+            @Override
             public T next() throws IOException {
                 while (true) {
                     T next = thisIterator.next();
@@ -99,6 +112,46 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                         return next;
                     }
                 }
+            }
+
+            @Override
+            public void releaseBatch() {
+                thisIterator.releaseBatch();
+            }
+        };
+    }
+
+    @Override
+    default FileRecordIterator<T> withRowId(final RowIdSequenceIterator idSequenceIterator) {
+        FileRecordIterator<T> thisIterator = this;
+        return new FileRecordIterator<T>() {
+            @Nullable private Long rowId;
+
+            @Override
+            public long returnedPosition() {
+                return thisIterator.returnedPosition();
+            }
+
+            @Override
+            public Path filePath() {
+                return thisIterator.filePath();
+            }
+
+            @Nullable
+            @Override
+            public T next() throws IOException {
+                T next = thisIterator.next();
+                if (next == null) {
+                    return null;
+                }
+                rowId = idSequenceIterator.next();
+                return next;
+            }
+
+            @Nullable
+            @Override
+            public Long rowId() {
+                return rowId;
             }
 
             @Override

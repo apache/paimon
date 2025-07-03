@@ -119,7 +119,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
-                return read.createReader((DataSplit) split);
+                return read.withRowId(withRowId).createReader((DataSplit) split);
             }
         };
     }
