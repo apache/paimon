@@ -123,6 +123,13 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    public static final ConfigOption<Boolean> BUCKET_APPEND_ORDERD =
+            key("bucket-append-ordered")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to ignore the order of the buckets when reading data from an append-only table.");
+
     @Immutable
     public static final ConfigOption<BucketFunctionType> BUCKET_FUNCTION_TYPE =
             key("bucket-function.type")
