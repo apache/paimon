@@ -31,7 +31,6 @@ import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -97,11 +96,9 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
-        this.unawareBucket =
-                table instanceof FileStoreTable
-                        && ((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
+        this.unawareBucket = !this.conf.get(CoreOptions.BUCKET_APPEND_ORDERD);
     }
 
     public FlinkSourceBuilder env(StreamExecutionEnvironment env) {
