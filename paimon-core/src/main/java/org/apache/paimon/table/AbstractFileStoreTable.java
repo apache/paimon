@@ -670,7 +670,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TagManager tagManager() {
-        return new TagManager(fileIO, path, currentBranch());
+        return new TagManager(fileIO, path, currentBranch(), coreOptions());
     }
 
     @Override

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
@@ -28,6 +29,8 @@ import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.tag.TagPeriodHandler;
+import org.apache.paimon.tag.TagTimeExtractor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +43,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -64,20 +68,26 @@ public class TagManager {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    private final CoreOptions coreOptions;
 
     public TagManager(FileIO fileIO, Path tablePath) {
-        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH, CoreOptions.fromMap(Collections.emptyMap()));
+    }
+
+    public TagManager(FileIO fileIO, Path tablePath, String branch) {
+        this(fileIO, tablePath, branch, CoreOptions.fromMap(Collections.emptyMap()));
     }
 
     /** Specify the default branch for data writing. */
-    public TagManager(FileIO fileIO, Path tablePath, String branch) {
+    public TagManager(FileIO fileIO, Path tablePath, String branch, CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branch);
+        this.coreOptions = coreOptions;
     }
 
     public TagManager copyWithBranch(String branchName) {
-        return new TagManager(fileIO, tablePath, branchName);
+        return new TagManager(fileIO, tablePath, branchName, coreOptions);
     }
 
     /** Return the root Directory of tags. */
@@ -131,6 +141,17 @@ public class TagManager {
             String tagName,
             @Nullable Duration timeRetained,
             @Nullable List<TagCallback> callbacks) {
+
+        if (isAutoTag(tagName)) {
+            List<String> autoTags = getSnapshotAutoTags(snapshot);
+            if (!autoTags.isEmpty()) {
+                throw new RuntimeException(
+                        String.format(
+                                "Snapshot %s is already auto-tagged with %s.",
+                                snapshot.id(), autoTags));
+            }
+        }
+
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
         // will cause older versions (<= 0.7) of readers to be unable to read this tag.
         // When timeRetained is defined, it is fine, because timeRetained is the new feature.
@@ -436,5 +457,37 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'. This is unexpected.",
                         taggedSnapshot.id()));
+    }
+
+    /**
+     * @param tagName
+     * @return true only if auto-tag enabled and the name is in right format
+     */
+    private boolean isAutoTag(String tagName) {
+        TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(coreOptions);
+        if (extractor == null) {
+            return false;
+        }
+        TagPeriodHandler periodHandler = TagPeriodHandler.create(coreOptions);
+        return periodHandler.isAutoTag(tagName);
+    }
+
+    /**
+     * @param snapshot
+     * @return the auto-tag names of the snapshot, empty if auto-tag is not enabled
+     */
+    private List<String> getSnapshotAutoTags(Snapshot snapshot) {
+        TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(coreOptions);
+        // no auto-tagging, no auto-tags
+        if (extractor == null) {
+            return Collections.emptyList();
+        }
+
+        TagPeriodHandler periodHandler = TagPeriodHandler.create(coreOptions);
+
+        // auto-tagging, tags in auto-tag format are auto-tags
+        return tags().getOrDefault(snapshot, new ArrayList<>()).stream()
+                .filter(tag -> periodHandler.isAutoTag(tag))
+                .collect(Collectors.toList());
     }
 }
