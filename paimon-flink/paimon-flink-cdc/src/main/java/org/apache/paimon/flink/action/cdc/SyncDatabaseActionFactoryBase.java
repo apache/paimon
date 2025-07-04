@@ -40,6 +40,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREF
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX_DB;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA;
 
 /** Base {@link ActionFactory} for synchronizing into database. */
 public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseActionBase>
@@ -85,6 +86,11 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
         if (params.has(COMPUTED_COLUMN)) {
             action.withComputedColumnArgs(
                     new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
+        }
+
+        if (params.has(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA)) {
+            action.usePKeysFromSourceForPaimonSchema(
+                    Boolean.parseBoolean(params.get(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA)));
         }
     }
 }
