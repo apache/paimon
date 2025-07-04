@@ -537,6 +537,12 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Controls the cache memory of writer coordinator to cache manifest files in Job Manager.");
 
+    public static final ConfigOption<Boolean> FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED =
+            key("filesystem.job-level-settings.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable pass job level filesystem settings to table file IO.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
