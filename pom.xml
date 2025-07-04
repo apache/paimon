@@ -62,6 +62,7 @@ under the License.
         <module>paimon-e2e-tests</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
+        <module>paimon-format-lance</module>
         <module>paimon-bundle</module>
         <module>paimon-hive</module>
         <module>paimon-spark</module>
