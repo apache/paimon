@@ -94,11 +94,11 @@ public final class DataField implements Serializable {
     }
 
     public DataField newDescription(String newDescription) {
-        return new DataField(id, name, type, defaultValue, newDescription);
+        return new DataField(id, name, type, newDescription, defaultValue);
     }
 
     public DataField newDefaultValue(String newDefaultValue) {
-        return new DataField(id, name, type, newDefaultValue, description);
+        return new DataField(id, name, type, description, newDefaultValue);
     }
 
     @Nullable
