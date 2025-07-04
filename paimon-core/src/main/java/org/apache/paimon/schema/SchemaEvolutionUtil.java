@@ -31,6 +31,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -131,11 +132,17 @@ public class SchemaEvolutionUtil {
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
      * @param filters the filters
+     * @param isKeyFilter whether the filter is for system _KEY_ fields
+     * @param nullSafe whether to return predicate if the predicate field name isn't in dataFields
      * @return the data filters
      */
     @Nullable
     public static List<Predicate> devolveDataFilters(
-            List<DataField> tableFields, List<DataField> dataFields, List<Predicate> filters) {
+            List<DataField> tableFields,
+            List<DataField> dataFields,
+            List<Predicate> filters,
+            boolean isKeyFilter,
+            boolean nullSafe) {
         if (filters == null) {
             return null;
         }
@@ -148,13 +155,17 @@ public class SchemaEvolutionUtil {
 
         PredicateReplaceVisitor visitor =
                 predicate -> {
+                    String fieldName = predicate.fieldName();
+                    if (isKeyFilter) {
+                        fieldName = PrimaryKeyTableUtils.addKeyNamePrefix(fieldName);
+                    }
                     DataField tableField =
                             checkNotNull(
-                                    nameToTableFields.get(predicate.fieldName()),
+                                    nameToTableFields.get(fieldName),
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
-                        return Optional.empty();
+                        return nullSafe ? Optional.of(predicate) : Optional.empty();
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(

@@ -40,7 +40,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -48,6 +47,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.TestingSchemaManager;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -356,6 +356,6 @@ public class LookupLevelsTest {
                         "");
         Map<Long, TableSchema> schemas = new HashMap<>();
         schemas.put(tableSchema.id(), tableSchema);
-        return new SchemaEvolutionTableTestBase.TestingSchemaManager(path, schemas);
+        return new TestingSchemaManager(path, schemas);
     }
 }

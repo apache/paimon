@@ -230,4 +230,30 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T WHERE f = 1")).containsExactly(Row.of(1, 1));
         assertThat(sql("SELECT * FROM T WHERE f <> 1")).containsExactly(Row.of(2, 111));
     }
+
+    @TestTemplate
+    public void testAppendStringToNumericForStatsFilter() {
+        sql("CREATE TABLE T (a STRING)");
+        sql("INSERT INTO T VALUES ('9'), ('10'), ('11')");
+        sql("ALTER TABLE T MODIFY (a INT)");
+
+        assertThat(sql("SELECT * FROM T WHERE a > 9"))
+                .containsExactlyInAnyOrder(Row.of(10), Row.of(11));
+    }
+
+    @TestTemplate
+    public void testPrimaryStringToNumericForStatsFilter() {
+        sql("CREATE TABLE T (pk STRING PRIMARY KEY NOT ENFORCED, v STRING)");
+        sql("INSERT INTO T VALUES ('9', '9'), ('10', '10'), ('11', '11')");
+
+        // key filter
+        sql("ALTER TABLE T MODIFY (pk INT)");
+        assertThat(sql("SELECT * FROM T WHERE pk > 9"))
+                .containsExactlyInAnyOrder(Row.of(10, "10"), Row.of(11, "11"));
+
+        // value filter
+        sql("ALTER TABLE T MODIFY (v INT)");
+        assertThat(sql("SELECT * FROM T WHERE v > 9"))
+                .containsExactlyInAnyOrder(Row.of(10, 10), Row.of(11, 11));
+    }
 }
