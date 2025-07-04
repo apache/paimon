@@ -127,11 +127,11 @@ public abstract class PartitionLoader implements Serializable {
                 break;
         }
 
+        Duration refresh =
+                options.get(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
+
         if (maxPartitionNum == -1) {
             if (scanPartitions.contains(MAX_PT)) {
-                Duration refresh =
-                        options.get(
-                                FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
                 return new DynamicPartitionLevelLoader(
                         table,
                         refresh,
@@ -141,8 +141,6 @@ public abstract class PartitionLoader implements Serializable {
             return new StaticPartitionLoader(
                     table, ParameterUtils.getPartitions(scanPartitions.split(";")));
         } else {
-            Duration refresh =
-                    options.get(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
             return new DynamicPartitionNumberLoader(table, refresh, maxPartitionNum);
         }
     }

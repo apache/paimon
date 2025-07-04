@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -34,7 +33,7 @@ public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionNumberLoader.class);
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 1L;
 
     private final int maxPartitionNum;
 
@@ -42,52 +41,10 @@ public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
             FileStoreTable table, Duration refreshInterval, int maxPartitionNum) {
         super(table, refreshInterval);
         this.maxPartitionNum = maxPartitionNum;
-    }
-
-    @Override
-    public boolean checkRefresh() {
-        if (lastRefresh != null
-                && !lastRefresh.plus(refreshInterval).isBefore(LocalDateTime.now())) {
-            return false;
-        }
-
         LOG.info(
-                "DynamicPartitionNumberLoader(maxPartitionNum={},table={}) refreshed after {} second(s), refreshing",
-                maxPartitionNum,
+                "Init DynamicPartitionNumberLoader(table={}),maxPartitionNum is {}",
                 table.name(),
-                refreshInterval.toMillis() / 1000);
-
-        List<BinaryRow> newPartitions = getMaxPartitions();
-        lastRefresh = LocalDateTime.now();
-
-        if (newPartitions.size() != partitions.size()) {
-            partitions = newPartitions;
-            logNewPartitions();
-            return true;
-        } else {
-            for (int i = 0; i < newPartitions.size(); i++) {
-                if (comparator.compare(newPartitions.get(i), partitions.get(i)) != 0) {
-                    partitions = newPartitions;
-                    logNewPartitions();
-                    return true;
-                }
-            }
-            LOG.info(
-                    "DynamicPartitionNumberLoader(maxPartitionNum={},table={}) didn't find new partitions.",
-                    maxPartitionNum,
-                    table.name());
-            return false;
-        }
-    }
-
-    private void logNewPartitions() {
-        String partitionsStr = partitionsToString(partitions);
-
-        LOG.info(
-                "DynamicPartitionNumberLoader(maxPartitionNum={},table={}) finds new partitions: {}.",
-                maxPartitionNum,
-                table.name(),
-                partitionsStr);
+                maxPartitionNum);
     }
 
     protected List<BinaryRow> getMaxPartitions() {

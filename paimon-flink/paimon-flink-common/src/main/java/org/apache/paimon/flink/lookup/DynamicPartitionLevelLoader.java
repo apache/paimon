@@ -28,11 +28,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /** Dynamic partition loader which can specify the partition level to load for lookup. */
@@ -40,10 +38,12 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionLevelLoader.class);
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 1L;
 
     private final int maxPartitionLoadLevel;
     private final List<InternalRow.FieldGetter> fieldGetters;
+
+    private final String defaultPartitionName;
 
     DynamicPartitionLevelLoader(
             FileStoreTable table,
@@ -53,42 +53,12 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
         maxPartitionLoadLevel =
                 getMaxPartitionLoadLevel(partitionLoadConfig, table.partitionKeys());
         fieldGetters = createPartitionFieldGetters();
-    }
-
-    @Override
-    public boolean checkRefresh() {
-        if (lastRefresh != null
-                && !lastRefresh.plus(refreshInterval).isBefore(LocalDateTime.now())) {
-            return false;
-        }
+        defaultPartitionName = table.coreOptions().partitionDefaultName();
 
         LOG.info(
-                "DynamicPartitionLevelLoader(maxPartitionLoadLevel={},table={}) refreshed after {} second(s), refreshing",
-                maxPartitionLoadLevel,
+                "Init DynamicPartitionLevelLoader(table={}),maxPartitionLoadLevel is {}",
                 table.name(),
-                refreshInterval.toMillis() / 1000);
-
-        List<BinaryRow> newPartitions = getMaxPartitions();
-        lastRefresh = LocalDateTime.now();
-
-        if (newPartitions.size() != partitions.size()) {
-            partitions = newPartitions;
-            logNewPartitions();
-            return true;
-        } else {
-            for (int i = 0; i < newPartitions.size(); i++) {
-                if (comparator.compare(newPartitions.get(i), partitions.get(i)) != 0) {
-                    partitions = newPartitions;
-                    logNewPartitions();
-                    return true;
-                }
-            }
-            LOG.info(
-                    "DynamicPartitionLevelLoader(maxPartitionLoadLevel={},table={}) didn't find new partitions.",
-                    maxPartitionLoadLevel,
-                    table.name());
-            return false;
-        }
+                maxPartitionLoadLevel);
     }
 
     @Override
@@ -143,8 +113,19 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
                 maxLoadLevel = Math.max(maxLoadLevel, i);
 
             } else {
-                // if level-i partition don't set config, we won't consider the partition level
-                // which is greater than level-i
+                // if level-i partition don't set config, partition level which is greater than
+                // level-i should not set config
+                for (int j = i + 1; j < partitionFields.size(); j++) {
+                    Preconditions.checkArgument(
+                            !partitionLoadConfig.containsKey(partitionFields.get(j)),
+                            "partition field(level=%s,name=%s) don't set config, "
+                                    + "but the sub partition field(level=%s,name=%s) set config, this is unsupported.",
+                            i,
+                            partitionFields.get(i),
+                            j,
+                            partitionFields.get(j));
+                }
+
                 return maxLoadLevel;
             }
         }
@@ -164,32 +145,22 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
 
     private List<BinaryRow> extractMaxPartitionsForFixedLevel(
             List<BinaryRow> partitions, int level) {
-        AtomicInteger currentDistinct = new AtomicInteger(0);
+        int currentDistinct = 0;
         Object lastField = null;
         for (int i = 0; i < partitions.size(); i++) {
             BinaryRow partition = partitions.get(i);
             Object newField = fieldGetters.get(level).getFieldOrNull(partition);
             // if newField is null, it's the default partition
             if (newField == null) {
-                newField = "__DEFAULT_PARTITION__";
+                newField = defaultPartitionName;
             }
-            if (lastField == null || !lastField.equals(newField)) {
+            if (!newField.equals(lastField)) {
                 lastField = newField;
-                if (currentDistinct.addAndGet(1) > 1) {
+                if (++currentDistinct > 1) {
                     return partitions.subList(0, i);
                 }
             }
         }
         return partitions;
-    }
-
-    private void logNewPartitions() {
-        String partitionsStr = partitionsToString(partitions);
-
-        LOG.info(
-                "DynamicPartitionLevelLoader(maxPartitionLoadLevel={},table={}) finds new partitions: {}.",
-                maxPartitionLoadLevel,
-                table.name(),
-                partitionsStr);
     }
 }

@@ -53,6 +53,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for {@link DynamicPartitionLevelLoader}. */
 public class DynamicPartitionLevelLoaderTest {
@@ -164,6 +165,36 @@ public class DynamicPartitionLevelLoaderTest {
         assertThat(partitions.size()).isEqualTo(2);
         assertThat(partitionsToString(partitions))
                 .hasSameElementsAs(Arrays.asList("2026/null/1", "2026/null/null"));
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testWrongConfig() throws Exception {
+        List<String> partitionKeys = Arrays.asList("pt1", "pt2", "pt3");
+        table =
+                createFileStoreTable(
+                        partitionKeys, Collections.emptyList(), Collections.emptyMap());
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, 1, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, 2, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), 15, null, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2025"), null, 1, 1, 1L));
+        write.write(GenericRow.of(BinaryString.fromString("2024"), 15, 1, 1, 1L));
+        write.write(GenericRow.of(null, 16, 1, 1, 1L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(FlinkConnectorOptions.SCAN_PARTITIONS.key(), "pt1=max_pt(),pt3=max_pt()");
+        table = table.copy(customOptions);
+
+        assertThatCode(() -> PartitionLoader.of(table))
+                .hasMessage(
+                        "partition field(level=1,name=pt2) don't set config, "
+                                + "but the sub partition field(level=2,name=pt3) set config, this is unsupported.");
 
         write.close();
         commit.close();

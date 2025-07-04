@@ -25,6 +25,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -34,7 +37,9 @@ import java.util.stream.Collectors;
 /** Dynamic partition for lookup. */
 public abstract class DynamicPartitionLoader extends PartitionLoader {
 
-    private static final long serialVersionUID = 2L;
+    private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionLoader.class);
+
+    private static final long serialVersionUID = 3L;
 
     protected final Duration refreshInterval;
 
@@ -55,7 +60,48 @@ public abstract class DynamicPartitionLoader extends PartitionLoader {
         this.lastRefresh = null;
     }
 
+    @Override
+    public boolean checkRefresh() {
+        if (lastRefresh != null
+                && !lastRefresh.plus(refreshInterval).isBefore(LocalDateTime.now())) {
+            return false;
+        }
+
+        LOG.info(
+                "DynamicPartitionLoader(table={}) refreshed after {} second(s), refreshing",
+                table.name(),
+                refreshInterval.toMillis() / 1000);
+
+        List<BinaryRow> newPartitions = getMaxPartitions();
+        lastRefresh = LocalDateTime.now();
+
+        if (newPartitions.size() != partitions.size()) {
+            partitions = newPartitions;
+            logNewPartitions();
+            return true;
+        } else {
+            for (int i = 0; i < newPartitions.size(); i++) {
+                if (comparator.compare(newPartitions.get(i), partitions.get(i)) != 0) {
+                    partitions = newPartitions;
+                    logNewPartitions();
+                    return true;
+                }
+            }
+            LOG.info("DynamicPartitionLoader(table={}) didn't find new partitions.", table.name());
+            return false;
+        }
+    }
+
     protected abstract List<BinaryRow> getMaxPartitions();
+
+    private void logNewPartitions() {
+        String partitionsStr = partitionsToString(partitions);
+
+        LOG.info(
+                "DynamicPartitionLoader(table={}) finds new partitions: {}.",
+                table.name(),
+                partitionsStr);
+    }
 
     protected String partitionsToString(List<BinaryRow> partitions) {
         return partitions.stream()
