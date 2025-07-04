@@ -167,6 +167,9 @@ public class CompactorSourceBuilder {
                 put(CoreOptions.SCAN_TIMESTAMP.key(), null);
                 put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
                 put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
+                put(
+                        CoreOptions.BATCH_SCAN_MODE.key(),
+                        CoreOptions.BatchScanMode.COMPACT.getValue());
             }
         };
     }

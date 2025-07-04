@@ -48,7 +48,11 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         this.hasNext = true;
 
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
-            snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
+            if (options.toConfiguration()
+                    .get(CoreOptions.BATCH_SCAN_MODE)
+                    .equals(CoreOptions.BatchScanMode.NONE)) {
+                snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
+            }
         }
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             snapshotReader.onlyReadRealBuckets();
