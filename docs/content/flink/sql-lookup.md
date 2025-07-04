@@ -173,6 +173,12 @@ The option `scan.partitions` can also specify fixed partitions in the form of `k
 Multiple partitions should be separated by semicolon (`;`).
 When specifying fixed partitions, this option can also be used in batch joins.
 
+The option `scan.partitions` can also specify max_pt() for parent partition in the form of `key1=max_pt(),key2=max_pt()`.
+All subpartitions for the latest parent partition will be loaded. For example, if partition keys is `'year', 'day', 'hh'`, 
+you can specify `year=max_pt()`, it will find the latest partition for `year` and load all its subpartitions for lookup.
+Only supports partitions to be specified hierarchically. For example, if setting `year=max_pt(),hh=max_pt()`, `hh=max_pt()`
+makes no sense.
+
 ## Query Service
 
 You can run a Flink Streaming Job to start query service for the table. When QueryService exists, Flink Lookup Join
