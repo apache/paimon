@@ -193,8 +193,7 @@ public class DynamicPartitionLevelLoaderTest {
 
         assertThatCode(() -> PartitionLoader.of(table))
                 .hasMessage(
-                        "partition field(level=1,name=pt2) don't set config, "
-                                + "but the sub partition field(level=2,name=pt3) set config, this is unsupported.");
+                        "Max load level is 0, but partition field pt3 with a higher level 2 sets MAX_PT.");
 
         write.close();
         commit.close();

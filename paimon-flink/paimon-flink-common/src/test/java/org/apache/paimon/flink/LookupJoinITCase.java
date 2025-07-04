@@ -1056,6 +1056,50 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
+    public void testLookupMultiPartitionLevelMaxPt(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt1 STRING, pt2 INT, pt3 INT, i INT, v INT)"
+                        + "PARTITIONED BY (`pt1`, `pt2`, `pt3`) WITH ("
+                        + "'scan.partitions' = 'pt1=max_pt(),pt2=max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        String query =
+                "SELECT D.pt1, D.pt2, D.pt3, T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES ('202415', 15, 1, 1, 1), ('202415', 15, 2, 1, 1), ('202414', 15, 1, 1, 1)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        List<Row> result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("202415", 15, 1, 1, 1), Row.of("202415", 15, 2, 1, 1));
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('202416', 15, 1, 2, 2), ('202416', 15, 2, 2, 2)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("202416", 15, 1, 2, 2), Row.of("202416", 15, 2, 2, 2));
+
+        sql("ALTER TABLE PARTITIONED_DIM DROP PARTITION (pt1 = '202416',pt2 = '15',pt3 = '1')");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(null, null, null, 1, null), Row.of("202416", 15, 2, 2, 2));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
     public void testLookupMaxTwoPt0(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt STRING, i INT, v INT)"

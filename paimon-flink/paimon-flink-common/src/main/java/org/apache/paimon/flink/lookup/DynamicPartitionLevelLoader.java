@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -78,56 +79,37 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
             }
         }
 
-        for (int level = 0; level <= maxPartitionLoadLevel; level++) {
-            newPartitions = extractMaxPartitionsForFixedLevel(newPartitions, level);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "DynamicPartitionLevelLoader(currentPartitionLoadLevel={},table={}) finds new partitions: {}.",
-                        level,
-                        table.name(),
-                        partitionsToString(newPartitions));
-            }
+        newPartitions = extractMaxPartitionsForFixedLevel(newPartitions, maxPartitionLoadLevel);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "DynamicPartitionLevelLoader(currentPartitionLoadLevel={},table={}) finds new partitions: {}.",
+                    maxPartitionLoadLevel,
+                    table.name(),
+                    partitionsToString(newPartitions));
         }
+
         return newPartitions;
     }
 
-    private int getMaxPartitionLoadLevel(
-            Map<String, String> partitionLoadConfig, List<String> partitionFields) {
-        Preconditions.checkArgument(partitionLoadConfig.size() <= partitionFields.size());
-
-        int maxLoadLevel = -1;
-        for (int i = 0; i < partitionFields.size(); i++) {
-            String config = partitionLoadConfig.getOrDefault(partitionFields.get(i), null);
-
-            if (i == 0) {
-                Preconditions.checkArgument(
-                        config != null, "the top level partition must set load config.");
+    private int getMaxPartitionLoadLevel(Map<String, String> toLoad, List<String> fields) {
+        Preconditions.checkArgument(toLoad.size() <= fields.size());
+        int maxLoadLevel = fields.size() - 1;
+        for (int i = 0; i < fields.size(); i++) {
+            if (!toLoad.containsKey(fields.get(i))) {
+                maxLoadLevel = i - 1;
+                break;
             }
-            if (config != null) {
-                Preconditions.checkArgument(
-                        config.equals(MAX_PT),
-                        "unsupported load config '{}' for partition field '{}', currently only support '{}'.",
-                        config,
-                        partitionFields.get(i),
-                        MAX_PT);
-                maxLoadLevel = Math.max(maxLoadLevel, i);
-
-            } else {
-                // if level-i partition don't set config, partition level which is greater than
-                // level-i should not set config
-                for (int j = i + 1; j < partitionFields.size(); j++) {
-                    Preconditions.checkArgument(
-                            !partitionLoadConfig.containsKey(partitionFields.get(j)),
-                            "partition field(level=%s,name=%s) don't set config, "
-                                    + "but the sub partition field(level=%s,name=%s) set config, this is unsupported.",
-                            i,
-                            partitionFields.get(i),
-                            j,
-                            partitionFields.get(j));
-                }
-
-                return maxLoadLevel;
-            }
+        }
+        Preconditions.checkArgument(
+                maxLoadLevel >= 0, "the top level partition must set load config.");
+        for (int i = maxLoadLevel + 1; i < fields.size(); i++) {
+            Preconditions.checkArgument(
+                    !toLoad.containsKey(fields.get(i)),
+                    "Max load level is %s, "
+                            + "but partition field %s with a higher level %s sets MAX_PT.",
+                    maxLoadLevel,
+                    fields.get(i),
+                    i);
         }
         return maxLoadLevel;
     }
@@ -146,16 +128,18 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
     private List<BinaryRow> extractMaxPartitionsForFixedLevel(
             List<BinaryRow> partitions, int level) {
         int currentDistinct = 0;
-        Object lastField = null;
+        Object[] lastFields = new Object[level + 1];
         for (int i = 0; i < partitions.size(); i++) {
             BinaryRow partition = partitions.get(i);
-            Object newField = fieldGetters.get(level).getFieldOrNull(partition);
-            // if newField is null, it's the default partition
-            if (newField == null) {
-                newField = defaultPartitionName;
+            Object[] newFields = new Object[level + 1];
+            for (int j = 0; j <= level; j++) {
+                newFields[j] = fieldGetters.get(j).getFieldOrNull(partition);
+                if (newFields[j] == null) {
+                    newFields[j] = defaultPartitionName;
+                }
             }
-            if (!newField.equals(lastField)) {
-                lastField = newField;
+            if (!Arrays.equals(newFields, lastFields)) {
+                lastFields = newFields;
                 if (++currentDistinct > 1) {
                     return partitions.subList(0, i);
                 }
