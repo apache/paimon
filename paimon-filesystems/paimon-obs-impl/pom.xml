@@ -81,7 +81,7 @@
     <build>
         <plugins>
 
-            <!-- Relocate all OSS related classes -->
+            <!-- Relocate all OBS related classes -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
