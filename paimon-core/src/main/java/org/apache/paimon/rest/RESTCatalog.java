@@ -60,7 +60,7 @@ import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.Nullable;
 
