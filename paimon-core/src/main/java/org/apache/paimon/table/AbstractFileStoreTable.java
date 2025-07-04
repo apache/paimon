@@ -369,18 +369,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
-        FileIO fileIO = this.fileIO.copy(dynamicOptions);
-        AbstractFileStoreTable copied =
-                tableSchema.primaryKeys().isEmpty()
-                        ? new AppendOnlyFileStoreTable(
-                                fileIO, path, tableSchema, catalogEnvironment)
-                        : new PrimaryKeyFileStoreTable(
-                                fileIO, path, tableSchema, catalogEnvironment);
-        return setCacheForCopy(copied);
-    }
-
-    @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         AbstractFileStoreTable copied =
                 newTableSchema.primaryKeys().isEmpty()

@@ -116,13 +116,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public FileStoreTable copyFileIODynamicOptions(Map<String, String> dynamicOptions) {
-        return new FallbackReadFileStoreTable(
-                wrapped.copyFileIODynamicOptions(dynamicOptions),
-                fallback.copyFileIODynamicOptions(dynamicOptions));
-    }
-
-    @Override
     public FileStoreTable switchToBranch(String branchName) {
         return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
     }

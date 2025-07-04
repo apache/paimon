@@ -36,6 +36,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -229,7 +230,11 @@ public abstract class AbstractFlinkTableFactory
         FileStoreTable table = fileStoreTable.copyWithoutTimeTravel(newOptions);
 
         if (Options.fromMap(table.options()).get(FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED)) {
-            table = table.copyFileIODynamicOptions(getAllOptions(context));
+            Map<String, String> runtimeContext = getAllOptions(context);
+            table.fileIO().setRuntimeContext(runtimeContext);
+            if (table instanceof ObjectTable) {
+                ((ObjectTable) table).objectFileIO().setRuntimeContext(runtimeContext);
+            }
         }
 
         // notice that the Paimon table schema must be the same with the Flink's
