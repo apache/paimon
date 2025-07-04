@@ -376,10 +376,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                 fileIO, path, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, path, newTableSchema, catalogEnvironment);
-        return setCacheForCopy(copied);
-    }
-
-    private FileStoreTable setCacheForCopy(FileStoreTable copied) {
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
