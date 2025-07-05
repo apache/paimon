@@ -804,6 +804,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>partition.expiration.timestamp-formatter</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The formatter to format timestamp from string. It can be used with 'partition.expiration.timestamp-pattern' to create a formatter using the specified value.<ul><li>Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd 23:59:59'.</li><li>Supports multiple partition fields like '$year-$month-$day $hour:59:59'.</li><li>The timestamp-formatter is compatible with Java's DateTimeFormatter.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration.timestamp-pattern</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>You can specify a pattern to get a timestamp from partition to expire. The formatter pattern is defined by 'partition.expiration.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:59:59'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:59:59'.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>primary-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
