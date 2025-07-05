@@ -417,7 +417,10 @@ public class LogSystemITCase extends KafkaTableTestBase {
                     "CREATE TEMPORARY TABLE gen (i INT, j INT) WITH ('connector'='datagen', 'rows-per-second'='2')");
             TableResult write = tEnv.executeSql("INSERT INTO T SELECT * FROM gen");
             BlockingIterator<Row, Row> read =
-                    BlockingIterator.of(tEnv.executeSql("SELECT * FROM T").collect());
+                    BlockingIterator.of(
+                            tEnv.executeSql(
+                                            "SELECT * FROM T /*+ OPTIONS('bucket-append-ordered'='false') */")
+                                    .collect());
             List<Row> collect = read.collect(10);
             assertThat(collect).hasSize(10);
             write.getJobClient().get().cancel();
