@@ -1636,10 +1636,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(30)
                     .withDescription(
-                            "The maximum number of concurrent deleting files. "
-                                    + "By default is the number of processors available to the Java virtual machine.");
+                            "The maximum number of concurrent deleting files in a process.");
 
     public static final ConfigOption<String> SCAN_FALLBACK_BRANCH =
             key("scan.fallback-branch")
