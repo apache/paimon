@@ -41,11 +41,14 @@ import scala.collection.JavaConverters._
 object PaimonFunctions {
 
   val PAIMON_BUCKET: String = "bucket"
+  val MOD_BUCKET: String = "mod_bucket"
   val MAX_PT: String = "max_pt"
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
     new BucketFunction(BucketFunctionType.DEFAULT),
+    MOD_BUCKET,
+    new BucketFunction(BucketFunctionType.MOD),
     MAX_PT,
     new MaxPtFunction
   )
@@ -53,7 +56,9 @@ object PaimonFunctions {
   /** The bucket function type to the function name mapping */
   private val TYPE_FUNC_MAPPING = ImmutableMap.of(
     BucketFunctionType.DEFAULT,
-    PAIMON_BUCKET
+    PAIMON_BUCKET,
+    BucketFunctionType.MOD,
+    MOD_BUCKET
   )
 
   val names: ImmutableList[String] = FUNCTIONS.keySet.asList()

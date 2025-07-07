@@ -39,6 +39,8 @@ public interface BucketFunction extends Serializable {
         switch (bucketFunctionType) {
             case DEFAULT:
                 return new PaimonBucketFunction();
+            case MOD:
+                return new ModBucketFunction(bucketKeyType);
             default:
                 throw new IllegalArgumentException(
                         "Unsupported bucket type: " + bucketFunctionType);
