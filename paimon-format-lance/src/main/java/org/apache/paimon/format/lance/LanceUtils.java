@@ -20,12 +20,14 @@ package org.apache.paimon.format.lance;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.jindo.JindoFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.oss.OSSFileIO;
+import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
@@ -34,6 +36,7 @@ import java.util.Map;
 public class LanceUtils {
 
     private static final Class<?> ossFileIOKlass;
+    private static final Class<?> pluginFileIO;
     private static final Class<?> jindoFileIOKlass;
 
     static {
@@ -51,38 +54,52 @@ public class LanceUtils {
             klass = null;
         }
         jindoFileIOKlass = klass;
+
+        try {
+            klass = Class.forName("org.apache.paimon.fs.PluginFileIO");
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            klass = null;
+        }
+        pluginFileIO = klass;
     }
 
     public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
-        boolean ossPath = false;
-        Path converted;
-        Map<String, String> storageOptions = new HashMap<>();
+
+        URI uri = path.toUri();
+        String schema = uri.getScheme();
+
+        if (fileIO instanceof RESTTokenFileIO) {
+            try {
+                fileIO = ((RESTTokenFileIO) fileIO).fileIO();
+            } catch (IOException e) {
+                throw new RuntimeException("Can't get fileIO from RESTTokenFileIO", e);
+            }
+        }
+
         Options originOptions;
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
-            ossPath = true;
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            ossPath = true;
             originOptions = ((JindoFileIO) fileIO).hadoopOptions();
+        } else if (pluginFileIO != null && pluginFileIO.isInstance(fileIO)) {
+            originOptions = ((PluginFileIO) fileIO).options();
         } else {
             originOptions = new Options();
         }
 
-        if (ossPath) {
-            URI uri = path.toUri();
+        Path converted = path;
+        Map<String, String> storageOptions = new HashMap<>();
+        if ("oss".equals(schema)) {
             storageOptions.put(
                     "endpoint",
                     "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
             storageOptions.put("access_key_id", originOptions.get("fs.oss.accessKeyId"));
             storageOptions.put("secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
             storageOptions.put("virtual_hosted_style_request", "true");
+            if (originOptions.containsKey("fs.oss.securityToken")) {
+                storageOptions.put("session_token", originOptions.get("fs.oss.securityToken"));
+            }
             converted = new Path(uri.toString().replace("oss://", "s3://"));
-        } else if (fileIO instanceof LocalFileIO) {
-            converted = path;
-        } else {
-            // TODO: support other FileIO types
-            throw new UnsupportedOperationException(
-                    "Unsupported FileIO type: " + fileIO.getClass().getName());
         }
 
         return Pair.of(converted, storageOptions);
