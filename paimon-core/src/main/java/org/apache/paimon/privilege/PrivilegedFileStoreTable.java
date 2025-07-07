@@ -26,7 +26,6 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -296,10 +295,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
 
     public static PrivilegedFileStoreTable wrap(
             FileStoreTable table, PrivilegeChecker privilegeChecker, Identifier identifier) {
-        if (table instanceof ObjectTable) {
-            return new PrivilegedObjectTable((ObjectTable) table, privilegeChecker, identifier);
-        } else {
-            return new PrivilegedFileStoreTable(table, privilegeChecker, identifier);
-        }
+        return new PrivilegedFileStoreTable(table, privilegeChecker, identifier);
     }
 }

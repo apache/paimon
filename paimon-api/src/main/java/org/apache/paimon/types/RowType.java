@@ -309,16 +309,18 @@ public final class RowType extends DataType {
     public RowType project(int[] mapping) {
         List<DataField> fields = getFields();
         return new RowType(
-                Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
+                        Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()))
+                .copy(isNullable());
     }
 
     public RowType project(List<String> names) {
         List<DataField> fields = getFields();
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
         return new RowType(
-                names.stream()
-                        .map(k -> fields.get(fieldNames.indexOf(k)))
-                        .collect(Collectors.toList()));
+                        names.stream()
+                                .map(k -> fields.get(fieldNames.indexOf(k)))
+                                .collect(Collectors.toList()))
+                .copy(isNullable());
     }
 
     public RowType project(String... names) {
