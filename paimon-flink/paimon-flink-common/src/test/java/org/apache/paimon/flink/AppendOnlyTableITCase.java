@@ -57,7 +57,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
+                        "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
     }
 
     @Test
