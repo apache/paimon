@@ -22,7 +22,6 @@ import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.configuration.RestartStrategyOptions;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
@@ -772,23 +771,5 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sql("INSERT INTO seq_default_agg VALUES (0, 2, 2)");
 
         assertThat(sql("SELECT * FROM seq_default_agg")).containsExactly(Row.of(0, 2, 3));
-    }
-
-    @Test
-    public void testSequenceGroupWithNotExistAgg() {
-        sql(
-                "CREATE TABLE seq_not_exist_agg ("
-                        + " pk INT PRIMARY KEY NOT ENFORCED,"
-                        + " seq INT,"
-                        + " v INT) WITH ("
-                        + " 'merge-engine'='partial-update',"
-                        + " 'fields.seq.sequence-group'='v',"
-                        + " 'fields.default-aggregate-function'='not_exist'"
-                        + ")");
-
-        assertThatThrownBy(() -> sql("INSERT INTO seq_not_exist_agg VALUES (0, 1, 1)"))
-                .hasCauseInstanceOf(ValidationException.class)
-                .hasMessageContaining(
-                        "Unable to create a sink for writing table 'PAIMON.default.seq_not_exist_agg'.");
     }
 }

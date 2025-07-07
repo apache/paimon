@@ -21,7 +21,10 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -223,6 +226,8 @@ public class SchemaValidation {
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
         }
+
+        validateMergeFunctionFactory(schema);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -588,5 +593,30 @@ public class SchemaValidation {
 
     private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {
         return !schema.primaryKeys().isEmpty() && bucket == BucketMode.POSTPONE_BUCKET;
+    }
+
+    private static void validateMergeFunctionFactory(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+        CoreOptions options = new CoreOptions(schema.options());
+        switch (options.mergeEngine()) {
+            case DEDUPLICATE:
+            case FIRST_ROW:
+                return;
+            default:
+        }
+
+        for (int i = 0; i < schema.logicalRowType().getFieldNames().size(); i++) {
+            String fieldName = schema.logicalRowType().getFieldNames().get(i);
+            String aggFuncName = options.fieldAggFunc(fieldName);
+            aggFuncName = aggFuncName == null ? options.fieldsDefaultFunc() : aggFuncName;
+            if (aggFuncName != null) {
+                FactoryUtil.discoverFactory(
+                        FieldAggregator.class.getClassLoader(),
+                        FieldAggregatorFactory.class,
+                        aggFuncName);
+            }
+        }
     }
 }

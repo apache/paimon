@@ -20,14 +20,11 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
-import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
@@ -75,21 +72,6 @@ public class PrimaryKeyTableUtils {
                 return FirstRowMergeFunction.factory(conf);
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
-        }
-    }
-
-    public static void validateMergeFunctionFactory(TableSchema tableSchema) {
-        CoreOptions options = new CoreOptions(tableSchema.options());
-        for (int i = 0; i < tableSchema.logicalRowType().getFieldNames().size(); i++) {
-            String fieldName = tableSchema.logicalRowType().getFieldNames().get(i);
-            String aggFuncName = options.fieldAggFunc(fieldName);
-            aggFuncName = aggFuncName == null ? options.fieldsDefaultFunc() : aggFuncName;
-            if (aggFuncName != null) {
-                FactoryUtil.discoverFactory(
-                        FieldAggregator.class.getClassLoader(),
-                        FieldAggregatorFactory.class,
-                        aggFuncName);
-            }
         }
     }
 
