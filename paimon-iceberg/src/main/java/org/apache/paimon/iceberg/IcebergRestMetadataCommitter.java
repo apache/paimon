@@ -29,7 +29,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
-import org.apache.iceberg.IcebergSnapshotRefType;
 import org.apache.iceberg.MetadataUpdate;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SchemaParser;
@@ -38,19 +37,15 @@ import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
-import org.apache.iceberg.UpdateRequirement;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
-import org.apache.iceberg.catalog.TableCommit;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -143,7 +138,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         TableMetadata newMetadata = TableMetadataParser.fromJson(newIcebergMetadata.toJson());
 
         // updates to be committed
-        List<MetadataUpdate> updates;
+        TableMetadata.Builder updatdeBuilder;
 
         // create database if not exist
         if (!databaseExists()) {
@@ -154,7 +149,11 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             if (!tableExists()) {
                 LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
                 icebergTable = createTable(newMetadata);
-                updates = updatesForCorrectBase(newMetadata, true);
+                updatdeBuilder =
+                        updatesForCorrectBase(
+                                ((BaseTable) icebergTable).operations().current(),
+                                newMetadata,
+                                true);
             } else {
                 icebergTable = getTable();
 
@@ -165,16 +164,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     LOG.info(
                             "lastSequenceNumber is 0 and currentSnapshotId is -1 for the existed iceberg table, "
                                     + "we'll treat it as a new table.");
-                    updates = updatesForCorrectBase(newMetadata, true);
+                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, true);
                 } else if (withBase) {
                     LOG.info("create updates with base metadata.");
-                    updates = updatesForCorrectBase(newMetadata, false);
+                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, false);
                 } else {
                     LOG.info(
                             "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
                             metadata.currentSnapshot().snapshotId(),
                             newMetadata.currentSnapshot().snapshotId());
-                    updates = updatesForIncorrectBase(newMetadata);
+                    updatdeBuilder = updatesForIncorrectBase(newMetadata);
                 }
             }
         } catch (Exception e) {
@@ -182,23 +181,20 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     "Fail to create table or get table: " + icebergTableIdentifier, e);
         }
 
+        TableMetadata updatedForCommit = updatdeBuilder.build();
+
         if (LOG.isDebugEnabled()) {
-            LOG.debug("updates:{}", updatesToString(updates));
+            LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
         }
 
-        IcebergTableCommit tableCommit =
-                new IcebergTableCommit(
-                        icebergTableIdentifier,
-                        ImmutableList.of(
-                                new UpdateRequirement.AssertTableUUID(
-                                        icebergTable.uuid().toString())),
-                        updates);
-        restCatalog.commitTransaction(tableCommit);
+        ((BaseTable) icebergTable)
+                .operations()
+                .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
     }
 
-    private List<MetadataUpdate> updatesForCorrectBase(
-            TableMetadata newMetadata, boolean isNewTable) {
-        List<MetadataUpdate> updates = new ArrayList<>();
+    private TableMetadata.Builder updatesForCorrectBase(
+            TableMetadata base, TableMetadata newMetadata, boolean isNewTable) {
+        TableMetadata.Builder updateBuilder = TableMetadata.buildFrom(base);
 
         int schemaId = icebergTable.schema().schemaId();
         if (isNewTable) {
@@ -209,14 +205,14 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             // add schemas which schema id is greater than current schema id in iceberg table
             if (newMetadata.currentSchemaId() > schemaId) {
                 addAndSetCurrentSchema(
-                        updates,
                         newMetadata.schemas().stream()
                                 .filter(schema -> schema.schemaId() > schemaId)
                                 .collect(Collectors.toList()),
-                        newMetadata.currentSchemaId());
+                        newMetadata.currentSchemaId(),
+                        updateBuilder);
             }
             // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updates);
+            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
         } else {
             // add new schema if needed
             Preconditions.checkArgument(
@@ -227,13 +223,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     newMetadata.currentSchemaId());
             if (newMetadata.currentSchemaId() != schemaId) {
                 addAndSetCurrentSchema(
-                        updates,
                         Collections.singletonList(newMetadata.schema()),
-                        newMetadata.currentSchemaId());
+                        newMetadata.currentSchemaId(),
+                        updateBuilder);
             }
 
             // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updates);
+            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
 
             // remove snapshots not in new metadata
             Set<Long> snapshotIdsToRemove = new HashSet<>();
@@ -245,21 +241,17 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                             .map(Snapshot::snapshotId)
                             .collect(Collectors.toSet());
             snapshotIdsToRemove.removeAll(snapshotIdsInNewMetadata);
-            removeSnapshots(snapshotIdsToRemove, updates);
+            removeSnapshots(snapshotIdsToRemove, updateBuilder);
         }
 
-        return updates;
+        return updateBuilder;
     }
 
-    // way1: recreate  iceberg table, and commit new snapshots
-    // side effects: unclear whether the data files will be deleted
-    private List<MetadataUpdate> updatesForIncorrectBase(TableMetadata newMetadata) {
-        List<MetadataUpdate> updates = new ArrayList<>();
+    private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
         LOG.info("the base metadata is incorrect, we'll recreate the iceberg table.");
         icebergTable = recreateTable(newMetadata);
-        updates.addAll(updatesForCorrectBase(newMetadata, true));
-
-        return updates;
+        return updatesForCorrectBase(
+                ((BaseTable) icebergTable).operations().current(), newMetadata, true);
     }
 
     private RESTCatalog initRestCatalog(Map<String, String> restConfigs, Configuration conf) {
@@ -320,36 +312,21 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     // -------------------------------------------------------------------------------------
 
     // add a new snapshot and point it as current snapshot
-    private void addNewSnapshot(Snapshot newSnapshot, List<MetadataUpdate> updates) {
-        updates.add(new MetadataUpdate.AddSnapshot(newSnapshot));
-        updates.add(
-                new MetadataUpdate.SetSnapshotRef(
-                        SnapshotRef.MAIN_BRANCH,
-                        newSnapshot.snapshotId(),
-                        IcebergSnapshotRefType.branchType(),
-                        null,
-                        null,
-                        null));
+    private void addNewSnapshot(Snapshot newSnapshot, TableMetadata.Builder update) {
+        update.setBranchSnapshot(newSnapshot, SnapshotRef.MAIN_BRANCH);
     }
 
     // remove snapshots recorded in table metadata
-    private void removeSnapshots(Set<Long> snapshotIds, List<MetadataUpdate> updates) {
-        for (Long snapshotId : snapshotIds) {
-            updates.add(new MetadataUpdate.RemoveSnapshot(snapshotId));
-        }
-    }
-
-    // reset current snapshot id to -1, this won't reset the last-sequence-number
-    private void resetSnapshot(List<MetadataUpdate> updates) {
-        updates.add(new MetadataUpdate.RemoveSnapshotRef(SnapshotRef.MAIN_BRANCH));
+    private void removeSnapshots(Set<Long> snapshotIds, TableMetadata.Builder update) {
+        update.removeSnapshots(snapshotIds);
     }
 
     private void addAndSetCurrentSchema(
-            List<MetadataUpdate> updates, List<Schema> schemas, int currentSchemaId) {
+            List<Schema> schemas, int currentSchemaId, TableMetadata.Builder update) {
         for (Schema schema : schemas) {
-            updates.add(new MetadataUpdate.AddSchema(schema));
+            update.addSchema(schema);
         }
-        updates.add(new MetadataUpdate.SetCurrentSchema(currentSchemaId));
+        update.setCurrentSchema(currentSchemaId);
 
         // update properties
         Map<String, String> properties = new HashMap<>();
@@ -359,7 +336,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         properties.put(
                 METADATA_DELETE_AFTER_COMMIT_ENABLED,
                 String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-        updates.add(new MetadataUpdate.SetProperties(properties));
+        update.setProperties(properties);
     }
 
     // -------------------------------------------------------------------------------------
@@ -413,7 +390,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return String.format(
                     "SetProperties(%s)", ((MetadataUpdate.SetProperties) update).updated());
         } else {
-            return "Unknown updates";
+            return update.toString();
         }
     }
 
@@ -421,37 +398,5 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         return updates.stream()
                 .map(IcebergRestMetadataCommitter::updateToString)
                 .collect(Collectors.joining(", "));
-    }
-
-    private static class IcebergTableCommit implements TableCommit {
-        private final TableIdentifier identifier;
-
-        private final List<UpdateRequirement> requirements;
-
-        private final List<MetadataUpdate> updates;
-
-        IcebergTableCommit(
-                TableIdentifier identifier,
-                List<UpdateRequirement> requirements,
-                List<MetadataUpdate> updates) {
-            this.identifier = identifier;
-            this.requirements = requirements;
-            this.updates = updates;
-        }
-
-        @Override
-        public TableIdentifier identifier() {
-            return identifier;
-        }
-
-        @Override
-        public List<UpdateRequirement> requirements() {
-            return requirements;
-        }
-
-        @Override
-        public List<MetadataUpdate> updates() {
-            return updates;
-        }
     }
 }
