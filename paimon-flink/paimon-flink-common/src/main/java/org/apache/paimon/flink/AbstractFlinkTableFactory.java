@@ -35,6 +35,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.utils.Preconditions;
@@ -226,7 +227,7 @@ public abstract class AbstractFlinkTableFactory
                 throw new RuntimeException(e);
             }
         }
-
+        PrimaryKeyTableUtils.validateMergeFunctionFactory(fileStoreTable.schema());
         FileStoreTable table = fileStoreTable.copyWithoutTimeTravel(newOptions);
 
         if (Options.fromMap(table.options()).get(FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED)) {
