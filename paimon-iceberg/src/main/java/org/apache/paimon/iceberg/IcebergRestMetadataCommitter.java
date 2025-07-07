@@ -21,7 +21,6 @@ package org.apache.paimon.iceberg;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
-import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -31,7 +30,6 @@ import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.MetadataUpdate;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.SchemaParser;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.Table;
@@ -73,9 +71,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
 
-    // we should use schema-0 in paimon to create iceberg table
-    private final Schema schema0;
-
     private Table icebergTable;
 
     public IcebergRestMetadataCommitter(FileStoreTable table) {
@@ -97,10 +92,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 TableIdentifier.of(Namespace.of(icebergDatabaseName), icebergTableName);
 
         Map<String, String> restConfigs = icebergOptions.icebergRestConfig();
-
-        schema0 =
-                SchemaParser.fromJson(
-                        IcebergSchema.create(table.schemaManager().schema(0)).toJson());
 
         try {
             Configuration hadoopConf = new Configuration();
@@ -124,21 +115,22 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     @Override
     public void commitMetadata(
-            IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
+            IcebergMetadata newIcebergMetadata,
+            Path newMetadataPath,
+            @Nullable IcebergMetadata baseIcebergMetadata) {
         try {
-            commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+            commitMetadataImpl(newIcebergMetadata, newMetadataPath, baseIcebergMetadata);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
     private void commitMetadataImpl(
-            IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
+            IcebergMetadata newIcebergMetadata,
+            Path newMetadataPath,
+            @Nullable IcebergMetadata baseIcebergMetadata) {
 
         TableMetadata newMetadata = TableMetadataParser.fromJson(newIcebergMetadata.toJson());
-
-        // updates to be committed
-        TableMetadata.Builder updatdeBuilder;
 
         // create database if not exist
         if (!databaseExists()) {
@@ -147,111 +139,80 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         try {
             if (!tableExists()) {
-                LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
-                icebergTable = createTable(newMetadata);
-                updatdeBuilder =
-                        updatesForCorrectBase(
-                                ((BaseTable) icebergTable).operations().current(),
-                                newMetadata,
-                                true);
+                LOG.info("Table {} does not exist, register it.", icebergTableIdentifier);
+                icebergTable = registerTable(newMetadataPath);
             } else {
                 icebergTable = getTable();
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
                 boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
-                if (metadata.lastSequenceNumber() == 0 && metadata.currentSnapshot() == null) {
-                    // treat the iceberg table as a newly created table
-                    LOG.info(
-                            "lastSequenceNumber is 0 and currentSnapshotId is -1 for the existed iceberg table, "
-                                    + "we'll treat it as a new table.");
-                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, true);
-                } else if (withBase) {
-                    LOG.info("create updates with base metadata.");
-                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, false);
+                if (withBase) {
+                    LOG.info("update the table with base metadata.");
+                    TableMetadata.Builder updatdeBuilder =
+                            updatesForCorrectBase(metadata, newMetadata);
+                    TableMetadata updatedForCommit = updatdeBuilder.build();
+
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
+                    }
+
+                    ((BaseTable) icebergTable)
+                            .operations()
+                            .commit(
+                                    ((BaseTable) icebergTable).operations().current(),
+                                    updatedForCommit);
                 } else {
                     LOG.info(
-                            "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
+                            "the base metadata is incorrect. currentSnapshotId for base metadata: {}, for new metadata:{}. "
+                                    + "we'll recreate the iceberg table.",
                             metadata.currentSnapshot().snapshotId(),
                             newMetadata.currentSnapshot().snapshotId());
-                    updatdeBuilder = updatesForIncorrectBase(newMetadata);
+                    icebergTable = reRegisterTable(newMetadataPath);
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException(
-                    "Fail to create table or get table: " + icebergTableIdentifier, e);
+                    "Fail to commit metadata to rest catalog, table is " + icebergTableIdentifier,
+                    e);
         }
-
-        TableMetadata updatedForCommit = updatdeBuilder.build();
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
-        }
-
-        ((BaseTable) icebergTable)
-                .operations()
-                .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
     }
 
     private TableMetadata.Builder updatesForCorrectBase(
-            TableMetadata base, TableMetadata newMetadata, boolean isNewTable) {
+            TableMetadata base, TableMetadata newMetadata) {
         TableMetadata.Builder updateBuilder = TableMetadata.buildFrom(base);
 
         int schemaId = icebergTable.schema().schemaId();
-        if (isNewTable) {
-            Preconditions.checkArgument(
-                    schemaId == 0,
-                    "the schema id for newly created iceberg table should be 0, but is %s",
-                    schemaId);
-            // add schemas which schema id is greater than current schema id in iceberg table
-            if (newMetadata.currentSchemaId() > schemaId) {
-                addAndSetCurrentSchema(
-                        newMetadata.schemas().stream()
-                                .filter(schema -> schema.schemaId() > schemaId)
-                                .collect(Collectors.toList()),
-                        newMetadata.currentSchemaId(),
-                        updateBuilder);
-            }
-            // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
-        } else {
-            // add new schema if needed
-            Preconditions.checkArgument(
-                    newMetadata.currentSchemaId() >= schemaId,
-                    "the new metadata has correct base, but the schemaId(%s) in iceberg table "
-                            + "is greater than currentSchemaId(%s) in new metadata.",
-                    schemaId,
-                    newMetadata.currentSchemaId());
-            if (newMetadata.currentSchemaId() != schemaId) {
-                addAndSetCurrentSchema(
-                        Collections.singletonList(newMetadata.schema()),
-                        newMetadata.currentSchemaId(),
-                        updateBuilder);
-            }
 
-            // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
-
-            // remove snapshots not in new metadata
-            Set<Long> snapshotIdsToRemove = new HashSet<>();
-            icebergTable
-                    .snapshots()
-                    .forEach(snapshot -> snapshotIdsToRemove.add(snapshot.snapshotId()));
-            Set<Long> snapshotIdsInNewMetadata =
-                    newMetadata.snapshots().stream()
-                            .map(Snapshot::snapshotId)
-                            .collect(Collectors.toSet());
-            snapshotIdsToRemove.removeAll(snapshotIdsInNewMetadata);
-            removeSnapshots(snapshotIdsToRemove, updateBuilder);
+        // add new schema if needed
+        Preconditions.checkArgument(
+                newMetadata.currentSchemaId() >= schemaId,
+                "the new metadata has correct base, but the schemaId(%s) in iceberg table "
+                        + "is greater than currentSchemaId(%s) in new metadata.",
+                schemaId,
+                newMetadata.currentSchemaId());
+        if (newMetadata.currentSchemaId() != schemaId) {
+            addAndSetCurrentSchema(
+                    Collections.singletonList(newMetadata.schema()),
+                    newMetadata.currentSchemaId(),
+                    updateBuilder);
         }
 
-        return updateBuilder;
-    }
+        // add snapshot
+        addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
 
-    private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
-        LOG.info("the base metadata is incorrect, we'll recreate the iceberg table.");
-        icebergTable = recreateTable(newMetadata);
-        return updatesForCorrectBase(
-                ((BaseTable) icebergTable).operations().current(), newMetadata, true);
+        // remove snapshots not in new metadata
+        Set<Long> snapshotIdsToRemove = new HashSet<>();
+        icebergTable
+                .snapshots()
+                .forEach(snapshot -> snapshotIdsToRemove.add(snapshot.snapshotId()));
+        Set<Long> snapshotIdsInNewMetadata =
+                newMetadata.snapshots().stream()
+                        .map(Snapshot::snapshotId)
+                        .collect(Collectors.toSet());
+        snapshotIdsToRemove.removeAll(snapshotIdsInNewMetadata);
+        removeSnapshots(snapshotIdsToRemove, updateBuilder);
+
+        return updateBuilder;
     }
 
     private RESTCatalog initRestCatalog(Map<String, String> restConfigs, Configuration conf) {
@@ -276,17 +237,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
     }
 
-    private Table createTable(TableMetadata tableMetadata) {
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                METADATA_PREVIOUS_VERSIONS_MAX,
-                String.valueOf(icebergOptions.previousVersionsMax()));
-        properties.put(
-                METADATA_DELETE_AFTER_COMMIT_ENABLED,
-                String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-
-        return restCatalog.createTable(
-                icebergTableIdentifier, schema0, tableMetadata.spec(), properties);
+    private Table registerTable(Path newMetadataPath) {
+        return restCatalog.registerTable(icebergTableIdentifier, newMetadataPath.toString());
     }
 
     private Table getTable() {
@@ -298,12 +250,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.dropTable(icebergTableIdentifier, false);
     }
 
-    private Table recreateTable(TableMetadata tableMetadata) {
+    private Table reRegisterTable(Path newMetadataPath) {
         try {
             dropTable();
-            return createTable(tableMetadata);
+            return registerTable(newMetadataPath);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to recreate iceberg table.", e);
+            throw new RuntimeException("Fail to re-register iceberg table.", e);
         }
     }
 
