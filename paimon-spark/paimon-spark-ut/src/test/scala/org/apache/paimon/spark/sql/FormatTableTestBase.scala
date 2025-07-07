@@ -33,6 +33,18 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     sql(s"USE $hiveDbName")
   }
 
+  test("Format table: csv with field-delimiter") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('field-delimiter' ';')")
+      val table =
+        paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
+      val csvFile =
+        new Path(table.location(), "part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c000.csv")
+      table.fileIO().writeFile(csvFile, "1;2\n3;4", false)
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 2), Row(3, 4)))
+    }
+  }
+
   test("Format table: write partitioned table") {
     for (format <- Seq("csv", "orc", "parquet", "json")) {
       withTable("t") {

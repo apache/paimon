@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable
+import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
@@ -48,7 +48,7 @@ object PaimonFormatTable {
 
     def globPaths: Boolean = {
       val entry = options.get(DataSource.GLOB_PATHS_KEY)
-      Option(entry).map(_ == "true").getOrElse(true)
+      Option(entry).forall(_ == "true")
     }
 
     val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
@@ -163,6 +163,18 @@ class PartitionedCSVTable(
     override val partitionSchema_ : StructType)
   extends CSVTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
+
+  override def newScanBuilder(options: CaseInsensitiveStringMap): CSVScanBuilder = {
+    val mergedOptions =
+      this.options.asCaseSensitiveMap().asScala ++ options.asCaseSensitiveMap().asScala
+    CSVScanBuilder(
+      sparkSession,
+      fileIndex,
+      schema,
+      dataSchema,
+      new CaseInsensitiveStringMap(mergedOptions.asJava))
+  }
+
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
       options,
