@@ -91,6 +91,7 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                     dvMaintainer,
                     options.compactionMinFileNum(),
                     options.targetFileSize(false),
+                    options.forceRewriteAllFiles(),
                     files -> compactRewrite(partition, bucket, dvFactory, files),
                     compactionMetrics == null
                             ? null
@@ -100,6 +101,6 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
 
     @Override
     protected Function<WriterContainer<InternalRow>, Boolean> createWriterCleanChecker() {
-        return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
+        return createConflictAwareWriterCleanChecker(commitUser, restore);
     }
 }

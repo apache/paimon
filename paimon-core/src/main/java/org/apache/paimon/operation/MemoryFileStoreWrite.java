@@ -20,7 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
@@ -64,13 +64,13 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             FileStoreScan scan,
             CoreOptions options,
             RowType partitionType,
-            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName) {
         super(
                 snapshotManager,
                 scan,
-                indexFactory,
+                dbMaintainerFactory,
                 dvMaintainerFactory,
                 tableName,
                 options,

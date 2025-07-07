@@ -27,7 +27,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
@@ -68,8 +67,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -80,14 +78,11 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
-    private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -123,6 +118,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.manifestCache = manifestCache;
         store().setManifestCache(manifestCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestCache() {
+        return manifestCache;
     }
 
     @Override
@@ -257,7 +258,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 changelogManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
-                DefaultValueAssigner.create(tableSchema),
                 store().pathFactory(),
                 name(),
                 store().newIndexFileHandler());
@@ -503,14 +503,37 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
-            return;
-        } catch (UnsupportedOperationException ignore) {
+        } catch (UnsupportedOperationException e) {
+            try {
+                Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+                rollbackHelper().cleanLargerThan(snapshot);
+            } catch (FileNotFoundException ex) {
+                // try to get snapshot from tag
+                TagManager tagManager = tagManager();
+                SortedMap<Snapshot, List<String>> tags = tagManager.tags();
+                for (Map.Entry<Snapshot, List<String>> entry : tags.entrySet()) {
+                    if (entry.getKey().id() == snapshotId) {
+                        rollbackTo(entry.getValue().get(0));
+                        return;
+                    }
+                }
+                throw new IllegalArgumentException(
+                        String.format("Rollback snapshot '%s' doesn't exist.", snapshotId), ex);
+            }
         }
-        checkArgument(
-                snapshotManager.snapshotExists(snapshotId),
-                "Rollback snapshot '%s' doesn't exist.",
-                snapshotId);
-        rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
+    }
+
+    @Override
+    public void rollbackTo(String tagName) {
+        SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(Instant.tag(tagName));
+        } catch (UnsupportedOperationException e) {
+            Snapshot taggedSnapshot = tagManager().getOrThrow(tagName).trimToSnapshot();
+            RollbackHelper rollbackHelper = rollbackHelper();
+            rollbackHelper.cleanLargerThan(taggedSnapshot);
+            rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+        }
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -587,9 +610,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Snapshot latestSnapshot = snapshotManager().latestSnapshot();
             SnapshotNotExistException.checkNotNull(
                     latestSnapshot, "Cannot replace tag because latest snapshot doesn't exist.");
-            tagManager().replaceTag(latestSnapshot, tagName, timeRetained);
+            tagManager()
+                    .replaceTag(
+                            latestSnapshot,
+                            tagName,
+                            timeRetained,
+                            store().createTagCallbacks(this));
         } else {
-            tagManager().replaceTag(findSnapshot(fromSnapshotId), tagName, timeRetained);
+            tagManager()
+                    .replaceTag(
+                            findSnapshot(fromSnapshotId),
+                            tagName,
+                            timeRetained,
+                            store().createTagCallbacks(this));
         }
     }
 
@@ -636,38 +669,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void rollbackTo(String tagName) {
-        SnapshotManager snapshotManager = snapshotManager();
-        try {
-            snapshotManager.rollback(Instant.tag(tagName));
-            return;
-        } catch (UnsupportedOperationException ignore) {
-
-        }
-        TagManager tagManager = tagManager();
-        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
-
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        rollbackHelper().updateLatestAndCleanLargerThan(taggedSnapshot);
-
-        try {
-            // it is possible that the earliest snapshot is later than the rollback tag because of
-            // snapshot expiration, in this case the `cleanLargerThan` method will delete all
-            // snapshots, so we should write the tag file to snapshot directory and modify the
-            // earliest hint
-            if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-                fileIO.writeFile(
-                        snapshotManager().snapshotPath(taggedSnapshot.id()),
-                        fileIO.readFileUtf8(tagManager.tagPath(tagName)),
-                        false);
-                snapshotManager.commitEarliestHint(taggedSnapshot.id());
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    @Override
     public TagManager tagManager() {
         return new TagManager(fileIO, path, currentBranch());
     }
@@ -704,14 +705,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private RollbackHelper rollbackHelper() {
-        return new RollbackHelper(
-                snapshotManager(),
-                changelogManager(),
-                tagManager(),
-                fileIO,
-                store().newSnapshotDeletion(),
-                store().newChangelogDeletion(),
-                store().newTagDeletion());
+        return new RollbackHelper(snapshotManager(), changelogManager(), tagManager(), fileIO);
     }
 
     protected RowKindGenerator rowKindGenerator() {

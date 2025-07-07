@@ -21,7 +21,6 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
@@ -230,12 +229,9 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
+    public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newWrite(commitUser, manifestFilter, writeId);
+        return wrapped.newWrite(commitUser, writeId);
     }
 
     @Override

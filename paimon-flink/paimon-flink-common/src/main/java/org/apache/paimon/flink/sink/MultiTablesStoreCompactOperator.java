@@ -47,8 +47,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
@@ -155,7 +153,8 @@ public class MultiTablesStoreCompactOperator
                         + " should not be true for MultiTablesStoreCompactOperator.");
 
         storeSinkWriteProvider =
-                createWriteProvider(table, checkpointConfig, isStreaming, ignorePreviousFiles);
+                StoreSinkWrite.createWriteProvider(
+                        table, checkpointConfig, isStreaming, ignorePreviousFiles, false);
 
         StoreSinkWrite write =
                 writes.computeIfAbsent(
@@ -251,77 +250,6 @@ public class MultiTablesStoreCompactOperator
             }
         }
         return table;
-    }
-
-    private StoreSinkWrite.Provider createWriteProvider(
-            FileStoreTable fileStoreTable,
-            CheckpointConfig checkpointConfig,
-            boolean isStreaming,
-            boolean ignorePreviousFiles) {
-        Options options = fileStoreTable.coreOptions().toConfiguration();
-        CoreOptions.ChangelogProducer changelogProducer =
-                fileStoreTable.coreOptions().changelogProducer();
-        boolean waitCompaction;
-        CoreOptions coreOptions = fileStoreTable.coreOptions();
-        if (coreOptions.writeOnly()) {
-            waitCompaction = false;
-        } else {
-            waitCompaction = coreOptions.prepareCommitWaitCompaction();
-            int deltaCommits = -1;
-            if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
-                deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
-            } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
-                long fullCompactionThresholdMs =
-                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
-                deltaCommits =
-                        (int)
-                                (fullCompactionThresholdMs
-                                        / checkpointConfig.getCheckpointInterval());
-            }
-
-            if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION
-                    || deltaCommits >= 0) {
-                int finalDeltaCommits = Math.max(deltaCommits, 1);
-                return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                        new GlobalFullCompactionSinkWrite(
-                                table,
-                                commitUser,
-                                state,
-                                ioManager,
-                                ignorePreviousFiles,
-                                waitCompaction,
-                                finalDeltaCommits,
-                                isStreaming,
-                                memoryPool,
-                                metricGroup);
-            }
-        }
-
-        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
-            return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                    new AsyncLookupSinkWrite(
-                            table,
-                            commitUser,
-                            state,
-                            ioManager,
-                            ignorePreviousFiles,
-                            waitCompaction,
-                            isStreaming,
-                            memoryPool,
-                            metricGroup);
-        }
-
-        return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                new StoreSinkWriteImpl(
-                        table,
-                        commitUser,
-                        state,
-                        ioManager,
-                        ignorePreviousFiles,
-                        waitCompaction,
-                        isStreaming,
-                        memoryPool,
-                        metricGroup);
     }
 
     /** {@link StreamOperatorFactory} of {@link MultiTablesStoreCompactOperator}. */

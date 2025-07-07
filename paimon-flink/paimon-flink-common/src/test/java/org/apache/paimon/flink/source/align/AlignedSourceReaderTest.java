@@ -31,7 +31,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -127,11 +126,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
 
         AlignedContinuousFileStoreSource alignedSource =
                 new AlignedContinuousFileStoreSource(
-                        table.newReadBuilder(),
-                        table.options(),
-                        null,
-                        BucketMode.HASH_DYNAMIC,
-                        null);
+                        table.newReadBuilder(), table.options(), null, false, null);
         SourceOperatorFactory<RowData> sourceOperatorFactory =
                 new SourceOperatorFactory<>(alignedSource, WatermarkStrategy.noWatermarks());
         StreamTaskMailboxTestHarnessBuilder<RowData> builder =

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.BucketFunctionType;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -26,7 +28,6 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 
@@ -55,9 +56,13 @@ public interface BucketSelectConverter {
     Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
 
     static Optional<BiFilter<Integer, Integer>> create(
-            Predicate bucketPredicate, RowType bucketKeyType) {
+            Predicate bucketPredicate,
+            RowType bucketKeyType,
+            BucketFunctionType bucketFunctionType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
+
+        BucketFunction bucketFunction = BucketFunction.create(bucketFunctionType, bucketKeyType);
 
         nextAnd:
         for (Predicate andPredicate : splitAnd(bucketPredicate)) {
@@ -105,19 +110,16 @@ public interface BucketSelectConverter {
         }
 
         InternalRowSerializer serializer = new InternalRowSerializer(bucketKeyType);
-        List<Integer> hashCodes = new ArrayList<>();
+        List<BinaryRow> bucketKeys = new ArrayList<>();
         assembleRows(
                 bucketValues,
-                columns -> hashCodes.add(hash(columns, serializer)),
+                columns ->
+                        bucketKeys.add(
+                                serializer.toBinaryRow(GenericRow.of(columns.toArray())).copy()),
                 new ArrayList<>(),
                 0);
 
-        return Optional.of(new Selector(hashCodes.stream().mapToInt(i -> i).toArray()));
-    }
-
-    static int hash(List<Object> columns, InternalRowSerializer serializer) {
-        BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
-        return KeyAndBucketExtractor.bucketKeyHashCode(binaryRow);
+        return Optional.of(new Selector(bucketKeys, bucketFunction));
     }
 
     static void assembleRows(
@@ -142,12 +144,15 @@ public interface BucketSelectConverter {
     @ThreadSafe
     class Selector implements BiFilter<Integer, Integer> {
 
-        private final int[] hashCodes;
+        private final List<BinaryRow> bucketKeys;
+
+        private final BucketFunction bucketFunction;
 
         private final Map<Integer, Set<Integer>> buckets = new ConcurrentHashMap<>();
 
-        public Selector(int[] hashCodes) {
-            this.hashCodes = hashCodes;
+        public Selector(List<BinaryRow> bucketKeys, BucketFunction bucketFunction) {
+            this.bucketKeys = bucketKeys;
+            this.bucketFunction = bucketFunction;
         }
 
         @Override
@@ -157,15 +162,10 @@ public interface BucketSelectConverter {
         }
 
         @VisibleForTesting
-        int[] hashCodes() {
-            return hashCodes;
-        }
-
-        @VisibleForTesting
         Set<Integer> createBucketSet(int numBucket) {
             ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
-            for (int hash : hashCodes) {
-                builder.add(KeyAndBucketExtractor.bucket(hash, numBucket));
+            for (BinaryRow key : bucketKeys) {
+                builder.add(bucketFunction.bucket(key, numBucket));
             }
             return builder.build();
         }

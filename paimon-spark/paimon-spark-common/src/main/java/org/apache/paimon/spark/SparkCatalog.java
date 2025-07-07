@@ -36,8 +36,10 @@ import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -49,6 +51,7 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.connector.catalog.TableCatalogCapability;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.FieldReference;
@@ -76,18 +79,24 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_METADATA_KEY;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
+import static org.apache.paimon.spark.utils.CatalogUtils.checkNoDefaultValue;
+import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
+import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultValue;
+import static org.apache.spark.sql.connector.catalog.TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
@@ -102,6 +111,10 @@ public class SparkCatalog extends SparkBaseCatalog
 
     private String defaultDatabase;
 
+    public Set<TableCatalogCapability> capabilities() {
+        return Collections.singleton(SUPPORT_COLUMN_DEFAULT_VALUE);
+    }
+
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         checkRequiredConfigurations();
@@ -110,7 +123,7 @@ public class SparkCatalog extends SparkBaseCatalog
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options),
-                        SparkSession.active().sessionState().newHadoopConf());
+                        PaimonSparkSession$.MODULE$.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
@@ -352,6 +365,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (change instanceof TableChange.AddColumn) {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
+            checkNoDefaultValue(add);
             return SchemaChange.addColumn(
                     add.fieldNames(),
                     toPaimonType(add.dataType()).copy(add.isNullable()),
@@ -378,6 +392,8 @@ public class SparkCatalog extends SparkBaseCatalog
             TableChange.UpdateColumnPosition update = (TableChange.UpdateColumnPosition) change;
             SchemaChange.Move move = getMove(update.position(), update.fieldNames());
             return SchemaChange.updateColumnPosition(move);
+        } else if (isUpdateColumnDefaultValue(change)) {
+            return toUpdateColumnDefaultValue(change);
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());
@@ -427,10 +443,16 @@ public class SparkCatalog extends SparkBaseCatalog
                         .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, null));
 
         for (StructField field : schema.fields()) {
-            schemaBuilder.column(
-                    field.name(),
-                    toPaimonType(field.dataType()).copy(field.nullable()),
-                    field.getComment().getOrElse(() -> null));
+            String name = field.name();
+            DataType type = toPaimonType(field.dataType()).copy(field.nullable());
+            String comment = field.getComment().getOrElse(() -> null);
+            if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
+                String defaultValue =
+                        field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
+                schemaBuilder.column(name, type, comment, defaultValue);
+            } else {
+                schemaBuilder.column(name, type, comment);
+            }
         }
         return schemaBuilder.build();
     }
@@ -475,6 +497,7 @@ public class SparkCatalog extends SparkBaseCatalog
     }
 
     private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+        SparkSession spark = PaimonSparkSession$.MODULE$.active();
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
         StructType partitionSchema =
                 SparkTypeUtils.fromPaimonRowType(
@@ -488,7 +511,7 @@ public class SparkCatalog extends SparkBaseCatalog
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -497,7 +520,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.ORC) {
             return new PartitionedOrcTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -506,7 +529,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.PARQUET) {
             return new PartitionedParquetTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
@@ -515,7 +538,7 @@ public class SparkCatalog extends SparkBaseCatalog
         } else if (formatTable.format() == FormatTable.Format.JSON) {
             return new PartitionedJsonTable(
                     ident.name(),
-                    SparkSession.active(),
+                    spark,
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),

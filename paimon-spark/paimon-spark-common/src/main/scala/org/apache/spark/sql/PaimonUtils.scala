@@ -29,6 +29,7 @@ import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
 import org.apache.spark.sql.internal.connector.PredicateUtils
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.PartitioningUtils
@@ -54,11 +55,11 @@ object PaimonUtils {
    * [[org.apache.spark.sql.execution.streaming.Sink.addBatch]].
    */
   def createNewDataFrame(data: DataFrame): DataFrame = {
-    data.sqlContext.internalCreateDataFrame(data.queryExecution.toRdd, data.schema)
+    SparkShimLoader.shim.classicApi.createDataset(data)
   }
 
   def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
-    Dataset.ofRows(sparkSession, logicalPlan)
+    SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
   }
 
   def normalizeExprs(exprs: Seq[Expression], attributes: Seq[Attribute]): Seq[Expression] = {

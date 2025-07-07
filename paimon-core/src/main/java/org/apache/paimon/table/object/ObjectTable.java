@@ -19,7 +19,6 @@
 package org.apache.paimon.table.object;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -159,10 +158,7 @@ public interface ObjectTable extends FileStoreTable {
         }
 
         @Override
-        public TableWriteImpl<?> newWrite(
-                String commitUser,
-                @Nullable ManifestCacheFilter manifestFilter,
-                @Nullable Integer writeId) {
+        public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
             throw new UnsupportedOperationException("Object table does not support Write.");
         }
 

@@ -204,7 +204,7 @@ public class Identifier implements Serializable {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(fullName), "fullName cannot be null or empty");
 
-        String[] paths = fullName.split("\\.");
+        String[] paths = fullName.split("\\.", 2);
 
         if (paths.length != 2) {
             throw new IllegalArgumentException(

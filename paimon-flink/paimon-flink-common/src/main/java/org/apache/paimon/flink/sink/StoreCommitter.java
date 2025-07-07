@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
-import org.apache.paimon.flink.sink.partition.PartitionListeners;
+import org.apache.paimon.flink.sink.listener.CommitListeners;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.BucketMode;
@@ -44,7 +44,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
-    private final PartitionListeners partitionListeners;
+    private final CommitListeners commitListeners;
     private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
@@ -58,7 +58,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         }
 
         try {
-            this.partitionListeners = PartitionListeners.create(context, table);
+            this.commitListeners = CommitListeners.create(context, table);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -110,7 +110,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             throws IOException, InterruptedException {
         commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
-        partitionListeners.notifyCommittable(committables);
+        commitListeners.notifyCommittable(committables);
     }
 
     @Override
@@ -119,7 +119,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             boolean checkAppendFiles,
             boolean partitionMarkDoneRecoverFromState) {
         int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
-        partitionListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
+        commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
 
         return committed;
     }
@@ -127,7 +127,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
         try {
-            partitionListeners.snapshotState();
+            commitListeners.snapshotState();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -142,7 +142,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void close() throws Exception {
         commit.close();
-        partitionListeners.close();
+        commitListeners.close();
     }
 
     public boolean allowLogOffsetDuplicate() {

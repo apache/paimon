@@ -30,8 +30,6 @@ import java.util.List;
  */
 public interface StoreSinkWriteState {
 
-    StoreSinkWriteState.StateValueFilter stateValueFilter();
-
     @Nullable
     List<StoreSinkWriteState.StateValue> get(String tableName, String key);
 

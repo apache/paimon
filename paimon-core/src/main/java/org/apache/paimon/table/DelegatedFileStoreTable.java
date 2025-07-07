@@ -25,7 +25,6 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.SchemaManager;
@@ -136,6 +135,12 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         wrapped.setManifestCache(manifestCache);
+    }
+
+    @Nullable
+    @Override
+    public SegmentsCache<Path> getManifestCache() {
+        return wrapped.getManifestCache();
     }
 
     @Override
@@ -294,11 +299,8 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
-        return wrapped.newWrite(commitUser, manifestFilter, writeId);
+    public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
+        return wrapped.newWrite(commitUser, writeId);
     }
 
     @Override

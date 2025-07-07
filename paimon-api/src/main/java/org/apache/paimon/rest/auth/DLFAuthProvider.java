@@ -53,8 +53,9 @@ public class DLFAuthProvider implements AuthProvider {
     protected static final String MEDIA_TYPE = "application/json";
 
     @Nullable private final DLFTokenLoader tokenLoader;
-    @Nullable protected DLFToken token;
     private final String region;
+
+    @Nullable protected volatile DLFToken token;
 
     public static DLFAuthProvider fromTokenLoader(DLFTokenLoader tokenLoader, String region) {
         return new DLFAuthProvider(tokenLoader, null, region);

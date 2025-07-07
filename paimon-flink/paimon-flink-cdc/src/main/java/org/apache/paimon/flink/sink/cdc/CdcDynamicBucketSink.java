@@ -20,12 +20,15 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /** {@link CdcDynamicBucketSinkBase} for {@link CdcRecord}. */
 public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
@@ -44,6 +47,11 @@ public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
     @Override
     protected OneInputStreamOperatorFactory<Tuple2<CdcRecord, Integer>, Committable>
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcDynamicBucketWriteOperator.Factory(table, writeProvider, commitUser);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new CdcDynamicBucketWriteOperator.CoordinatedFactory(
+                        table, writeProvider, commitUser)
+                : new CdcDynamicBucketWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }

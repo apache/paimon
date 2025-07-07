@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
@@ -55,6 +54,9 @@ import java.util.Optional;
 public interface FileStoreTable extends DataTable {
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
+
+    @Nullable
+    SegmentsCache<Path> getManifestCache();
 
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
@@ -113,10 +115,7 @@ public interface FileStoreTable extends DataTable {
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 
-    TableWriteImpl<?> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId);
+    TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
     @Override
     TableCommitImpl newCommit(String commitUser);

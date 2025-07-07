@@ -20,14 +20,19 @@ package org.apache.spark.sql.execution
 
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
+import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable
+import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import java.util
 
 import scala.collection.JavaConverters._
 
@@ -43,7 +48,7 @@ object PaimonFormatTable {
 
     def globPaths: Boolean = {
       val entry = options.get(DataSource.GLOB_PATHS_KEY)
-      Option(entry).map(_ == "true").getOrElse(true)
+      Option(entry).forall(_ == "true")
     }
 
     val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
@@ -108,6 +113,45 @@ object PaimonFormatTable {
 }
 
 // Paimon Format Table
+trait PartitionedFormatTable extends SupportsPartitionManagement {
+
+  val partitionSchema_ : StructType
+
+  val fileIndex: PartitioningAwareFileIndex
+
+  override def partitionSchema(): StructType = partitionSchema_
+
+  override def listPartitionIdentifiers(
+      names: Array[String],
+      ident: InternalRow): Array[InternalRow] = {
+    val partitionFilters = names.zipWithIndex.map {
+      case (name, index) =>
+        val f = partitionSchema().apply(name)
+        EqualTo(
+          AttributeReference(f.name, f.dataType, f.nullable)(),
+          Literal(ident.get(index, f.dataType), f.dataType))
+    }.toSeq
+    fileIndex.listFiles(partitionFilters, Seq.empty).map(_.values).toArray
+  }
+
+  override def createPartition(ident: InternalRow, properties: util.Map[String, String]): Unit = {
+    throw new UnsupportedOperationException()
+  }
+
+  override def dropPartition(ident: InternalRow): Boolean = {
+    throw new UnsupportedOperationException()
+  }
+
+  override def replacePartitionMetadata(
+      ident: InternalRow,
+      properties: util.Map[String, String]): Unit = {
+    throw new UnsupportedOperationException()
+  }
+
+  override def loadPartitionMetadata(ident: InternalRow): util.Map[String, String] = {
+    Map.empty[String, String].asJava
+  }
+}
 
 class PartitionedCSVTable(
     name: String,
@@ -116,8 +160,20 @@ class PartitionedCSVTable(
     paths: Seq[String],
     userSpecifiedSchema: Option[StructType],
     fallbackFileFormat: Class[_ <: FileFormat],
-    partitionSchema: StructType
-) extends CSVTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat) {
+    override val partitionSchema_ : StructType)
+  extends CSVTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
+
+  override def newScanBuilder(options: CaseInsensitiveStringMap): CSVScanBuilder = {
+    val mergedOptions =
+      this.options.asCaseSensitiveMap().asScala ++ options.asCaseSensitiveMap().asScala
+    CSVScanBuilder(
+      sparkSession,
+      fileIndex,
+      schema,
+      dataSchema,
+      new CaseInsensitiveStringMap(mergedOptions.asJava))
+  }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
@@ -125,7 +181,7 @@ class PartitionedCSVTable(
       sparkSession,
       paths,
       userSpecifiedSchema,
-      partitionSchema)
+      partitionSchema())
   }
 }
 
@@ -136,8 +192,9 @@ class PartitionedOrcTable(
     paths: Seq[String],
     userSpecifiedSchema: Option[StructType],
     fallbackFileFormat: Class[_ <: FileFormat],
-    partitionSchema: StructType
-) extends OrcTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat) {
+    override val partitionSchema_ : StructType
+) extends OrcTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
@@ -145,7 +202,7 @@ class PartitionedOrcTable(
       sparkSession,
       paths,
       userSpecifiedSchema,
-      partitionSchema)
+      partitionSchema())
   }
 }
 
@@ -156,14 +213,9 @@ class PartitionedParquetTable(
     paths: Seq[String],
     userSpecifiedSchema: Option[StructType],
     fallbackFileFormat: Class[_ <: FileFormat],
-    partitionSchema: StructType
-) extends ParquetTable(
-    name,
-    sparkSession,
-    options,
-    paths,
-    userSpecifiedSchema,
-    fallbackFileFormat) {
+    override val partitionSchema_ : StructType
+) extends ParquetTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
@@ -171,7 +223,7 @@ class PartitionedParquetTable(
       sparkSession,
       paths,
       userSpecifiedSchema,
-      partitionSchema)
+      partitionSchema())
   }
 }
 
@@ -182,8 +234,9 @@ class PartitionedJsonTable(
     paths: Seq[String],
     userSpecifiedSchema: Option[StructType],
     fallbackFileFormat: Class[_ <: FileFormat],
-    partitionSchema: StructType)
-  extends JsonTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat) {
+    override val partitionSchema_ : StructType)
+  extends JsonTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
@@ -191,6 +244,6 @@ class PartitionedJsonTable(
       sparkSession,
       paths,
       userSpecifiedSchema,
-      partitionSchema)
+      partitionSchema())
   }
 }

@@ -22,12 +22,13 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{execution, SparkSession}
+import org.apache.spark.sql.{execution, PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Expression, In, InSubquery, Literal, ScalarSubquery, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.{ExecSubqueryExpression, QueryExecution}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.BooleanType
 
 import scala.collection.JavaConverters._
@@ -42,7 +43,7 @@ import scala.collection.JavaConverters._
  */
 object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHelper with Logging {
 
-  lazy val spark: SparkSession = SparkSession.active
+  lazy val spark: SparkSession = PaimonSparkSession.active
   lazy val resolver: Resolver = spark.sessionState.conf.resolver
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
@@ -75,7 +76,8 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
           throw new RuntimeException("Correlated InSubquery is not supported")
         }
 
-        val executedPlan = QueryExecution.prepareExecutedPlan(spark, listQuery.plan)
+        val executedPlan =
+          SparkShimLoader.shim.classicApi.prepareExecutedPlan(spark, listQuery.plan)
         val physicalSubquery = execution.InSubqueryExec(
           expr,
           execution.SubqueryExec(s"subquery#${listQuery.exprId.id}", executedPlan),
@@ -83,7 +85,7 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
         evalPhysicalSubquery(physicalSubquery)
 
         physicalSubquery.values() match {
-          case Some(l) if l.length > 0 => In(expr, l.map(Literal(_, expr.dataType)))
+          case Some(l) if l.length > 0 => In(expr, l.map(Literal(_, expr.dataType)).toSeq)
           case _ => Literal(false, BooleanType)
         }
 
@@ -92,7 +94,7 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
           throw new RuntimeException("Correlated ScalarSubquery is not supported")
         }
 
-        val executedPlan = QueryExecution.prepareExecutedPlan(spark, s.plan)
+        val executedPlan = SparkShimLoader.shim.classicApi.prepareExecutedPlan(spark, s.plan)
         val physicalSubquery = execution.ScalarSubquery(
           execution.SubqueryExec
             .createForScalarSubquery(s"scalar-subquery#${s.exprId.id}", executedPlan),

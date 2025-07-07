@@ -21,6 +21,7 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -70,9 +71,14 @@ public class LookupDataTableScan extends DataTableStreamScan {
                 supportStreamingReadOverwrite,
                 queryAuth,
                 hasPk);
+
         this.startupMode = options.startupMode();
         this.lookupScanMode = lookupScanMode;
         dropStats();
+
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
+            snapshotReader.onlyReadRealBuckets();
+        }
     }
 
     @Override

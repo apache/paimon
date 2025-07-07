@@ -23,10 +23,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.HashIndexMaintainer;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
@@ -114,11 +112,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public KeyValueFileStoreScan newScan() {
-        return newScan(ScanType.FOR_READ);
-    }
-
-    @Override
     public MergeFileSplitRead newRead() {
         return new MergeFileSplitRead(
                 options,
@@ -156,17 +149,14 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null, null);
+        return newWrite(commitUser, null);
     }
 
     @Override
-    public AbstractFileStoreWrite<KeyValue> newWrite(
-            String commitUser,
-            @Nullable ManifestCacheFilter manifestFilter,
-            @Nullable Integer writeId) {
-        IndexMaintainer.Factory<KeyValue> indexFactory = null;
+    public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
+        DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
-            indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
+            indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
         }
         DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
         if (options.deletionVectorsEnabled()) {
@@ -177,14 +167,16 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
+                    pathFactory(),
                     schema,
                     commitUser,
                     partitionType,
                     keyType,
                     valueType,
                     this::pathFactory,
+                    newReaderFactoryBuilder(),
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     options,
                     tableName,
                     writeId);
@@ -204,7 +196,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     pathFactory(),
                     this::pathFactory,
                     snapshotManager(),
-                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    newScan(),
                     indexFactory,
                     deletionVectorsMaintainerFactory,
                     options,
@@ -214,7 +206,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    protected KeyValueFileStoreScan newScan(ScanType scanType) {
+    public KeyValueFileStoreScan newScan() {
         BucketMode bucketMode = bucketMode();
         BucketSelectConverter bucketSelectConverter =
                 keyFilter -> {
@@ -229,31 +221,25 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                                     keyType.getFieldNames(),
                                     bucketKeyType.getFieldNames());
                     if (!bucketFilters.isEmpty()) {
-                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                        return BucketSelectConverter.create(
+                                and(bucketFilters), bucketKeyType, options.bucketFunctionType());
                     }
                     return Optional.empty();
                 };
 
-        KeyValueFileStoreScan scan =
-                new KeyValueFileStoreScan(
-                        newManifestsReader(scanType == ScanType.FOR_WRITE),
-                        bucketSelectConverter,
-                        snapshotManager(),
-                        schemaManager,
-                        schema,
-                        keyValueFieldsExtractor,
-                        manifestFileFactory(scanType == ScanType.FOR_WRITE),
-                        options.scanManifestParallelism(),
-                        options.deletionVectorsEnabled(),
-                        options.mergeEngine(),
-                        options.changelogProducer(),
-                        options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
-
-        if (options.bucket() == BucketMode.POSTPONE_BUCKET && scanType == ScanType.FOR_READ) {
-            scan.onlyReadRealBuckets();
-        }
-
-        return scan;
+        return new KeyValueFileStoreScan(
+                newManifestsReader(),
+                bucketSelectConverter,
+                snapshotManager(),
+                schemaManager,
+                schema,
+                keyValueFieldsExtractor,
+                manifestFileFactory(),
+                options.scanManifestParallelism(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine(),
+                options.changelogProducer(),
+                options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
     }
 
     @Override

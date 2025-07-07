@@ -50,6 +50,8 @@ public class FlinkCdcMultiTableSinkTest {
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        FlinkConnectorOptions.SINK_WRITER_CPU.defaultValue(),
+                        null,
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
                         null,
                         UUID.randomUUID().toString(),

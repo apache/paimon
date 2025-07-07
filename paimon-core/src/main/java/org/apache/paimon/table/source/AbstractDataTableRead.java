@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
@@ -33,8 +32,6 @@ import java.util.Optional;
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
 
-    private final DefaultValueAssigner defaultValueAssigner;
-
     private RowType readType;
     private boolean executeFilter = false;
     private Predicate predicate;
@@ -42,7 +39,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     public AbstractDataTableRead(TableSchema schema) {
         this.schema = schema;
-        this.defaultValueAssigner = schema == null ? null : DefaultValueAssigner.create(schema);
     }
 
     public abstract void applyReadType(RowType readType);
@@ -57,9 +53,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withFilter(Predicate predicate) {
         this.predicate = predicate;
-        if (defaultValueAssigner != null) {
-            predicate = defaultValueAssigner.handlePredicate(predicate);
-        }
         return innerWithFilter(predicate);
     }
 
@@ -82,7 +75,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withReadType(RowType readType) {
         this.readType = readType;
-        this.defaultValueAssigner.handleReadRowType(readType);
         applyReadType(readType);
         return this;
     }
@@ -90,9 +82,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final RecordReader<InternalRow> createReader(Split split) throws IOException {
         RecordReader<InternalRow> reader = reader(split);
-        if (defaultValueAssigner != null) {
-            reader = defaultValueAssigner.assignFieldsDefaultValue(reader);
-        }
         if (executeFilter) {
             reader = executeFilter(reader);
         }

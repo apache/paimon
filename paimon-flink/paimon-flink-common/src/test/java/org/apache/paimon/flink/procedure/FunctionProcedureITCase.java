@@ -45,7 +45,8 @@ public class FunctionProcedureITCase extends RESTCatalogITCaseBase {
                                         + "'[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]', true, 'comment', 'k1=v1,k2=v2')",
                                 DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
-        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        assertThat(batchSql(String.format("SHOW FUNCTIONS in %s", DATABASE_NAME)))
+                .contains(Row.of(functionName));
         result =
                 sql(
                         String.format(
@@ -54,11 +55,13 @@ public class FunctionProcedureITCase extends RESTCatalogITCaseBase {
         assertThat(result.toString()).contains("Success");
         Catalog catalog = tEnv.getCatalog("PAIMON").get();
         ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
-        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        assertThat(batchSql(String.format("SHOW FUNCTIONS in %s", DATABASE_NAME)))
+                .contains(Row.of(functionName));
         CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
         assertThat(getFunction.getClassName()).isEqualTo("xxxx");
         result = sql(String.format("CALL sys.drop_function('%s.%s')", DATABASE_NAME, functionName));
         assertThat(result.toString()).contains("Success");
-        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).doesNotContain(Row.of(functionName));
+        assertThat(batchSql(String.format("SHOW FUNCTIONS in %s", DATABASE_NAME)))
+                .doesNotContain(Row.of(functionName));
     }
 }

@@ -33,6 +33,18 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     sql(s"USE $hiveDbName")
   }
 
+  test("Format table: csv with field-delimiter") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('field-delimiter' ';')")
+      val table =
+        paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
+      val csvFile =
+        new Path(table.location(), "part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c000.csv")
+      table.fileIO().writeFile(csvFile, "1;2\n3;4", false)
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 2), Row(3, 4)))
+    }
+  }
+
   test("Format table: write partitioned table") {
     for (format <- Seq("csv", "orc", "parquet", "json")) {
       withTable("t") {
@@ -54,6 +66,26 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         checkAnswer(sql("SELECT id FROM t"), Row(1))
         checkAnswer(sql("SELECT p1 FROM t"), Row(2))
         checkAnswer(sql("SELECT p2 FROM t"), Row(3))
+      }
+    }
+  }
+
+  test("Format table: show partitions") {
+    for (format <- Seq("csv", "orc", "parquet", "json")) {
+      withTable("t") {
+        sql(s"CREATE TABLE t (id INT, p1 INT, p2 STRING) USING $format PARTITIONED BY (p1, p2)")
+        sql("INSERT INTO t VALUES (1, 1, '1')")
+        sql("INSERT INTO t VALUES (2, 1, '1')")
+        sql("INSERT INTO t VALUES (3, 2, '1')")
+        sql("INSERT INTO t VALUES (3, 2, '2')")
+
+        checkAnswer(
+          spark.sql("SHOW PARTITIONS T"),
+          Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+
+        checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p1=1)"), Seq(Row("p1=1/p2=1")))
+
+        checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
       }
     }
   }
@@ -95,6 +127,14 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         fileIO.deleteQuietly(new Path(file))
         checkAnswer(sql("SELECT * FROM compress_t"), Row(1, 2, 3))
       }
+    }
+  }
+
+  test("Format table: field delimiter in HMS") {
+    withTable("t1") {
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('field-delimiter' ';')")
+      val row = sql("SHOW CREATE TABLE t1").collect()(0)
+      assert(row.toString().contains("'field-delimiter' = ';'"))
     }
   }
 }

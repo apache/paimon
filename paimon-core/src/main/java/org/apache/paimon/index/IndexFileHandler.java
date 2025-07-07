@@ -189,6 +189,9 @@ public class IndexFileHandler {
 
     public List<IndexManifestEntry> scanEntries(
             Snapshot snapshot, String indexType, Set<BinaryRow> partitions) {
+        if (snapshot == null) {
+            return Collections.emptyList();
+        }
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return Collections.emptyList();

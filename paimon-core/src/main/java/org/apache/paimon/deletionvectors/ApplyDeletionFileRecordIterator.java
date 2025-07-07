@@ -27,7 +27,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** A {@link FileRecordIterator} wraps a {@link FileRecordIterator} and {@link DeletionVector}. */
-public class ApplyDeletionFileRecordIterator implements FileRecordIterator<InternalRow> {
+public class ApplyDeletionFileRecordIterator
+        implements FileRecordIterator<InternalRow>, DeletionFileRecordIterator {
 
     private final FileRecordIterator<InternalRow> iterator;
     private final DeletionVector deletionVector;
@@ -38,10 +39,12 @@ public class ApplyDeletionFileRecordIterator implements FileRecordIterator<Inter
         this.deletionVector = deletionVector;
     }
 
+    @Override
     public FileRecordIterator<InternalRow> iterator() {
         return iterator;
     }
 
+    @Override
     public DeletionVector deletionVector() {
         return deletionVector;
     }

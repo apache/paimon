@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.flink.sink.partition.MockCustomPartitionMarkDoneAction;
+import org.apache.paimon.flink.sink.listener.MockCustomPartitionMarkDoneAction;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.actions.HttpReportMarkDoneAction;
 import org.apache.paimon.partition.file.SuccessFile;

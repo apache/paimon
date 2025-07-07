@@ -37,6 +37,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
+import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
@@ -76,10 +77,11 @@ class HiveTableUtils {
                 format = Format.JSON;
             } else {
                 format = Format.CSV;
-                // hive default field delimiter is '\u0001'
                 options.set(
                         FIELD_DELIMITER,
-                        serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+                        serdeInfo
+                                .getParameters()
+                                .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
             }
         } else {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);

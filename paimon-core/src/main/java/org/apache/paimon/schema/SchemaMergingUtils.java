@@ -119,7 +119,8 @@ public class SchemaMergingUtils {
                                                     baseField.id(),
                                                     baseField.name(),
                                                     updatedDataType,
-                                                    baseField.description());
+                                                    baseField.description(),
+                                                    baseField.defaultValue());
                                         } else {
                                             return baseField;
                                         }
@@ -220,16 +221,16 @@ public class SchemaMergingUtils {
 
     private static boolean supportsDataTypesCast(
             DataType sourceType, DataType targetType, boolean allowExplicitCast) {
-        if (allowExplicitCast) {
-            return DataTypeCasts.supportsExplicitCast(sourceType, targetType);
-        } else {
-            return DataTypeCasts.supportsImplicitCast(sourceType, targetType);
-        }
+        return DataTypeCasts.supportsCast(sourceType, targetType, allowExplicitCast);
     }
 
     private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
         DataType dataType = ReassignFieldId.reassign(field.type(), highestFieldId);
         return new DataField(
-                highestFieldId.incrementAndGet(), field.name(), dataType, field.description());
+                highestFieldId.incrementAndGet(),
+                field.name(),
+                dataType,
+                field.description(),
+                field.defaultValue());
     }
 }

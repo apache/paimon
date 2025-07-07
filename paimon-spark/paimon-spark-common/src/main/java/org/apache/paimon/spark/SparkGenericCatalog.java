@@ -27,6 +27,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.spark.SparkConf;
+import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -202,7 +203,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
-            return SparkShimLoader.getSparkShim()
+            return SparkShimLoader.shim()
                     .createTable(asTableCatalog(), ident, schema, partitions, properties);
         }
     }
@@ -238,7 +239,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     @Override
     public final void initialize(String name, CaseInsensitiveStringMap options) {
-        SparkSession sparkSession = SparkSession.active();
+        SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         SessionState sessionState = sparkSession.sessionState();
         Configuration hadoopConf = sessionState.newHadoopConf();
         if (options.containsKey(METASTORE.key())

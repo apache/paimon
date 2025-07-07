@@ -137,6 +137,8 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
+Note that this optimization only takes effect when the join keys contain all the bucket keys.
+
 ## Dynamic Partition
 
 In traditional data warehouses, each partition often maintains the latest full data, so this partition table only 
@@ -170,6 +172,12 @@ The Lookup node will automatically refresh the latest partition and query the da
 The option `scan.partitions` can also specify fixed partitions in the form of `key1=value1,key2=value2`.
 Multiple partitions should be separated by semicolon (`;`).
 When specifying fixed partitions, this option can also be used in batch joins.
+
+The option `scan.partitions` can also specify max_pt() for parent partition in the form of `key1=max_pt(),key2=max_pt()`.
+All subpartitions for the latest parent partition will be loaded. For example, if partition keys is `'year', 'day', 'hh'`, 
+you can specify `year=max_pt()`, it will find the latest partition for `year` and load all its subpartitions for lookup.
+Only supports partitions to be specified hierarchically. For example, if setting `year=max_pt(),hh=max_pt()`, `hh=max_pt()`
+makes no sense.
 
 ## Query Service
 

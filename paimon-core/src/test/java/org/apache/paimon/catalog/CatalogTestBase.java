@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
@@ -64,6 +65,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -438,6 +440,17 @@ public abstract class CatalogTestBase {
                 .withMessage("The value of auto-create property should be false.");
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
 
+        // Create table throws Exception when type = format-table.
+        if (supportsFormatTable()) {
+            schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+            schema.options().put(CoreOptions.PRIMARY_KEY.key(), "a");
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> catalog.createTable(identifier, schema, false))
+                    .withMessage("Cannot define primary-key for format table.");
+            schema.options().remove(CoreOptions.TYPE.key());
+            schema.options().remove(CoreOptions.PRIMARY_KEY.key());
+        }
+
         // Create table and check the schema
         schema.options().put("k1", "v1");
         catalog.createTable(identifier, schema, false);
@@ -681,413 +694,15 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testAlterTable() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table adds a new column to an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING())),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(
-                        SchemaChange.addColumn("col2", DataTypes.DATE()),
-                        SchemaChange.addColumn("col3", DataTypes.STRING(), "col3 field")),
-                false);
-        Table table = catalog.getTable(identifier);
-        assertThat(table.rowType().getFields()).hasSize(3);
-        int index = table.rowType().getFieldIndex("col2");
-        int index2 = table.rowType().getFieldIndex("col3");
-        assertThat(index).isEqualTo(1);
-        assertThat(index2).isEqualTo(2);
-        assertThat(table.rowType().getTypeAt(index)).isEqualTo(DataTypes.DATE());
-        assertThat(table.rowType().getTypeAt(index2)).isEqualTo(DataTypes.STRING());
-        assertThat(table.rowType().getFields().get(2).description()).isEqualTo("col3 field");
-
-        // Alter table throws Exception when table is system table
-        assertThatExceptionOfType(IllegalArgumentException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        Identifier.create("test_db", "$system_table"),
-                                        Lists.newArrayList(
-                                                SchemaChange.addColumn("col2", DataTypes.DATE())),
-                                        false))
-                .withMessage(
-                        "Cannot 'alterTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
-
-        // Alter table throws TableNotExistException when table does not exist
-        assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        Identifier.create("test_db", "non_existing_table"),
-                                        Lists.newArrayList(
-                                                SchemaChange.addColumn("col3", DataTypes.INT())),
-                                        false))
-                .withMessage("Table test_db.non_existing_table does not exist.");
-
-        // Alter table adds a column throws ColumnAlreadyExistException when column already exists
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.addColumn("col1", DataTypes.INT())),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnAlreadyExistException.class,
-                                "Column col1 already exists in the test_db.test_table table."));
-
-        // conflict options
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.setOption(
-                                                        "changelog-producer", "input")),
-                                        false))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Can not set changelog-producer on table without primary keys");
+    public void testAlterDataTable() throws Exception {
+        baseAlterTable(Maps.newHashMap());
     }
 
     @Test
-    public void testAlterTableRenameColumn() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table renames a column in an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.STRING()),
-                                new DataField(1, "col2", DataTypes.STRING())),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.renameColumn("col1", "new_col1")),
-                false);
-        Table table = catalog.getTable(identifier);
-
-        assertThat(table.rowType().getFields()).hasSize(2);
-        assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
-        assertThat(table.rowType().getFieldIndex("new_col1")).isEqualTo(0);
-
-        // Alter table renames a new column throws ColumnAlreadyExistException when column already
-        // exists
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.renameColumn("col2", "new_col1")),
-                                        false))
-                .isInstanceOf(Catalog.ColumnAlreadyExistException.class);
-
-        // Alter table renames a column throws ColumnNotExistException when column does not exist
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.renameColumn(
-                                                        "non_existing_col", "new_col2")),
-                                        false))
-                .isInstanceOf(Catalog.ColumnNotExistException.class);
-    }
-
-    @Test
-    public void testAlterTableDropColumn() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table drop a column in an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.STRING()),
-                                new DataField(1, "col2", DataTypes.STRING())),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.dropColumn("col1")), false);
-        Table table = catalog.getTable(identifier);
-
-        assertThat(table.rowType().getFields()).hasSize(1);
-        assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
-
-        // Alter table drop all fields throws Exception
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(SchemaChange.dropColumn("col2")),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class, "Cannot drop all fields in table"));
-
-        // Alter table drop a column throws ColumnNotExistException when column does not exist
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.dropColumn("non_existing_col")),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnNotExistException.class,
-                                "Column non_existing_col does not exist in the test_db.test_table table."));
-    }
-
-    @Test
-    public void testAlterTableUpdateColumnType() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table update a column type in an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "dt", DataTypes.STRING()),
-                                new DataField(1, "col1", DataTypes.BIGINT(), "col1 field")),
-                        Lists.newArrayList("dt"),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.updateColumnType("col1", DataTypes.DOUBLE())),
-                false);
-        Table table = catalog.getTable(identifier);
-
-        assertThat(table.rowType().getFieldIndex("col1")).isEqualTo(1);
-        assertThat(table.rowType().getTypeAt(1)).isEqualTo(DataTypes.DOUBLE());
-        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col1 field");
-
-        // Alter table update a column type throws Exception when column data type does not support
-        // cast
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnType(
-                                                        "col1", DataTypes.DATE())),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalStateException.class,
-                                "Column type col1[DOUBLE] cannot be converted to DATE without loosing information."));
-
-        // Alter table update a column type throws ColumnNotExistException when column does not
-        // exist
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnType(
-                                                        "non_existing_col", DataTypes.INT())),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnNotExistException.class,
-                                "Column non_existing_col does not exist in the test_db.test_table table."));
-        // Alter table update a column type throws Exception when column is partition columns
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnType(
-                                                        "dt", DataTypes.DATE())),
-                                        false))
-                .satisfies(anyCauseMatches("Cannot update partition column: [dt]"));
-    }
-
-    @Test
-    public void testAlterTableUpdateColumnComment() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table update a column comment in an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
-                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
-                                new DataField(
-                                        2,
-                                        "col3",
-                                        DataTypes.ROW(
-                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
-                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
-                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
-                                        "field3")),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.updateColumnComment("col2", "col2 field")),
-                false);
-
-        // Update nested column
-        String[] fields = new String[] {"col3", "f1"};
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.updateColumnComment(fields, "col3 f1 field")),
-                false);
-
-        Table table = catalog.getTable(identifier);
-        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col2 field");
-        RowType rowType = (RowType) table.rowType().getFields().get(2).type();
-        assertThat(rowType.getFields().get(0).description()).isEqualTo("col3 f1 field");
-
-        // Alter table update a column comment throws Exception when column does not exist
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnComment(
-                                                        new String[] {"non_existing_col"}, "")),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnNotExistException.class,
-                                "Column non_existing_col does not exist in the test_db.test_table table."));
-    }
-
-    @Test
-    public void testAlterTableUpdateColumnNullability() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        // Alter table update a column nullability in an existing table
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
-                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
-                                new DataField(
-                                        2,
-                                        "col3",
-                                        DataTypes.ROW(
-                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
-                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
-                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
-                                        "field3")),
-                        Lists.newArrayList("col1"),
-                        Lists.newArrayList("col1", "col2"),
-                        Maps.newHashMap(),
-                        ""),
-                false);
-
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(
-                        SchemaChange.setOption(
-                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")),
-                false);
-
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.updateColumnNullability("col1", false)),
-                false);
-
-        // Update nested column
-        String[] fields = new String[] {"col3", "f1"};
-        catalog.alterTable(
-                identifier,
-                Lists.newArrayList(SchemaChange.updateColumnNullability(fields, false)),
-                false);
-
-        Table table = catalog.getTable(identifier);
-        assertThat(table.rowType().getFields().get(0).type().isNullable()).isEqualTo(false);
-
-        // Alter table update a column nullability throws Exception when column does not exist
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnNullability(
-                                                        new String[] {"non_existing_col"}, false)),
-                                        false))
-                .satisfies(
-                        anyCauseMatches(
-                                Catalog.ColumnNotExistException.class,
-                                "Column non_existing_col does not exist in the test_db.test_table table."));
-
-        // Alter table update a column nullability throws Exception when column is pk columns
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier,
-                                        Lists.newArrayList(
-                                                SchemaChange.updateColumnNullability(
-                                                        new String[] {"col2"}, true)),
-                                        false))
-                .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
-    }
-
-    @Test
-    public void testAlterTableUpdateComment() throws Exception {
-        catalog.createDatabase("test_db", false);
-
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
-                                new DataField(1, "col2", DataTypes.STRING(), "field2")),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        "comment"),
-                false);
-
-        catalog.alterTable(
-                identifier, Lists.newArrayList(SchemaChange.updateComment("new comment")), false);
-
-        Table table = catalog.getTable(identifier);
-        assertThat(table.comment().isPresent() && table.comment().get().equals("new comment"))
-                .isTrue();
-
-        // drop comment
-        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.updateComment(null)), false);
-
-        table = catalog.getTable(identifier);
-        assertThat(table.comment().isPresent()).isFalse();
+    public void testAlterMaterializedTable() throws Exception {
+        Map<String, String> initOptions = Maps.newHashMap();
+        initOptions.put(CoreOptions.TYPE.key(), TableType.MATERIALIZED_TABLE.toString());
+        baseAlterTable(initOptions);
     }
 
     @Test
@@ -1309,6 +924,7 @@ public abstract class CatalogTestBase {
                         .column("int", DataTypes.INT())
                         .options(getFormatTableOptions())
                         .option("file.format", "csv")
+                        .option("remove-key", "value")
                         .build();
         catalog.createTable(identifier, schema, false);
         assertThat(catalog.listTables(identifier.getDatabaseName()))
@@ -1316,9 +932,13 @@ public abstract class CatalogTestBase {
         assertThat(catalog.getTable(identifier)).isInstanceOf(FormatTable.class);
 
         // alter table
-        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
-        assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
-                .hasMessageContaining("Only data table support alter table.");
+        if (supportsAlterFormatTable()) {
+            baseAlterTable(getFormatTableOptions());
+        } else {
+            SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
+            assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
+                    .hasMessageContaining("Only data table support alter table.");
+        }
 
         // drop table
         catalog.dropTable(identifier, false);
@@ -1498,6 +1118,10 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsFormatTable() {
+        return false;
+    }
+
+    protected boolean supportsAlterFormatTable() {
         return false;
     }
 
@@ -1687,5 +1311,360 @@ public abstract class CatalogTestBase {
             dialects.put("spark", "SELECT * FROM SPARK_TABLE");
         }
         return new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
+    }
+
+    private void baseAlterTable(Map<String, String> initOptions) throws Exception {
+        catalog.createDatabase("test_db", true);
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING(), "field1")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initOptions,
+                        "comment"),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(
+                        SchemaChange.addColumn("col2", DataTypes.DATE()),
+                        SchemaChange.addColumn("col3", DataTypes.STRING(), "col3 field")),
+                false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFields()).hasSize(3);
+        int index = table.rowType().getFieldIndex("col2");
+        int index2 = table.rowType().getFieldIndex("col3");
+        assertThat(index).isEqualTo(1);
+        assertThat(index2).isEqualTo(2);
+        assertThat(table.rowType().getTypeAt(index)).isEqualTo(DataTypes.DATE());
+        assertThat(table.rowType().getTypeAt(index2)).isEqualTo(DataTypes.STRING());
+        assertThat(table.rowType().getFields().get(2).description()).isEqualTo("col3 field");
+
+        // Alter table throws Exception when table is system table
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        Identifier.create("test_db", "$system_table"),
+                                        Lists.newArrayList(
+                                                SchemaChange.addColumn("col2", DataTypes.DATE())),
+                                        false))
+                .withMessage(
+                        "Cannot 'alterTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
+
+        // Alter table throws TableNotExistException when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        Identifier.create("test_db", "non_existing_table"),
+                                        Lists.newArrayList(
+                                                SchemaChange.addColumn("col3", DataTypes.INT())),
+                                        false))
+                .withMessage("Table test_db.non_existing_table does not exist.");
+
+        // Alter table adds a column throws ColumnAlreadyExistException when column already exists
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.addColumn("col1", DataTypes.INT())),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                Catalog.ColumnAlreadyExistException.class,
+                                "Column col1 already exists in the test_db.test_table table."));
+
+        // conflict options
+        if (Options.fromMap(table.options()).get(TYPE) == TableType.MATERIALIZED_TABLE
+                || Options.fromMap(table.options()).get(TYPE) == TableType.TABLE) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier,
+                                            Lists.newArrayList(
+                                                    SchemaChange.setOption(
+                                                            "changelog-producer", "input")),
+                                            false))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(
+                            "Can not set changelog-producer on table without primary keys");
+        }
+
+        catalog.alterTable(
+                identifier, Lists.newArrayList(SchemaChange.updateComment("new comment")), false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent() && table.comment().get().equals("new comment"))
+                .isTrue();
+
+        // Alter table renames a column in an existing table;
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.renameColumn("col1", "new_col1")),
+                false);
+        table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
+        assertThat(table.rowType().getFieldIndex("new_col1")).isEqualTo(0);
+
+        // Alter table renames a new column throws ColumnAlreadyExistException when column already
+        // exists
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.renameColumn("col2", "new_col1")),
+                                        false))
+                .isInstanceOf(Catalog.ColumnAlreadyExistException.class);
+
+        // Alter table renames a column throws ColumnNotExistException when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.renameColumn(
+                                                        "non_existing_col", "new_col2")),
+                                        false))
+                .isInstanceOf(Catalog.ColumnNotExistException.class);
+        catalog.dropTable(identifier, true);
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING()),
+                                new DataField(1, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        ""),
+                false);
+        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.dropColumn("col1")), false);
+        table = catalog.getTable(identifier);
+
+        assertThat(table.rowType().getFields()).hasSize(1);
+        assertThat(table.rowType().getFieldIndex("col1")).isLessThan(0);
+
+        // Alter table drop all fields throws Exception
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(SchemaChange.dropColumn("col2")),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class, "Cannot drop all fields in table"));
+
+        // Alter table drop a column throws ColumnNotExistException when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.dropColumn("non_existing_col")),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                Catalog.ColumnNotExistException.class,
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
+
+        // drop comment
+        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.updateComment(null)), false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent()).isFalse();
+        catalog.dropTable(identifier, false);
+
+        // Alter table update a column type in an existing table
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "dt", DataTypes.STRING()),
+                                new DataField(1, "col1", DataTypes.BIGINT(), "col1 field")),
+                        Lists.newArrayList("dt"),
+                        Collections.emptyList(),
+                        initOptions,
+                        ""),
+                false);
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnType("col1", DataTypes.DOUBLE())),
+                false);
+        table = catalog.getTable(identifier);
+
+        assertThat(table.rowType().getFieldIndex("col1")).isEqualTo(1);
+        assertThat(table.rowType().getTypeAt(1)).isEqualTo(DataTypes.DOUBLE());
+        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col1 field");
+
+        // Alter table update a column type throws Exception when column data type does not support
+        // cast
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnType(
+                                                        "col1", DataTypes.DATE())),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Column type col1[DOUBLE] cannot be converted to DATE without loosing information."));
+
+        // Alter table update a column type throws ColumnNotExistException when column does not
+        // exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnType(
+                                                        "non_existing_col", DataTypes.INT())),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                Catalog.ColumnNotExistException.class,
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
+        // Alter table update a column type throws Exception when column is partition columns
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnType(
+                                                        "dt", DataTypes.DATE())),
+                                        false))
+                .satisfies(anyCauseMatches("Cannot update partition column: [dt]"));
+        catalog.dropTable(identifier, false);
+
+        // Alter table update a column comment in an existing table
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
+                                new DataField(
+                                        2,
+                                        "col3",
+                                        DataTypes.ROW(
+                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
+                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
+                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
+                                        "field3")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initOptions,
+                        ""),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnComment("col2", "col2 field")),
+                false);
+
+        // Update nested column
+        String[] fields = new String[] {"col3", "f1"};
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnComment(fields, "col3 f1 field")),
+                false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col2 field");
+        RowType rowType = (RowType) table.rowType().getFields().get(2).type();
+        assertThat(rowType.getFields().get(0).description()).isEqualTo("col3 f1 field");
+
+        // Alter table update a column comment throws Exception when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnComment(
+                                                        new String[] {"non_existing_col"}, "")),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                Catalog.ColumnNotExistException.class,
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
+        catalog.dropTable(identifier, false);
+
+        // Alter table update a column nullability in an existing table
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
+                                new DataField(
+                                        2,
+                                        "col3",
+                                        DataTypes.ROW(
+                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
+                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
+                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
+                                        "field3")),
+                        Lists.newArrayList("col1"),
+                        Lists.newArrayList("col1", "col2"),
+                        Maps.newHashMap(),
+                        ""),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnNullability("col1", false)),
+                false);
+
+        // Update nested column
+        fields = new String[] {"col3", "f1"};
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnNullability(fields, false)),
+                false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFields().get(0).type().isNullable()).isEqualTo(false);
+
+        // Alter table update a column nullability throws Exception when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnNullability(
+                                                        new String[] {"non_existing_col"}, false)),
+                                        false))
+                .satisfies(
+                        anyCauseMatches(
+                                Catalog.ColumnNotExistException.class,
+                                "Column non_existing_col does not exist in the test_db.test_table table."));
+
+        // Alter table update a column nullability throws Exception when column is pk columns
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnNullability(
+                                                        new String[] {"col2"}, true)),
+                                        false))
+                .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
+        catalog.dropTable(identifier, false);
     }
 }

@@ -22,7 +22,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -47,6 +47,8 @@ import java.util.concurrent.ExecutorService;
  * @param <T> type of record to write.
  */
 public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<T>>> {
+
+    FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore);
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
 
@@ -76,10 +78,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     /**
      * Ignores the check that the written partition must have the same number of buckets with the
      * table option.
-     *
-     * <p>TODO: to support writing partitions with different total buckets, we'll also need a
-     * special {@link org.apache.paimon.table.sink.ChannelComputer} and {@link
-     * org.apache.paimon.table.sink.KeyAndBucketExtractor} to deal with different bucket numbers.
      */
     void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck);
 
@@ -94,15 +92,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
 
     void withCompactExecutor(ExecutorService compactExecutor);
-
-    /**
-     * This method is called when the insert only status of the records changes.
-     *
-     * @param insertOnly If true, all the following records would be of {@link
-     *     org.apache.paimon.types.RowKind#INSERT}, and no two records would have the same primary
-     *     key.
-     */
-    void withInsertOnly(boolean insertOnly);
 
     /**
      * Write the data to the store according to the partition and bucket.
@@ -167,7 +156,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
         protected final long maxSequenceNumber;
-        @Nullable protected final IndexMaintainer<T> indexMaintainer;
+        @Nullable protected final DynamicBucketIndexMaintainer indexMaintainer;
         @Nullable protected final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final CommitIncrement commitIncrement;
 
@@ -179,7 +168,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
                 long maxSequenceNumber,
-                @Nullable IndexMaintainer<T> indexMaintainer,
+                @Nullable DynamicBucketIndexMaintainer indexMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;

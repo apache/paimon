@@ -224,12 +224,12 @@ public class FlinkConnectorOptions {
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
                                     + " is used to calculate aggregation and the input is not complete changelog.");
 
-    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION =
-            key("streaming-read.shuffle-bucket-with-partition")
+    public static final ConfigOption<Boolean> READ_SHUFFLE_BUCKET_WITH_PARTITION =
+            key("read.shuffle-bucket-with-partition")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription(
-                            "Whether shuffle by partition and bucket when streaming read.");
+                    .withFallbackKeys("streaming-read.shuffle-bucket-with-partition")
+                    .withDescription("Whether shuffle by partition and bucket when read.");
 
     /**
      * Weight of writer buffer in managed memory, Flink will compute the memory size for writer
@@ -341,6 +341,18 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, a tag will be automatically created for the snapshot created by flink savepoint.");
+
+    public static final ConfigOption<Double> SINK_WRITER_CPU =
+            ConfigOptions.key("sink.writer-cpu")
+                    .doubleType()
+                    .defaultValue(1.0)
+                    .withDescription("Sink writer cpu to control cpu cores of writer.");
+
+    public static final ConfigOption<MemorySize> SINK_WRITER_MEMORY =
+            ConfigOptions.key("sink.writer-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription("Sink writer memory to control heap memory of writer.");
 
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
@@ -496,6 +508,41 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
+    public static final ConfigOption<Boolean> SCAN_DEDICATED_SPLIT_GENERATION =
+            key("scan.dedicated-split-generation")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, the split generation process would be performed during runtime on a Flink task, instead of on the JobManager during initialization phase.");
+
+    public static final ConfigOption<String> COMMIT_CUSTOM_LISTENERS =
+            key("commit.custom-listeners")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription(
+                            "Commit listener will be called after a successful commit. This option list custom commit "
+                                    + "listener identifiers separated by comma.");
+
+    public static final ConfigOption<Boolean> SINK_WRITER_COORDINATOR_ENABLED =
+            key("sink.writer-coordinator.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable sink writer coordinator to plan data files in Job Manager.");
+
+    public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
+            key("sink.writer-coordinator.cache-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription(
+                            "Controls the cache memory of writer coordinator to cache manifest files in Job Manager.");
+
+    public static final ConfigOption<Boolean> FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED =
+            key("filesystem.job-level-settings.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable pass job level filesystem settings to table file IO.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -522,7 +569,10 @@ public class FlinkConnectorOptions {
         AUTO,
 
         /** Use full caching mode. */
-        FULL
+        FULL,
+
+        /** Use in-memory caching mode. */
+        MEMORY
     }
 
     /** Watermark emit strategy for scan. */

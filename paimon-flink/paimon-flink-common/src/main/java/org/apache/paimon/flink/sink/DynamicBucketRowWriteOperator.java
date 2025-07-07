@@ -79,4 +79,31 @@ public class DynamicBucketRowWriteOperator
             return DynamicBucketRowWriteOperator.class;
         }
     }
+
+    /** {@link StreamOperatorFactory} of {@link DynamicBucketRowWriteOperator}. */
+    public static class CoordinatedFactory
+            extends TableWriteOperator.CoordinatedFactory<Tuple2<InternalRow, Integer>> {
+
+        public CoordinatedFactory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends TableWriteOperator<Tuple2<InternalRow, Integer>>>
+                T createStreamOperatorImpl(StreamOperatorParameters<Committable> parameters) {
+            return (T)
+                    new DynamicBucketRowWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return DynamicBucketRowWriteOperator.class;
+        }
+    }
 }

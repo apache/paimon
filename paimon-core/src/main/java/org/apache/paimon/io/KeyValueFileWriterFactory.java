@@ -43,7 +43,6 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -157,21 +156,6 @@ public class KeyValueFileWriterFactory {
         // in WriteFormatKey
         fileIO.deleteQuietly(
                 formatContext.pathFactory(new WriteFormatKey(file.level(), false)).toPath(file));
-    }
-
-    public void copyFile(DataFileMeta sourceFile, DataFileMeta targetFile) throws IOException {
-        // this path factory is only for path generation, so we don't care about the true or false
-        // in WriteFormatKey
-        boolean isChangelog = false;
-        Path sourcePath =
-                formatContext
-                        .pathFactory(new WriteFormatKey(sourceFile.level(), isChangelog))
-                        .toPath(sourceFile);
-        Path targetPath =
-                formatContext
-                        .pathFactory(new WriteFormatKey(targetFile.level(), isChangelog))
-                        .toPath(targetFile);
-        fileIO.copyFile(sourcePath, targetPath, true);
     }
 
     public FileIO getFileIO() {

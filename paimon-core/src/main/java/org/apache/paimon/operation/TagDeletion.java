@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -104,10 +103,6 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
         cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
-    }
-
-    public Predicate<ExpireFileEntry> dataFileSkipper(Snapshot fromSnapshot) throws Exception {
-        return dataFileSkipper(Collections.singletonList(fromSnapshot));
     }
 
     public Predicate<ExpireFileEntry> dataFileSkipper(List<Snapshot> fromSnapshots)

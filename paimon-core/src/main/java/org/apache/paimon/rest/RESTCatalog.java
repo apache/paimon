@@ -30,6 +30,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -80,7 +81,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
-import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for REST. */
@@ -97,7 +98,11 @@ public class RESTCatalog implements Catalog {
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.api = new RESTApi(context.options(), configRequired);
         this.context =
-                CatalogContext.create(api.options(), context.preferIO(), context.fallbackIO());
+                CatalogContext.create(
+                        api.options(),
+                        context.hadoopConf(),
+                        context.preferIO(),
+                        context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
     }
 
@@ -247,12 +252,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listTablesPagedGlobally(
+    public PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        PagedList<String> tables =
+        PagedList<Identifier> tables =
                 api.listTablesPagedGlobally(
                         databaseNamePattern, tableNamePattern, maxResults, pageToken);
         return new PagedList<>(tables.getElements(), tables.getNextPageToken());
@@ -422,7 +427,7 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateAutoCreateClose(schema.options());
+            validateCreateTable(schema);
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
@@ -727,6 +732,53 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listFunctionsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            return api.listFunctionsPaged(databaseName, maxResults, pageToken, functionNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<Identifier> listFunctionsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String functionNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        PagedList<Identifier> functions =
+                api.listFunctionsPagedGlobally(
+                        databaseNamePattern, functionNamePattern, maxResults, pageToken);
+        return new PagedList<>(functions.getElements(), functions.getNextPageToken());
+    }
+
+    @Override
+    public PagedList<Function> listFunctionDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            PagedList<GetFunctionResponse> functions =
+                    api.listFunctionDetailsPaged(
+                            databaseName, maxResults, pageToken, functionNamePattern);
+            return new PagedList<>(
+                    functions.getElements().stream()
+                            .map(v -> v.toFunction(Identifier.create(databaseName, v.name())))
+                            .collect(Collectors.toList()),
+                    functions.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         try {
             GetViewResponse response = api.getView(identifier);
@@ -815,12 +867,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listViewsPagedGlobally(
+    public PagedList<Identifier> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        PagedList<String> views =
+        PagedList<Identifier> views =
                 api.listViewsPagedGlobally(
                         databaseNamePattern, viewNamePattern, maxResults, pageToken);
         return new PagedList<>(views.getElements(), views.getNextPageToken());

@@ -35,22 +35,20 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** Dynamic partition for lookup. */
-public class DynamicPartitionLoader extends PartitionLoader {
+public abstract class DynamicPartitionLoader extends PartitionLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionLoader.class);
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
-    private final Duration refreshInterval;
-    private final int maxPartitionNum;
+    protected final Duration refreshInterval;
 
-    private transient Comparator<InternalRow> comparator;
-    private transient LocalDateTime lastRefresh;
+    protected transient Comparator<InternalRow> comparator;
+    protected transient LocalDateTime lastRefresh;
 
-    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval, int maxPartitionNum) {
+    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval) {
         super(table);
         this.refreshInterval = refreshInterval;
-        this.maxPartitionNum = maxPartitionNum;
     }
 
     @Override
@@ -70,8 +68,7 @@ public class DynamicPartitionLoader extends PartitionLoader {
         }
 
         LOG.info(
-                "DynamicPartitionLoader(maxPartitionNum={},table={}) refreshed after {} second(s), refreshing",
-                maxPartitionNum,
+                "DynamicPartitionLoader(table={}) refreshed after {} second(s), refreshing",
                 table.name(),
                 refreshInterval.toMillis() / 1000);
 
@@ -90,42 +87,31 @@ public class DynamicPartitionLoader extends PartitionLoader {
                     return true;
                 }
             }
-            LOG.info(
-                    "DynamicPartitionLoader(maxPartitionNum={},table={}) didn't find new partitions.",
-                    maxPartitionNum,
-                    table.name());
+            LOG.info("DynamicPartitionLoader(table={}) didn't find new partitions.", table.name());
             return false;
         }
     }
 
+    protected abstract List<BinaryRow> getMaxPartitions();
+
     private void logNewPartitions() {
-        String partitionsStr =
-                partitions.stream()
-                        .map(
-                                partition ->
-                                        InternalRowPartitionComputer.partToSimpleString(
-                                                table.rowType().project(table.partitionKeys()),
-                                                partition,
-                                                "-",
-                                                200))
-                        .collect(Collectors.joining(","));
+        String partitionsStr = partitionsToString(partitions);
+
         LOG.info(
-                "DynamicPartitionLoader(maxPartitionNum={},table={}) finds new partitions: {}.",
-                maxPartitionNum,
+                "DynamicPartitionLoader(table={}) finds new partitions: {}.",
                 table.name(),
                 partitionsStr);
     }
 
-    private List<BinaryRow> getMaxPartitions() {
-        List<BinaryRow> newPartitions =
-                table.newReadBuilder().newScan().listPartitions().stream()
-                        .sorted(comparator.reversed())
-                        .collect(Collectors.toList());
-
-        if (newPartitions.size() <= maxPartitionNum) {
-            return newPartitions;
-        } else {
-            return newPartitions.subList(0, maxPartitionNum);
-        }
+    protected String partitionsToString(List<BinaryRow> partitions) {
+        return partitions.stream()
+                .map(
+                        partition ->
+                                InternalRowPartitionComputer.partToSimpleString(
+                                        table.rowType().project(table.partitionKeys()),
+                                        partition,
+                                        "-",
+                                        200))
+                .collect(Collectors.joining(","));
     }
 }

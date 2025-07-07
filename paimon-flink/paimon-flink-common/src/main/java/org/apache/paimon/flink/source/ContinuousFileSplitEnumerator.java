@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -70,6 +69,8 @@ public class ContinuousFileSplitEnumerator
 
     protected final StreamTableScan scan;
 
+    protected final int splitMaxPerTask;
+
     protected final SplitAssigner splitAssigner;
 
     protected final ConsumerProgressCalculator consumerProgressCalculator;
@@ -94,7 +95,7 @@ public class ContinuousFileSplitEnumerator
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             StreamTableScan scan,
-            BucketMode bucketMode,
+            boolean unawareBucket,
             int splitMaxPerTask,
             boolean shuffleBucketWithPartition,
             int maxSnapshotCount) {
@@ -105,8 +106,9 @@ public class ContinuousFileSplitEnumerator
         this.readersAwaitingSplit = new LinkedHashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
-        this.splitAssigner = createSplitAssigner(bucketMode);
+        this.splitMaxPerTask = splitMaxPerTask;
         this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
+        this.splitAssigner = createSplitAssigner(unawareBucket);
         this.shuffleBucketWithPartition = shuffleBucketWithPartition;
         addSplits(remainSplits);
 
@@ -309,10 +311,11 @@ public class ContinuousFileSplitEnumerator
         return ChannelComputer.select(dataSplit.bucket(), context.currentParallelism());
     }
 
-    protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
-        return bucketMode == BucketMode.BUCKET_UNAWARE
+    protected SplitAssigner createSplitAssigner(boolean unawareBucket) {
+        return unawareBucket
                 ? new FIFOSplitAssigner(Collections.emptyList())
-                : new PreAssignSplitAssigner(1, context, Collections.emptyList());
+                : new PreAssignSplitAssigner(
+                        this.splitMaxPerTask, context, Collections.emptyList());
     }
 
     protected boolean noMoreSplits() {

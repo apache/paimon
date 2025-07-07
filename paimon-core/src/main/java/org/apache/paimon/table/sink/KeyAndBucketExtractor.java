@@ -19,7 +19,6 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.types.RowKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,14 +42,4 @@ public interface KeyAndBucketExtractor<T> {
     BinaryRow trimmedPrimaryKey();
 
     BinaryRow logPrimaryKey();
-
-    static int bucketKeyHashCode(BinaryRow bucketKey) {
-        assert bucketKey.getRowKind() == RowKind.INSERT;
-        return bucketKey.hashCode();
-    }
-
-    static int bucket(int hashcode, int numBuckets) {
-        assert numBuckets > 0;
-        return Math.abs(hashcode % numBuckets);
-    }
 }

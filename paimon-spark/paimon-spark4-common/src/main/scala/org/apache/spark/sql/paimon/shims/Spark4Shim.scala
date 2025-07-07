@@ -24,22 +24,24 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensi
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.internal.ExpressionUtils
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
 import org.apache.spark.unsafe.types.VariantVal
 
 import java.util.{Map => JMap}
 
 class Spark4Shim extends SparkShim {
+
+  override def classicApi: ClassicApi = new Classic4Api
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
     new PaimonSpark4SqlExtensionsParser(delegate)
@@ -57,13 +59,7 @@ class Spark4Shim extends SparkShim {
     new Spark4ArrayData(elementType)
   }
 
-  def supportsHashAggregate(
-      aggregateBufferAttributes: Seq[Attribute],
-      groupingExpression: Seq[Expression]): Boolean = {
-    Aggregate.supportsHashAggregate(aggregateBufferAttributes, groupingExpression)
-  }
-
-  def createTable(
+  override def createTable(
       tableCatalog: TableCatalog,
       ident: Identifier,
       schema: StructType,
@@ -73,10 +69,24 @@ class Spark4Shim extends SparkShim {
     tableCatalog.createTable(ident, columns, partitions, properties)
   }
 
-  def column(expr: Expression): Column = ExpressionUtils.column(expr)
+  override def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef = {
+    CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
+  }
 
-  def convertToExpression(spark: SparkSession, column: Column): Expression =
-    spark.expression(column)
+  override def supportsHashAggregate(
+      aggregateBufferAttributes: Seq[Attribute],
+      groupingExpression: Seq[Expression]): Boolean = {
+    Aggregate.supportsHashAggregate(aggregateBufferAttributes.toSeq, groupingExpression.toSeq)
+  }
+
+  override def supportsObjectHashAggregate(
+      aggregateExpressions: Seq[AggregateExpression],
+      groupByExpressions: Seq[Expression]): Boolean =
+    Aggregate.supportsObjectHashAggregate(aggregateExpressions.toSeq, groupByExpressions.toSeq)
 
   override def toPaimonVariant(o: Object): Variant = {
     val v = o.asInstanceOf[VariantVal]

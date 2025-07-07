@@ -42,6 +42,7 @@ import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -116,6 +117,10 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
     @Test
     public void testSyncTable() throws Exception {
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        boolean useCoordinator =
+                flinkVersion.compareTo("1.15") > 0 && ThreadLocalRandom.current().nextBoolean();
+
         runAction(
                 ACTION_SYNC_TABLE,
                 "pt",
@@ -124,7 +129,11 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 ImmutableMap.of(),
                 ImmutableMap.of(
                         "database-name", "paimon_sync_table", "table-name", "schema_evolution_.+"),
-                ImmutableMap.of("bucket", "2"));
+                ImmutableMap.of(
+                        "bucket",
+                        "2",
+                        "sink.writer-coordinator.enabled",
+                        String.valueOf(useCoordinator)));
 
         try (Connection conn = getMySqlConnection();
                 Statement statement = conn.createStatement()) {

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -41,6 +42,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Optional;
 
 /** Action to rescale one partition of a table. */
 public class RescaleAction extends TableActionBase {
@@ -81,6 +83,21 @@ public class RescaleAction extends TableActionBase {
         env.configure(flinkConf);
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
+        Optional<Snapshot> optionalSnapshot = fileStoreTable.latestSnapshot();
+        if (!optionalSnapshot.isPresent()) {
+            throw new IllegalArgumentException(
+                    "Table " + table.fullName() + " has no snapshot. No need to rescale.");
+        }
+        Snapshot snapshot = optionalSnapshot.get();
+
+        // If someone commits while the rescale job is running, this commit will be lost.
+        // So we use strict mode to make sure nothing is lost.
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(
+                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+                String.valueOf(snapshot.id()));
+        fileStoreTable = fileStoreTable.copy(dynamicOptions);
+
         RowType partitionType = fileStoreTable.schema().logicalPartitionType();
         Predicate partitionPredicate =
                 PartitionPredicate.createPartitionPredicate(
@@ -94,7 +111,9 @@ public class RescaleAction extends TableActionBase {
                         .env(env)
                         .sourceBounded(true)
                         .sourceParallelism(
-                                scanParallelism == null ? currentBucketNum() : scanParallelism)
+                                scanParallelism == null
+                                        ? currentBucketNum(snapshot)
+                                        : scanParallelism)
                         .predicate(partitionPredicate)
                         .build();
 
@@ -118,15 +137,17 @@ public class RescaleAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         build();
-        env.execute("Rescale Postpone Bucket : " + table.fullName());
+        env.execute("Rescale : " + table.fullName());
     }
 
-    private int currentBucketNum() {
+    private int currentBucketNum(Snapshot snapshot) {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         Iterator<ManifestEntry> it =
                 fileStoreTable
                         .newSnapshotReader()
+                        .withSnapshot(snapshot)
                         .withPartitionFilter(partition)
+                        .onlyReadRealBuckets()
                         .readFileIterator();
         Preconditions.checkArgument(
                 it.hasNext(),

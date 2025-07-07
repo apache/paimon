@@ -38,7 +38,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.operation.FileStoreTestUtils;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -79,6 +78,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -95,6 +95,8 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
@@ -291,12 +293,10 @@ public abstract class SimpleTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Collections.singletonList(
-                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
+                        singletonList("1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Collections.singletonList(
-                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+                        singletonList("2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -534,46 +534,6 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testManifestCache() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf ->
-                                conf.set(
-                                        CoreOptions.WRITE_MANIFEST_CACHE,
-                                        MemorySize.ofMebiBytes(1)));
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-
-        // lots of commits, produce lots of manifest
-        List<String> expected = new ArrayList<>();
-        int cnt = 50;
-        for (int i = 0; i < cnt; i++) {
-            write.write(rowData(i, i, (long) i));
-            commit.commit(i, write.prepareCommit(false, i));
-            expected.add(
-                    String.format("%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i, i));
-        }
-        write.close();
-
-        // create new write and reload manifests
-        write = table.newWrite(commitUser);
-        for (int i = 0; i < cnt; i++) {
-            write.write(rowData(i, i + 1, (long) i + 1));
-            expected.add(
-                    String.format(
-                            "%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i + 1, i + 1));
-        }
-        commit.commit(cnt, write.prepareCommit(false, cnt));
-        commit.close();
-
-        // check result
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), BATCH_ROW_TO_STRING);
-        assertThat(result.size()).isEqualTo(expected.size());
-        assertThat(result).containsExactlyInAnyOrderElementsOf(expected);
-    }
-
-    @Test
     public void testWriteWithoutCompactionAndExpiration() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -789,8 +749,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(8);
+        assertRollbackTo(table, singletonList(1L), 1, 1, emptyList());
     }
 
     // All tags are after the rollback snapshot
@@ -813,16 +772,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(8);
-        // table-path/snapshot/LATEST
-        // table-path/snapshot/EARLIEST
-        // table-path/snapshot/snapshot-1
-        // table-path/pt=0/bucket-0/data-0.orc
-        // table-path/manifest/manifest-list-1
-        // table-path/manifest/manifest-0
-        // table-path/manifest/manifest-list-0
-        // table-path/schema/schema-0
+        assertRollbackTo(table, singletonList(1L), 1, 1, emptyList());
     }
 
     // One tag is at the rollback snapshot and others are after it
@@ -856,10 +806,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(9);
-        // case 0 plus 1:
-        // table-path/tag/tag-test3
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test3"));
     }
 
     // One tag is before the rollback snapshot and others are after it
@@ -895,15 +842,7 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(14);
-        // case 0 plus 6:
-        // table-path/manifest/manifest-list-2
-        // table-path/manifest/manifest-list-3
-        // table-path/manifest/manifest-1
-        // table-path/snapshot/snapshot-2
-        // table-path/tag/tag-test3
-        // table-path/pt=1/bucket-0/data-0.orc
+        assertRollbackTo(table, Arrays.asList(1L, 2L), 1, 2, singletonList("test3"));
     }
 
     @ParameterizedTest(name = "expire snapshots = {0}")
@@ -948,10 +887,36 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
-        assertThat(files).hasSize(9);
-        // rollback snapshot case 0 plus 1:
-        // table-path/tag/tag-test1
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test1"));
+    }
+
+    @Test
+    public void testRollbackToTagFromSnapshotId() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
+
+        table.createTag("test", 1);
+
+        // expire snapshots
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
+        options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
+        table.copy(options.toMap()).newCommit("").expireSnapshots();
+
+        table.rollbackTo(1);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        assertRollbackTo(table, singletonList(1L), 1, 1, singletonList("test"));
     }
 
     private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {
@@ -1761,5 +1726,21 @@ public abstract class SimpleTableTestBase {
                                 toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    protected void assertRollbackTo(
+            FileStoreTable table,
+            List<Long> expectedSnapshots,
+            long expectedEarliest,
+            long expectedLatest,
+            List<String> expectedTags)
+            throws IOException {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        List<Long> snapshots = snapshotManager.snapshotIdStream().collect(Collectors.toList());
+        assertThat(snapshots).containsExactlyInAnyOrderElementsOf(expectedSnapshots);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(expectedEarliest);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(expectedLatest);
+        assertThat(table.tagManager().allTagNames())
+                .containsExactlyInAnyOrderElementsOf(expectedTags);
     }
 }

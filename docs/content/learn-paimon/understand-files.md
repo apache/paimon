@@ -267,7 +267,7 @@ CALL sys.compact(
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     [--partition <partition-name>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \

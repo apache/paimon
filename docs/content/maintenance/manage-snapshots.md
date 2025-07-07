@@ -228,6 +228,58 @@ mode by setting `snapshot.expire.execution-mode` to `async`. However, if your jo
 batch mode, it is not recommended to use asynchronous expiration mode, as the expire task 
 may fail to complete successfully.
 
+## Manually expire snapshot
+Manually expire a table's snapshots
+{{< tabs "manually_expire_snapshot" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following command:
+
+```sql
+-- for Flink 1.18
+CALL sys.expire_snapshots('database_name.table_name', 2)
+-- for Flink 1.19 and later
+CALL sys.expire_snapshots(`table` => 'database_name.table_name', retain_max => 2)
+CALL sys.expire_snapshots(`table` => 'database_name.table_name', older_than => '2024-01-01 12:00:00')
+CALL sys.expire_snapshots(`table` => 'database_name.table_name', older_than => '2024-01-01 12:00:00', retain_min => 10)
+CALL sys.expire_snapshots(`table` => 'database_name.table_name', older_than => '2024-01-01 12:00:00', max_deletes => 10, options => 'snapshot.expire.limit=1')
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    expire_snapshots \
+    --warehouse <warehouse-path> \
+    --identifier <identifier> \
+    --older_than <timestamp> \
+    --version <snapshot-id> \
+    --max_deletes <max-deletes> \
+    --retain_max <retain-max> \
+    --retain_min <retain-min> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.expire_snapshots(table => 'database_name.table_name', retain_max => 10, options => 'snapshot.expire.limit=1');
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Rollback to Snapshot
 
 Rollback a table to a specific snapshot ID.
@@ -253,7 +305,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     rollback_to \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --version <snapshot-id> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
@@ -323,7 +375,7 @@ CALL sys.remove_orphan_files(`table` => 'my_db.*', [older_than => '2023-10-31 12
     /path/to/paimon-flink-action-{{< version >}}.jar \
     remove_orphan_files \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     [--older_than <timestamp>] \
     [--dry_run <false/true>] \
@@ -338,7 +390,7 @@ To avoid deleting files that are newly added by other writing jobs, this action 
     /path/to/paimon-flink-action-{{< version >}}.jar \
     remove_orphan_files \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table T \
     --older_than '2023-10-31 12:00:00'
 ```

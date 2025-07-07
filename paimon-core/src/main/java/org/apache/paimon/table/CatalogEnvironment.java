@@ -132,6 +132,16 @@ public class CatalogEnvironment implements Serializable {
         return catalogLoader;
     }
 
+    public CatalogEnvironment copy(Identifier identifier) {
+        return new CatalogEnvironment(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                supportsVersionManagement);
+    }
+
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
             return select -> Collections.emptyList();

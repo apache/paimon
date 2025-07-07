@@ -333,7 +333,7 @@ paths:
       tags:
         - table
       summary: List tables globally
-      operationId: List tables globally
+      operationId: ListTablesGlobally
       description: list tables paged globally which matches the given database name pattern and table name pattern both.
       parameters:
         - name: prefix
@@ -367,7 +367,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListTablesResponse'
+                $ref: '#/components/schemas/ListTablesGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -1237,7 +1237,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListViewsResponse'
+                $ref: '#/components/schemas/ListViewsGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -1398,6 +1398,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: functionNamePattern
+          description: A sql LIKE pattern (%) for function names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -1414,7 +1419,7 @@ paths:
     post:
       tags:
         - function
-      summary: Create Function
+      summary: Create function
       operationId: createFunction
       parameters:
         - name: prefix
@@ -1445,6 +1450,97 @@ paths:
           $ref: '#/components/responses/FunctionAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+
+  /v1/{prefix}/databases/{database}/function-details:
+    get:
+      tags:
+        - function
+      summary: List function details
+      operationId: listFunctionDetails
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: functionNamePattern
+          description: A sql LIKE pattern (%) for function names. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFunctionDetailsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+
+  /v1/{prefix}/functions:
+    get:
+      tags:
+        - function
+      summary: List functions globally
+      operationId: listFunctionsGlobally
+      description: List functions globally which matches the given database name pattern and function name pattern both.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: databaseNamePattern
+          description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: path
+          schema:
+            type: string
+        - name: functionNamePattern
+          description: A sql LIKE pattern (%) for function names. All functions will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFunctionsGloballyResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+
 
   /v1/{prefix}/databases/{database}/functions/{function}:
     get:
@@ -2233,6 +2329,7 @@ components:
         - $ref: '#/components/schemas/RenameColumn'
         - $ref: '#/components/schemas/DropColumn'
         - $ref: '#/components/schemas/UpdateColumnComment'
+        - $ref: '#/components/schemas/UpdateColumnDefaultValue'
         - $ref: '#/components/schemas/UpdateColumnType'
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
@@ -2247,6 +2344,7 @@ components:
           renameColumn: '#/components/schemas/RenameColumn'
           dropColumn: '#/components/schemas/DropColumn'
           updateColumnComment: '#/components/schemas/UpdateColumnComment'
+          updateColumnDefaultValue: '#/components/schemas/UpdateColumnDefaultValue'
           updateColumnType: '#/components/schemas/UpdateColumnType'
           updateColumnPosition: '#/components/schemas/UpdateColumnPosition'
           updateColumnNullability: '#/components/schemas/UpdateColumnNullability'
@@ -2338,6 +2436,19 @@ components:
           items:
             type: string
         newComment:
+          type: string
+    UpdateColumnDefaultValue:
+      allOf:
+        - $ref: '#/components/schemas/BaseSchemaChange'
+      properties:
+        action:
+          type: string
+          const: "updateColumnDefaultValue"
+        fieldNames:
+          type: array
+          items:
+            type: string
+        newDefaultValue:
           type: string
     UpdateColumnType:
       allOf:
@@ -2624,7 +2735,7 @@ components:
           type: array
           items:
             type: string
-            description: table name or full table name of the table. full table name format is like "db.table"
+            description: table name of the table.
         nextPageToken:
           type: string
     ListTableDetailsResponse:
@@ -2634,6 +2745,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GetTableResponse'
+        nextPageToken:
+          type: string
+    ListTablesGloballyResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            identifier:
+              $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ConfigResponse:
@@ -2702,7 +2823,7 @@ components:
           type: array
           items:
             type: string
-            description: view name or full view name of the view. full view name format is like "db.view"
+            description: view name of the view.
         nextPageToken:
           type: string
     ListViewDetailsResponse:
@@ -2714,6 +2835,23 @@ components:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
           type: string
+    ListFunctionsGloballyResponse:
+      type: object
+      properties:
+        functions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Identifier'
+    ListViewsGloballyResponse:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            identifier:
+              $ref: '#/components/schemas/Identifier'
+        nextPageToken:
+          type: string
     ListFunctionsResponse:
       type: object
       properties:
@@ -2721,6 +2859,15 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
+    ListFunctionDetailsResponse:
+      type: object
+      properties:
+        functionDetails:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetFunctionResponse'
         nextPageToken:
           type: string
     GetFunctionResponse:

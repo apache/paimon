@@ -19,8 +19,10 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -51,5 +53,10 @@ public class CdcAppendTableSink extends FlinkWriteSink<CdcRecord> {
     public DataStream<Committable> doWrite(
             DataStream<CdcRecord> input, String initialCommitUser, @Nullable Integer parallelism) {
         return super.doWrite(input, initialCommitUser, this.parallelism);
+    }
+
+    @Override
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
+        return createRestoreOnlyCommittableStateManager(table);
     }
 }

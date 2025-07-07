@@ -32,7 +32,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /** Compact strategy to decide which files to select for compaction. */
 public interface CompactStrategy {
@@ -55,16 +54,23 @@ public interface CompactStrategy {
             int numLevels,
             List<LevelSortedRun> runs,
             @Nullable RecordLevelExpire recordLevelExpire,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            boolean forceRewriteAllFiles) {
         int maxLevel = numLevels - 1;
         if (runs.isEmpty()) {
             // no sorted run, no need to compact
             return Optional.empty();
-        } else if ((runs.size() == 1 && runs.get(0).level() == maxLevel)) {
+        }
+
+        // only max level files
+        if ((runs.size() == 1 && runs.get(0).level() == maxLevel)) {
             List<DataFileMeta> filesToBeCompacted = new ArrayList<>();
 
             for (DataFileMeta file : runs.get(0).run().files()) {
-                if (recordLevelExpire != null && recordLevelExpire.isExpireFile(file)) {
+                if (forceRewriteAllFiles) {
+                    // add all files when force compacted
+                    filesToBeCompacted.add(file);
+                } else if (recordLevelExpire != null && recordLevelExpire.isExpireFile(file)) {
                     // check record level expire for large files
                     filesToBeCompacted.add(file);
                 } else if (dvMaintainer != null
@@ -74,27 +80,14 @@ public interface CompactStrategy {
                 }
             }
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Pick these files which have expired records or dv index for full compaction: {}",
-                        filesToBeCompacted.stream()
-                                .map(
-                                        file ->
-                                                String.format(
-                                                        "(%s, %d, %d)",
-                                                        file.fileName(),
-                                                        file.level(),
-                                                        file.fileSize()))
-                                .collect(Collectors.joining(", ")));
-            }
-
-            if (!filesToBeCompacted.isEmpty()) {
-                return Optional.of(CompactUnit.fromFiles(maxLevel, filesToBeCompacted));
-            } else {
+            if (filesToBeCompacted.isEmpty()) {
                 return Optional.empty();
             }
-        } else {
-            return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+
+            return Optional.of(CompactUnit.fromFiles(maxLevel, filesToBeCompacted, true));
         }
+
+        // full compaction
+        return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
     }
 }

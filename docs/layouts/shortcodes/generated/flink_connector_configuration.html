@@ -33,10 +33,22 @@ under the License.
             <td>Maximum number of threads to copy bytes from small changelog files. By default is the number of processors available to the Java virtual machine.</td>
         </tr>
         <tr>
+            <td><h5>commit.custom-listeners</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Commit listener will be called after a successful commit. This option list custom commit listener identifiers separated by comma.</td>
+        </tr>
+        <tr>
             <td><h5>end-input.watermark</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>Optional endInput watermark used in case of batch mode or bounded stream.</td>
+        </tr>
+        <tr>
+            <td><h5>filesystem.job-level-settings.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable pass job level filesystem settings to table file IO.</td>
         </tr>
         <tr>
             <td><h5>lookup.async</h5></td>
@@ -60,7 +72,7 @@ under the License.
             <td><h5>lookup.cache</h5></td>
             <td style="word-wrap: break-word;">AUTO</td>
             <td><p>Enum</p></td>
-            <td>The cache mode of lookup join.<br /><br />Possible values:<ul><li>"AUTO"</li><li>"FULL"</li></ul></td>
+            <td>The cache mode of lookup join.<br /><br />Possible values:<ul><li>"AUTO"</li><li>"FULL"</li><li>"MEMORY"</li></ul></td>
         </tr>
         <tr>
             <td><h5>lookup.dynamic-partition.refresh-interval</h5></td>
@@ -123,10 +135,22 @@ under the License.
             <td>If true, it will add a compact coordinator and worker operator after the writer operator,in order to compact several changelog files (for primary key tables) or newly created data files (for unaware bucket tables) from the same partition into large ones, which can decrease the number of small files.</td>
         </tr>
         <tr>
+            <td><h5>read.shuffle-bucket-with-partition</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether shuffle by partition and bucket when read.</td>
+        </tr>
+        <tr>
             <td><h5>scan.bounded</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Bounded mode for Paimon consumer. By default, Paimon automatically selects bounded mode based on the mode of the Flink job.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.dedicated-split-generation</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the split generation process would be performed during runtime on a Flink task, instead of on the JobManager during initialization phase.</td>
         </tr>
         <tr>
             <td><h5>scan.infer-parallelism</h5></td>
@@ -285,6 +309,30 @@ under the License.
             <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
         </tr>
         <tr>
+            <td><h5>sink.writer-coordinator.cache-memory</h5></td>
+            <td style="word-wrap: break-word;">1 gb</td>
+            <td>MemorySize</td>
+            <td>Controls the cache memory of writer coordinator to cache manifest files in Job Manager.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-coordinator.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable sink writer coordinator to plan data files in Job Manager.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-cpu</h5></td>
+            <td style="word-wrap: break-word;">1.0</td>
+            <td>Double</td>
+            <td>Sink writer cpu to control cpu cores of writer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Sink writer memory to control heap memory of writer.</td>
+        </tr>
+        <tr>
             <td><h5>source.checkpoint-align.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -301,12 +349,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Set the uid suffix for the source operators. After setting, the uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
-        </tr>
-        <tr>
-            <td><h5>streaming-read.shuffle-bucket-with-partition</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether shuffle by partition and bucket when streaming read.</td>
         </tr>
         <tr>
             <td><h5>unaware-bucket.compaction.parallelism</h5></td>

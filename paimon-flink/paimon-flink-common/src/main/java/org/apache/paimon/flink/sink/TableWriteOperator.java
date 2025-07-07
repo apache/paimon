@@ -19,18 +19,26 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
+import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
+import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
+import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.CoordinatedOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -38,13 +46,16 @@ import java.util.List;
 /** An abstract class for table write operator. */
 public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, Committable> {
 
+    private static final long serialVersionUID = 1L;
+
     protected FileStoreTable table;
 
-    private final StoreSinkWrite.Provider storeSinkWriteProvider;
-    private final String initialCommitUser;
+    protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+    protected final String initialCommitUser;
 
-    private transient String commitUser;
-    private transient StoreSinkWriteState state;
+    protected transient @Nullable WriteRestore writeRestore;
+    protected transient String commitUser;
+    protected transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(
@@ -83,6 +94,13 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPool,
                         getMetricGroup());
+        if (writeRestore != null) {
+            write.setWriteRestore(writeRestore);
+        }
+    }
+
+    public void setWriteRestore(@Nullable WriteRestore writeRestore) {
+        this.writeRestore = writeRestore;
     }
 
     protected StoreSinkWriteState createState(
@@ -104,12 +122,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         }
 
         return commitUser;
-    }
-
-    @Override
-    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
-        ProcessRecordAttributesUtil.processWithWrite(recordAttributes, write);
-        super.processRecordAttributes(recordAttributes);
     }
 
     protected abstract boolean containLogSystem();
@@ -144,6 +156,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
     protected abstract static class Factory<IN>
             extends PrepareCommitOperator.Factory<IN, Committable> {
+
+        private static final long serialVersionUID = 1L;
+
         protected final FileStoreTable table;
         protected final StoreSinkWrite.Provider storeSinkWriteProvider;
         protected final String initialCommitUser;
@@ -157,5 +172,51 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
             this.storeSinkWriteProvider = storeSinkWriteProvider;
             this.initialCommitUser = initialCommitUser;
         }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
+    protected abstract static class CoordinatedFactory<IN>
+            extends PrepareCommitOperator.Factory<IN, Committable>
+            implements CoordinatedOperatorFactory<Committable> {
+
+        private static final long serialVersionUID = 1L;
+
+        protected final FileStoreTable table;
+        protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+        protected final String initialCommitUser;
+
+        protected CoordinatedFactory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(Options.fromMap(table.options()));
+            this.table = table;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+        }
+
+        @Override
+        public OperatorCoordinator.Provider getCoordinatorProvider(
+                String operatorName, OperatorID operatorID) {
+            return new WriteOperatorCoordinator.Provider(operatorID, table);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public final <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            OperatorID operatorID = parameters.getStreamConfig().getOperatorID();
+            TaskOperatorEventGateway gateway =
+                    parameters
+                            .getContainingTask()
+                            .getEnvironment()
+                            .getOperatorCoordinatorEventGateway();
+            TableWriteOperator<IN> operator = createStreamOperatorImpl(parameters);
+            operator.setWriteRestore(new CoordinatedWriteRestore(gateway, operatorID));
+            return (T) operator;
+        }
+
+        public abstract <T extends TableWriteOperator<IN>> T createStreamOperatorImpl(
+                StreamOperatorParameters<Committable> parameters);
     }
 }

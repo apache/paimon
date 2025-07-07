@@ -30,6 +30,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -107,11 +108,8 @@ public class FlinkSinkBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         SingleOutputStreamOperator<RowData> newInput =
-                input.transform(
-                        "Map",
-                        InternalTypeInfo.of(rowType),
-                        new StreamMapWithForwardingRecordAttributes<>(
-                                (MapFunction<Row, RowData>) converter::toInternal));
+                input.map((MapFunction<Row, RowData>) converter::toInternal)
+                        .returns(InternalTypeInfo.of(rowType));
         setParallelism(newInput, input.getParallelism(), false);
         this.input = newInput;
         return this;
@@ -252,11 +250,10 @@ public class FlinkSinkBuilder {
     public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
         SingleOutputStreamOperator<InternalRow> result =
-                input.transform(
-                        "Map",
-                        org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
-                        new StreamMapWithForwardingRecordAttributes<>(
-                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new));
+                input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                        .returns(
+                                org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
+                                        rowType));
         forwardParallelism(result, input);
         return result;
     }
@@ -295,9 +292,15 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        DataStream<InternalRow> partitioned =
-                partition(input, new PostponeBucketChannelComputer(table.schema()), parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, null);
+        ChannelComputer<InternalRow> channelComputer;
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        } else {
+            channelComputer = new PostponeBucketChannelComputer(table.schema());
+        }
+        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }
 
@@ -335,19 +338,13 @@ public class FlinkSinkBuilder {
             boolean isStreaming = isStreaming(input);
             boolean isAdaptiveParallelismEnabled =
                     AdaptiveParallelism.isEnabled(input.getExecutionEnvironment());
-            boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
             boolean hashDynamicMode = table.bucketMode() == BucketMode.HASH_DYNAMIC;
             if (parallelismUndefined
                     && !isStreaming
                     && isAdaptiveParallelismEnabled
-                    && (writeMCacheEnabled || hashDynamicMode)) {
+                    && hashDynamicMode) {
                 List<String> messages = new ArrayList<>();
-                if (writeMCacheEnabled) {
-                    messages.add("Write Manifest Cache");
-                }
-                if (hashDynamicMode) {
-                    messages.add("Dynamic Bucket Mode");
-                }
+                messages.add("Dynamic Bucket Mode");
 
                 String parallelismSource;
                 if (input.getParallelism() > 0) {

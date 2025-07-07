@@ -34,7 +34,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -85,7 +84,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final ConsumerManager consumerManager;
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
-    private final DefaultValueAssigner defaultValueAssigner;
     private final FileStorePathFactory pathFactory;
     private final String tableName;
     private final IndexFileHandler indexFileHandler;
@@ -101,7 +99,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
             ChangelogManager changelogManager,
             SplitGenerator splitGenerator,
             BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
-            DefaultValueAssigner defaultValueAssigner,
             FileStorePathFactory pathFactory,
             String tableName,
             IndexFileHandler indexFileHandler) {
@@ -118,7 +115,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         snapshotManager.branch());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
-        this.defaultValueAssigner = defaultValueAssigner;
         this.pathFactory = pathFactory;
 
         this.tableName = tableName;
@@ -218,8 +214,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p :
-                PredicateBuilder.splitAnd(defaultValueAssigner.handlePredicate(predicate))) {
+        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
             Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());
@@ -272,6 +267,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withBucket(int bucket) {
         scan.withBucket(bucket);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader onlyReadRealBuckets() {
+        scan.onlyReadRealBuckets();
         return this;
     }
 

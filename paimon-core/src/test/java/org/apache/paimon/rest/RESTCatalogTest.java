@@ -82,6 +82,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
@@ -547,7 +548,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     public void testListTablesPagedGlobally() throws Exception {
         // List table paged globally returns an empty list when there are no tables in the catalog
 
-        PagedList<String> pagedTables = catalog.listTablesPagedGlobally(null, null, null, null);
+        PagedList<Identifier> pagedTables = catalog.listTablesPagedGlobally(null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -559,10 +560,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         };
         prepareDataForListTablesPagedGlobally(databaseName, databaseName2, tableNames);
 
-        String[] expectedTableNames =
-                Arrays.stream(tableNames).map((databaseName + ".")::concat).toArray(String[]::new);
-        String[] fullTableNames = Arrays.copyOf(expectedTableNames, tableNames.length + 1);
-        fullTableNames[tableNames.length] = databaseName2 + ".table1";
+        Identifier[] expectedTableNames =
+                Arrays.stream(tableNames)
+                        .map(tableName -> Identifier.create(databaseName, tableName))
+                        .toArray(Identifier[]::new);
+        Identifier[] fullTableNames = Arrays.copyOf(expectedTableNames, tableNames.length + 1);
+        fullTableNames[tableNames.length] = Identifier.create(databaseName2, "table1");
 
         pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, null, null, null);
         assertThat(pagedTables.getElements()).containsExactlyInAnyOrder(expectedTableNames);
@@ -611,10 +614,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected void assertListTablesPagedGloballyWithLoop(
-            String databaseNamePattern, String[] expectedTableNames) {
+            String databaseNamePattern, Identifier[] expectedTableNames) {
         int maxResults = 2;
-        PagedList<String> pagedTables;
-        List<String> tables = new ArrayList<>();
+        PagedList<Identifier> pagedTables;
+        List<Identifier> tables = new ArrayList<>();
         String pageToken = null;
         do {
             pagedTables =
@@ -636,9 +639,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected void assertListTablesPagedGloballyWithTablePattern(
-            String databaseName, String databaseNamePattern, String[] expectedTableNames) {
+            String databaseName, String databaseNamePattern, Identifier[] expectedTableNames) {
         int maxResults = 9;
-        PagedList<String> pagedTables =
+        PagedList<Identifier> pagedTables =
                 catalog.listTablesPagedGlobally(databaseNamePattern, null, maxResults, null);
         assertEquals(
                 Math.min(maxResults, expectedTableNames.length), pagedTables.getElements().size());
@@ -649,10 +652,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertEquals(4, pagedTables.getElements().size());
         assertThat(pagedTables.getElements())
                 .containsExactlyInAnyOrder(
-                        buildFullName(databaseName, "table1"),
-                        buildFullName(databaseName, "table2"),
-                        buildFullName(databaseName, "table3"),
-                        buildFullName(databaseName, "table_name"));
+                        Identifier.create(databaseName, "table1"),
+                        Identifier.create(databaseName, "table2"),
+                        Identifier.create(databaseName, "table3"),
+                        Identifier.create(databaseName, "table_name"));
         assertNull(pagedTables.getNextPageToken());
 
         pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "table_", null, null);
@@ -662,7 +665,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "table_%", null, null);
         assertEquals(1, pagedTables.getElements().size());
         assertThat(pagedTables.getElements())
-                .containsExactlyInAnyOrder(buildFullName(databaseName, "table_name"));
+                .containsExactlyInAnyOrder(Identifier.create(databaseName, "table_name"));
         assertNull(pagedTables.getNextPageToken());
 
         pagedTables = catalog.listTablesPagedGlobally(databaseNamePattern, "tabl_", null, null);
@@ -878,7 +881,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     public void testListViewsPagedGlobally() throws Exception {
         // list views paged globally returns an empty list when there are no views in the catalog
 
-        PagedList<String> pagedViews = catalog.listViewsPagedGlobally(null, null, null, null);
+        PagedList<Identifier> pagedViews = catalog.listViewsPagedGlobally(null, null, null, null);
         assertThat(pagedViews.getElements()).isEmpty();
         assertNull(pagedViews.getNextPageToken());
 
@@ -888,10 +891,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr", "view_name"};
         prepareDataForListViewsPagedGlobally(databaseName, databaseName2, viewNames);
 
-        String[] expectedViewNames =
-                Arrays.stream(viewNames).map((databaseName + ".")::concat).toArray(String[]::new);
-        String[] fullTableNames = Arrays.copyOf(expectedViewNames, viewNames.length + 1);
-        fullTableNames[viewNames.length] = databaseName2 + ".view1";
+        Identifier[] expectedViewNames =
+                Arrays.stream(viewNames)
+                        .map(viewName -> Identifier.create(databaseName, viewName))
+                        .toArray(Identifier[]::new);
+        Identifier[] fullTableNames = Arrays.copyOf(expectedViewNames, viewNames.length + 1);
+        fullTableNames[viewNames.length] = Identifier.create(databaseName2, "view1");
 
         pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, null, null, null);
         assertEquals(expectedViewNames.length, pagedViews.getElements().size());
@@ -921,10 +926,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected void assertListViewsPagedGloballyWithLoop(
-            String databaseNamePattern, String[] expectedViewNames) {
+            String databaseNamePattern, Identifier[] expectedViewNames) {
         int maxResults = 2;
-        PagedList<String> pagedViews;
-        List<String> views = new ArrayList<>();
+        PagedList<Identifier> pagedViews;
+        List<Identifier> views = new ArrayList<>();
         String pageToken = null;
         do {
             pagedViews =
@@ -946,9 +951,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected void assertListViewsPagedGloballyWithViewPattern(
-            String databaseName, String databaseNamePattern, String[] expectedViewNames) {
+            String databaseName, String databaseNamePattern, Identifier[] expectedViewNames) {
         int maxResults = 8;
-        PagedList<String> pagedViews =
+        PagedList<Identifier> pagedViews =
                 catalog.listViewsPagedGlobally(databaseNamePattern, null, maxResults, null);
         assertEquals(
                 Math.min(maxResults, expectedViewNames.length), pagedViews.getElements().size());
@@ -959,10 +964,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertEquals(4, pagedViews.getElements().size());
         assertThat(pagedViews.getElements())
                 .containsExactlyInAnyOrder(
-                        buildFullName(databaseName, "view1"),
-                        buildFullName(databaseName, "view2"),
-                        buildFullName(databaseName, "view3"),
-                        buildFullName(databaseName, "view_name"));
+                        Identifier.create(databaseName, "view1"),
+                        Identifier.create(databaseName, "view2"),
+                        Identifier.create(databaseName, "view3"),
+                        Identifier.create(databaseName, "view_name"));
         assertNull(pagedViews.getNextPageToken());
 
         pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, "view_", null, null);
@@ -972,7 +977,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         pagedViews = catalog.listViewsPagedGlobally(databaseNamePattern, "view_%", null, null);
         assertEquals(1, pagedViews.getElements().size());
         assertThat(pagedViews.getElements())
-                .containsExactlyInAnyOrder(buildFullName(databaseName, "view_name"));
+                .containsExactlyInAnyOrder(Identifier.create(databaseName, "view_name"));
         assertNull(pagedViews.getNextPageToken());
 
         Assertions.assertThrows(
@@ -1203,6 +1208,60 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 BadRequestException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=01%01"));
+    }
+
+    @Test
+    public void testListPartitionsPagedWithMultiLevel() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_paged_db";
+        Map<String, String> partitionSpec =
+                new HashMap<String, String>() {
+                    {
+                        put("dt", "20250101");
+                        put("col", "0");
+                    }
+                };
+
+        Map<String, String> partitionSpec2 =
+                new HashMap<String, String>() {
+                    {
+                        put("dt", "20250102");
+                        put("col", "0");
+                    }
+                };
+        List<Map<String, String>> partitionSpecs = Arrays.asList(partitionSpec, partitionSpec2);
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt", "col")
+                        .build(),
+                true);
+
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partition : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partition.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        PagedList<Partition> pagedPartitions =
+                catalog.listPartitionsPaged(identifier, null, null, "dt=20250101/col=0");
+        assertPagedPartitions(pagedPartitions, 1, partitionSpecs.get(0));
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, null, null, "dt=20250102%");
+        assertPagedPartitions(pagedPartitions, 1, partitionSpecs.get(1));
     }
 
     @Test
@@ -1573,8 +1632,38 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testFunction() throws Exception {
-        Identifier identifier = new Identifier("rest_catalog_db", "function");
-        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Identifier identifierWithSlash = new Identifier("rest_catalog_db", "function/");
+        catalog.createDatabase(identifierWithSlash.getDatabaseName(), false);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createFunction(
+                                identifierWithSlash,
+                                MockRESTMessage.function(identifierWithSlash),
+                                false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithSlash));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithSlash, true));
+
+        Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createFunction(
+                                identifierWithoutAlphabet,
+                                MockRESTMessage.function(identifierWithoutAlphabet),
+                                false));
+        assertThrows(
+                Catalog.FunctionNotExistException.class,
+                () -> catalog.getFunction(identifierWithoutAlphabet));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropFunction(identifierWithoutAlphabet, true));
+
+        Identifier identifier = Identifier.fromString("rest_catalog_db.function.na_me-01");
         Function function = MockRESTMessage.function(identifier);
 
         catalog.createFunction(identifier, function, true);
@@ -1599,6 +1688,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> catalog.dropFunction(identifier, false));
         assertThrows(
                 Catalog.FunctionNotExistException.class, () -> catalog.getFunction(identifier));
+    }
+
+    @Test
+    void testListFunctions() throws Exception {
+        String db1 = "db_rest_catalog_db";
+        String db2 = "db2_rest_catalog";
+        Identifier identifier = new Identifier(db1, "list_function");
+        Identifier identifier1 = new Identifier(db1, "function");
+        Identifier identifier2 = new Identifier(db2, "list_function");
+        Identifier identifier3 = new Identifier(db2, "function");
+        catalog.createDatabase(db1, false);
+        catalog.createDatabase(db2, false);
+        catalog.createFunction(identifier, MockRESTMessage.function(identifier), true);
+        catalog.createFunction(identifier1, MockRESTMessage.function(identifier1), true);
+        catalog.createFunction(identifier2, MockRESTMessage.function(identifier2), true);
+        catalog.createFunction(identifier3, MockRESTMessage.function(identifier3), true);
+        assertThat(catalog.listFunctionsPaged(db1, null, null, null).getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, 1, null, null).getElements())
+                .containsAnyOf(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPaged(db1, 1, identifier1.getObjectName(), null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName());
+        assertThat(catalog.listFunctionsPaged(db1, null, null, "func%").getElements())
+                .containsExactlyInAnyOrder(identifier1.getObjectName());
+        assertThat(
+                        catalog.listFunctionsPagedGlobally("db2_rest%", "func%", null, null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier3);
+        assertThat(catalog.listFunctionsPagedGlobally("db2_rest%", null, 1, null).getElements())
+                .containsAnyOf(identifier2, identifier3);
+        assertThat(
+                        catalog.listFunctionsPagedGlobally(
+                                        "db2_rest%", null, 1, identifier3.getFullName())
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier2);
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db1, 1, null, null).getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier.getFullName(), identifier1.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 4, null, "func%").getElements()
+                                .stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .containsExactly(identifier3.getFullName());
+
+        assertThat(
+                        catalog.listFunctionDetailsPaged(db2, 1, identifier3.getObjectName(), null)
+                                .getElements().stream()
+                                .map(f -> f.fullName())
+                                .collect(Collectors.toList()))
+                .contains(identifier2.getFullName());
     }
 
     @Test
@@ -1672,6 +1818,38 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.DefinitionNotExistException.class,
                 () -> catalog.alterFunction(identifier, ImmutableList.of(dropDefinition), false));
+    }
+
+    @Test
+    public void testValidateFunctionName() throws Exception {
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a1_"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a-b_c"));
+        assertDoesNotThrow(() -> RESTFunctionValidator.checkFunctionName("a-b_c.1"));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a\\/b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a$?b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a@b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("a*b"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("123"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName("_-"));
+        assertThrows(
+                IllegalArgumentException.class, () -> RESTFunctionValidator.checkFunctionName(""));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RESTFunctionValidator.checkFunctionName(null));
     }
 
     @Test
@@ -1828,6 +2006,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Override
     protected boolean supportsFormatTable() {
+        return true;
+    }
+
+    @Override
+    protected boolean supportsAlterFormatTable() {
         return true;
     }
 

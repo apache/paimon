@@ -423,6 +423,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[3.1400, 1, 123, 3.14, 3]", "+I[4.1300, 2, 456, 3.14, 4]");
 
         sql("CREATE TABLE T1 (a STRING, b STRING)");
+        sql("ALTER TABLE T1 SET ('disable-explicit-type-casting' = 'false')");
         sql("INSERT INTO T1 VALUES('test', '3.14')");
 
         sql("ALTER TABLE T1 MODIFY (a INT, b TINYINT)");
@@ -1350,5 +1351,242 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("ALTER TABLE T MODIFY v BIGINT NOT NULL");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
+    }
+
+    @Test
+    public void testAlterColumnTypeNestedArrayAndMap() {
+        sql("CREATE TABLE T ( k INT, v ARRAY<ARRAY<ARRAY<INT>>>, PRIMARY KEY(k) NOT ENFORCED )");
+        sql("INSERT INTO T VALUES (1, ARRAY[ARRAY[ARRAY[1, 2]]]), (2, ARRAY[ARRAY[ARRAY[3, 4]]])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Integer[][][] {{{1, 2}}}),
+                        Row.of(2, new Integer[][][] {{{3, 4}}}));
+        sql("ALTER TABLE T MODIFY v ARRAY<ARRAY<ARRAY<BIGINT>>>");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, new Long[][][] {{{1L, 2L}}}),
+                        Row.of(2, new Long[][][] {{{3L, 4L}}}));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v ARRAY<ARRAY<ARRAY<BIGINT NOT NULL>>>"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v.element.element.element");
+
+        sql("DROP TABLE T");
+
+        sql(
+                "CREATE TABLE T ( k INT, v MAP<STRING, MAP<STRING, MAP<STRING, INT NOT NULL>>>, PRIMARY KEY(k) NOT ENFORCED )");
+        Map<String, Map<String, Map<String, Integer>>> mp1 = new HashMap<>();
+        Map<String, Map<String, Integer>> l1Mp1 = new HashMap<>();
+        Map<String, Integer> l2Mp1 = new HashMap<>();
+        l2Mp1.put("aaa", 1);
+        l2Mp1.put("aab", 2);
+        l1Mp1.put("aa", l2Mp1);
+        mp1.put("a", l1Mp1);
+        Map<String, Map<String, Map<String, Integer>>> mp2 = new HashMap<>();
+        Map<String, Map<String, Integer>> l1Mp2 = new HashMap<>();
+        Map<String, Integer> l2Mp2 = new HashMap<>();
+        l2Mp2.put("bbb", 3);
+        l2Mp2.put("bbc", 4);
+        l1Mp2.put("bb", l2Mp2);
+        mp2.put("b", l1Mp2);
+        sql(
+                "INSERT INTO T VALUES (1, MAP['a', MAP['aa', MAP['aaa', 1, 'aab', 2]]]), (2, MAP['b', MAP['bb', MAP['bbb', 3, 'bbc', 4]]])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, mp1), Row.of(2, mp2));
+        sql("ALTER TABLE T MODIFY v MAP<STRING, MAP<STRING, MAP<STRING, BIGINT>>>");
+        Map<String, Map<String, Map<String, Long>>> mp3 = new HashMap<>();
+        Map<String, Map<String, Long>> l1Mp3 = new HashMap<>();
+        Map<String, Long> l2Mp3 = new HashMap<>();
+        l2Mp3.put("aaa", 1L);
+        l2Mp3.put("aab", 2L);
+        l1Mp3.put("aa", l2Mp3);
+        mp3.put("a", l1Mp3);
+        Map<String, Map<String, Map<String, Long>>> mp4 = new HashMap<>();
+        Map<String, Map<String, Long>> l1Mp4 = new HashMap<>();
+        Map<String, Long> l2Mp4 = new HashMap<>();
+        l2Mp4.put("bbb", 3L);
+        l2Mp4.put("bbc", 4L);
+        l1Mp4.put("bb", l2Mp4);
+        mp4.put("b", l1Mp4);
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, mp3), Row.of(2, mp4));
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY v MAP<STRING, MAP<STRING, MAP<STRING, BIGINT NOT NULL>>>"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for v.value.value.value");
+
+        sql("DROP TABLE T");
+
+        sql(
+                "CREATE TABLE T ( k INT, a ARRAY<INT NOT NULL>, b MAP<STRING, INT NOT NULL>, PRIMARY KEY(k) NOT ENFORCED )");
+        sql("INSERT INTO T VALUES (1, ARRAY[1, 2, 3, 4], MAP['a', 1, 'b', 2])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                new Integer[] {1, 2, 3, 4},
+                                new HashMap<String, Integer>() {
+                                    {
+                                        put("a", 1);
+                                    }
+
+                                    {
+                                        put("b", 2);
+                                    }
+                                }));
+        sql("ALTER TABLE T MODIFY a ARRAY<BIGINT>");
+        sql("INSERT INTO T VALUES (2, ARRAY[5, 6, 7, CAST(NULL AS BIGINT)], MAP['c', 3, 'd', 4])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                new Long[] {1L, 2L, 3L, 4L},
+                                new HashMap<String, Integer>() {
+                                    {
+                                        put("a", 1);
+                                    }
+
+                                    {
+                                        put("b", 2);
+                                    }
+                                }),
+                        Row.of(
+                                2,
+                                new Long[] {5L, 6L, 7L, null},
+                                new HashMap<String, Integer>() {
+                                    {
+                                        put("c", 3);
+                                    }
+
+                                    {
+                                        put("d", 4);
+                                    }
+                                }));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY a ARRAY<BIGINT NOT NULL>"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.element");
+        sql("ALTER TABLE T MODIFY b MAP<STRING, BIGINT>");
+        sql(
+                "INSERT INTO T VALUES (2, ARRAY[5, 6, 7, CAST(NULL AS BIGINT)], MAP['c', 3, 'd', CAST(NULL AS BIGINT)])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                new Long[] {1L, 2L, 3L, 4L},
+                                new HashMap<String, Long>() {
+                                    {
+                                        put("a", 1L);
+                                    }
+
+                                    {
+                                        put("b", 2L);
+                                    }
+                                }),
+                        Row.of(
+                                2,
+                                new Long[] {5L, 6L, 7L, null},
+                                new HashMap<String, Long>() {
+                                    {
+                                        put("c", 3L);
+                                    }
+
+                                    {
+                                        put("d", null);
+                                    }
+                                }));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY b MAP<STRING, BIGINT NOT NULL>"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for b.value");
+
+        sql("DROP TABLE T");
+        sql(
+                "CREATE TABLE T ( k INT, a MAP<STRING, ARRAY<INT NOT NULL>>, PRIMARY KEY(k) NOT ENFORCED )");
+        sql("INSERT INTO T VALUES (1, MAP['a', ARRAY[1, 2, 3]])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                new HashMap<String, Integer[]>() {
+                                    {
+                                        put("a", new Integer[] {1, 2, 3});
+                                    }
+                                }));
+        sql("ALTER TABLE T MODIFY a MAP<STRING, ARRAY<BIGINT>>");
+        sql(
+                "INSERT INTO T VALUES(1, MAP['a', ARRAY[1, 2, 3], 'b', ARRAY[2, 3, CAST(NULL AS BIGINT)]])");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                new HashMap<String, Long[]>() {
+                                    {
+                                        put("a", new Long[] {1L, 2L, 3L});
+                                    }
+
+                                    {
+                                        put("b", new Long[] {2L, 3L, null});
+                                    }
+                                }));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY a MAP<STRING, ARRAY<BIGINT NOT NULL>>"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.value.element");
+
+        sql("DROP TABLE T");
+
+        sql(
+                "CREATE TABLE T ( k INT, a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN> NOT NULL) NOT NULL, PRIMARY KEY(k) NOT ENFORCED )");
+        sql("INSERT INTO T VALUES (1, ROW(1.0, ARRAY[true, false]))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, Row.of(1.0, new Boolean[] {true, false})));
+        sql("ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>) NOT NULL");
+        sql("INSERT INTO T VALUES (2, ROW(2.0, CAST(NULL AS ARRAY<BOOLEAN>)))");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, Row.of(1.0, new Boolean[] {true, false})),
+                        Row.of(2, Row.of(2.0, null)));
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN> NOT NULL) NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.c2");
+        sql(
+                "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL");
+        sql(
+                "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN>>) NOT NULL");
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "ALTER TABLE T MODIFY a ROW(c1 DOUBLE, c2 ARRAY<BOOLEAN>, c3 ARRAY<MAP<STRING, BOOLEAN NOT NULL>>) NOT NULL"))
+                .hasStackTraceContaining(
+                        "Cannot update column type from nullable to non nullable for a.c3.element.value");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testDisableExplicitTypeCasting(String formatType) {
+        sql(
+                "CREATE TABLE T "
+                        + "( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( 'bucket' = '1', 'file.format' = '"
+                        + formatType
+                        + "' )");
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'true')");
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
+                .hasStackTraceContaining(
+                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+        sql("ALTER TABLE T MODIFY v BIGINT");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
+        assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
+                .hasStackTraceContaining(
+                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+        // disable explicit type casting
+        sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
+        sql("ALTER TABLE T MODIFY v INT");
+        assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
     }
 }

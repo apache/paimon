@@ -50,7 +50,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -215,7 +214,7 @@ public class TableCommitImpl implements InnerTableCommit {
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
-                commit.commit(committable, new HashMap<>(), checkAppendFiles);
+                commit.commit(committable, checkAppendFiles);
             }
             if (!committables.isEmpty()) {
                 expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);

@@ -115,6 +115,7 @@ public class ManifestEntry implements FileEntry {
         return file.extraFiles();
     }
 
+    @Override
     public int totalBuckets() {
         return totalBuckets;
     }

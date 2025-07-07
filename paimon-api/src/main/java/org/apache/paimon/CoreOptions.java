@@ -66,8 +66,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
-    public static final String DEFAULT_VALUE_SUFFIX = "default-value";
-
     public static final String FIELDS_PREFIX = "fields";
 
     public static final String FIELDS_SEPARATOR = ",";
@@ -125,6 +123,18 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    @Immutable
+    public static final ConfigOption<BucketFunctionType> BUCKET_FUNCTION_TYPE =
+            key("bucket-function.type")
+                    .enumType(BucketFunctionType.class)
+                    .defaultValue(BucketFunctionType.DEFAULT)
+                    .withDescription("The bucket function for paimon bucket");
+
+    /** Paimon bucket function type. */
+    public enum BucketFunctionType {
+        DEFAULT,
+    }
+
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
             key("data-file.external-paths")
                     .stringType()
@@ -150,6 +160,13 @@ public class CoreOptions implements Serializable {
                                     + " is set to "
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
+
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
+            key("compaction.force-rewrite-all-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to force pick all files for a full compaction. Usually seen in a compaction task to external paths.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
@@ -512,13 +529,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(10)
                     .withDescription(
                             "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
-
-    public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
-            key("write-manifest-cache")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(0))
-                    .withDescription(
-                            "Cache size for reading manifest files for write initialization.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
@@ -902,6 +912,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(100)
                     .withDescription("The default deleted num of partition expiration.");
 
+    public static final ConfigOption<Integer> PARTITION_EXPIRATION_BATCH_SIZE =
+            key("partition.expiration-batch-size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The batch size of partition expiration. "
+                                    + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
+                                    + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
+
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
                     .stringType()
@@ -1086,6 +1105,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The mode of streaming read that specifies to read the data of table file or log.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
+            key("batch-scan-mode")
+                    .enumType(BatchScanMode.class)
+                    .defaultValue(BatchScanMode.NONE)
+                    .withDescription(
+                            "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
+                                    + "dedicated internal streaming scan.");
+
     public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
             key("consumer.expiration-time")
                     .durationType()
@@ -1235,6 +1263,14 @@ public class CoreOptions implements Serializable {
                                                     + " reading engine requires at least version 0.9.1 or 1.0.0 or higher.")
                                     .build());
 
+    public static final ConfigOption<Integer> METADATA_STATS_KEEP_FIRST_N_COLUMNS =
+            key("metadata.stats-keep-first-n-columns")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "Define how many columns' stats are kept in metadata file from front to end. "
+                                    + "Default value '-1' means ignoring this config.");
+
     public static final ConfigOption<String> COMMIT_CALLBACKS =
             key("commit.callbacks")
                     .stringType()
@@ -1325,7 +1361,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text(
-                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                            "This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance."
                                                     + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
                                     .list(
                                             text(
@@ -1736,6 +1772,23 @@ public class CoreOptions implements Serializable {
                             "If true, it disables altering column type from null to not null. Default is true. "
                                     + "Users can disable this option to explicitly convert null column type to not null.");
 
+    public static final ConfigOption<Boolean> DISABLE_EXPLICIT_TYPE_CASTING =
+            ConfigOptions.key("disable-explicit-type-casting")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. "
+                                    + "Users can enable this option to disable explicit type casting");
+
+    public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, "
+                                    + "starting from the snapshot after this one. If found, commit will be aborted. "
+                                    + "If the value of this option is -1, committer will not check for its first commit.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1760,6 +1813,10 @@ public class CoreOptions implements Serializable {
 
     public int bucket() {
         return options.get(BUCKET);
+    }
+
+    public BucketFunctionType bucketFunctionType() {
+        return options.get(BUCKET_FUNCTION_TYPE);
     }
 
     public Path path() {
@@ -1811,10 +1868,6 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
-    }
-
-    public MemorySize writeManifestCache() {
-        return options.get(WRITE_MANIFEST_CACHE);
     }
 
     public String partitionDefaultName() {
@@ -2251,6 +2304,10 @@ public class CoreOptions implements Serializable {
         return options.get(DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL);
     }
 
+    public boolean disableExplicitTypeCasting() {
+        return options.get(DISABLE_EXPLICIT_TYPE_CASTING);
+    }
+
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
@@ -2427,6 +2484,11 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_MAX_NUM);
     }
 
+    public int partitionExpireBatchSize() {
+        return options.getOptional(PARTITION_EXPIRATION_BATCH_SIZE)
+                .orElse(options.get(PARTITION_EXPIRATION_MAX_NUM));
+    }
+
     public PartitionExpireStrategy partitionExpireStrategy() {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
@@ -2443,6 +2505,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String externalSpecificFS() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
+    }
+
+    public Boolean forceRewriteAllFiles() {
+        return options.get(COMPACTION_FORCE_REWRITE_ALL_FILES);
     }
 
     public String partitionTimestampFormatter() {
@@ -2557,20 +2623,6 @@ public class CoreOptions implements Serializable {
         return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
     }
 
-    public Map<String, String> getFieldDefaultValues() {
-        Map<String, String> defaultValues = new HashMap<>();
-        String fieldPrefix = FIELDS_PREFIX + ".";
-        String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
-        for (Map.Entry<String, String> option : options.toMap().entrySet()) {
-            String key = option.getKey();
-            if (key != null && key.startsWith(fieldPrefix) && key.endsWith(defaultValueSuffix)) {
-                String fieldName = key.replace(fieldPrefix, "").replace(defaultValueSuffix, "");
-                defaultValues.put(fieldName, option.getValue());
-            }
-        }
-        return defaultValues;
-    }
-
     public Map<String, String> commitCallbacks() {
         return callbacks(COMMIT_CALLBACKS, COMMIT_CALLBACK_PARAM);
     }
@@ -2672,11 +2724,6 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_WAIT);
     }
 
-    public boolean laziedLookup() {
-        return needLookup()
-                && (!options.get(LOOKUP_WAIT) || LookupCompactMode.GENTLE.equals(lookupCompact()));
-    }
-
     public LookupCompactMode lookupCompact() {
         return options.get(LOOKUP_COMPACT);
     }
@@ -2697,12 +2744,20 @@ public class CoreOptions implements Serializable {
         return options.get(METADATA_STATS_DENSE_STORE);
     }
 
+    public int statsKeepFirstNColumns() {
+        return options.get(METADATA_STATS_KEEP_FIRST_N_COLUMNS);
+    }
+
     public boolean dataFileThinMode() {
         return options.get(DATA_FILE_THIN_MODE);
     }
 
     public boolean aggregationRemoveRecordOnDelete() {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
+    }
+
+    public Optional<Long> commitStrictModeLastSafeSnapshot() {
+        return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2993,6 +3048,34 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         StreamScanMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
+
+    /** Inner batch scan mode for some internal requirements. */
+    public enum BatchScanMode implements DescribedEnum {
+        NONE("none", "No requirement."),
+        COMPACT("compact", "Compaction for batch mode.");
+
+        private final String value;
+        private final String description;
+
+        BatchScanMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

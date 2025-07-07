@@ -18,12 +18,9 @@
 
 package org.apache.paimon.deletionvectors;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.manifest.IndexManifestEntry;
 
 import javax.annotation.Nullable;
 
@@ -32,9 +29,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
-
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /** Maintainer of deletionVectors index. */
 public class DeletionVectorsMaintainer {
@@ -162,38 +156,24 @@ public class DeletionVectorsMaintainer {
             this.handler = handler;
         }
 
-        public DeletionVectorsMaintainer createOrRestore(
-                @Nullable Snapshot snapshot, BinaryRow partition, int bucket) {
-            List<IndexFileMeta> indexFiles =
-                    snapshot == null
-                            ? Collections.emptyList()
-                            : handler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
-            Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
-            return createOrRestore(deletionVectors);
+        public IndexFileHandler indexFileHandler() {
+            return handler;
         }
 
-        @VisibleForTesting
-        public DeletionVectorsMaintainer createOrRestore(
-                @Nullable Snapshot snapshot, BinaryRow partition) {
-            List<IndexFileMeta> indexFiles =
-                    snapshot == null
-                            ? Collections.emptyList()
-                            : handler.scanEntries(snapshot, DELETION_VECTORS_INDEX, partition)
-                                    .stream()
-                                    .map(IndexManifestEntry::indexFile)
-                                    .collect(Collectors.toList());
+        public DeletionVectorsMaintainer create(@Nullable List<IndexFileMeta> restoredFiles) {
+            if (restoredFiles == null) {
+                restoredFiles = Collections.emptyList();
+            }
             Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
-            return createOrRestore(deletionVectors);
+                    new HashMap<>(handler.readAllDeletionVectors(restoredFiles));
+            return create(deletionVectors);
         }
 
         public DeletionVectorsMaintainer create() {
-            return createOrRestore(new HashMap<>());
+            return create(new HashMap<>());
         }
 
-        public DeletionVectorsMaintainer createOrRestore(
-                Map<String, DeletionVector> deletionVectors) {
+        public DeletionVectorsMaintainer create(Map<String, DeletionVector> deletionVectors) {
             return new DeletionVectorsMaintainer(handler, deletionVectors);
         }
     }

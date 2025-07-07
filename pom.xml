@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.2-SNAPSHOT</version>
+    <version>1.3-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -74,7 +74,7 @@ under the License.
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2025-04-14T05:56:01Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2025-06-12T05:51:18Z</project.build.outputTimestamp>
         <paimon.shade.version>0.8.0</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
@@ -87,8 +87,8 @@ under the License.
         <paimon-flinkx-common>paimon-flink1-common</paimon-flinkx-common>
         <paimon-flink-common.flink.version>1.20.1</paimon-flink-common.flink.version>
         <flink.scala.binary.version>2.12</flink.scala.binary.version>
-        <scala212.version>2.12.15</scala212.version>
-        <scala213.version>2.13.14</scala213.version>
+        <scala212.version>2.12.18</scala212.version>
+        <scala213.version>2.13.16</scala213.version>
         <scala.version>${scala212.version}</scala.version>
         <codegen.scala.version>${scala212.version}</codegen.scala.version>
         <snappy.version>1.1.8.4</snappy.version>
@@ -112,6 +112,7 @@ under the License.
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
+        <arrow.version>15.0.0</arrow.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
@@ -400,10 +401,10 @@ under the License.
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.0.0-preview2</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.0.0</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common</paimon-sparkx-common>
                 <test.spark.main.version>4.0</test.spark.main.version>
-                <test.spark.version>4.0.0-preview2</test.spark.version>
+                <test.spark.version>4.0.0</test.spark.version>
             </properties>
             <activation>
                 <property>
@@ -421,6 +422,7 @@ under the License.
                 <test.flink.version>1.20.1</test.flink.version>
             </properties>
             <modules>
+                <module>paimon-flink/paimon-flink1-common</module>
                 <module>paimon-flink/paimon-flink-1.15</module>
                 <module>paimon-flink/paimon-flink-1.16</module>
                 <module>paimon-flink/paimon-flink-1.17</module>
@@ -446,6 +448,7 @@ under the License.
                 <test.flink.version>2.0.0</test.flink.version>
             </properties>
             <modules>
+                <module>paimon-flink/paimon-flink2-common</module>
                 <module>paimon-flink/paimon-flink-2.0</module>
             </modules>
             <activation>
@@ -971,7 +974,7 @@ under the License.
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-javadoc-plugin</artifactId>
-                    <version>2.9.1</version><!--$NO-MVN-MAN-VER$-->
+                    <version>3.1.1</version><!--$NO-MVN-MAN-VER$-->
                     <configuration>
                         <quiet>true</quiet>
                         <detectOfflineLinks>false</detectOfflineLinks>

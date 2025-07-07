@@ -24,9 +24,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.ChangelogFollowUpScanner;
@@ -61,7 +61,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private final StreamScanMode scanMode;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
-    private final DefaultValueAssigner defaultValueAssigner;
     private final NextSnapshotFetcher nextSnapshotProvider;
     private final boolean hasPk;
 
@@ -86,21 +85,26 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             TableQueryAuth queryAuth,
             boolean hasPk) {
         super(schema, options, snapshotReader, queryAuth);
+
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
-        this.defaultValueAssigner = DefaultValueAssigner.create(schema);
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
                         snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
         this.hasPk = hasPk;
+
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET
+                && options.changelogProducer() != CoreOptions.ChangelogProducer.NONE) {
+            snapshotReader.onlyReadRealBuckets();
+        }
     }
 
     @Override
     public DataTableStreamScan withFilter(Predicate predicate) {
         super.withFilter(predicate);
-        snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
+        snapshotReader.withFilter(predicate);
         return this;
     }
 

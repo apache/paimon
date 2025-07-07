@@ -117,7 +117,7 @@ If `snapshot_id` unset, snapshot_id defaults to the latest.
     /path/to/paimon-flink-action-{{< version >}}.jar \
     create_tag \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --tag_name <tag-name> \
     [--snapshot <snapshot_id>] \
@@ -191,7 +191,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     delete_tag \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --tag_name <tag-name> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
@@ -252,7 +252,7 @@ Run the following command:
     /path/to/paimon-flink-action-{{< version >}}.jar \
     rollback_to \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --version <tag-name> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]

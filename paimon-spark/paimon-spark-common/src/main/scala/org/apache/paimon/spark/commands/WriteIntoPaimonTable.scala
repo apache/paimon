@@ -18,16 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.CoreOptions.{DYNAMIC_PARTITION_OVERWRITE, TagCreationMode}
+import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.options.Options
-import org.apache.paimon.partition.actions.PartitionMarkDoneAction
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.CommitMessage
-import org.apache.paimon.tag.TagBatchCreation
-import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, TypeUtils}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, PaimonUtils, Row, SparkSession}
@@ -84,37 +79,7 @@ case class WriteIntoPaimonTable(
     val commitMessages = writer.write(data)
     writer.commit(commitMessages)
 
-    preFinish(commitMessages)
     Seq.empty
-  }
-
-  private def preFinish(commitMessages: Seq[CommitMessage]): Unit = {
-    if (table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
-      val tagCreation = new TagBatchCreation(table)
-      tagCreation.createTag()
-    }
-    markDoneIfNeeded(commitMessages)
-  }
-
-  private def markDoneIfNeeded(commitMessages: Seq[CommitMessage]): Unit = {
-    val coreOptions = table.coreOptions()
-    if (coreOptions.toConfiguration.get(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT)) {
-      val actions =
-        PartitionMarkDoneAction.createActions(getClass.getClassLoader, table, table.coreOptions())
-      val partitionComputer = new InternalRowPartitionComputer(
-        coreOptions.partitionDefaultName,
-        TypeUtils.project(table.rowType(), table.partitionKeys()),
-        table.partitionKeys().asScala.toArray,
-        coreOptions.legacyPartitionName()
-      )
-      val partitions = commitMessages
-        .map(c => c.partition())
-        .distinct
-        .map(p => PartitionPathUtils.generatePartitionPath(partitionComputer.generatePartValues(p)))
-      for (partition <- partitions) {
-        actions.forEach(a => a.markDone(partition))
-      }
-    }
   }
 
   private def parseSaveMode(): (Boolean, Map[String, String]) = {
@@ -140,5 +105,4 @@ case class WriteIntoPaimonTable(
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
     this.asInstanceOf[WriteIntoPaimonTable]
-
 }

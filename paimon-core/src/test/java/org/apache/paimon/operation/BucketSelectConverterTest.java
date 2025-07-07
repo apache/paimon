@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.BucketFunctionType;
 import org.apache.paimon.operation.BucketSelectConverter.Selector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -71,7 +72,6 @@ public class BucketSelectConverterTest {
         Selector selector =
                 newSelector(and(builder.equal(0, 0), builder.equal(1, 1), builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes()).containsExactly(1141287431);
         assertThat(selector.createBucketSet(20)).containsExactly(11);
     }
 
@@ -84,7 +84,6 @@ public class BucketSelectConverterTest {
                                         builder.equal(1, 1),
                                         builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
         assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
@@ -100,7 +99,6 @@ public class BucketSelectConverterTest {
                                         builder.equal(1, 1),
                                         builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
         assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
@@ -113,7 +111,6 @@ public class BucketSelectConverterTest {
                                         builder.equal(1, 1),
                                         builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
         assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
@@ -126,9 +123,6 @@ public class BucketSelectConverterTest {
                                         builder.in(1, Arrays.asList(1, 8)),
                                         builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes())
-                .containsExactly(
-                        -1272936927, -1567268077, 582056914, 2124429589, -1234868890, 1063796399);
         assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
@@ -144,13 +138,11 @@ public class BucketSelectConverterTest {
                                         or(builder.equal(1, 1), builder.equal(1, 8)),
                                         builder.equal(2, 2)))
                         .get();
-        assertThat(selector.hashCodes())
-                .containsExactly(
-                        -1272936927, -1567268077, 582056914, 2124429589, -1234868890, 1063796399);
         assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
     private Optional<Selector> newSelector(Predicate predicate) {
-        return (Optional) BucketSelectConverter.create(predicate, rowType);
+        return (Optional)
+                BucketSelectConverter.create(predicate, rowType, BucketFunctionType.DEFAULT);
     }
 }

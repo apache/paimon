@@ -118,6 +118,7 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            vectorSchemaRoot.close();
         }
     }
 
@@ -160,6 +161,7 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            vectorSchemaRoot.close();
         }
     }
 
@@ -192,6 +194,7 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            vectorSchemaRoot.close();
         }
     }
 
@@ -248,7 +251,7 @@ public class ArrowFormatWriterTest {
                         .isEqualTo(fieldGetter.getFieldOrNull(expectec));
             }
         }
-        writer.release();
+        vectorSchemaRoot.close();
     }
 
     private Object[] randomRowValues(boolean[] nullable) {

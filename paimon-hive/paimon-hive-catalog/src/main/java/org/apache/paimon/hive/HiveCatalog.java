@@ -74,6 +74,7 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,6 +152,8 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
     private static final int DEFAULT_TABLE_BATCH_SIZE = 300;
     private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
+    // hive default field delimiter is '\u0001'
+    public static final String HIVE_FIELD_DELIM_DEFAULT = "\u0001";
 
     private final HiveConf hiveConf;
     private final String clientClassName;
@@ -1358,6 +1361,22 @@ public class HiveCatalog extends AbstractCatalog {
         return table != null && TableType.EXTERNAL_TABLE.name().equals(table.getTableType());
     }
 
+    private static String currentUser() {
+        String username = null;
+        try {
+            username = UserGroupInformation.getCurrentUser().getShortUserName();
+        } catch (IOException e) {
+            LOG.warn("Failed to get Hadoop user", e);
+        }
+
+        if (username != null) {
+            return username;
+        } else {
+            LOG.warn("Hadoop user is null, defaulting to user.name");
+            return System.getProperty("user.name");
+        }
+    }
+
     private Table newHmsTable(
             Identifier identifier,
             Map<String, String> tableParameters,
@@ -1368,8 +1387,7 @@ public class HiveCatalog extends AbstractCatalog {
                 new Table(
                         identifier.getTableName(),
                         identifier.getDatabaseName(),
-                        // current linux user
-                        System.getProperty("user.name"),
+                        currentUser(),
                         (int) (currentTimeMillis / 1000),
                         (int) (currentTimeMillis / 1000),
                         Integer.MAX_VALUE,
@@ -1449,10 +1467,14 @@ public class HiveCatalog extends AbstractCatalog {
         return OUTPUT_FORMAT_CLASS_NAME;
     }
 
-    private Map<String, String> setSerDeInfoParam(@Nullable FormatTable.Format provider) {
+    private Map<String, String> setSerDeInfoParam(
+            @Nullable FormatTable.Format provider, Map<String, String> tableParameters) {
         Map<String, String> param = new HashMap<>();
         if (provider == FormatTable.Format.CSV) {
-            param.put(FIELD_DELIM, options.get(FIELD_DELIMITER));
+            param.put(
+                    FIELD_DELIM,
+                    tableParameters.getOrDefault(
+                            FIELD_DELIMITER.key(), options.get(FIELD_DELIMITER)));
         }
         return param;
     }
@@ -1469,7 +1491,7 @@ public class HiveCatalog extends AbstractCatalog {
         sd.setOutputFormat(getOutputFormatClassName(provider));
 
         SerDeInfo serDeInfo = sd.getSerdeInfo() != null ? sd.getSerdeInfo() : new SerDeInfo();
-        serDeInfo.setParameters(setSerDeInfoParam(provider));
+        serDeInfo.setParameters(setSerDeInfoParam(provider, schema.options()));
         serDeInfo.setSerializationLib(getSerdeClassName(provider));
         sd.setSerdeInfo(serDeInfo);
 

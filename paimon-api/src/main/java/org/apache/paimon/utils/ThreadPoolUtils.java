@@ -21,8 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -36,8 +34,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -78,20 +74,12 @@ public class ThreadPoolUtils {
         return executor;
     }
 
-    public static ScheduledExecutorService createScheduledThreadPool(
-            int threadNum, String namePrefix) {
-        return new ScheduledThreadPoolExecutor(threadNum, newDaemonThreadFactory(namePrefix));
-    }
-
     /** This method aims to parallel process tasks with memory control and sequentially. */
     public static <T, U> Iterable<T> sequentialBatchedExecute(
-            ThreadPoolExecutor executor,
+            ExecutorService executor,
             Function<U, List<T>> processor,
             List<U> input,
-            @Nullable Integer queueSize) {
-        if (queueSize == null) {
-            queueSize = executor.getMaximumPoolSize();
-        }
+            int queueSize) {
         if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negative");
         }

@@ -27,17 +27,21 @@ import org.apache.paimon.types.{DataType, RowType}
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
 
 class Spark3Shim extends SparkShim {
+
+  override def classicApi: ClassicApi = new Classic3Api
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
     new PaimonSpark3SqlExtensionsParser(delegate)
@@ -55,12 +59,6 @@ class Spark3Shim extends SparkShim {
     new Spark3ArrayData(elementType)
   }
 
-  override def supportsHashAggregate(
-      aggregateBufferAttributes: Seq[Attribute],
-      groupingExpression: Seq[Expression]): Boolean = {
-    Aggregate.supportsHashAggregate(aggregateBufferAttributes)
-  }
-
   override def createTable(
       tableCatalog: TableCatalog,
       ident: Identifier,
@@ -70,9 +68,22 @@ class Spark3Shim extends SparkShim {
     tableCatalog.createTable(ident, schema, partitions, properties)
   }
 
-  override def column(expr: Expression): Column = new Column(expr)
+  override def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef =
+    MinorVersionShim.createCTERelationRef(cteId, resolved, output, isStreaming)
 
-  override def convertToExpression(spark: SparkSession, column: Column): Expression = column.expr
+  override def supportsHashAggregate(
+      aggregateBufferAttributes: Seq[Attribute],
+      groupingExpression: Seq[Expression]): Boolean =
+    Aggregate.supportsHashAggregate(aggregateBufferAttributes)
+
+  override def supportsObjectHashAggregate(
+      aggregateExpressions: Seq[AggregateExpression],
+      groupByExpressions: Seq[Expression]): Boolean =
+    Aggregate.supportsObjectHashAggregate(aggregateExpressions)
 
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
 
@@ -87,4 +98,5 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
+
 }

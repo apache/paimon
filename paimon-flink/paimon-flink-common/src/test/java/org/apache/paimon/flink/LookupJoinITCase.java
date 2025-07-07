@@ -57,8 +57,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
 
         String fullOption = ", 'lookup.cache' = 'full'";
-
         String lruOption = ", 'changelog-producer'='lookup'";
+        String memoryOption = ", 'lookup.cache' = 'memory'";
 
         switch (cacheMode) {
             case FULL:
@@ -68,6 +68,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
             case AUTO:
                 tEnv.executeSql(String.format(dim, lruOption));
                 tEnv.executeSql(String.format(partitioned, lruOption));
+                break;
+            case MEMORY:
+                tEnv.executeSql(String.format(dim, memoryOption));
+                tEnv.executeSql(String.format(partitioned, memoryOption));
                 break;
             default:
                 throw new UnsupportedOperationException();
@@ -1011,6 +1015,91 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
+    public void testLookupPartitionLevelMaxPt(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt1 STRING, pt2 INT, i INT, v INT)"
+                        + "PARTITIONED BY (`pt1`, `pt2`) WITH ("
+                        + "'scan.partitions' = 'pt1=max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        String query =
+                "SELECT D.pt1, D.pt2, T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES ('202415', 14, 1, 1), ('202415', 15, 1, 1), ('202414', 15, 1, 1)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        List<Row> result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of("202415", 14, 1, 1), Row.of("202415", 15, 1, 1));
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('202416', 14, 2, 2), ('202416', 15, 2, 2)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of("202416", 14, 2, 2), Row.of("202416", 15, 2, 2));
+
+        sql("ALTER TABLE PARTITIONED_DIM DROP PARTITION (pt1 = '202416',pt2 = '15')");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(null, null, 1, null), Row.of("202416", 14, 2, 2));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupMultiPartitionLevelMaxPt(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt1 STRING, pt2 INT, pt3 INT, i INT, v INT)"
+                        + "PARTITIONED BY (`pt1`, `pt2`, `pt3`) WITH ("
+                        + "'scan.partitions' = 'pt1=max_pt(),pt2=max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        String query =
+                "SELECT D.pt1, D.pt2, D.pt3, T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES ('202415', 15, 1, 1, 1), ('202415', 15, 2, 1, 1), ('202414', 15, 1, 1, 1)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        List<Row> result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("202415", 15, 1, 1, 1), Row.of("202415", 15, 2, 1, 1));
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('202416', 15, 1, 2, 2), ('202416', 15, 2, 2, 2)");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("202416", 15, 1, 2, 2), Row.of("202416", 15, 2, 2, 2));
+
+        sql("ALTER TABLE PARTITIONED_DIM DROP PARTITION (pt1 = '202416',pt2 = '15',pt3 = '1')");
+        Thread.sleep(500); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(null, null, null, 1, null), Row.of("202416", 15, 2, 2, 2));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
     public void testLookupMaxTwoPt0(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt STRING, i INT, v INT)"
@@ -1103,5 +1192,38 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
+    }
+
+    @Test
+    public void testFallbackCacheMode() throws Exception {
+        sql(
+                "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j', 'bucket' = '1')");
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (2, 11, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222), // not change
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
     }
 }

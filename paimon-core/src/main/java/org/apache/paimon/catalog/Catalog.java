@@ -235,7 +235,7 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
      *     not {@link #supportsListByPattern()}.
      */
-    default PagedList<String> listTablesPagedGlobally(
+    default PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
@@ -443,7 +443,7 @@ public interface Catalog extends AutoCloseable {
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
-     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
+     * @throws UnsupportedOperationException if it does not {@link #supportsListByPattern()}
      */
     default PagedList<String> listViewsPaged(
             String databaseName,
@@ -470,7 +470,7 @@ public interface Catalog extends AutoCloseable {
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
-     * @throws UnsupportedOperationException if does not {@link #supportsListByPattern()}
+     * @throws UnsupportedOperationException if it does not {@link #supportsListByPattern()}
      */
     default PagedList<View> listViewDetailsPaged(
             String databaseName,
@@ -484,8 +484,6 @@ public interface Catalog extends AutoCloseable {
     /**
      * Gets an array of views for a catalog.
      *
-     * <p>NOTE: System tables will not be listed.
-     *
      * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
@@ -496,11 +494,11 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @return a list of the views with provided page size under this databaseNamePattern &
-     *     tableNamePattern and next page token
-     * @throws UnsupportedOperationException if does not {@link #supportsListObjectsPaged()} or does
-     *     not {@link #supportsListByPattern()}}.
+     *     viewNamePattern and next page token
+     * @throws UnsupportedOperationException if it does not {@link #supportsListObjectsPaged()} or
+     *     does not {@link #supportsListByPattern()}}.
      */
-    default PagedList<String> listViewsPagedGlobally(
+    default PagedList<Identifier> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
@@ -786,6 +784,86 @@ public interface Catalog extends AutoCloseable {
     List<String> listFunctions(String databaseName) throws DatabaseNotExistException;
 
     /**
+     * Get paged list names of function under this database. An empty list is returned if none
+     * function exists.
+     *
+     * @param databaseName Name of the database to list function.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All function will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @return a list of the names of function with provided page size in this database and next
+     *     page token, or a list of the names of all function in this database if the catalog does
+     *     not {@link #supportsListObjectsPaged()}.
+     * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if it does not {@link #supportsListByPattern()}
+     */
+    default PagedList<String> listFunctionsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        return new PagedList<>(listFunctions(databaseName), null);
+    }
+
+    /**
+     * Gets an array of function for a catalog.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the function identifier with provided page size under this
+     *     databaseNamePattern & functionNamePattern and next page token
+     * @throws UnsupportedOperationException if it does not {@link #supportsListObjectsPaged()} or
+     *     does not {@link #supportsListByPattern()}}.
+     */
+    default PagedList<Identifier> listFunctionsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String functionNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listFunctionsPagedGlobally");
+    }
+
+    /**
+     * Get paged list function details under this database. An empty list is returned if none
+     * function exists.
+     *
+     * @param databaseName Name of the database to list function detail.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All function details
+     *     will be returned if not set or empty. Currently, only prefix matching is supported.
+     * @return a list of the function detail with provided page size (@param maxResults) in this
+     *     database and next page token, or a list of the details of all functions in this database
+     *     if the catalog does not {@link #supportsListObjectsPaged()}.
+     * @throws DatabaseNotExistException if the database does not exist
+     * @throws UnsupportedOperationException if it does not {@link #supportsListByPattern()}
+     */
+    default PagedList<Function> listFunctionDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern)
+            throws DatabaseNotExistException {
+        return new PagedList<>(Collections.emptyList(), null);
+    }
+
+    /**
      * Get function by name.
      *
      * @param identifier Path of the function to get
@@ -951,12 +1029,17 @@ public interface Catalog extends AutoCloseable {
 
     /** Exception for trying to operate on the database that doesn't have permission. */
     class DatabaseNoPermissionException extends RuntimeException {
-        private static final String MSG = "Database %s has no permission.";
+        private static final String MSG = "Database %s has no permission. Cause by %s.";
 
         private final String database;
 
         public DatabaseNoPermissionException(String database, Throwable cause) {
-            super(String.format(MSG, database), cause);
+            super(
+                    String.format(
+                            MSG,
+                            database,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.database = database;
         }
 
@@ -1015,12 +1098,17 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
-        private static final String MSG = "Table %s has no permission.";
+        private static final String MSG = "Table %s has no permission. Cause by %s.";
 
         private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
             this.identifier = identifier;
         }
 

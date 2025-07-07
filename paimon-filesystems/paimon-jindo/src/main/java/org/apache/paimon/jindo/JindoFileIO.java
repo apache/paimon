@@ -125,6 +125,10 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         }
     }
 
+    public Options hadoopOptions() {
+        return hadoopOptions;
+    }
+
     @Override
     protected Pair<JindoHadoopSystem, String> createFileSystem(org.apache.hadoop.fs.Path path) {
         final String scheme = path.toUri().getScheme();

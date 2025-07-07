@@ -38,10 +38,6 @@ public class ListFunctionsResponse implements PagedResponse<String> {
     @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
     private final String nextPageToken;
 
-    public ListFunctionsResponse(@JsonProperty(FIELD_FUNCTIONS) List<String> functions) {
-        this(functions, null);
-    }
-
     @JsonCreator
     public ListFunctionsResponse(
             @JsonProperty(FIELD_FUNCTIONS) List<String> functions,

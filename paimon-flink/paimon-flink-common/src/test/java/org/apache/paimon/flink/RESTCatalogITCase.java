@@ -136,7 +136,8 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         jarResourcePath,
                         ResourceType.JAR,
                         jarResourcePath2));
-        assertThat(batchSql(String.format("SHOW FUNCTIONS"))).contains(Row.of(functionName));
+        assertThat(batchSql(String.format("SHOW FUNCTIONS in %s", DATABASE_NAME)))
+                .contains(Row.of(functionName));
         ObjectPath functionObjectPath = new ObjectPath(DATABASE_NAME, functionName);
         CatalogFunction getFunction = catalog.getFunction(functionObjectPath);
         assertThat(getFunction).isEqualTo(function);

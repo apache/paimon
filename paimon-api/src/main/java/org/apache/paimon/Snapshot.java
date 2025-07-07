@@ -87,6 +87,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
     protected static final String FIELD_WATERMARK = "watermark";
     protected static final String FIELD_STATISTICS = "statistics";
+    protected static final String FIELD_PROPERTIES = "properties";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -195,6 +196,13 @@ public class Snapshot implements Serializable {
     @Nullable
     protected final String statistics;
 
+    // properties
+    // null for paimon <= 1.1 or empty properties
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_PROPERTIES)
+    @Nullable
+    protected final Map<String, String> properties;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -214,7 +222,8 @@ public class Snapshot implements Serializable {
             @Nullable Long deltaRecordCount,
             @Nullable Long changelogRecordCount,
             @Nullable Long watermark,
-            @Nullable String statistics) {
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -235,7 +244,8 @@ public class Snapshot implements Serializable {
                 deltaRecordCount,
                 changelogRecordCount,
                 watermark,
-                statistics);
+                statistics,
+                properties);
     }
 
     @JsonCreator
@@ -260,7 +270,8 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
-            @JsonProperty(FIELD_STATISTICS) @Nullable String statistics) {
+            @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
+            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -281,6 +292,7 @@ public class Snapshot implements Serializable {
         this.changelogRecordCount = changelogRecordCount;
         this.watermark = watermark;
         this.statistics = statistics;
+        this.properties = properties;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -395,6 +407,12 @@ public class Snapshot implements Serializable {
         return statistics;
     }
 
+    @JsonGetter(FIELD_PROPERTIES)
+    @Nullable
+    public Map<String, String> properties() {
+        return properties;
+    }
+
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -421,7 +439,8 @@ public class Snapshot implements Serializable {
                 deltaRecordCount,
                 changelogRecordCount,
                 watermark,
-                statistics);
+                statistics,
+                properties);
     }
 
     @Override
@@ -452,7 +471,8 @@ public class Snapshot implements Serializable {
                 && Objects.equals(deltaRecordCount, that.deltaRecordCount)
                 && Objects.equals(changelogRecordCount, that.changelogRecordCount)
                 && Objects.equals(watermark, that.watermark)
-                && Objects.equals(statistics, that.statistics);
+                && Objects.equals(statistics, that.statistics)
+                && Objects.equals(properties, that.properties);
     }
 
     /** Type of changes in this snapshot. */

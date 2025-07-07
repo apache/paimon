@@ -19,14 +19,29 @@
 package org.apache.paimon.postpone;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.memory.MemoryOwner;
+import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SinkWriter;
+import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
+import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
 
 import javax.annotation.Nullable;
 
@@ -36,30 +51,69 @@ import java.util.Collections;
 import java.util.List;
 
 /** {@link RecordWriter} for {@code bucket = -2} tables. */
-public class PostponeBucketWriter implements RecordWriter<KeyValue> {
+public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
+    private final FileIO fileIO;
+    private final DataFilePathFactory pathFactory;
     private final KeyValueFileWriterFactory writerFactory;
     private final List<DataFileMeta> files;
+    private final IOFunction<List<DataFileMeta>, RecordReaderIterator<KeyValue>> fileRead;
+    private final @Nullable IOManager ioManager;
+    private final CompressOptions spillCompression;
+    private final MemorySize maxDiskSize;
 
-    private RollingFileWriter<KeyValue, DataFileMeta> writer;
+    private SinkWriter<KeyValue> sinkWriter;
+    private MemorySegmentPool memorySegmentPool;
 
     public PostponeBucketWriter(
-            KeyValueFileWriterFactory writerFactory, @Nullable CommitIncrement restoreIncrement) {
+            FileIO fileIO,
+            DataFilePathFactory pathFactory,
+            CompressOptions spillCompression,
+            MemorySize maxDiskSize,
+            @Nullable IOManager ioManager,
+            KeyValueFileWriterFactory writerFactory,
+            IOFunction<List<DataFileMeta>, RecordReaderIterator<KeyValue>> fileRead,
+            boolean useWriteBuffer,
+            boolean spillable,
+            @Nullable CommitIncrement restoreIncrement) {
+        this.ioManager = ioManager;
         this.writerFactory = writerFactory;
+        this.fileRead = fileRead;
+        this.fileIO = fileIO;
+        this.pathFactory = pathFactory;
+        this.spillCompression = spillCompression;
+        this.maxDiskSize = maxDiskSize;
         this.files = new ArrayList<>();
         if (restoreIncrement != null) {
             files.addAll(restoreIncrement.newFilesIncrement().newFiles());
         }
+        this.sinkWriter =
+                useWriteBuffer
+                        ? createBufferedSinkWriter(spillable)
+                        : new DirectSinkWriter<>(this::createRollingRowWriter);
+    }
 
-        this.writer = null;
+    private RollingFileWriter<KeyValue, DataFileMeta> createRollingRowWriter() {
+        return writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
     }
 
     @Override
     public void write(KeyValue record) throws Exception {
-        if (writer == null) {
-            writer = writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        boolean success = sinkWriter.write(record);
+        if (!success) {
+            flush();
+            success = sinkWriter.write(record);
+            if (!success) {
+                // Should not get here, because writeBuffer will throw too big exception out.
+                // But we throw again in case of something unexpected happens. (like someone changed
+                // code in SpillableBuffer.)
+                throw new RuntimeException("Mem table is too small to hold a single element.");
+            }
         }
-        writer.write(record);
+    }
+
+    private void flush() throws Exception {
+        files.addAll(sinkWriter.flush());
     }
 
     @Override
@@ -82,19 +136,77 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
-    public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        if (writer != null) {
-            writer.close();
-            files.addAll(writer.result());
-            writer = null;
-        }
+    public void setMemoryPool(MemorySegmentPool memoryPool) {
+        this.memorySegmentPool = memoryPool;
+        sinkWriter.setMemoryPool(memoryPool);
+    }
 
+    @Override
+    public long memoryOccupancy() {
+        return sinkWriter.memoryOccupancy();
+    }
+
+    @Override
+    public void flushMemory() throws Exception {
+        boolean success = sinkWriter.flushMemory();
+        if (!success) {
+            flush();
+        }
+    }
+
+    private BufferedSinkWriter<KeyValue> createBufferedSinkWriter(boolean spillable) {
+        RowType keyType = writerFactory.keyType();
+        RowType valueType = writerFactory.valueType();
+        RowType kvRowType = KeyValue.schema(keyType, valueType);
+        KeyValueSerializer serializer = new KeyValueSerializer(keyType, valueType);
+        return new BufferedSinkWriter<>(
+                this::createRollingRowWriter,
+                serializer::toRow,
+                serializer::fromRow,
+                ioManager,
+                kvRowType,
+                spillable,
+                maxDiskSize,
+                spillCompression);
+    }
+
+    public void toBufferedWriter() throws Exception {
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter() && fileRead != null) {
+            // fetch the written results
+            List<DataFileMeta> files = sinkWriter.flush();
+
+            sinkWriter.close();
+            sinkWriter = createBufferedSinkWriter(true);
+            sinkWriter.setMemoryPool(memorySegmentPool);
+
+            // rewrite small files
+            try (RecordReaderIterator<KeyValue> reader = fileRead.apply(files)) {
+                while (reader.hasNext()) {
+                    sinkWriter.write(reader.next());
+                }
+            } finally {
+                // remove small files
+                for (DataFileMeta file : files) {
+                    fileIO.deleteQuietly(pathFactory.toPath(file));
+                }
+            }
+        }
+    }
+
+    @Override
+    public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
+        flush();
         List<DataFileMeta> result = new ArrayList<>(files);
         files.clear();
         return new CommitIncrement(
                 new DataIncrement(result, Collections.emptyList(), Collections.emptyList()),
                 CompactIncrement.emptyIncrement(),
                 null);
+    }
+
+    @VisibleForTesting
+    public boolean useBufferedSinkWriter() {
+        return sinkWriter instanceof BufferedSinkWriter;
     }
 
     @Override
@@ -106,13 +218,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     public void sync() throws Exception {}
 
     @Override
-    public void withInsertOnly(boolean insertOnly) {}
-
-    @Override
     public void close() throws Exception {
-        if (writer != null) {
-            writer.abort();
-            writer = null;
-        }
+        sinkWriter.close();
     }
 }

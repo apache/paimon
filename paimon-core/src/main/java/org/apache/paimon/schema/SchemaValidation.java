@@ -21,10 +21,10 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.casting.CastExecutor;
-import org.apache.paimon.casting.CastExecutors;
-import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -38,7 +38,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
@@ -104,8 +103,6 @@ public class SchemaValidation {
         CoreOptions options = new CoreOptions(schema.options());
 
         validateBucket(schema, options);
-
-        validateDefaultValues(schema);
 
         validateStartupMode(options);
 
@@ -229,6 +226,8 @@ public class SchemaValidation {
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
         }
+
+        validateMergeFunctionFactory(schema);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -486,64 +485,6 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateDefaultValues(TableSchema schema) {
-        CoreOptions coreOptions = new CoreOptions(schema.options());
-        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
-
-        if (!defaultValues.isEmpty()) {
-
-            List<String> partitionKeys = schema.partitionKeys();
-            for (String partitionKey : partitionKeys) {
-                if (defaultValues.containsKey(partitionKey)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Partition key %s should not be assign default column.",
-                                    partitionKey));
-                }
-            }
-
-            List<String> primaryKeys = schema.primaryKeys();
-            for (String primaryKey : primaryKeys) {
-                if (defaultValues.containsKey(primaryKey)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Primary key %s should not be assign default column.",
-                                    primaryKey));
-                }
-            }
-
-            List<DataField> fields = schema.fields();
-
-            for (DataField field : fields) {
-                String defaultValueStr = defaultValues.get(field.name());
-                if (defaultValueStr == null) {
-                    continue;
-                }
-
-                @SuppressWarnings("unchecked")
-                CastExecutor<Object, Object> resolve =
-                        (CastExecutor<Object, Object>)
-                                CastExecutors.resolve(VarCharType.STRING_TYPE, field.type());
-                if (resolve == null) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The column %s with datatype %s is currently not supported for default value.",
-                                    field.name(), field.type().asSQLString()));
-                }
-
-                try {
-                    resolve.cast(BinaryString.fromString(defaultValueStr));
-                } catch (Exception e) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The default value %s of the column %s can not be cast to datatype: %s",
-                                    defaultValueStr, field.name(), field.type()),
-                            e);
-                }
-            }
-        }
-    }
-
     private static void validateForDeletionVectors(CoreOptions options) {
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
@@ -652,5 +593,30 @@ public class SchemaValidation {
 
     private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {
         return !schema.primaryKeys().isEmpty() && bucket == BucketMode.POSTPONE_BUCKET;
+    }
+
+    private static void validateMergeFunctionFactory(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+        CoreOptions options = new CoreOptions(schema.options());
+        switch (options.mergeEngine()) {
+            case DEDUPLICATE:
+            case FIRST_ROW:
+                return;
+            default:
+        }
+
+        for (int i = 0; i < schema.logicalRowType().getFieldNames().size(); i++) {
+            String fieldName = schema.logicalRowType().getFieldNames().get(i);
+            String aggFuncName = options.fieldAggFunc(fieldName);
+            aggFuncName = aggFuncName == null ? options.fieldsDefaultFunc() : aggFuncName;
+            if (aggFuncName != null) {
+                FactoryUtil.discoverFactory(
+                        FieldAggregator.class.getClassLoader(),
+                        FieldAggregatorFactory.class,
+                        aggFuncName);
+            }
+        }
     }
 }

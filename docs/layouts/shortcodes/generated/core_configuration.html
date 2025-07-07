@@ -57,6 +57,12 @@ under the License.
             <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), -2 (postpone bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
         </tr>
         <tr>
+            <td><h5>bucket-function.type</h5></td>
+            <td style="word-wrap: break-word;">DEFAULT</td>
+            <td><p>Enum</p></td>
+            <td>The bucket function for paimon bucket<br /><br />Possible values:<ul><li>"DEFAULT"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>bucket-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -159,6 +165,12 @@ under the License.
             <td>Maximum number of retries when commit failed.</td>
         </tr>
         <tr>
+            <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, starting from the snapshot after this one. If found, commit will be aborted. If the value of this option is -1, committer will not check for its first commit.</td>
+        </tr>
+        <tr>
             <td><h5>commit.timeout</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
@@ -175,6 +187,12 @@ under the License.
             <td style="word-wrap: break-word;">0.2</td>
             <td>Double</td>
             <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.force-rewrite-all-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force pick all files for a full compaction. Usually seen in a compaction task to external paths.</td>
         </tr>
         <tr>
             <td><h5>compaction.force-up-level-0</h5></td>
@@ -313,6 +331,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
+        </tr>
+        <tr>
+            <td><h5>disable-explicit-type-casting</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. Users can enable this option to disable explicit type casting</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -592,6 +616,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
         </tr>
         <tr>
+            <td><h5>metadata.stats-keep-first-n-columns</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>Define how many columns' stats are kept in metadata file from front to end. Default value '-1' means ignoring this config.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.stats-mode</h5></td>
             <td style="word-wrap: break-word;">"truncate(16)"</td>
             <td>String</td>
@@ -690,6 +720,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether mark the done status to indicate that the data is ready when end input.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-batch-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The batch size of partition expiration. By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. Use this parameter to divide partition expiration process and mitigate memory pressure.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -753,7 +789,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.sink-strategy</h5></td>
             <td style="word-wrap: break-word;">NONE</td>
             <td><p>Enum</p></td>
-            <td>This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
+            <td>This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -1127,12 +1163,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Whether the write buffer can be spillable. Enabled by default when using object storage or when 'target-file-size' is greater than 'write-buffer-size'.</td>
-        </tr>
-        <tr>
-            <td><h5>write-manifest-cache</h5></td>
-            <td style="word-wrap: break-word;">0 bytes</td>
-            <td>MemorySize</td>
-            <td>Cache size for reading manifest files for write initialization.</td>
         </tr>
         <tr>
             <td><h5>write-max-writers-to-spill</h5></td>

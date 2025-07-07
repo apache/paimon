@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
@@ -65,6 +66,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
+    private final boolean forceRewriteAllFiles;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -80,7 +82,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             boolean needLookup,
-            @Nullable RecordLevelExpire recordLevelExpire) {
+            @Nullable RecordLevelExpire recordLevelExpire,
+            boolean forceRewriteAllFiles) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -93,6 +96,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.lazyGenDeletionFile = lazyGenDeletionFile;
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
+        this.forceRewriteAllFiles = forceRewriteAllFiles;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -135,7 +139,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             }
             optionalUnit =
                     CompactStrategy.pickFullCompaction(
-                            levels.numberOfLevels(), runs, recordLevelExpire, dvMaintainer);
+                            levels.numberOfLevels(),
+                            runs,
+                            recordLevelExpire,
+                            dvMaintainer,
+                            forceRewriteAllFiles);
         } else {
             if (taskFuture != null) {
                 return;
@@ -145,7 +153,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             }
             optionalUnit =
                     strategy.pick(levels.numberOfLevels(), runs)
-                            .filter(unit -> unit.files().size() > 0)
+                            .filter(unit -> !unit.files().isEmpty())
                             .filter(
                                     unit ->
                                             unit.files().size() > 1
@@ -199,21 +207,28 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             : () -> CompactDeletionFile.generateFiles(dvMaintainer);
         }
 
-        MergeTreeCompactTask task =
-                new MergeTreeCompactTask(
-                        keyComparator,
-                        compactionFileSize,
-                        rewriter,
-                        unit,
-                        dropDelete,
-                        levels.maxLevel(),
-                        metricsReporter,
-                        compactDfSupplier,
-                        dvMaintainer,
-                        recordLevelExpire);
+        CompactTask task;
+        if (unit.fileRewrite()) {
+            task = new FileRewriteCompactTask(rewriter, unit, dropDelete, metricsReporter);
+        } else {
+            task =
+                    new MergeTreeCompactTask(
+                            keyComparator,
+                            compactionFileSize,
+                            rewriter,
+                            unit,
+                            dropDelete,
+                            levels.maxLevel(),
+                            metricsReporter,
+                            compactDfSupplier,
+                            recordLevelExpire,
+                            forceRewriteAllFiles);
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "Pick these files (name, level, size) for compaction: {}",
+                    "Pick these files (name, level, size) for {} compaction: {}",
+                    task.getClass().getSimpleName(),
                     unit.files().stream()
                             .map(
                                     file ->

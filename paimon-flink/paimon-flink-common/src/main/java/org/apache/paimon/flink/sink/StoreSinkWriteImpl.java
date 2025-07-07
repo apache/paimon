@@ -28,6 +28,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -64,8 +65,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     protected TableWriteImpl<?> write;
 
     @Nullable private final MetricGroup metricGroup;
-
-    @Nullable private Boolean insertOnly;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -142,11 +141,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
 
         TableWriteImpl<?> tableWrite =
-                table.newWrite(
-                                commitUser,
-                                (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket),
-                                state.getSubtaskId())
+                table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)
@@ -157,21 +152,15 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         }
 
         if (memoryPoolFactory != null) {
-            tableWrite.withMemoryPoolFactory(memoryPoolFactory);
+            return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
         } else {
-            tableWrite.withMemoryPool(
+            return tableWrite.withMemoryPool(
                     memoryPool != null
                             ? memoryPool
                             : new HeapMemorySegmentPool(
                                     table.coreOptions().writeBufferSize(),
                                     table.coreOptions().pageSize()));
         }
-
-        if (insertOnly != null) {
-            tableWrite.withInsertOnly(insertOnly);
-        }
-
-        return tableWrite;
     }
 
     public void withCompactExecutor(ExecutorService compactExecutor) {
@@ -179,9 +168,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public void withInsertOnly(boolean insertOnly) {
-        this.insertOnly = insertOnly;
-        write.withInsertOnly(insertOnly);
+    public void setWriteRestore(WriteRestore writeRestore) {
+        write.withWriteRestore(writeRestore);
     }
 
     @Override

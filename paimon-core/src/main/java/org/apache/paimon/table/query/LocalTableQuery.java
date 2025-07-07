@@ -55,7 +55,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
@@ -105,23 +104,7 @@ public class LocalTableQuery implements TableQuery {
                                 options.lookupCacheMaxMemory(),
                                 options.lookupCacheHighPrioPoolRatio()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
-
-        if (options.needLookup()) {
-            startLevel = 1;
-        } else {
-            if (options.sequenceField().size() > 0) {
-                throw new UnsupportedOperationException(
-                        "Not support sequence field definition, but is: "
-                                + options.sequenceField());
-            }
-
-            if (options.mergeEngine() != DEDUPLICATE) {
-                throw new UnsupportedOperationException(
-                        "Only support deduplicate merge engine, but is: " + options.mergeEngine());
-            }
-
-            startLevel = 0;
-        }
+        startLevel = options.needLookup() ? 1 : 0;
     }
 
     public void refreshFiles(

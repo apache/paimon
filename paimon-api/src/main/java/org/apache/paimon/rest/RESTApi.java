@@ -51,6 +51,7 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -60,12 +61,16 @@ import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
+import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
+import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
+import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
@@ -94,6 +99,8 @@ import java.util.function.Function;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.rest.RESTFunctionValidator.checkFunctionName;
+import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 
@@ -134,6 +141,7 @@ public class RESTApi {
     public static final String DATABASE_NAME_PATTERN = "databaseNamePattern";
     public static final String TABLE_NAME_PATTERN = "tableNamePattern";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
+    public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
@@ -169,14 +177,13 @@ public class RESTApi {
     public RESTApi(Options options, boolean configRequired) {
         this.client = new HttpClient(options.get(RESTCatalogOptions.URI));
         AuthProvider authProvider = createAuthProvider(options);
-        Map<String, String> baseHeaders = Collections.emptyMap();
+        Map<String, String> baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
         if (configRequired) {
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
                             ? ImmutableMap.of(WAREHOUSE.key(), RESTUtil.encodeString(warehouse))
                             : ImmutableMap.of();
-            baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
             options =
                     new Options(
                             client.get(
@@ -422,12 +429,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
      */
-    public PagedList<String> listTablesPagedGlobally(
+    public PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        ListTablesResponse response =
+        ListTablesGloballyResponse response =
                 client.get(
                         resourcePaths.tables(),
                         buildPagedQueryParams(
@@ -435,9 +442,9 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
-                        ListTablesResponse.class,
+                        ListTablesGloballyResponse.class,
                         restAuthFunction);
-        List<String> tables = response.getTables();
+        List<Identifier> tables = response.getTables();
         if (tables == null) {
             return new PagedList<>(emptyList(), null);
         }
@@ -843,6 +850,127 @@ public class RESTApi {
     }
 
     /**
+     * List functions by page.
+     *
+     * <p>Gets an array of functions for a database. There is no guarantee of a specific ordering of
+     * the elements in the array.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<String> listFunctionsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern) {
+        ListFunctionsResponse response =
+                client.get(
+                        resourcePaths.functions(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionsResponse.class,
+                        restAuthFunction);
+        List<String> functions = response.functions();
+        if (functions == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functions, response.getNextPageToken());
+    }
+
+    /**
+     * List function details.
+     *
+     * <p>Gets an array of function details for a database. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<GetFunctionResponse> listFunctionDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String functionNamePattern) {
+        ListFunctionDetailsResponse response =
+                client.get(
+                        resourcePaths.functionDetails(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionDetailsResponse.class,
+                        restAuthFunction);
+        List<GetFunctionResponse> functionDetails = response.data();
+        if (functionDetails == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functionDetails, response.getNextPageToken());
+    }
+
+    /**
+     * List functions for a catalog.
+     *
+     * <p>Gets an array of functions for a catalog. There is no guarantee of a specific ordering of
+     * the elements in the array.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names. All databases will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param functionNamePattern A sql LIKE pattern (%) for function names. All functions will be
+     *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public PagedList<Identifier> listFunctionsPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String functionNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        ListFunctionsGloballyResponse response =
+                client.get(
+                        resourcePaths.functions(),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
+                                Pair.of(FUNCTION_NAME_PATTERN, functionNamePattern)),
+                        ListFunctionsGloballyResponse.class,
+                        restAuthFunction);
+        List<Identifier> functions = response.data();
+        if (functions == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(functions, response.getNextPageToken());
+    }
+
+    /**
      * Get a function by identifier.
      *
      * @param identifier the identifier of the function to retrieve
@@ -851,6 +979,12 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to access the function
      */
     public GetFunctionResponse getFunction(Identifier identifier) {
+        if (!isValidFunctionName(identifier.getObjectName())) {
+            throw new NoSuchResourceException(
+                    ErrorResponse.RESOURCE_TYPE_FUNCTION,
+                    identifier.getObjectName(),
+                    "Invalid function name: " + identifier.getObjectName());
+        }
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetFunctionResponse.class,
@@ -868,6 +1002,7 @@ public class RESTApi {
      */
     public void createFunction(
             Identifier identifier, org.apache.paimon.function.Function function) {
+        checkFunctionName(identifier.getObjectName());
         client.post(
                 resourcePaths.functions(identifier.getDatabaseName()),
                 new CreateFunctionRequest(function),
@@ -883,6 +1018,7 @@ public class RESTApi {
      *     this function
      */
     public void dropFunction(Identifier identifier) {
+        checkFunctionName(identifier.getObjectName());
         client.delete(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
@@ -897,6 +1033,7 @@ public class RESTApi {
      * @throws ForbiddenException if the user lacks permission to modify the function
      */
     public void alterFunction(Identifier identifier, List<FunctionChange> changes) {
+        checkFunctionName(identifier.getObjectName());
         client.post(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
                 new AlterFunctionRequest(changes),
@@ -1061,12 +1198,12 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this database
      */
-    public PagedList<String> listViewsPagedGlobally(
+    public PagedList<Identifier> listViewsPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String viewNamePattern,
             @Nullable Integer maxResults,
             @Nullable String pageToken) {
-        ListViewsResponse response =
+        ListViewsGloballyResponse response =
                 client.get(
                         resourcePaths.views(),
                         buildPagedQueryParams(
@@ -1074,9 +1211,9 @@ public class RESTApi {
                                 pageToken,
                                 Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
                                 Pair.of(VIEW_NAME_PATTERN, viewNamePattern)),
-                        ListViewsResponse.class,
+                        ListViewsGloballyResponse.class,
                         restAuthFunction);
-        List<String> views = response.getViews();
+        List<Identifier> views = response.getViews();
         if (views == null) {
             return new PagedList<>(emptyList(), null);
         }

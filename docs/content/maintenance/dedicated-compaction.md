@@ -104,7 +104,7 @@ Run the following command to submit a compaction job for the table.
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     [--partition <partition-name>] \
     [--compact_strategy <minor / full>] \
@@ -191,7 +191,7 @@ CALL sys.compact_database(
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact_database \
     --warehouse <warehouse-path> \
-    --including_databases <database-name|name-regular-expr> \ 
+    --including_databases <database-name|name-regular-expr> \
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
@@ -296,7 +296,7 @@ CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by =>
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
     --order_strategy <orderType> \
     --order_by <col1,col2,...> \
@@ -312,6 +312,10 @@ The sort parallelism is the same as the sink parallelism, you can dynamically sp
 {{< /tab >}}
 
 {{< /tabs >}}
+
+{{< hint info >}}
+Sort Compact currently supports only bucket=-1 and batch mode.
+{{< /hint >}}
 
 ## Historical Partition Compact
 
@@ -348,9 +352,9 @@ CALL sys.compact(`table` => 'default.T', partition_idle_time => '1 d')
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --database <database-name> \
     --table <table-name> \
-    --partition_idle_time <partition-idle-time> \ 
+    --partition_idle_time <partition-idle-time> \
     [--partition <partition-name>] \
     [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
@@ -409,7 +413,7 @@ CALL sys.compact_database(
     compact_database \
     --warehouse <warehouse-path> \
     --including_databases <database-name|name-regular-expr> \
-    --partition_idle_time <partition-idle-time> \ 
+    --partition_idle_time <partition-idle-time> \
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \

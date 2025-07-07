@@ -60,16 +60,41 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAQEWithWriteManifest() {
-        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
-        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
-        assertThat(batchSql("SELECT * FROM T"))
+    public void testWriteRestoreCoordinator() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS PK (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT) WITH ('bucket' = '2')");
+        batchSql("ALTER TABLE PK SET ('sink.writer-coordinator.enabled' = 'true')");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        assertThat(batchSql("SELECT * FROM PK"))
                 .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111),
-                        Row.of(2, 22, 222),
-                        Row.of(1, 11, 111),
-                        Row.of(2, 22, 222));
+                        Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, 33, 333));
+    }
+
+    @Test
+    public void testWriteRestoreCoordinatorDv() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS PK (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT) WITH ("
+                        + "'bucket' = '2', 'deletion-vectors.enabled' = 'true')");
+        batchSql("ALTER TABLE PK SET ('sink.writer-coordinator.enabled' = 'true')");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        assertThat(batchSql("SELECT * FROM PK"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, 33, 333));
+    }
+
+    @Test
+    public void testWriteRestoreCoordinatorDb() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS PK (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT) WITH ("
+                        + "'bucket' = '-1', 'dynamic-bucket.target-row-num' = '1')");
+        batchSql("ALTER TABLE PK SET ('sink.writer-coordinator.enabled' = 'true')");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        batchSql("INSERT INTO PK VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333)");
+        assertThat(batchSql("SELECT * FROM PK"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, 33, 333));
     }
 
     @Test
@@ -814,5 +839,43 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .containsExactly(Row.of((Object) new String[] {"A"}));
         assertThat(sql("SELECT rowkind, b FROM `test_table$binlog`"))
                 .containsExactly(Row.of("+I", new String[] {"A"}));
+    }
+
+    @Test
+    public void testBatchReadSourceWithSnapshot() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333), (4, 44, 444)");
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1', 'scan.dedicated-split-generation'='true') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+
+        batchSql("INSERT INTO T VALUES (5, 55, 555), (6, 66, 666)");
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */ limit 2"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testBatchReadSourceWithoutSnapshot() {
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
+                .hasSize(0);
     }
 }

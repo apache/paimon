@@ -151,7 +151,7 @@ public class TestCommitThread extends Thread {
                             inc.compactIncrement()));
         }
 
-        runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
+        runWithRetry(committable, () -> commit.commit(committable, false));
     }
 
     private void doOverwrite() throws Exception {
@@ -193,7 +193,7 @@ public class TestCommitThread extends Thread {
                                     inc.newFilesIncrement(),
                                     inc.compactIncrement()));
                 }
-                commit.commit(committable, Collections.emptyMap());
+                commit.commit(committable, false);
                 break;
             } catch (Exception e) {
                 if (LOG.isDebugEnabled()) {

@@ -178,27 +178,20 @@ public final class DataTypeCasts {
     }
 
     /**
-     * Returns whether the source type can be safely cast to the target type without loosing
-     * information.
+     * allowExplicit false : Returns whether the source type can be safely cast to the target type
+     * without loosing information. Implicit casts are used for type widening and type
+     * generalization (finding a common supertype for a set of types). Implicit casts are similar to
+     * the Java semantics (e.g. this is not possible: {@code int x = (String) z}).
      *
-     * <p>Implicit casts are used for type widening and type generalization (finding a common
-     * supertype for a set of types). Implicit casts are similar to the Java semantics (e.g. this is
-     * not possible: {@code int x = (String) z}).
-     */
-    public static boolean supportsImplicitCast(DataType sourceType, DataType targetType) {
-        return supportsCasting(sourceType, targetType, false);
-    }
-
-    /**
-     * Returns whether the source type can be cast to the target type.
-     *
-     * <p>Explicit casts correspond to the SQL cast specification and represent the logic behind a
+     * <p>allowExplicit true : Returns whether the source type can be cast to the target type.
+     * Explicit casts correspond to the SQL cast specification and represent the logic behind a
      * {@code CAST(sourceType AS targetType)} operation. For example, it allows for converting most
      * types of the {@link DataTypeFamily#PREDEFINED} family to types of the {@link
      * DataTypeFamily#CHARACTER_STRING} family.
      */
-    public static boolean supportsExplicitCast(DataType sourceType, DataType targetType) {
-        return supportsCasting(sourceType, targetType, true);
+    public static boolean supportsCast(
+            DataType sourceType, DataType targetType, boolean allowExplicit) {
+        return supportsCasting(sourceType, targetType, allowExplicit);
     }
 
     /**

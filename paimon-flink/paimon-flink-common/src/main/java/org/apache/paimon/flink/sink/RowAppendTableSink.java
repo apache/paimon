@@ -19,17 +19,17 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
-import org.apache.flink.streaming.api.operators.StreamOperator;
-import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
 import java.util.Map;
 
 /** An {@link AppendTableSink} which handles {@link InternalRow}. */
 public class RowAppendTableSink extends AppendTableSink<InternalRow> {
+
+    private static final long serialVersionUID = 1L;
 
     public RowAppendTableSink(
             FileStoreTable table,
@@ -42,34 +42,12 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator.Factory(
-                table, logSinkFunction, writeProvider, commitUser) {
-            @Override
-            @SuppressWarnings("unchecked, rawtypes")
-            public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
-                return new RowDataStoreWriteOperator(
-                        parameters, table, logSinkFunction, writeProvider, commitUser) {
+        return createNoStateRowWriteOperatorFactory(
+                table, logSinkFunction, writeProvider, commitUser);
+    }
 
-                    @Override
-                    protected StoreSinkWriteState createState(
-                            int subtaskId,
-                            StateInitializationContext context,
-                            StoreSinkWriteState.StateValueFilter stateFilter)
-                            throws Exception {
-                        // No conflicts will occur in append only unaware bucket writer, so no state
-                        // is needed.
-                        return new NoopStoreSinkWriteState(subtaskId, stateFilter);
-                    }
-
-                    @Override
-                    protected String getCommitUser(StateInitializationContext context)
-                            throws Exception {
-                        // No conflicts will occur in append only unaware bucket writer, so
-                        // commitUser does not matter.
-                        return commitUser;
-                    }
-                };
-            }
-        };
+    @Override
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
+        return createRestoreOnlyCommittableStateManager(table);
     }
 }

@@ -328,7 +328,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         String manifestListFileName = manifestList.writeWithoutRolling(manifestFileMetas);
 
-        int schemaId = (int) table.schema().id();
+        int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
@@ -559,7 +559,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         // add new schema if needed
         SchemaCache schemaCache = new SchemaCache();
-        int schemaId = (int) table.schema().id();
+        int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergSchema> schemas = baseMetadata.schemas();
         if (baseMetadata.currentSchemaId() != schemaId) {
@@ -942,8 +942,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 table.fileIO().deleteQuietly(listPath);
             }
-            deleteApplicableMetadataFiles(snapshotId);
         }
+        deleteApplicableMetadataFiles(snapshotId);
     }
 
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
@@ -1188,6 +1188,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         private IcebergSchema get(long schemaId) {
             return schemas.computeIfAbsent(
                     schemaId, id -> IcebergSchema.create(schemaManager.schema(id)));
+        }
+
+        private long getLatestSchemaId() {
+            return schemaManager.latest().get().id();
         }
     }
 }

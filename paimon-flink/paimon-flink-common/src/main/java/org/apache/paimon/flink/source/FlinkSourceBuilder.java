@@ -78,11 +78,12 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @since 0.8
  */
 public class FlinkSourceBuilder {
+
     private static final String SOURCE_NAME = "Source";
 
     private final Table table;
     private final Options conf;
-    private final BucketMode bucketMode;
+    private final boolean unawareBucket;
     private String sourceName;
     private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
@@ -96,10 +97,9 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
-        this.bucketMode =
+        this.unawareBucket =
                 table instanceof FileStoreTable
-                        ? ((FileStoreTable) table).bucketMode()
-                        : BucketMode.HASH_FIXED;
+                        && ((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
     }
@@ -204,7 +204,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        bucketMode,
+                        unawareBucket,
                         outerProject()));
     }
 
@@ -215,7 +215,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        bucketMode,
+                        unawareBucket,
                         outerProject()));
     }
 
@@ -295,6 +295,9 @@ public class FlinkSourceBuilder {
         }
 
         if (sourceBounded) {
+            if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
+                return buildDedicatedSplitGenSource(true);
+            }
             return buildStaticFileSource();
         }
         TableScanUtils.streamingReadingValidate(table);
@@ -326,16 +329,16 @@ public class FlinkSourceBuilder {
             } else if (conf.contains(CoreOptions.CONSUMER_ID)
                     && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
                             == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
-                return buildContinuousStreamOperator();
+                return buildDedicatedSplitGenSource(false);
             } else {
                 return buildContinuousFileSource();
             }
         }
     }
 
-    private DataStream<RowData> buildContinuousStreamOperator() {
+    private DataStream<RowData> buildDedicatedSplitGenSource(boolean isBounded) {
         DataStream<RowData> dataStream;
-        if (limit != null) {
+        if (limit != null && !isBounded) {
             throw new IllegalArgumentException(
                     "Cannot limit streaming source, please use batch execution mode.");
         }
@@ -347,10 +350,11 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
-                        conf.get(
-                                FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                        bucketMode,
-                        outerProject());
+                        conf.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
+                        unawareBucket,
+                        outerProject(),
+                        isBounded,
+                        limit);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

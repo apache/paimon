@@ -19,11 +19,14 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.NoopStoreSinkWriteState;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 
+import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -38,6 +41,16 @@ public class CdcAppendTableWriteOperator extends CdcRecordStoreWriteOperator {
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
         super(parameters, table, storeSinkWriteProvider, initialCommitUser);
+    }
+
+    @Override
+    protected StoreSinkWriteState createState(
+            int subtaskId,
+            StateInitializationContext context,
+            StoreSinkWriteState.StateValueFilter stateFilter) {
+        // No conflicts will occur in append only unaware bucket writer, so no state
+        // is needed.
+        return new NoopStoreSinkWriteState(subtaskId);
     }
 
     @Override

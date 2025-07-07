@@ -44,6 +44,7 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Tencent Cloud Object Storage | cosn://    | Y         |                                                                        |
 | Microsoft Azure Storage      | abfs://    | Y         |                                                                        |
 | Huawei OBS                   | obs://     | Y         |                                                                        |
+| Google Cloud Storage         | gs://      | Y         |                                                                        |
 
 ## Dependency
 
@@ -212,7 +213,7 @@ If you have already configured oss access through Spark (Via Hadoop FileSystem),
 Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=oss://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
@@ -314,7 +315,7 @@ If you have already configured s3 access through Spark (Via Hadoop FileSystem), 
 Place `paimon-s3-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=s3://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.s3.endpoint=your-endpoint-hostname \
@@ -405,7 +406,7 @@ Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots
 {{< tab "Flink" >}}
 
 {{< hint info >}}
-If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
+If you have already configured [gcs access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
 here you can skip the following configuration.
 {{< /hint >}}
 
@@ -414,7 +415,7 @@ Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'oss://<bucket>/<path>',
+    'warehouse' = 'gs://<bucket>/<path>',
     'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
     'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
 );
@@ -524,7 +525,7 @@ If you have already configured obs access through Spark (Via Hadoop FileSystem),
 Place `paimon-obs-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
-spark-sql \ 
+spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=obs://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.obs.endpoint=obs-endpoint-hostname \

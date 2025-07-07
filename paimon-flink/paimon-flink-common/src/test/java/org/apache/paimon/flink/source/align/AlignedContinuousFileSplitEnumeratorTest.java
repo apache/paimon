@@ -30,7 +30,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -208,7 +207,6 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
         private long discoveryInterval = Long.MAX_VALUE;
 
         private StreamTableScan scan;
-        private BucketMode bucketMode = BucketMode.HASH_FIXED;
 
         private long timeout = 30000L;
 
@@ -233,11 +231,6 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
             return this;
         }
 
-        public Builder withBucketMode(BucketMode bucketMode) {
-            this.bucketMode = bucketMode;
-            return this;
-        }
-
         public Builder setAlignedTimeout(long timeout) {
             this.timeout = timeout;
             return this;
@@ -250,7 +243,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
                     null,
                     discoveryInterval,
                     scan,
-                    bucketMode,
+                    false,
                     timeout,
                     10,
                     false,

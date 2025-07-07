@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,6 +61,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
 import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -68,7 +70,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
-import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -326,7 +328,18 @@ public abstract class AbstractCatalog implements Catalog {
             Table table = getTable(identifier);
             if (table instanceof FileStoreTable) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
-                externalPaths = fileStoreTable.store().pathFactory().getExternalPaths();
+                externalPaths =
+                        fileStoreTable.schemaManager().listAll().stream()
+                                .map(
+                                        schema ->
+                                                schema.toSchema()
+                                                        .options()
+                                                        .get(DATA_FILE_EXTERNAL_PATHS.key()))
+                                .filter(Objects::nonNull)
+                                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
+                                .map(Path::new)
+                                .distinct()
+                                .collect(Collectors.toList());
             }
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
@@ -345,7 +358,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateAutoCreateClose(schema.options());
+        validateCreateTable(schema);
         validateCustomTablePath(schema.options());
 
         // check db exists

@@ -35,7 +35,6 @@ import org.apache.paimon.utils.RecordWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -111,7 +110,7 @@ public class FileStoreTestUtils {
         }
 
         try (FileStoreCommit commit = store.newCommit()) {
-            commit.commit(committable, Collections.emptyMap());
+            commit.commit(committable, false);
         }
 
         writers.values().stream()
