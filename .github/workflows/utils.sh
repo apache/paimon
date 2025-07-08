@@ -17,6 +17,9 @@
 # limitations under the License.
 ################################################################################
 
+set -e
+yum install -y openssl-devel
+
 function random_timezone() {
     local rnd=$(expr $RANDOM % 25)
     local hh=$(expr $rnd / 2)
