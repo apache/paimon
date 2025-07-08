@@ -93,11 +93,7 @@ public class ArrowBatchReader {
                     public InternalRow next() {
                         columnarRow.setRowId(position);
                         position++;
-                        // when pk merge, the last value will be referenced by maxKey. If reader
-                        // close, the maxKey will be useless. We must avoid this situation
-                        return position == rowCount
-                                ? internalRowSerializer.toBinaryRow(columnarRow)
-                                : columnarRow;
+                        return columnarRow;
                     }
                 };
     }
