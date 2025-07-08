@@ -757,19 +757,6 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
-      <td>refresh_object_table</td>
-      <td>
-         CALL [catalog.]sys.refresh_object_table('identifier')
-      </td>
-      <td>
-         To refresh_object_table a object table. Arguments:
-            <li>table: the target table identifier. Cannot be empty.</li>
-      </td>
-      <td>
-         CALL sys.refresh_object_table('default.T')
-      </td>
-   </tr>
-   <tr>
       <td>compact_manifest</td>
       <td>
          CALL [catalog.]sys.compact_manifest(`table` => 'identifier')<br/>

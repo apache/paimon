@@ -28,6 +28,8 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
@@ -43,6 +45,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -90,6 +93,8 @@ import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
+import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
@@ -1977,6 +1982,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.snapshot(12),
                         table.snapshot(13),
                         table.snapshot(14));
+    }
+
+    @Test
+    public void testObjectTable() throws Exception {
+        // create object table
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "object_table");
+        Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(ObjectTable.class);
+        ObjectTable objectTable = (ObjectTable) table;
+
+        // write file to object path
+        FileIO fileIO = objectTable.fileIO();
+        Path path = new Path(objectTable.location());
+        fileIO.writeFile(new Path(path, "my_file1"), "my_content1", false);
+        fileIO.writeFile(new Path(path, "my_file2"), "my_content2", false);
+        fileIO.writeFile(new Path(path, "dir1/my_file3"), "my_content3", false);
+
+        // read from object table
+        ReadBuilder readBuilder = objectTable.newReadBuilder();
+        List<String> files = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> files.add(row.getString(0).toString()));
+        assertThat(files).containsExactlyInAnyOrder("my_file1", "my_file2", "dir1/my_file3");
     }
 
     private TestPagedResponse generateTestPagedResponse(

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.fs;
 
-import java.io.Closeable;
 import java.io.IOException;
 
 /** An iterator for lazily listing remote entries. */
-public interface RemoteIterator<E> extends Closeable {
+public interface RemoteIterator<E> {
 
     /**
      * Checks if there are more entries to be iterated.

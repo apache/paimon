@@ -177,11 +177,4 @@ public class CatalogOptions {
                             "Whether to allow static cache in file io implementation. If not allowed, this means that "
                                     + "there may be a large number of FileIO instances generated, enabling caching can "
                                     + "lead to resource leakage.");
-
-    public static final ConfigOption<Boolean> FILE_IO_POPULATE_META =
-            ConfigOptions.key("file-io.populate-meta")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to populate file metadata while listing or getting file status.");
 }

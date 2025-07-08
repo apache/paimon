@@ -1665,12 +1665,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to enable asynchronous IO writing when writing files.");
 
-    public static final ConfigOption<String> OBJECT_LOCATION =
-            key("object-location")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The object location for object table.");
-
     public static final ConfigOption<Boolean> MANIFEST_DELETE_FILE_DROP_STATS =
             key("manifest.delete-file-drop-stats")
                     .booleanType()
@@ -1884,11 +1878,6 @@ public class CoreOptions implements Serializable {
 
     public Integer getLocalSampleMagnification() {
         return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
-    }
-
-    public String objectLocation() {
-        checkArgument(type() == TableType.OBJECT_TABLE, "Only object table has object location!");
-        return options.get(OBJECT_LOCATION);
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {
