@@ -18,7 +18,7 @@
 ################################################################################
 
 set -e
-apt install -y openssl-devel
+sudo apt install -y openssl-devel
 
 function random_timezone() {
     local rnd=$(expr $RANDOM % 25)
