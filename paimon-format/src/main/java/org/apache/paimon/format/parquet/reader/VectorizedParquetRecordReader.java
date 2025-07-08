@@ -255,8 +255,6 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
     public boolean nextBatch() throws IOException {
         try {
-            // Primary key table will use the last record, so we can't reset first
-            // TODO: remove usage of the last record by primary key table after batch reset
             if (rowsReturned >= totalRowCount) {
                 return false;
             }
