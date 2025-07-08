@@ -23,7 +23,8 @@ import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.utils.BlockingIterator;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectPath;

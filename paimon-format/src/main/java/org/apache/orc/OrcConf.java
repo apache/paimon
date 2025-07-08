@@ -18,7 +18,8 @@
 
 package org.apache.orc;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.hadoop.conf.Configuration;
 
 import java.util.ArrayList;

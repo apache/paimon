@@ -189,6 +189,11 @@ This file is based on the checkstyle file of Apache Beam.
 			<property name="message"
 					  value="Use Paimon's Preconditions instead of Guava's Preconditions"/>
 		</module>
+		<module name="Regexp">
+			<property name="format" value="import org\.apache\.commons\.lang3\.StringUtils"/>
+			<property name="illegalPattern" value="true"/>
+			<property name="message" value="{0}; Use paimon StringUtils or paimon shaded StringUtils instead."/>
+		</module>
 
 		<!-- Enforce Java-style array declarations -->
 		<module name="ArrayTypeStyle"/>
