@@ -42,7 +42,7 @@ As shown in the architecture above:
   - batch insert/overwrite from offline data.
 
 **Ecosystem:** In addition to Apache Flink, Paimon also supports read by other computation
-engines like Apache Hive, Apache Spark and Trino.
+engines like Apache Spark, StarRocks, Apache Doris, Apache Hive and Trino.
 
 **Internal:**
 - Under the hood, Paimon stores the columnar files on the filesystem/object-store
