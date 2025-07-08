@@ -2000,6 +2000,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Path path = new Path(objectTable.location());
         fileIO.writeFile(new Path(path, "my_file1"), "my_content1", false);
         fileIO.writeFile(new Path(path, "my_file2"), "my_content2", false);
+        fileIO.writeFile(new Path(path, "dir1/my_file3"), "my_content3", false);
 
         // read from object table
         ReadBuilder readBuilder = objectTable.newReadBuilder();
@@ -2008,7 +2009,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .newRead()
                 .createReader(readBuilder.newScan().plan())
                 .forEachRemaining(row -> files.add(row.getString(0).toString()));
-        assertThat(files).containsExactlyInAnyOrder("my_file1", "my_file2");
+        assertThat(files).containsExactlyInAnyOrder("my_file1", "my_file2", "dir1/my_file3");
     }
 
     private TestPagedResponse generateTestPagedResponse(

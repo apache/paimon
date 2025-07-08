@@ -230,7 +230,8 @@ Object Table is a virtual table for unstructured data objects in the specified o
 1. Use the virtual file system (Under development) to read and write files.
 2. Or use the SQL computing engine to read it as a structured file list.
 
-The object table is managed by Catalog and can also have access permissions.
+The object table is managed by Catalog and can also have access permissions. Now, only REST Catalog supports Object
+Table.
 
 To Create an object table:
 

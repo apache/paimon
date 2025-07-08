@@ -35,12 +35,12 @@ public interface ObjectTable extends Table {
 
     RowType SCHEMA =
             RowType.builder()
-                    .field("relative_path", DataTypes.STRING().notNull())
-                    .field("name", DataTypes.STRING().notNull())
-                    .field("length", DataTypes.BIGINT().notNull())
-                    .field("mtime", DataTypes.BIGINT().notNull())
-                    .field("atime", DataTypes.BIGINT().notNull())
-                    .field("owner", DataTypes.STRING().nullable())
+                    .field("path", DataTypes.STRING().notNull(), "Relative path of object")
+                    .field("name", DataTypes.STRING().notNull(), "Name of object")
+                    .field("length", DataTypes.BIGINT().notNull(), "Bytes length of object")
+                    .field("mtime", DataTypes.BIGINT().notNull(), "Modification time of object")
+                    .field("atime", DataTypes.BIGINT().notNull(), "Access time of object")
+                    .field("owner", DataTypes.STRING().nullable(), "Owner of object")
                     .build()
                     .notNull();
 
