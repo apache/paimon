@@ -18,7 +18,7 @@
 ################################################################################
 
 set -e
-yum install -y openssl-devel
+apt install -y openssl-devel
 
 function random_timezone() {
     local rnd=$(expr $RANDOM % 25)
