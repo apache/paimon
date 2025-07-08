@@ -223,7 +223,10 @@ public class TagsTable implements ReadonlyTable {
             }
             Path location = ((TagsSplit) split).location;
             Predicate predicate = ((TagsSplit) split).tagPredicate;
-            TagManager tagManager = new TagManager(fileIO, location, branch);
+
+            // There should not be any tag creation related options here for tags table.
+            TagManager tagManager =
+                    new TagManager(fileIO, location, branch, CoreOptions.fromMap(options()));
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();
             Map<String, Tag> predicateMap = new TreeMap<>();
