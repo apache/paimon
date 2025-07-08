@@ -223,7 +223,6 @@ public class TagsTable implements ReadonlyTable {
             }
             Path location = ((TagsSplit) split).location;
             Predicate predicate = ((TagsSplit) split).tagPredicate;
-
             TagManager tagManager = new TagManager(fileIO, location, branch);
 
             Map<String, Tag> nameToSnapshot = new TreeMap<>();

@@ -67,8 +67,7 @@ public class TagManager {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
-
-    private final TagPeriodHandler tagPeriodHandler;
+    @Nullable private final TagPeriodHandler tagPeriodHandler;
 
     public TagManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH, (TagPeriodHandler) null);
