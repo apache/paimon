@@ -46,9 +46,9 @@ object PaimonFunctions {
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
-    new BucketFunction(BucketFunctionType.DEFAULT),
+    new BucketFunction(PAIMON_BUCKET, BucketFunctionType.DEFAULT),
     MOD_BUCKET,
-    new BucketFunction(BucketFunctionType.MOD),
+    new BucketFunction(MOD_BUCKET, BucketFunctionType.MOD),
     MAX_PT,
     new MaxPtFunction
   )
@@ -74,10 +74,7 @@ object PaimonFunctions {
  *
  * params arg0: bucket number, arg1...argn bucket keys.
  */
-class BucketFunction(bucketFunctionType: BucketFunctionType) extends UnboundFunction {
-
-  private val NAME = "bucket"
-
+class BucketFunction(NAME: String, bucketFunctionType: BucketFunctionType) extends UnboundFunction {
   override def bind(inputType: StructType): BoundFunction = {
     assert(inputType.fields(0).dataType == IntegerType, "bucket number field must be integer type")
 
