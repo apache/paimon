@@ -79,7 +79,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Pair;
 
-import org.apache.parquet.hadoop.ParquetOutputFormat;
+import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

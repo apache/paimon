@@ -54,9 +54,10 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericRecord;
+import org.apache.paimon.shade.org.apache.avro.file.DataFileStream;
+import org.apache.paimon.shade.org.apache.avro.generic.GenericDatumReader;
+import org.apache.paimon.shade.org.apache.avro.generic.GenericRecord;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.utils.StringUtils;
+
 import com.github.dockerjava.api.command.InspectContainerResponse;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
@@ -67,7 +68,10 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
         try {
             String createUserCommand =
                     Files.readAllLines(Paths.get(setupFile.toURI())).stream()
-                            .filter(x -> StringUtils.isNotBlank(x) && !x.trim().startsWith("//"))
+                            .filter(
+                                    x ->
+                                            !StringUtils.isNullOrWhitespaceOnly(x)
+                                                    && !x.trim().startsWith("//"))
                             .map(
                                     x -> {
                                         final Matcher m = COMMENT_PATTERN.matcher(x);
@@ -168,7 +172,10 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
             String command0 = String.format("db = db.getSiblingDB('%s');\n", dbName);
             String command1 =
                     Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()
-                            .filter(x -> StringUtils.isNotBlank(x) && !x.trim().startsWith("//"))
+                            .filter(
+                                    x ->
+                                            !StringUtils.isNullOrWhitespaceOnly(x)
+                                                    && !x.trim().startsWith("//"))
                             .map(
                                     x -> {
                                         final Matcher m = COMMENT_PATTERN.matcher(x);

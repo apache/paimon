@@ -59,7 +59,8 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.parquet.hadoop.ParquetOutputFormat;
+import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
