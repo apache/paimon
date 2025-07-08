@@ -23,7 +23,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.lance.jni.JniInit;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -58,7 +57,6 @@ public class LanceFileFormat extends FileFormat {
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
-        JniInit.init();
     }
 
     private final FileFormatFactory.FormatContext formatContext;
