@@ -221,7 +221,6 @@ public class IcebergRestMetadataCommitterTest {
                         partitionKeys,
                         primaryKeys,
                         primaryKeys.isEmpty() ? -1 : 2,
-                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -266,7 +265,6 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
-                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -309,9 +307,9 @@ public class IcebergRestMetadataCommitterTest {
 
         Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(5);
-        // 4 history metadata
+        // 1 metadata for createTable + 4 history metadata
         assertThat(((BaseTable) icebergTable).operations().current().previousFiles().size())
-                .isEqualTo(4);
+                .isEqualTo(5);
 
         write.close();
         commit.close();
@@ -331,7 +329,6 @@ public class IcebergRestMetadataCommitterTest {
                                 Collections.emptyList(),
                                 Collections.singletonList("k"),
                                 1,
-                                randomFormat(),
                                 Collections.emptyMap())
                         .copy(options);
 
@@ -393,7 +390,6 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
-                        randomFormat(),
                         options);
 
         String commitUser = UUID.randomUUID().toString();
@@ -481,7 +477,6 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
-                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -572,7 +567,6 @@ public class IcebergRestMetadataCommitterTest {
             List<String> partitionKeys,
             List<String> primaryKeys,
             int numBuckets,
-            String fileFormat,
             Map<String, String> customOptions)
             throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
@@ -582,7 +576,7 @@ public class IcebergRestMetadataCommitterTest {
         options.set(CoreOptions.BUCKET, numBuckets);
         options.set(
                 IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.REST_CATALOG);
-        options.set(CoreOptions.FILE_FORMAT, fileFormat);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
@@ -630,12 +624,5 @@ public class IcebergRestMetadataCommitterTest {
         }
         result.close();
         return actual;
-    }
-
-    private String randomFormat() {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        int i = random.nextInt(3);
-        String[] formats = new String[] {"orc", "parquet", "avro"};
-        return formats[i];
     }
 }

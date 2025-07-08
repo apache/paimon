@@ -107,11 +107,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private static final String PUFFIN_FORMAT = "puffin";
 
-    private static final String Iceberg_METADATA_PREVIOUS_VERSIONS_MAX =
-            "write.metadata.previous-versions-max";
-    private static final String Iceberg_METADATA_DELETE_AFTER_COMMIT_ENABLED =
-            "write.metadata.delete-after-commit.enabled";
-
     private final FileStoreTable table;
     private final String commitUser;
 
@@ -355,16 +350,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         entry -> new IcebergRef(entry.getKey().id())));
 
         String tableUuid = UUID.randomUUID().toString();
-
-        IcebergOptions icebergOptions = new IcebergOptions(table.options());
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                Iceberg_METADATA_DELETE_AFTER_COMMIT_ENABLED,
-                String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-        properties.put(
-                Iceberg_METADATA_PREVIOUS_VERSIONS_MAX,
-                String.valueOf(icebergOptions.previousVersionsMax()));
-
         IcebergMetadata metadata =
                 new IcebergMetadata(
                         formatVersion,
@@ -383,7 +368,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
                         (int) snapshotId,
-                        properties,
                         icebergTags);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -401,7 +385,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     metadataCommitter.commitMetadata(metadataPath, null);
                     break;
                 case "rest":
-                    metadataCommitter.commitMetadata(metadata, metadataPath, null);
+                    metadataCommitter.commitMetadata(metadata, null);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -629,7 +613,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         baseMetadata.lastPartitionId(),
                         snapshots,
                         (int) snapshotId,
-                        baseMetadata.properties(),
                         baseMetadata.refs());
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -652,7 +635,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     metadataCommitter.commitMetadata(metadataPath, baseMetadataPath);
                     break;
                 case "rest":
-                    metadataCommitter.commitMetadata(metadata, metadataPath, baseMetadata);
+                    metadataCommitter.commitMetadata(metadata, baseMetadata);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -1048,7 +1031,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             baseMetadata.lastPartitionId(),
                             baseMetadata.snapshots(),
                             baseMetadata.currentSnapshotId(),
-                            baseMetadata.properties(),
                             baseMetadata.refs());
 
             /*
@@ -1107,7 +1089,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             baseMetadata.lastPartitionId(),
                             baseMetadata.snapshots(),
                             baseMetadata.currentSnapshotId(),
-                            baseMetadata.properties(),
                             baseMetadata.refs());
 
             /*

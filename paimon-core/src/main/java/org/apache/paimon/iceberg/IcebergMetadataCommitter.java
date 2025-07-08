@@ -34,7 +34,5 @@ public interface IcebergMetadataCommitter {
     void commitMetadata(Path newMetadataPath, @Nullable Path baseMetadataPath);
 
     void commitMetadata(
-            IcebergMetadata newIcebergMetadata,
-            Path newMetadataPath,
-            @Nullable IcebergMetadata baseIcebergMetadata);
+            IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata);
 }

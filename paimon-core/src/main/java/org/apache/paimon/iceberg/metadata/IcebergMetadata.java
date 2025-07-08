@@ -130,7 +130,6 @@ public class IcebergMetadata {
             int lastPartitionId,
             List<IcebergSnapshot> snapshots,
             long currentSnapshotId,
-            Map<String, String> properties,
             @Nullable Map<String, IcebergRef> refs) {
         this(
                 formatVersion,
@@ -148,7 +147,7 @@ public class IcebergMetadata {
                 IcebergSortOrder.ORDER_ID,
                 snapshots,
                 currentSnapshotId,
-                properties,
+                new HashMap<>(),
                 refs);
     }
 

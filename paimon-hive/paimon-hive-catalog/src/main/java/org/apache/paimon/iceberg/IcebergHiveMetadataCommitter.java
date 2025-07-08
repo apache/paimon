@@ -134,9 +134,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     @Override
     public void commitMetadata(
-            IcebergMetadata icebergMetadata,
-            Path newMetadataPath,
-            @Nullable IcebergMetadata baseIcebergMetadata) {
+            IcebergMetadata icebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
         throw new UnsupportedOperationException();
     }
 
