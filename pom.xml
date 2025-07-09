@@ -479,7 +479,6 @@ under the License.
                 <configuration>
                     <archive>
                         <manifestEntries>
-                            <!-- The SCM revision is set by the git-commit-id-plugin -->
                             <SCM-Revision>${git.commit.id}</SCM-Revision>
                         </manifestEntries>
                         <manifest>
@@ -487,26 +486,6 @@ under the License.
                             <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
                         </manifest>
                     </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>pl.project13.maven</groupId>
-                <artifactId>git-commit-id-plugin</artifactId>
-                <version>4.0.0</version>
-                <executions>
-                    <execution>
-                        <id>get-the-git-infos</id>
-                        <goals>
-                            <goal>revision</goal>
-                        </goals>
-                        <phase>validate</phase>
-                    </execution>
-                </executions>
-                <configuration>
-                    <dotGitDirectory>${project.basedir}/.git</dotGitDirectory>
-                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
-                    <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
-                    <useNativeGit>true</useNativeGit>
                 </configuration>
             </plugin>
 
