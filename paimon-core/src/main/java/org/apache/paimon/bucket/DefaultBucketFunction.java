@@ -22,7 +22,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.types.RowKind;
 
 /** Paimon default bucket function. */
-public class PaimonBucketFunction implements BucketFunction {
+public class DefaultBucketFunction implements BucketFunction {
+
+    private static final long serialVersionUID = 1L;
 
     @Override
     public int bucket(BinaryRow row, int numBuckets) {

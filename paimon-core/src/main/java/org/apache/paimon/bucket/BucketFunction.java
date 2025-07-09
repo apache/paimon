@@ -38,7 +38,7 @@ public interface BucketFunction extends Serializable {
             CoreOptions.BucketFunctionType bucketFunctionType, RowType bucketKeyType) {
         switch (bucketFunctionType) {
             case DEFAULT:
-                return new PaimonBucketFunction();
+                return new DefaultBucketFunction();
             case MOD:
                 return new ModBucketFunction(bucketKeyType);
             default:

@@ -132,7 +132,9 @@ public class CoreOptions implements Serializable {
 
     /** Paimon bucket function type. */
     public enum BucketFunctionType implements DescribedEnum {
-        DEFAULT("default", "The default bucket function."),
+        DEFAULT(
+                "default",
+                "The default bucket function which will use arithmetic: bucket_id = Math.abs(hash_bucket_binary_row % numBuckets) to get bucket."),
         MOD(
                 "mod",
                 "The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. "
