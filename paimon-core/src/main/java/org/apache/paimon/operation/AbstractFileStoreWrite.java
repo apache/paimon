@@ -86,7 +86,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     private boolean ignoreNumBucketCheck = false;
-    protected boolean isStreamingMode = false;
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
@@ -416,7 +415,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
 
-        if (!isStreamingMode && writerNumber() >= writerNumberMax) {
+        if (writerNumber() >= writerNumberMax) {
             try {
                 forceBufferSpill();
             } catch (Exception e) {
@@ -460,11 +459,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 indexMaintainer,
                 dvMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
-    }
-
-    @Override
-    public void withExecutionMode(boolean isStreamingMode) {
-        this.isStreamingMode = isStreamingMode;
     }
 
     @Override

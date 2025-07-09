@@ -127,8 +127,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 restoreIncrement,
                 options.useWriteBufferForAppend() || forceBufferSpill,
-                options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode, false)
-                        || forceBufferSpill,
+                options.writeBufferSpillable() || forceBufferSpill,
                 options.fileCompression(),
                 options.spillCompressOptions(),
                 statsCollectors,

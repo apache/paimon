@@ -66,7 +66,6 @@ public class BucketedAppendFileStoreWriteTest {
         BucketedAppendFileStoreWrite write =
                 (BucketedAppendFileStoreWrite) table.store().newWrite("ss");
         write.withIOManager(IOManager.create(tempDir.toString()));
-        write.withExecutionMode(false);
 
         write.write(partition(0), 0, GenericRow.of(0, 0, 0));
         write.write(partition(1), 1, GenericRow.of(1, 1, 0));
@@ -119,7 +118,6 @@ public class BucketedAppendFileStoreWriteTest {
         FileStoreTable table = createFileStoreTable();
 
         BaseAppendFileStoreWrite write = (BaseAppendFileStoreWrite) table.store().newWrite("ss");
-        write.withExecutionMode(false);
 
         write.write(partition(0), 0, GenericRow.of(0, 0, 0));
         write.write(partition(1), 1, GenericRow.of(1, 1, 0));
@@ -188,7 +186,6 @@ public class BucketedAppendFileStoreWriteTest {
 
         BaseAppendFileStoreWrite write = (BaseAppendFileStoreWrite) table.store().newWrite("ss");
         StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
-        write.withExecutionMode(false);
 
         for (int i = 0; i < 100; i++) {
             if (i == 0) {
@@ -220,7 +217,6 @@ public class BucketedAppendFileStoreWriteTest {
 
         BaseAppendFileStoreWrite write = (BaseAppendFileStoreWrite) table.store().newWrite("ss");
         StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
-        write.withExecutionMode(false);
 
         for (int i = 0; i < 100; i++) {
             write.write(nullPartition(), i, GenericRow.of(null, i, i));
@@ -247,7 +243,6 @@ public class BucketedAppendFileStoreWriteTest {
 
         BaseAppendFileStoreWrite write = (BaseAppendFileStoreWrite) table.store().newWrite("ss");
         StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
-        write.withExecutionMode(false);
 
         for (int i = 0; i < 100; i++) {
             write.write(partition(1), i, GenericRow.of(null, i, i));

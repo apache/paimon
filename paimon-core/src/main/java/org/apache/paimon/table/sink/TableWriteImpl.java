@@ -103,12 +103,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public TableWriteImpl<T> withExecutionMode(boolean isStreamingMode) {
-        write.withExecutionMode(isStreamingMode);
-        return this;
-    }
-
-    @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;
