@@ -822,19 +822,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return retryCount + 1;
     }
 
-    private void commitRetryWait(int retryCount) {
-        int delayMs =
-                (int) Math.min(commitMinRetryWait * Math.pow(2, retryCount), commitMaxRetries);
-        int jitter = ThreadLocalRandom.current().nextInt(Math.max(1, (int) (delayMs * 0.1)));
-        int sleepTimeMs = delayMs + jitter;
-        try {
-            TimeUnit.MILLISECONDS.sleep(sleepTimeMs);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(ie);
-        }
-    }
-
     private int tryOverwrite(
             @Nullable PartitionPredicate partitionFilter,
             List<ManifestEntry> changes,
@@ -1569,6 +1556,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private void cleanIndexManifest(String oldIndexManifest, String newIndexManifest) {
         if (newIndexManifest != null && !Objects.equals(oldIndexManifest, newIndexManifest)) {
             indexManifestFile.delete(newIndexManifest);
+        }
+    }
+
+    private void commitRetryWait(int retryCount) {
+        int retryWait =
+                (int) Math.min(commitMinRetryWait * Math.pow(2, retryCount), commitMaxRetryWait);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        retryWait += random.nextInt(Math.max(1, (int) (retryWait * 0.2)));
+        try {
+            TimeUnit.MILLISECONDS.sleep(retryWait);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(ie);
         }
     }
 
