@@ -91,7 +91,8 @@ public class SchemaEvolutionUtilTest {
                         IsNull.INSTANCE, DataTypes.INT(), 7, "a", Collections.emptyList()));
 
         List<Predicate> filters =
-                SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
+                SchemaEvolutionUtil.devolveDataFilters(
+                        tableFields2, dataFields, predicates, false, false);
         assert filters != null;
         assertThat(filters.size()).isEqualTo(1);
 

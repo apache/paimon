@@ -119,14 +119,8 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
 
-                    /**
-                     * Filter field "g" in [200, 500] in SCHEMA_FIELDS which is updated from bigint
-                     * to float and will get another file with one data as followed:
-                     *
-                     * <ul>
-                     *   <li>2,"400","401",402D,403,toDecimal(404),405F,406D,toDecimal(407),408,409,toBytes("410")
-                     * </ul>
-                     */
+                    // Filter field "g" in [200, 500] in SCHEMA_FIELDS cannot filter old file 1 and
+                    // file 2 because filter is forbidden
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
@@ -139,8 +133,12 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
+                                    // old file1
+                                    "1|100|101|102.0|103|104.00|105.0|106.0|107.00|108|109|110",
+                                    // old file2
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",
                                     "2|300|301|302.0|303|304.00|305.0|306.0|307.00|308|309|310",
+                                    // normal filtered data
                                     "2|400|401|402.0|403|404.00|405.0|406.0|407.00|408|409|410");
                 },
                 getPrimaryKeyNames(),

@@ -88,7 +88,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.fieldKeyStatsConverters =
                 new SimpleStatsEvolutions(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
-                        schema.id());
+                        schema.id(),
+                        true);
         this.fieldValueStatsConverters =
                 new SimpleStatsEvolutions(
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
@@ -119,21 +120,21 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        DataFileMeta file = entry.file();
         if (isValueFilterEnabled() && !filterByValueFilter(entry)) {
             return false;
         }
 
-        if (keyFilter != null) {
-            SimpleStatsEvolution.Result stats =
-                    fieldKeyStatsConverters
-                            .getOrCreate(file.schemaId())
-                            .evolution(file.keyStats(), file.rowCount(), null);
-            return keyFilter.test(
-                    file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+        if (keyFilter == null || fieldKeyStatsConverters.statsFilterUnsafe(entry, keyFilter)) {
+            return true;
         }
 
-        return true;
+        DataFileMeta file = entry.file();
+        SimpleStatsEvolution.Result stats =
+                fieldKeyStatsConverters
+                        .getOrCreate(file.schemaId())
+                        .evolution(file.keyStats(), file.rowCount(), null);
+        return keyFilter.test(
+                file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
     @Override
@@ -157,7 +158,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                             entry.file().schemaId(),
                             id ->
                                     fieldValueStatsConverters.tryDevolveFilter(
-                                            entry.file().schemaId(), valueFilter));
+                                            entry.file().schemaId(), valueFilter, false));
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
@@ -223,6 +224,10 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private boolean filterByValueFilter(ManifestEntry entry) {
         if (entry instanceof FilteredManifestEntry) {
             return ((FilteredManifestEntry) entry).selected();
+        }
+
+        if (fieldValueStatsConverters.statsFilterUnsafe(entry, valueFilter)) {
+            return true;
         }
 
         DataFileMeta file = entry.file();
