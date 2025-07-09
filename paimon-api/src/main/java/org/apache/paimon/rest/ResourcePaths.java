@@ -37,6 +37,7 @@ public class ResourcePaths {
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
+    protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
 
@@ -110,6 +111,10 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 ROLLBACK);
+    }
+
+    public String registerTable(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), REGISTER);
     }
 
     public String tableToken(String databaseName, String objectName) {

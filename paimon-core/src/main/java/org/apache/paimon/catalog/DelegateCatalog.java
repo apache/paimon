@@ -150,6 +150,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public String registerTable(Identifier identifier, String location)
+            throws TableAlreadyExistException {
+        return wrapped.registerTable(identifier, location);
+    }
+
+    @Override
     public boolean supportsListObjectsPaged() {
         return wrapped.supportsListObjectsPaged();
     }

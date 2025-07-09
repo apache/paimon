@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -73,6 +74,7 @@ import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
+import org.apache.paimon.rest.responses.RegisterTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
@@ -675,6 +677,16 @@ public class RESTApi {
         client.delete(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                 restAuthFunction);
+    }
+
+    public String registerTable(Identifier identifier, String location) {
+        RegisterTableResponse response =
+                client.post(
+                        resourcePaths.registerTable(identifier.getDatabaseName()),
+                        new RegisterTableRequest(identifier, location),
+                        RegisterTableResponse.class,
+                        restAuthFunction);
+        return response.getTableId();
     }
 
     /**

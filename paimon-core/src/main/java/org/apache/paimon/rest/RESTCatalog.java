@@ -533,6 +533,22 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public String registerTable(Identifier identifier, String location)
+            throws TableAlreadyExistException {
+        try {
+            return api.registerTable(identifier, location);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (AlreadyExistsException e) {
+            throw new TableAlreadyExistException(identifier);
+        } catch (ServiceFailureException e) {
+            throw new IllegalStateException(e.getMessage());
+        } catch (BadRequestException e) {
+            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        }
+    }
+
+    @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         try {
