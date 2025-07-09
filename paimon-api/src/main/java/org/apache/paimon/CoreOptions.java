@@ -607,13 +607,13 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Duration> COMMIT_MIN_RETRY_WAIT =
             key("commit.min-retry-wait")
                     .durationType()
-                    .defaultValue(Duration.ofMillis(100))
+                    .defaultValue(Duration.ofMillis(10))
                     .withDescription("Min retry wait time when commit failed.");
 
     public static final ConfigOption<Duration> COMMIT_MAX_RETRY_WAIT =
             key("commit.max-retry-wait")
                     .durationType()
-                    .defaultValue(Duration.ofSeconds(60))
+                    .defaultValue(Duration.ofSeconds(10))
                     .withDescription("Max retry wait time when commit failed.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT =
