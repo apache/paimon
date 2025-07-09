@@ -90,6 +90,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -350,6 +351,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         entry -> new IcebergRef(entry.getKey().id())));
 
         String tableUuid = UUID.randomUUID().toString();
+
+        List<IcebergSchema> allSchemas =
+                IntStream.rangeClosed(0, schemaId)
+                        .mapToObj(schemaCache::get)
+                        .collect(Collectors.toList());
         IcebergMetadata metadata =
                 new IcebergMetadata(
                         formatVersion,
@@ -357,7 +363,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         table.location().toString(),
                         snapshotId,
                         icebergSchema.highestFieldId(),
-                        Collections.singletonList(icebergSchema),
+                        allSchemas,
                         schemaId,
                         Collections.singletonList(new IcebergPartitionSpec(partitionFields)),
                         partitionFields.stream()
@@ -568,14 +574,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         newDVManifestFileMetas.stream())
                                 .collect(Collectors.toList()));
 
-        // add new schema if needed
+        // add new schemas if needed
         SchemaCache schemaCache = new SchemaCache();
         int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergSchema> schemas = baseMetadata.schemas();
         if (baseMetadata.currentSchemaId() != schemaId) {
+            Preconditions.checkArgument(
+                    schemaId > baseMetadata.currentSchemaId(),
+                    "currentSchemaId{%s} in paimon should be greater than currentSchemaId{%s} in base metadata.",
+                    schemaId,
+                    baseMetadata.currentSchemaId());
             schemas = new ArrayList<>(schemas);
-            schemas.add(icebergSchema);
+            schemas.addAll(
+                    IntStream.rangeClosed(baseMetadata.currentSchemaId() + 1, schemaId)
+                            .mapToObj(schemaCache::get)
+                            .collect(Collectors.toList()));
         }
 
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());

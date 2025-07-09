@@ -221,6 +221,7 @@ public class IcebergRestMetadataCommitterTest {
                         partitionKeys,
                         primaryKeys,
                         primaryKeys.isEmpty() ? -1 : 2,
+                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -265,6 +266,7 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
+                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -329,6 +331,7 @@ public class IcebergRestMetadataCommitterTest {
                                 Collections.emptyList(),
                                 Collections.singletonList("k"),
                                 1,
+                                randomFormat(),
                                 Collections.emptyMap())
                         .copy(options);
 
@@ -390,6 +393,7 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
+                        randomFormat(),
                         options);
 
         String commitUser = UUID.randomUUID().toString();
@@ -477,6 +481,7 @@ public class IcebergRestMetadataCommitterTest {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         1,
+                        randomFormat(),
                         Collections.emptyMap());
 
         String commitUser = UUID.randomUUID().toString();
@@ -567,6 +572,7 @@ public class IcebergRestMetadataCommitterTest {
             List<String> partitionKeys,
             List<String> primaryKeys,
             int numBuckets,
+            String fileFormat,
             Map<String, String> customOptions)
             throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
@@ -576,7 +582,7 @@ public class IcebergRestMetadataCommitterTest {
         options.set(CoreOptions.BUCKET, numBuckets);
         options.set(
                 IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.REST_CATALOG);
-        options.set(CoreOptions.FILE_FORMAT, "avro");
+        options.set(CoreOptions.FILE_FORMAT, fileFormat);
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
@@ -624,5 +630,12 @@ public class IcebergRestMetadataCommitterTest {
         }
         result.close();
         return actual;
+    }
+
+    private String randomFormat() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int i = random.nextInt(3);
+        String[] formats = new String[] {"orc", "parquet", "avro"};
+        return formats[i];
     }
 }

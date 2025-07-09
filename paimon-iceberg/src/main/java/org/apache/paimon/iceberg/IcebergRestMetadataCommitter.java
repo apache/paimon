@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
+import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -31,7 +32,6 @@ import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.MetadataUpdate;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.SchemaParser;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.Table;
@@ -46,7 +46,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -73,9 +72,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
 
-    // we should use schema-0 in paimon to create iceberg table
-    private final Schema schema0;
-
     private Table icebergTable;
 
     public IcebergRestMetadataCommitter(FileStoreTable table) {
@@ -97,10 +93,6 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 TableIdentifier.of(Namespace.of(icebergDatabaseName), icebergTableName);
 
         Map<String, String> restConfigs = icebergOptions.icebergRestConfig();
-
-        schema0 =
-                SchemaParser.fromJson(
-                        IcebergSchema.create(table.schemaManager().schema(0)).toJson());
 
         try {
             Configuration hadoopConf = new Configuration();
@@ -135,6 +127,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private void commitMetadataImpl(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
 
+        newIcebergMetadata = adjustMetadataForRest(newIcebergMetadata);
         TableMetadata newMetadata = TableMetadataParser.fromJson(newIcebergMetadata.toJson());
 
         // updates to be committed
@@ -148,7 +141,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         try {
             if (!tableExists()) {
                 LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
-                icebergTable = createTable(newMetadata);
+                icebergTable = createTable();
                 updatdeBuilder =
                         updatesForCorrectBase(
                                 ((BaseTable) icebergTable).operations().current(),
@@ -159,13 +152,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
                 boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
-                if (metadata.lastSequenceNumber() == 0 && metadata.currentSnapshot() == null) {
-                    // treat the iceberg table as a newly created table
-                    LOG.info(
-                            "lastSequenceNumber is 0 and currentSnapshotId is -1 for the existed iceberg table, "
-                                    + "we'll treat it as a new table.");
-                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, true);
-                } else if (withBase) {
+                if (withBase) {
                     LOG.info("create updates with base metadata.");
                     updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, false);
                 } else {
@@ -187,9 +174,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
         }
 
-        ((BaseTable) icebergTable)
-                .operations()
-                .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
+        try {
+            ((BaseTable) icebergTable)
+                    .operations()
+                    .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
+        } catch (Exception e) {
+            throw new RuntimeException("Fail to commit metadata to rest catalog.", e);
+        }
     }
 
     private TableMetadata.Builder updatesForCorrectBase(
@@ -202,17 +193,15 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     schemaId == 0,
                     "the schema id for newly created iceberg table should be 0, but is %s",
                     schemaId);
-            // add schemas which schema id is greater than current schema id in iceberg table
-            if (newMetadata.currentSchemaId() > schemaId) {
-                addAndSetCurrentSchema(
-                        newMetadata.schemas().stream()
-                                .filter(schema -> schema.schemaId() > schemaId)
-                                .collect(Collectors.toList()),
-                        newMetadata.currentSchemaId(),
-                        updateBuilder);
-            }
+            // add all schemas
+            addAndSetCurrentSchema(
+                    newMetadata.schemas(), newMetadata.currentSchemaId(), updateBuilder);
+            updateBuilder.addPartitionSpec(newMetadata.spec());
+            updateBuilder.setDefaultPartitionSpec(newMetadata.defaultSpecId());
+
             // add snapshot
             addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
+
         } else {
             // add new schema if needed
             Preconditions.checkArgument(
@@ -223,7 +212,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     newMetadata.currentSchemaId());
             if (newMetadata.currentSchemaId() != schemaId) {
                 addAndSetCurrentSchema(
-                        Collections.singletonList(newMetadata.schema()),
+                        newMetadata.schemas().stream()
+                                .filter(schema -> schema.schemaId() > schemaId)
+                                .collect(Collectors.toList()),
                         newMetadata.currentSchemaId(),
                         updateBuilder);
             }
@@ -249,7 +240,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
         LOG.info("the base metadata is incorrect, we'll recreate the iceberg table.");
-        icebergTable = recreateTable(newMetadata);
+        icebergTable = recreateTable();
         return updatesForCorrectBase(
                 ((BaseTable) icebergTable).operations().current(), newMetadata, true);
     }
@@ -276,17 +267,15 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
     }
 
-    private Table createTable(TableMetadata tableMetadata) {
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                METADATA_PREVIOUS_VERSIONS_MAX,
-                String.valueOf(icebergOptions.previousVersionsMax()));
-        properties.put(
-                METADATA_DELETE_AFTER_COMMIT_ENABLED,
-                String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-
-        return restCatalog.createTable(
-                icebergTableIdentifier, schema0, tableMetadata.spec(), properties);
+    private Table createTable() {
+        /* Here we create iceberg table with an emptySchema. This is because:
+        When creating table, fieldId in iceberg will be forced to start from 1, while fieldId in paimon usually start from 0.
+        If we directly use the schema extracted from paimon to create iceberg table, the fieldId will be in disorder, and this
+        may cause incorrectness when reading by iceberg reader. So we use an emptySchema here, and add the corresponding
+        schemas later.
+        */
+        Schema emptySchema = new Schema();
+        return restCatalog.createTable(icebergTableIdentifier, emptySchema);
     }
 
     private Table getTable() {
@@ -298,10 +287,10 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.dropTable(icebergTableIdentifier, false);
     }
 
-    private Table recreateTable(TableMetadata tableMetadata) {
+    private Table recreateTable() {
         try {
             dropTable();
-            return createTable(tableMetadata);
+            return createTable();
         } catch (Exception e) {
             throw new RuntimeException("Fail to recreate iceberg table.", e);
         }
@@ -321,6 +310,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         update.removeSnapshots(snapshotIds);
     }
 
+    // add schemas and set the current schema id
     private void addAndSetCurrentSchema(
             List<Schema> schemas, int currentSchemaId, TableMetadata.Builder update) {
         for (Schema schema : schemas) {
@@ -364,6 +354,44 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         // base of the new table metadata, we use current snapshot id to check
         return currentMetadata.currentSnapshot().snapshotId()
                 == newMetadata.currentSnapshot().snapshotId() - 1;
+    }
+
+    private IcebergMetadata adjustMetadataForRest(IcebergMetadata newIcebergMetadata) {
+        // why need this:
+        // Since we will use an empty schema to create iceberg table in rest catalog and id-0 will
+        // be occupied by the empty schema, there will be 1-unit offset between the schema-id in
+        // metadata stored in rest catalog and the schema-id in paimon.
+
+        List<IcebergSchema> schemas =
+                newIcebergMetadata.schemas().stream()
+                        .map(schema -> new IcebergSchema(schema.schemaId() + 1, schema.fields()))
+                        .collect(Collectors.toList());
+        int currentSchemaId = newIcebergMetadata.currentSchemaId() + 1;
+        List<IcebergSnapshot> snapshots =
+                newIcebergMetadata.snapshots().stream()
+                        .map(
+                                snapshot ->
+                                        new IcebergSnapshot(
+                                                snapshot.sequenceNumber(),
+                                                snapshot.snapshotId(),
+                                                snapshot.timestampMs(),
+                                                snapshot.summary(),
+                                                snapshot.manifestList(),
+                                                snapshot.schemaId() + 1))
+                        .collect(Collectors.toList());
+        return new IcebergMetadata(
+                newIcebergMetadata.formatVersion(),
+                newIcebergMetadata.tableUuid(),
+                newIcebergMetadata.location(),
+                newIcebergMetadata.currentSnapshotId(),
+                newIcebergMetadata.lastColumnId(),
+                schemas,
+                currentSchemaId,
+                newIcebergMetadata.partitionSpecs(),
+                newIcebergMetadata.lastPartitionId(),
+                snapshots,
+                newIcebergMetadata.currentSnapshotId(),
+                newIcebergMetadata.refs());
     }
 
     private static String updateToString(MetadataUpdate update) {
