@@ -30,8 +30,9 @@ import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.rest.RESTCatalogServer;
 import org.apache.iceberg.rest.RESTServerExtension;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,8 +54,9 @@ public class IcebergRestMetadataCommitterITCase extends AbstractTestBase {
                             CatalogProperties.CATALOG_IMPL,
                             HadoopCatalog.class.getName()));
 
-    @Test
-    public void testCommitToRestCatalog() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"avro", "parquet", "orc"})
+    public void testCommitToRestCatalog(String fileFormat) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
 
@@ -82,9 +84,9 @@ public class IcebergRestMetadataCommitterITCase extends AbstractTestBase {
                                 + "  'metadata.iceberg.rest.uri' = '%s',\n"
                                 + "  'metadata.iceberg.rest.warehouse' = '%s',\n"
                                 + "  'metadata.iceberg.rest.clients' = '%s',\n"
-                                + "  'file.format' = 'avro'\n"
+                                + "  'file.format' = '%s'\n"
                                 + ")",
-                        restUri, restWarehouse, restClients));
+                        restUri, restWarehouse, restClients, fileFormat));
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
                                 + "(1, 9, 90), "
