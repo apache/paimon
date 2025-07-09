@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.CoreOptions.PartitionSinkStrategy
+import org.apache.paimon.spark.SparkConnectorOptions.WriteDistributionMode
 import org.apache.paimon.spark.commands.BucketExpression.quote
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.FileStoreTable
 
@@ -56,7 +59,12 @@ object PaimonWriteRequirement {
     val clusteringExpressions =
       (partitionTransforms ++ bucketTransforms).map(identity[Expression]).toArray
 
-    if (clusteringExpressions.isEmpty) {
+    if (
+      clusteringExpressions.isEmpty || (bucketTransforms.isEmpty && table
+        .coreOptions()
+        .partitionSinkStrategy()
+        .equals(PartitionSinkStrategy.NONE))
+    ) {
       EMPTY
     } else {
       val distribution: ClusteredDistribution =
