@@ -18,25 +18,19 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsEvolution;
-import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataField;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
