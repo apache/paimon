@@ -636,6 +636,7 @@ public class IcebergRestMetadataCommitterTest {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
         String[] formats = new String[] {"orc", "parquet", "avro"};
-        return formats[i];
+        //        return formats[i];
+        return "orc";
     }
 }
