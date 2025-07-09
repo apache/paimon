@@ -79,6 +79,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -140,6 +142,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
     private final long commitTimeout;
+    private final long commitMinRetryWait;
+    private final long commitMaxRetryWait;
     private final int commitMaxRetries;
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
@@ -176,6 +180,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
             long commitTimeout,
+            long commitMinRetryWait,
+            long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
@@ -205,6 +211,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
         this.commitTimeout = commitTimeout;
+        this.commitMinRetryWait = commitMinRetryWait;
+        this.commitMaxRetryWait = commitMaxRetryWait;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
         this.partitionComputer =
                 new InternalRowPartitionComputer(
@@ -808,9 +816,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new RuntimeException(message, retryResult.exception);
             }
 
+            commitRetryWait(retryCount);
             retryCount++;
         }
         return retryCount + 1;
+    }
+
+    private void commitRetryWait(int retryCount) {
+        int delayMs =
+                (int) Math.min(commitMinRetryWait * Math.pow(2, retryCount), commitMaxRetries);
+        int jitter = ThreadLocalRandom.current().nextInt(Math.max(1, (int) (delayMs * 0.1)));
+        int sleepTimeMs = delayMs + jitter;
+        try {
+            TimeUnit.MILLISECONDS.sleep(sleepTimeMs);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(ie);
+        }
     }
 
     private int tryOverwrite(
@@ -1142,6 +1164,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 commitTimeout, retryCount));
             }
 
+            commitRetryWait(retryCount);
             retryCount++;
         }
     }

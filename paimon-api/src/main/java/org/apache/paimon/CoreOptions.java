@@ -604,6 +604,18 @@ public class CoreOptions implements Serializable {
                     .defaultValue(10)
                     .withDescription("Maximum number of retries when commit failed.");
 
+    public static final ConfigOption<Duration> COMMIT_MIN_RETRY_WAIT =
+            key("commit.min-retry-wait")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(100))
+                    .withDescription("Min retry wait time when commit failed.");
+
+    public static final ConfigOption<Duration> COMMIT_MAX_RETRY_WAIT =
+            key("commit.max-retry-wait")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(60))
+                    .withDescription("Max retry wait time when commit failed.");
+
     public static final ConfigOption<Integer> COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT =
             key("compaction.max-size-amplification-percent")
                     .intType()
@@ -2247,6 +2259,14 @@ public class CoreOptions implements Serializable {
         return options.get(COMMIT_TIMEOUT) == null
                 ? Long.MAX_VALUE
                 : options.get(COMMIT_TIMEOUT).toMillis();
+    }
+
+    public long commitMinRetryWait() {
+        return options.get(COMMIT_MIN_RETRY_WAIT).toMillis();
+    }
+
+    public long commitMaxRetryWait() {
+        return options.get(COMMIT_MAX_RETRY_WAIT).toMillis();
     }
 
     public int commitMaxRetries() {
