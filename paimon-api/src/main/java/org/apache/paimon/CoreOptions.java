@@ -128,11 +128,45 @@ public class CoreOptions implements Serializable {
             key("bucket-function.type")
                     .enumType(BucketFunctionType.class)
                     .defaultValue(BucketFunctionType.DEFAULT)
-                    .withDescription("The bucket function for paimon bucket");
+                    .withDescription("The bucket function for paimon bucket.");
 
     /** Paimon bucket function type. */
-    public enum BucketFunctionType {
-        DEFAULT,
+    public enum BucketFunctionType implements DescribedEnum {
+        DEFAULT(
+                "default",
+                "The default bucket function which will use arithmetic: bucket_id = Math.abs(hash_bucket_binary_row % numBuckets) to get bucket."),
+        MOD(
+                "mod",
+                "The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. "
+                        + "Note: the bucket key must be a single field of INT or BIGINT datatype.");
+
+        private final String value;
+        private final String description;
+
+        BucketFunctionType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        public static BucketFunctionType of(String bucketType) {
+            if (DEFAULT.value.equalsIgnoreCase(bucketType)) {
+                return DEFAULT;
+            } else if (MOD.value.equalsIgnoreCase(bucketType)) {
+                return MOD;
+            }
+            throw new IllegalArgumentException(
+                    "cannot match type: " + bucketType + " for bucket function");
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
