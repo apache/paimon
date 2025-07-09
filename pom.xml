@@ -478,9 +478,6 @@ under the License.
                 <version>3.4.2</version><!--$NO-MVN-MAN-VER$-->
                 <configuration>
                     <archive>
-                        <manifestEntries>
-                            <SCM-Revision>${git.commit.id}</SCM-Revision>
-                        </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                             <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
