@@ -365,6 +365,8 @@ public abstract class AbstractCatalog implements Catalog {
                 return;
             }
             throw new TableAlreadyExistException(identifier);
+        } catch (TableExistButNotPaimonException ignored) {
+            throw new TableExistButNotPaimonException(identifier);
         } catch (TableNotExistException ignored) {
         }
 

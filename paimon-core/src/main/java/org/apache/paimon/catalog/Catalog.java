@@ -1095,6 +1095,28 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+
+    /** Table exist but is not a paimon one or paimon metadata corrupted. */
+    class TableExistButNotPaimonException extends RuntimeException {
+
+        private static final String MSG = "Table %s exist, but this table is not a paimon table.";
+
+        private final Identifier identifier;
+
+        public TableExistButNotPaimonException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public TableExistButNotPaimonException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
