@@ -29,6 +29,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -62,7 +63,7 @@ public class CompactorSourceBuilder {
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
-    @Nullable private Predicate partitionPredicate = null;
+    @Nullable private Either<Predicate, List<Map<String, String>>> partitions = null;
     @Nullable private Duration partitionIdleTime = null;
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
@@ -89,8 +90,15 @@ public class CompactorSourceBuilder {
         compactBucketsTable =
                 compactBucketsTable.copy(
                         isContinuous ? streamingCompactOptions() : batchCompactOptions());
-        ReadBuilder readBuilder =
-                compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
+        ReadBuilder readBuilder = compactBucketsTable.newReadBuilder();
+        if (partitions != null) {
+            if (partitions.isLeft()) {
+                Predicate predicate = partitions.left();
+                readBuilder.withFilter(predicate);
+            } else {
+                readBuilder.withPartitionFilter(partitions.right());
+            }
+        }
         if (CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
             readBuilder = readBuilder.dropStats();
         }
@@ -171,8 +179,9 @@ public class CompactorSourceBuilder {
         };
     }
 
-    public CompactorSourceBuilder withPartitionPredicate(@Nullable Predicate partitionPredicate) {
-        this.partitionPredicate = partitionPredicate;
+    public CompactorSourceBuilder withPartitionPredicate(
+            @Nullable Either<Predicate, List<Map<String, String>>> partitionPredicate) {
+        this.partitions = partitionPredicate;
         return this;
     }
 

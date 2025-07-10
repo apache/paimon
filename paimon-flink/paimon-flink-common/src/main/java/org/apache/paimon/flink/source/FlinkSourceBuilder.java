@@ -35,6 +35,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -61,6 +62,7 @@ import org.apache.flink.types.Row;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
@@ -88,7 +90,8 @@ public class FlinkSourceBuilder {
     private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
     @Nullable private int[][] projectedFields;
-    @Nullable private Predicate predicate;
+    // Predicate can be either a {@link Predicate} or a list of partition filters.
+    @Nullable private Either<Predicate, List<Map<String, String>>> predicate;
     @Nullable private LogSourceProvider logSourceProvider;
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
@@ -131,7 +134,7 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    public FlinkSourceBuilder predicate(Predicate predicate) {
+    public FlinkSourceBuilder predicate(Either<Predicate, List<Map<String, String>>> predicate) {
         this.predicate = predicate;
         return this;
     }
@@ -179,7 +182,13 @@ public class FlinkSourceBuilder {
         if (readType != null) {
             readBuilder.withReadType(readType);
         }
-        readBuilder.withFilter(predicate);
+        if (predicate != null) {
+            if (predicate.isLeft()) {
+                readBuilder.withFilter(predicate.left());
+            } else {
+                readBuilder.withPartitionFilter(predicate.right());
+            }
+        }
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }

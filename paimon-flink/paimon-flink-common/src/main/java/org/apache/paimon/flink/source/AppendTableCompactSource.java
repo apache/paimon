@@ -24,6 +24,7 @@ import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.utils.Either;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -40,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Source for unaware-bucket Compaction.
@@ -58,17 +60,17 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
     private final FileStoreTable table;
     private final boolean streaming;
     private final long scanInterval;
-    private final Predicate filter;
+    private final Either<Predicate, List<Map<String, String>>> partitionFilter;
 
     public AppendTableCompactSource(
             FileStoreTable table,
             boolean isStreaming,
             long scanInterval,
-            @Nullable Predicate filter) {
+            @Nullable Either<Predicate, List<Map<String, String>>> partitionFilter) {
         this.table = table;
         this.streaming = isStreaming;
         this.scanInterval = scanInterval;
-        this.filter = filter;
+        this.partitionFilter = partitionFilter;
     }
 
     @Override
@@ -82,7 +84,7 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
         Preconditions.checkArgument(
                 readerContext.currentParallelism() == 1,
                 "Compaction Operator parallelism in paimon MUST be one.");
-        return new CompactSourceReader(table, streaming, filter, scanInterval);
+        return new CompactSourceReader(table, streaming, partitionFilter, scanInterval);
     }
 
     /** BucketUnawareCompactSourceReader. */
@@ -92,9 +94,12 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
         private final long scanInterval;
 
         public CompactSourceReader(
-                FileStoreTable table, boolean streaming, Predicate filter, long scanInterval) {
+                FileStoreTable table,
+                boolean streaming,
+                Either<Predicate, List<Map<String, String>>> partitions,
+                long scanInterval) {
             this.scanInterval = scanInterval;
-            compactionCoordinator = new AppendCompactCoordinator(table, streaming, filter);
+            compactionCoordinator = new AppendCompactCoordinator(table, streaming, partitions);
         }
 
         @Override

@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -131,7 +132,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitionPredicate(predicate)
+                        .withPartitionPredicate(Either.Left(predicate))
                         .build();
         new CompactorSinkBuilder(table, true).withInput(source).build();
         env.execute();
@@ -171,7 +172,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitionPredicate(predicate)
+                        .withPartitionPredicate(Either.Left(predicate))
                         .build();
         Integer sinkParalellism = new Random().nextInt(100) + 1;
         new CompactorSinkBuilder(

@@ -44,6 +44,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -218,7 +219,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .sourceBounded(!unbounded)
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
-                        .predicate(getPredicateWithScanPartitions())
+                        .predicate(Either.Left(getPredicateWithScanPartitions()))
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
