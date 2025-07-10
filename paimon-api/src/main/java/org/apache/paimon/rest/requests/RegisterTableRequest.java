@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -29,14 +30,27 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RegisterTableRequest implements RESTRequest {
 
+    private static final String FIELD_IDENTIFIER = "identifier";
+
     private static final String FIELD_PATH = "path";
+
+    @JsonProperty(FIELD_IDENTIFIER)
+    private final Identifier identifier;
 
     @JsonProperty(FIELD_PATH)
     private final String path;
 
     @JsonCreator
-    public RegisterTableRequest(@JsonProperty(FIELD_PATH) String path) {
+    public RegisterTableRequest(
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+            @JsonProperty(FIELD_PATH) String path) {
+        this.identifier = identifier;
         this.path = path;
+    }
+
+    @JsonGetter(FIELD_IDENTIFIER)
+    public Identifier getIdentifier() {
+        return identifier;
     }
 
     @JsonGetter(FIELD_PATH)

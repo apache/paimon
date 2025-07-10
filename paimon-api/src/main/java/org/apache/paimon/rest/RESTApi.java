@@ -680,9 +680,8 @@ public class RESTApi {
 
     public void registerTable(Identifier identifier, String path) {
         client.post(
-                resourcePaths.registerTable(
-                        identifier.getDatabaseName(), identifier.getObjectName()),
-                new RegisterTableRequest(path),
+                resourcePaths.registerTable(identifier.getDatabaseName()),
+                new RegisterTableRequest(identifier, path),
                 restAuthFunction);
     }
 
