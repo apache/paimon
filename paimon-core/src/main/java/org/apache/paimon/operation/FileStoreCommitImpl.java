@@ -899,12 +899,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // Check if the commit has been completed. At this point, there will be no more repeated
         // commits and just return success
         if (retryResult != null && latestSnapshot != null) {
+            Map<Long, Snapshot> snapshotCache = new HashMap<>();
+            snapshotCache.put(latestSnapshot.id(), latestSnapshot);
             long startCheckSnapshot = Snapshot.FIRST_SNAPSHOT_ID;
             if (retryResult.latestSnapshot != null) {
+                snapshotCache.put(retryResult.latestSnapshot.id(), retryResult.latestSnapshot);
                 startCheckSnapshot = retryResult.latestSnapshot.id() + 1;
             }
             for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
-                Snapshot snapshot = snapshotManager.snapshot(i);
+                Snapshot snapshot = snapshotCache.computeIfAbsent(i, snapshotManager::snapshot);
                 if (snapshot.commitUser().equals(commitUser)
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
