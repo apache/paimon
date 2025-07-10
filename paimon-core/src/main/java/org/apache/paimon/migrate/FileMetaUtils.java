@@ -245,6 +245,27 @@ public class FileMetaUtils {
         return binaryRow;
     }
 
+    public static BinaryRow writePartitionValue(
+            RowType partitionRowType,
+            List<Object> partitionValues,
+            List<BinaryWriter.ValueSetter> valueSetters) {
+        BinaryRow binaryRow = new BinaryRow(partitionRowType.getFieldCount());
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+
+        List<DataField> fields = partitionRowType.getFields();
+
+        for (int i = 0; i < fields.size(); i++) {
+            Object value = partitionValues.get(i);
+            if (value == null) {
+                binaryRowWriter.setNullAt(i);
+            } else {
+                valueSetters.get(i).setValue(binaryRowWriter, i, value);
+            }
+        }
+        binaryRowWriter.complete();
+        return binaryRow;
+    }
+
     public static SimpleStatsExtractor createSimpleStatsExtractor(Table table, String format) {
         CoreOptions options = ((FileStoreTable) table).coreOptions();
         SimpleColStatsCollector.Factory[] factories =
