@@ -302,6 +302,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 createCommitCallbacks(commitUser, table),
                 options.commitMaxRetries(),
                 options.commitTimeout(),
+                options.commitMinRetryWait(),
+                options.commitMaxRetryWait(),
                 options.commitStrictModeLastSafeSnapshot().orElse(null));
     }
 

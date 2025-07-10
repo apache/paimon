@@ -79,6 +79,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -140,6 +142,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
     private final long commitTimeout;
+    private final long commitMinRetryWait;
+    private final long commitMaxRetryWait;
     private final int commitMaxRetries;
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
@@ -176,6 +180,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
             long commitTimeout,
+            long commitMinRetryWait,
+            long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
@@ -205,6 +211,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
         this.commitTimeout = commitTimeout;
+        this.commitMinRetryWait = commitMinRetryWait;
+        this.commitMaxRetryWait = commitMaxRetryWait;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
         this.partitionComputer =
                 new InternalRowPartitionComputer(
@@ -808,6 +816,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new RuntimeException(message, retryResult.exception);
             }
 
+            commitRetryWait(retryCount);
             retryCount++;
         }
         return retryCount + 1;
@@ -890,12 +899,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // Check if the commit has been completed. At this point, there will be no more repeated
         // commits and just return success
         if (retryResult != null && latestSnapshot != null) {
+            Map<Long, Snapshot> snapshotCache = new HashMap<>();
+            snapshotCache.put(latestSnapshot.id(), latestSnapshot);
             long startCheckSnapshot = Snapshot.FIRST_SNAPSHOT_ID;
             if (retryResult.latestSnapshot != null) {
+                snapshotCache.put(retryResult.latestSnapshot.id(), retryResult.latestSnapshot);
                 startCheckSnapshot = retryResult.latestSnapshot.id() + 1;
             }
             for (long i = startCheckSnapshot; i <= latestSnapshot.id(); i++) {
-                Snapshot snapshot = snapshotManager.snapshot(i);
+                Snapshot snapshot = snapshotCache.computeIfAbsent(i, snapshotManager::snapshot);
                 if (snapshot.commitUser().equals(commitUser)
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
@@ -1142,6 +1154,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 commitTimeout, retryCount));
             }
 
+            commitRetryWait(retryCount);
             retryCount++;
         }
     }
@@ -1546,6 +1559,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private void cleanIndexManifest(String oldIndexManifest, String newIndexManifest) {
         if (newIndexManifest != null && !Objects.equals(oldIndexManifest, newIndexManifest)) {
             indexManifestFile.delete(newIndexManifest);
+        }
+    }
+
+    private void commitRetryWait(int retryCount) {
+        int retryWait =
+                (int) Math.min(commitMinRetryWait * Math.pow(2, retryCount), commitMaxRetryWait);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        retryWait += random.nextInt(Math.max(1, (int) (retryWait * 0.2)));
+        try {
+            TimeUnit.MILLISECONDS.sleep(retryWait);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(ie);
         }
     }
 
