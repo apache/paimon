@@ -66,7 +66,7 @@ public class HiveCloneUtilsTest {
     }
 
     @Test
-    public void listAllTablesForDatabases() throws Exception {
+    public void listAllTablesForDatabase() throws Exception {
         HiveCatalog mockHiveCatalog = mock(HiveCatalog.class);
         IMetaStoreClient mockClient = mock(IMetaStoreClient.class);
         when(mockHiveCatalog.getHmsClient()).thenReturn(mockClient);
