@@ -37,15 +37,19 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -663,5 +667,30 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 RuntimeException.class,
                                 "Caught NullPointerException, the possible reason is you have set following options together"));
+    }
+
+    @Test
+    public void testStreamingReadLatestFullAppendWithCompactAndDv() throws Exception {
+        sql(
+                "CREATE TABLE test (a INT, b INT) WITH ('compaction.min.file-num' = '2', 'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO test VALUES (1, 1)");
+        sql("INSERT INTO test VALUES (2, 2)");
+        sql("CALL sys.compact('default.test')");
+
+        // wait compaction
+        waitUtil(
+                () -> sql("SELECT count(*) FROM `test$snapshots`").get(0).getField(0).equals(3L),
+                Duration.ofMinutes(1),
+                Duration.ofSeconds(20));
+
+        BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM test /*+ OPTIONS('scan.mode' = 'latest-full') */");
+        assertThat(iter.collect(2)).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+
+        sql("INSERT INTO test VALUES (3, 3)");
+        assertThat(iter.collect(1)).containsExactly(Row.of(3, 3));
+
+        iter.close();
     }
 }
