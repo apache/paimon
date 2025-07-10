@@ -34,8 +34,10 @@ under the License.
     <packaging>pom</packaging>
 
     <modules>
+        <module>paimon-flink1-common</module>
         <module>paimon-flink-common</module>
         <module>paimon-flink-action</module>
+        <module>paimon-flink-cdc</module>
     </modules>
 
     <dependencies>
