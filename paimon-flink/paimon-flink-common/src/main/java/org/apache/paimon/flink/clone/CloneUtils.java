@@ -27,11 +27,14 @@ import org.apache.paimon.hive.clone.HiveCloneUtils;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +54,7 @@ public class CloneUtils {
             String targetDatabase,
             String targetTableName,
             Catalog sourceCatalog,
+            @Nullable List<String> excludedTables,
             StreamExecutionEnvironment env)
             throws Exception {
         List<Tuple2<Identifier, Identifier>> result = new ArrayList<>();
@@ -66,7 +70,7 @@ public class CloneUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier : HiveCloneUtils.listTables(hiveCatalog)) {
+            for (Identifier identifier : HiveCloneUtils.listTables(hiveCatalog, excludedTables)) {
                 result.add(new Tuple2<>(identifier, identifier));
             }
         } else if (StringUtils.isNullOrWhitespaceOnly(sourceTableName)) {
@@ -77,7 +81,8 @@ public class CloneUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier : HiveCloneUtils.listTables(hiveCatalog, sourceDatabase)) {
+            for (Identifier identifier :
+                    HiveCloneUtils.listTables(hiveCatalog, sourceDatabase, excludedTables)) {
                 result.add(
                         new Tuple2<>(
                                 identifier,
@@ -90,6 +95,9 @@ public class CloneUtils {
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must not be blank when clone a table.");
+            checkArgument(
+                    CollectionUtils.isNotEmpty(excludedTables),
+                    "excludedTables must be empty when clone a single table.");
             result.add(
                     new Tuple2<>(
                             Identifier.create(sourceDatabase, sourceTableName),
