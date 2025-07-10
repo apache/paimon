@@ -150,9 +150,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public String registerTable(Identifier identifier, String location)
+    public void registerTable(Identifier identifier, String path)
             throws TableAlreadyExistException {
-        return wrapped.registerTable(identifier, location);
+        wrapped.registerTable(identifier, path);
     }
 
     @Override

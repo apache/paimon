@@ -74,7 +74,6 @@ import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
-import org.apache.paimon.rest.responses.RegisterTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
@@ -679,14 +678,12 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    public String registerTable(Identifier identifier, String location) {
-        RegisterTableResponse response =
-                client.post(
-                        resourcePaths.registerTable(identifier.getDatabaseName()),
-                        new RegisterTableRequest(identifier, location),
-                        RegisterTableResponse.class,
-                        restAuthFunction);
-        return response.getTableId();
+    public void registerTable(Identifier identifier, String path) {
+        client.post(
+                resourcePaths.registerTable(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                new RegisterTableRequest(path),
+                restAuthFunction);
     }
 
     /**

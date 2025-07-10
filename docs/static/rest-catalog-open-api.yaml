@@ -206,45 +206,6 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/register:
-    post:
-      tags:
-        - table
-      summary: Register table
-      operationId: RegisterTable
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegisterTableRequest'
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RegisterTableResponse'
-        "400":
-          $ref: '#/components/responses/BadRequestErrorResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
-        "409":
-          $ref: '#/components/responses/TableAlreadyExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables:
     get:
       tags:
@@ -541,6 +502,46 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/TableAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/register:
+    post:
+      tags:
+        - table
+      summary: Register table
+      operationId: RegisterTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "409":
           $ref: '#/components/responses/TableAlreadyExistErrorResponse'
         "500":
@@ -2365,11 +2366,6 @@ components:
         updatedAt:
           format: int64
         updatedBy:
-          type: string
-    RegisterTableResponse:
-      type: object
-      properties:
-        tableId:
           type: string
     SchemaChange:
       anyOf:

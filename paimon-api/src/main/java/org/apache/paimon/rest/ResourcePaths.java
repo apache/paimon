@@ -113,8 +113,15 @@ public class ResourcePaths {
                 ROLLBACK);
     }
 
-    public String registerTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), REGISTER);
+    public String registerTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                REGISTER);
     }
 
     public String tableToken(String databaseName, String objectName) {

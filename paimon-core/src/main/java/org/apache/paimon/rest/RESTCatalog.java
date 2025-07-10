@@ -533,10 +533,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public String registerTable(Identifier identifier, String location)
+    public void registerTable(Identifier identifier, String path)
             throws TableAlreadyExistException {
         try {
-            return api.registerTable(identifier, location);
+            api.registerTable(identifier, path);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (AlreadyExistsException e) {

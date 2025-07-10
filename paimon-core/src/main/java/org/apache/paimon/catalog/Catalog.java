@@ -565,11 +565,10 @@ public interface Catalog extends AutoCloseable {
      * Register a paimon table to the catalog if it does not exist. It is an asynchronous operation
      *
      * @param identifier a table identifier
-     * @param location the location of the table
-     * @return the Table id
+     * @param path the path of the table
      * @throws TableAlreadyExistException if the table already exists in the catalog.
      */
-    default String registerTable(Identifier identifier, String location)
+    default void registerTable(Identifier identifier, String path)
             throws TableAlreadyExistException {
         throw new UnsupportedOperationException();
     }
