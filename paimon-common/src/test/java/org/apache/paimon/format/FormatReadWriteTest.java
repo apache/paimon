@@ -84,20 +84,13 @@ public abstract class FormatReadWriteTest {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            rowType = (RowType) rowType.notNull();
+            rowType = rowType.notNull();
         }
 
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         FileFormat format = fileFormat();
-
-        PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        writer.addElement(GenericRow.of(1, 1L));
-        writer.addElement(GenericRow.of(2, 2L));
-        writer.addElement(GenericRow.of(3, null));
-        writer.close();
-        out.close();
-
+        FormatWriterFactory factory = format.createWriterFactory(rowType);
+        write(factory, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -105,9 +98,10 @@ public abstract class FormatReadWriteTest {
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
-        assertThat(result)
-                .containsExactly(
-                        GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
+        assertThat(result.get(0)).isEqualTo(GenericRow.of(1, 1L));
+        assertThat(result.get(1)).isEqualTo(GenericRow.of(2, 2L));
+        assertThat(result.get(2).getInt(0)).isEqualTo(3);
+        assertThat(result.get(2).isNullAt(1)).isTrue();
     }
 
     @Test
@@ -116,12 +110,8 @@ public abstract class FormatReadWriteTest {
         InternalRow expected = expectedRowForFullTypesTest();
         FileFormat format = fileFormat();
 
-        PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        writer.addElement(expected);
-        writer.close();
-        out.close();
-
+        FormatWriterFactory factory = format.createWriterFactory(rowType);
+        write(factory, expected);
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -149,10 +139,8 @@ public abstract class FormatReadWriteTest {
                                         DataTypes.FIELD(3, "f1", DataTypes.INT()),
                                         DataTypes.FIELD(4, "f2", DataTypes.INT()))));
 
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
-                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
-            writer.addElement(GenericRow.of(0, GenericRow.of(10, 11, 12)));
-        }
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        write(factory, GenericRow.of(0, GenericRow.of(10, 11, 12)));
 
         // skip read f0, f1.f1
         RowType readType =
@@ -173,7 +161,8 @@ public abstract class FormatReadWriteTest {
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
 
-        assertThat(result).containsExactly(GenericRow.of(GenericRow.of(10, 12)));
+        assertThat(result.get(0).getRow(0, 2).getInt(0)).isEqualTo(10);
+        assertThat(result.get(0).getRow(0, 2).getInt(1)).isEqualTo(12);
     }
 
     @Test
@@ -186,12 +175,8 @@ public abstract class FormatReadWriteTest {
 
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
 
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
-                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
-            writer.addElement(
-                    GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
-        }
-
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        write(factory, GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType)
@@ -214,18 +199,14 @@ public abstract class FormatReadWriteTest {
         }
 
         RowType writeType = DataTypes.ROW(new ArrayType(true, new VariantType()));
-
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
-                FormatWriter writer = format.createWriterFactory(writeType).create(out, "zstd")) {
-            writer.addElement(
-                    GenericRow.of(
-                            new GenericArray(
-                                    new Object[] {
-                                        GenericVariant.fromJson(
-                                                "{\"age\":35,\"city\":\"Chicago\"}"),
-                                        GenericVariant.fromJson("{\"age\":45,\"city\":\"Beijing\"}")
-                                    })));
-        }
+        write(
+                format.createWriterFactory(writeType),
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {
+                                    GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}"),
+                                    GenericVariant.fromJson("{\"age\":45,\"city\":\"Beijing\"}")
+                                })));
 
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -241,7 +222,25 @@ public abstract class FormatReadWriteTest {
         assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
     }
 
-    private RowType rowTypeForFullTypesTest() {
+    private void write(FormatWriterFactory factory, InternalRow... rows) throws IOException {
+        FormatWriter writer;
+        PositionOutputStream out = null;
+        if (factory instanceof SupportsDirectWrite) {
+            writer = ((SupportsDirectWrite) factory).create(fileIO, file, "zstd");
+        } else {
+            out = fileIO.newOutputStream(file, false);
+            writer = factory.create(out, "zstd");
+        }
+        for (InternalRow row : rows) {
+            writer.addElement(row);
+        }
+        writer.close();
+        if (out != null) {
+            out.close();
+        }
+    }
+
+    protected RowType rowTypeForFullTypesTest() {
         RowType.Builder builder =
                 RowType.builder()
                         .field("id", DataTypes.INT().notNull())
@@ -292,7 +291,7 @@ public abstract class FormatReadWriteTest {
         return rowType;
     }
 
-    private GenericRow expectedRowForFullTypesTest() {
+    protected GenericRow expectedRowForFullTypesTest() {
         Object[] mapValueData = getMapValueData();
         List<Object> values =
                 Arrays.asList(

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.StringUtils;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
@@ -27,7 +28,6 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.flink.configuration.Configuration;
 import org.bson.Document;

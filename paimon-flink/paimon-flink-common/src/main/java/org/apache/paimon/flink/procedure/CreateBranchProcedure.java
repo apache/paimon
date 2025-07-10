@@ -22,7 +22,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;

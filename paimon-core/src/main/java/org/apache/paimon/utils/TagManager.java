@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
@@ -28,6 +29,8 @@ import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.tag.TagPeriodHandler;
+import org.apache.paimon.tag.TagTimeExtractor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,20 +67,44 @@ public class TagManager {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    @Nullable private final TagPeriodHandler tagPeriodHandler;
 
     public TagManager(FileIO fileIO, Path tablePath) {
-        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH, (TagPeriodHandler) null);
+    }
+
+    public TagManager(FileIO fileIO, Path tablePath, String branch) {
+        this(fileIO, tablePath, branch, (TagPeriodHandler) null);
     }
 
     /** Specify the default branch for data writing. */
-    public TagManager(FileIO fileIO, Path tablePath, String branch) {
-        this.fileIO = fileIO;
-        this.tablePath = tablePath;
-        this.branch = BranchManager.normalizeBranch(branch);
+    public TagManager(FileIO fileIO, Path tablePath, String branch, CoreOptions options) {
+        this(fileIO, tablePath, branch, createIfNecessary(options));
     }
 
+    @Nullable
+    private static TagPeriodHandler createIfNecessary(CoreOptions options) {
+        return TagTimeExtractor.createForAutoTag(options) == null
+                ? null
+                : TagPeriodHandler.create(options);
+    }
+
+    private TagManager(
+            FileIO fileIO,
+            Path tablePath,
+            String branch,
+            @Nullable TagPeriodHandler tagPeriodHandler) {
+        this.fileIO = fileIO;
+        this.tablePath = tablePath;
+        this.branch = branch;
+        this.tagPeriodHandler = tagPeriodHandler;
+    }
+
+    // TODO: Current usage of this method only use the tag directory of new branch.
+    // If we will use the new branch TagManager to create tag, we need to pass TagPeriodHandler
+    // according to branch options.
     public TagManager copyWithBranch(String branchName) {
-        return new TagManager(fileIO, tablePath, branchName);
+        return new TagManager(fileIO, tablePath, branchName, (TagPeriodHandler) null);
     }
 
     /** Return the root Directory of tags. */
@@ -131,6 +158,8 @@ public class TagManager {
             String tagName,
             @Nullable Duration timeRetained,
             @Nullable List<TagCallback> callbacks) {
+        validateNoAutoTag(tagName, snapshot);
+
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
         // will cause older versions (<= 0.7) of readers to be unable to read this tag.
         // When timeRetained is defined, it is fine, because timeRetained is the new feature.
@@ -436,5 +465,19 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'. This is unexpected.",
                         taggedSnapshot.id()));
+    }
+
+    private void validateNoAutoTag(String tagName, Snapshot snapshot) {
+        if (tagPeriodHandler == null || !tagPeriodHandler.isAutoTag(tagName)) {
+            return;
+        }
+
+        List<String> autoTags = tags(tagPeriodHandler::isAutoTag).get(snapshot);
+        if (autoTags != null) {
+            throw new RuntimeException(
+                    String.format(
+                            "Snapshot %s is already auto-tagged with %s.",
+                            snapshot.id(), autoTags));
+        }
     }
 }

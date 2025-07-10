@@ -48,6 +48,7 @@ import static org.apache.paimon.CoreOptions.TAG_DEFAULT_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for tag automatic creation. */
 public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
@@ -481,6 +482,23 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                 .containsOnly("2024-06-26 15", "2024-06-26 16", "2024-06-26 17");
 
         commit.close();
+    }
+
+    @Test
+    public void testMultiAutoTagsOnOneSnapshot() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        // auto-tag
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:00:01")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-17");
+
+        // create a tag in auto-tag format should incur an exception
+        assertThrows(RuntimeException.class, () -> table.createTag("2023-07-18", 1));
     }
 
     private long localZoneMills(String timestamp) {

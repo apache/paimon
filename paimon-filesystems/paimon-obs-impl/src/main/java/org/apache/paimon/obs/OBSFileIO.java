@@ -38,7 +38,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
-import static org.apache.paimon.options.CatalogOptions.FILE_IO_POPULATE_META;
 
 /** Huawei OBS Storage {@link FileIO}. */
 public class OBSFileIO extends HadoopCompliantFileIO {
@@ -77,7 +76,6 @@ public class OBSFileIO extends HadoopCompliantFileIO {
 
     private Options hadoopOptions;
     private boolean allowCache = true;
-    private boolean populateMeta = false;
 
     @Override
     public boolean isObjectStore() {
@@ -87,7 +85,6 @@ public class OBSFileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
-        populateMeta = context.options().get(FILE_IO_POPULATE_META);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {

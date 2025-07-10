@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import java.util.Map;
 

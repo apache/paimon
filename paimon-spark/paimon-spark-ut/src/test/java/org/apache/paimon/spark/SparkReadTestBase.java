@@ -35,7 +35,8 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;

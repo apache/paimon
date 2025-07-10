@@ -16,18 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.bucket;
+package org.apache.paimon.format.lance;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.types.RowKind;
+import org.apache.paimon.format.FileFormatFactory;
 
-/** Paimon default bucket function. */
-public class PaimonBucketFunction implements BucketFunction {
+/** Factory to create {@link LanceFileFormat}. */
+public class LanceFileFormatFactory implements FileFormatFactory {
+
+    public static final String IDENTIFIER = "lance";
 
     @Override
-    public int bucket(BinaryRow row, int numBuckets) {
-        assert numBuckets > 0 && row.getRowKind() == RowKind.INSERT;
-        int hash = row.hashCode();
-        return Math.abs(hash % numBuckets);
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public LanceFileFormat create(FormatContext formatContext) {
+        return new LanceFileFormat(formatContext);
     }
 }

@@ -92,6 +92,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.LazyField;
@@ -103,12 +104,12 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
@@ -134,6 +135,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTApi.DATABASE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.FUNCTION_NAME_PATTERN;
@@ -1269,6 +1271,8 @@ public class RESTCatalogServer {
                     TableMetadata tableMetadata;
                     if (isFormatTable(schema)) {
                         tableMetadata = createFormatTable(identifier, schema);
+                    } else if (isObjectTable(schema)) {
+                        tableMetadata = createObjectTable(identifier, schema);
                     } else {
                         catalog.createTable(identifier, schema, false);
                         tableMetadata =
@@ -1422,6 +1426,10 @@ public class RESTCatalogServer {
 
     private boolean isFormatTable(Schema schema) {
         return Options.fromMap(schema.options()).get(TYPE) == FORMAT_TABLE;
+    }
+
+    private boolean isObjectTable(Schema schema) {
+        return Options.fromMap(schema.options()).get(TYPE) == OBJECT_TABLE;
     }
 
     private MockResponse tableHandle(String method, String data, Identifier identifier)
@@ -2195,12 +2203,22 @@ public class RESTCatalogServer {
                         schema.primaryKeys(),
                         options,
                         schema.comment());
-        TableMetadata tableMetadata = new TableMetadata(tableSchema, isExternal, uuid);
-        return tableMetadata;
+        return new TableMetadata(tableSchema, isExternal, uuid);
     }
 
     private TableMetadata createFormatTable(Identifier identifier, Schema schema) {
         return createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
+    }
+
+    private TableMetadata createObjectTable(Identifier identifier, Schema schema) {
+        Schema newSchema =
+                new Schema(
+                        ObjectTable.SCHEMA.getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        schema.options(),
+                        schema.comment());
+        return createTableMetadata(identifier, 1L, newSchema, UUID.randomUUID().toString(), false);
     }
 
     private FileStoreTable getFileTable(Identifier identifier)

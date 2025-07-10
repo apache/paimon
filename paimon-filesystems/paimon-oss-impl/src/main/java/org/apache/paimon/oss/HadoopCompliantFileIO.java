@@ -96,9 +96,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                 org.apache.hadoop.fs.FileStatus hadoopStatus = hadoopIter.next();
                 return new HadoopFileStatus(hadoopStatus);
             }
-
-            @Override
-            public void close() throws IOException {}
         };
     }
 

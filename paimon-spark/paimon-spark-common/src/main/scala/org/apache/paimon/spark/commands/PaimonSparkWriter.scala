@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.CoreOptions.WRITE_ONLY
+import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
@@ -42,7 +42,7 @@ import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
@@ -233,7 +233,15 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
         }
 
       case BUCKET_UNAWARE | POSTPONE_MODE =>
-        writeWithoutBucket(data)
+        if (
+          coreOptions.partitionSinkStrategy().equals(PartitionSinkStrategy.HASH) && !tableSchema
+            .partitionKeys()
+            .isEmpty
+        ) {
+          writeWithoutBucket(data.repartition(partitionCols(data): _*))
+        } else {
+          writeWithoutBucket(data)
+        }
 
       case HASH_FIXED =>
         if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
@@ -410,14 +418,17 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
   }
 
   private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
+    df.repartition(partitionCols(df) ++ Seq(col(BUCKET_COL)): _*)
+  }
+
+  def partitionCols(df: DataFrame): Seq[Column] = {
     val inputSchema = df.schema
-    val partitionCols = tableSchema
+    tableSchema
       .partitionKeys()
       .asScala
       .map(tableSchema.fieldNames().indexOf(_))
       .map(x => col(inputSchema.fieldNames(x)))
       .toSeq
-    df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 
   private def deserializeCommitMessage(

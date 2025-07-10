@@ -207,6 +207,10 @@ public class CatalogUtils {
             return toFormatTable(identifier, schema, dataFileIO);
         }
 
+        if (options.type() == TableType.OBJECT_TABLE) {
+            return toObjectTable(identifier, schema, dataFileIO);
+        }
+
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
                         identifier,
@@ -218,10 +222,6 @@ public class CatalogUtils {
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
-
-        if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(externalFileIO, table);
-        }
 
         if (identifier.isSystemTable()) {
             return CatalogUtils.createSystemTable(identifier, table);
@@ -295,14 +295,14 @@ public class CatalogUtils {
     }
 
     private static ObjectTable toObjectTable(
-            Function<Path, FileIO> fileIOLoader, FileStoreTable underlyingTable) {
-        CoreOptions options = underlyingTable.coreOptions();
-        String objectLocation = options.objectLocation();
-        FileIO objectFileIO = fileIOLoader.apply(new Path(objectLocation));
+            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+        Map<String, String> options = schema.options();
+        String location = options.get(CoreOptions.PATH.key());
         return ObjectTable.builder()
-                .underlyingTable(underlyingTable)
-                .objectLocation(objectLocation)
-                .objectFileIO(objectFileIO)
+                .fileIO(fileIO.apply(new Path(location)))
+                .identifier(identifier)
+                .location(location)
+                .comment(schema.comment())
                 .build();
     }
 }

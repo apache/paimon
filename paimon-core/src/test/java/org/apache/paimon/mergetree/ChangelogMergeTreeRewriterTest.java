@@ -50,6 +50,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -70,6 +71,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link ChangelogMergeTreeRewriter}. */
@@ -188,6 +190,31 @@ public class ChangelogMergeTreeRewriterTest {
                 Assertions.assertEquals(1, files.size()); // data file
             }
         }
+    }
+
+    @Test
+    public void testWriteReusedKey() throws Exception {
+        Path testPath = new Path(path, UUID.randomUUID().toString());
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(testPath, keyType, valueType);
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
+                writerFactory.createRollingChangelogFileWriter(0);
+
+        GenericRow key = new GenericRow(1);
+        try {
+            key.setField(0, 1);
+            writer.write(new KeyValue().replace(key, RowKind.INSERT, GenericRow.of(2)));
+
+            key.setField(0, 3);
+            writer.write(new KeyValue().replace(key, RowKind.INSERT, GenericRow.of(4)));
+
+            // set to null to check reusing
+            key.setField(0, null);
+        } finally {
+            writer.close();
+        }
+
+        DataFileMeta fileMeta = writer.result().get(0);
+        assertThat(fileMeta.maxKey()).isEqualTo(BinaryRow.singleColumn(3));
     }
 
     private KeyValueFileWriterFactory createWriterFactory(

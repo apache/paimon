@@ -39,10 +39,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
-import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +52,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,7 +59,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
-import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -74,7 +70,6 @@ import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -380,28 +375,15 @@ public abstract class AbstractCatalog implements Catalog {
             case MATERIALIZED_TABLE:
                 createTableImpl(identifier, schema);
                 break;
-            case OBJECT_TABLE:
-                createObjectTable(identifier, schema);
-                break;
             case FORMAT_TABLE:
                 createFormatTable(identifier, schema);
                 break;
+            case OBJECT_TABLE:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s cannot support object tables.",
+                                this.getClass().getName()));
         }
-    }
-
-    private void createObjectTable(Identifier identifier, Schema schema) {
-        RowType rowType = schema.rowType();
-        checkArgument(
-                rowType.getFields().isEmpty()
-                        || new HashSet<>(ObjectTable.SCHEMA.getFields())
-                                .containsAll(rowType.getFields()),
-                "Schema of Object Table can be empty or %s, but is %s.",
-                ObjectTable.SCHEMA,
-                rowType);
-        checkArgument(
-                schema.options().containsKey(OBJECT_LOCATION.key()),
-                "Object table should have object-location option.");
-        createTableImpl(identifier, schema.copy(ObjectTable.SCHEMA));
     }
 
     protected abstract void createTableImpl(Identifier identifier, Schema schema);

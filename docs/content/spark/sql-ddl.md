@@ -340,6 +340,7 @@ ALTER TABLE T REPLACE TAG `TAG-4` AS OF VERSION 2 RETAIN 24 HOURS;
 -- create or replace a tag, create tag if it not exist, replace tag if it exists.
 ALTER TABLE T CREATE OR REPLACE TAG `TAG-5` AS OF VERSION 2 RETAIN 24 HOURS;
 ```
+NOTE: If tag.automatic-creation is set, only one auto-tag could be created for one snapshot.
 
 ### Delete Tag
 Delete a tag or multiple tags of a table.

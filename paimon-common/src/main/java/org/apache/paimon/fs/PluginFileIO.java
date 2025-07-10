@@ -42,6 +42,10 @@ public abstract class PluginFileIO implements FileIO {
         this.options = context.options();
     }
 
+    public Options options() {
+        return options;
+    }
+
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         return wrap(() -> fileIO(path).newInputStream(path));

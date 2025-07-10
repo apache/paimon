@@ -20,8 +20,6 @@ package org.apache.paimon.lookup;
 
 import org.apache.paimon.utils.SortUtil;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.util.Arrays;
 
 /** A class wraps byte[] to implement equals and hashCode. */
@@ -55,7 +53,7 @@ public class ByteArray implements Comparable<ByteArray> {
     }
 
     @Override
-    public int compareTo(@NotNull ByteArray o) {
+    public int compareTo(ByteArray o) {
         return SortUtil.compareBinary(bytes, o.bytes);
     }
 }

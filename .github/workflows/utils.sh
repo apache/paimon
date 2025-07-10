@@ -17,6 +17,10 @@
 # limitations under the License.
 ################################################################################
 
+set -e
+wget https://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1-1ubuntu2.1~18.04.23_amd64.deb
+sudo dpkg -i libssl1.1_1.1.1-1ubuntu2.1~18.04.23_amd64.deb
+
 function random_timezone() {
     local rnd=$(expr $RANDOM % 25)
     local hh=$(expr $rnd / 2)

@@ -49,7 +49,7 @@ case class FixedBucketExpression(_children: Seq[Expression])
     })
 
     PaimonFunctions
-      .load(PaimonFunctions.bucketFunctionName(BucketFunctionType.valueOf(funcType)))
+      .load(PaimonFunctions.bucketFunctionName(BucketFunctionType.of(funcType)))
       .bind(inputType)
       .asInstanceOf[ScalarFunction[Int]]
   }

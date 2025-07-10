@@ -97,10 +97,9 @@ public abstract class FileIOBehaviorTestBase {
         Path fileBC = createRandomFileInDirectory(dirB);
 
         List<FileStatus> allFiles = new ArrayList<>();
-        try (RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, false)) {
-            while (iter.hasNext()) {
-                allFiles.add(iter.next());
-            }
+        RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, false);
+        while (iter.hasNext()) {
+            allFiles.add(iter.next());
         }
         assertThat(allFiles.size()).isEqualTo(1);
         assertThat(allFiles.get(0).getPath()).isEqualTo(fileA);
@@ -114,10 +113,9 @@ public abstract class FileIOBehaviorTestBase {
         Path fileBC = createRandomFileInDirectory(dirB);
 
         List<FileStatus> allFiles = new ArrayList<>();
-        try (RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, true)) {
-            while (iter.hasNext()) {
-                allFiles.add(iter.next());
-            }
+        RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, true);
+        while (iter.hasNext()) {
+            allFiles.add(iter.next());
         }
         assertThat(allFiles.size()).isEqualTo(2);
         assertThat(allFiles.stream().filter(f -> f.getPath().equals(fileA)).count()).isEqualTo(1);

@@ -151,7 +151,7 @@ public class RESTTokenFileIO implements FileIO {
         }
     }
 
-    private FileIO fileIO() throws IOException {
+    public FileIO fileIO() throws IOException {
         tryToRefreshToken();
 
         FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);

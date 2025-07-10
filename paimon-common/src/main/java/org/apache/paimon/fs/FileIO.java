@@ -122,10 +122,9 @@ public interface FileIO extends Serializable, Closeable {
      */
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
         List<FileStatus> files = new ArrayList<>();
-        try (RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive)) {
-            while (iter.hasNext()) {
-                files.add(iter.next());
-            }
+        RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive);
+        while (iter.hasNext()) {
+            files.add(iter.next());
         }
         return files.toArray(new FileStatus[0]);
     }
@@ -171,9 +170,6 @@ public interface FileIO extends Serializable, Closeable {
                     }
                 }
             }
-
-            @Override
-            public void close() {}
         };
     }
 

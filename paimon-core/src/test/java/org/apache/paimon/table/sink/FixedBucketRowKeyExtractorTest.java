@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.bucket.PaimonBucketFunction;
+import org.apache.paimon.bucket.DefaultBucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -91,7 +91,7 @@ public class FixedBucketRowKeyExtractorTest {
                                 new DataField(3, "k", new IntType())));
 
         String[] bucketColsToTest = {"d", "ltz", "ntz"};
-        PaimonBucketFunction bucketFunction = new PaimonBucketFunction();
+        DefaultBucketFunction bucketFunction = new DefaultBucketFunction();
         for (String bucketCol : bucketColsToTest) {
             FixedBucketRowKeyExtractor extractor = extractor(rowType, "", bucketCol, "", bucketNum);
             BinaryRow binaryRow =

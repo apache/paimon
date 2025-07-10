@@ -41,11 +41,14 @@ import scala.collection.JavaConverters._
 object PaimonFunctions {
 
   val PAIMON_BUCKET: String = "bucket"
+  val MOD_BUCKET: String = "mod_bucket"
   val MAX_PT: String = "max_pt"
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
-    new BucketFunction(BucketFunctionType.DEFAULT),
+    new BucketFunction(PAIMON_BUCKET, BucketFunctionType.DEFAULT),
+    MOD_BUCKET,
+    new BucketFunction(MOD_BUCKET, BucketFunctionType.MOD),
     MAX_PT,
     new MaxPtFunction
   )
@@ -53,7 +56,9 @@ object PaimonFunctions {
   /** The bucket function type to the function name mapping */
   private val TYPE_FUNC_MAPPING = ImmutableMap.of(
     BucketFunctionType.DEFAULT,
-    PAIMON_BUCKET
+    PAIMON_BUCKET,
+    BucketFunctionType.MOD,
+    MOD_BUCKET
   )
 
   val names: ImmutableList[String] = FUNCTIONS.keySet.asList()
@@ -69,10 +74,7 @@ object PaimonFunctions {
  *
  * params arg0: bucket number, arg1...argn bucket keys.
  */
-class BucketFunction(bucketFunctionType: BucketFunctionType) extends UnboundFunction {
-
-  private val NAME = "bucket"
-
+class BucketFunction(NAME: String, bucketFunctionType: BucketFunctionType) extends UnboundFunction {
   override def bind(inputType: StructType): BoundFunction = {
     assert(inputType.fields(0).dataType == IntegerType, "bucket number field must be integer type")
 

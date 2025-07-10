@@ -19,7 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.bucket.PaimonBucketFunction;
+import org.apache.paimon.bucket.DefaultBucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
@@ -59,7 +59,8 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.parquet.hadoop.ParquetOutputFormat;
+import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1024,7 +1025,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         List<Map<Integer, List<InternalRow>>> dataset = new ArrayList<>();
         Map<Integer, List<InternalRow>> dataPerBucket = new HashMap<>(numOfBucket);
         int numOfPartition = Math.max(random.nextInt(10), 1);
-        PaimonBucketFunction bucketFunction = new PaimonBucketFunction();
+        DefaultBucketFunction bucketFunction = new DefaultBucketFunction();
         for (int i = 0; i < numOfPartition; i++) {
             for (int j = 0; j < Math.max(random.nextInt(200), 1); j++) {
                 BinaryRow data =

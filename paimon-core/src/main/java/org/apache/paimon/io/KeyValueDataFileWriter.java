@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.RowHelper;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
@@ -65,12 +65,11 @@ public abstract class KeyValueDataFileWriter
     private final SimpleStatsConverter keyStatsConverter;
     private final boolean isExternalPath;
     private final SimpleStatsConverter valueStatsConverter;
-    private final InternalRowSerializer keySerializer;
+    private final RowHelper keyKeeper;
     private final FileSource fileSource;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
 
     private BinaryRow minKey = null;
-    private InternalRow maxKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
@@ -99,7 +98,7 @@ public abstract class KeyValueDataFileWriter
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
         this.isExternalPath = isExternalPath;
         this.valueStatsConverter = new SimpleStatsConverter(valueType, options.statsDenseStore());
-        this.keySerializer = new InternalRowSerializer(keyType);
+        this.keyKeeper = new RowHelper(keyType.getFieldTypes());
         this.fileSource = fileSource;
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
@@ -114,8 +113,10 @@ public abstract class KeyValueDataFileWriter
             dataFileIndexWriter.write(kv.value());
         }
 
-        updateMinKey(kv);
-        updateMaxKey(kv);
+        keyKeeper.copyInto(kv.key());
+        if (minKey == null) {
+            minKey = keyKeeper.copiedRow();
+        }
 
         updateMinSeqNumber(kv);
         updateMaxSeqNumber(kv);
@@ -127,16 +128,6 @@ public abstract class KeyValueDataFileWriter
         if (LOG.isDebugEnabled()) {
             LOG.debug("Write to Path " + path + " key value " + kv.toString(keyType, valueType));
         }
-    }
-
-    private void updateMinKey(KeyValue kv) {
-        if (minKey == null) {
-            minKey = keySerializer.toBinaryRow(kv.key()).copy();
-        }
-    }
-
-    private void updateMaxKey(KeyValue kv) {
-        maxKey = kv.key();
     }
 
     private void updateMinSeqNumber(KeyValue kv) {
@@ -173,7 +164,7 @@ public abstract class KeyValueDataFileWriter
                 fileSize,
                 recordCount(),
                 minKey,
-                keySerializer.toBinaryRow(maxKey).copy(),
+                keyKeeper.copiedRow(),
                 keyStats,
                 valueStatsPair.getValue(),
                 minSeqNumber,
