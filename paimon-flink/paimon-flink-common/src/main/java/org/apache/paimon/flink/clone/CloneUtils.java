@@ -96,7 +96,7 @@ public class CloneUtils {
                     !StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must not be blank when clone a table.");
             checkArgument(
-                    CollectionUtils.isNotEmpty(excludedTables),
+                    CollectionUtils.isEmpty(excludedTables),
                     "excludedTables must be empty when clone a single table.");
             result.add(
                     new Tuple2<>(
