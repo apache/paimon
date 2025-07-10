@@ -132,7 +132,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitionPredicate(Either.Left(predicate))
+                        .withPartitionPredicate(Either.left(predicate))
                         .build();
         new CompactorSinkBuilder(table, true).withInput(source).build();
         env.execute();
@@ -172,7 +172,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitionPredicate(Either.Left(predicate))
+                        .withPartitionPredicate(Either.left(predicate))
                         .build();
         Integer sinkParalellism = new Random().nextInt(100) + 1;
         new CompactorSinkBuilder(

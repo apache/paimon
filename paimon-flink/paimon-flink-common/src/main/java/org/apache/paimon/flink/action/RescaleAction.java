@@ -104,7 +104,7 @@ public class RescaleAction extends TableActionBase {
                                 scanParallelism == null
                                         ? currentBucketNum(snapshot)
                                         : scanParallelism)
-                        .predicate(Either.Right(Collections.singletonList(partition)))
+                        .predicate(Either.right(Collections.singletonList(partition)))
                         .build();
 
         Map<String, String> bucketOptions = new HashMap<>(fileStoreTable.options());

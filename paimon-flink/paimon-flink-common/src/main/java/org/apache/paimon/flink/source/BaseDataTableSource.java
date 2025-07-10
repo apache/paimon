@@ -219,7 +219,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .sourceBounded(!unbounded)
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
-                        .predicate(Either.Left(getPredicateWithScanPartitions()))
+                        .predicate(Either.left(getPredicateWithScanPartitions()))
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());

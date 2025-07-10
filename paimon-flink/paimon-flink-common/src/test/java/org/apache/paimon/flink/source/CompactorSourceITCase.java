@@ -267,7 +267,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(isStreaming)
                         .withEnv(env)
-                        .withPartitionPredicate(Either.Right(specifiedPartitions))
+                        .withPartitionPredicate(Either.right(specifiedPartitions))
                         .build();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 

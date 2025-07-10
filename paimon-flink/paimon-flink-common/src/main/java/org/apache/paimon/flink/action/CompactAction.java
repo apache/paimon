@@ -195,7 +195,7 @@ public class CompactAction extends TableActionBase {
                 "partitions and where cannot be used together.");
         Predicate predicate = null;
         if (partitions != null) {
-            return Either.Right(partitions);
+            return Either.right(partitions);
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
                     new SimpleSqlPredicateConvertor(table.rowType());
@@ -212,7 +212,7 @@ public class CompactAction extends TableActionBase {
                     "Only partition key can be specialized in compaction action.");
         }
 
-        return Either.Left(predicate);
+        return Either.left(predicate);
     }
 
     private boolean buildForPostponeBucketCompaction(

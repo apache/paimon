@@ -23,11 +23,11 @@ import java.io.Serializable;
 /** Either class, A or B. Reference to Flink. */
 public abstract class Either<L, R> implements Serializable {
 
-    public static <L, R> Either<L, R> Left(L value) {
+    public static <L, R> Either<L, R> left(L value) {
         return new Left<>(value);
     }
 
-    public static <L, R> Either<L, R> Right(R value) {
+    public static <L, R> Either<L, R> right(R value) {
         return new Right<>(value);
     }
 
@@ -43,6 +43,7 @@ public abstract class Either<L, R> implements Serializable {
         return this.getClass() == Right.class;
     }
 
+    /** A Left value. */
     public static class Left<L, R> extends Either<L, R> {
         private L value;
 
@@ -55,7 +56,7 @@ public abstract class Either<L, R> implements Serializable {
         }
 
         public R right() {
-            throw new IllegalStateException("Cannot retrieve Right value on a Left");
+            throw new IllegalStateException("Cannot retrieve right value on a left");
         }
 
         public void setValue(L value) {
@@ -76,7 +77,7 @@ public abstract class Either<L, R> implements Serializable {
         }
 
         public String toString() {
-            return "Left(" + this.value.toString() + ")";
+            return "left(" + this.value.toString() + ")";
         }
 
         public static <L, R> Left<L, R> of(L left) {
@@ -84,6 +85,7 @@ public abstract class Either<L, R> implements Serializable {
         }
     }
 
+    /** A Right value. */
     public static class Right<L, R> extends Either<L, R> {
         private R value;
 
@@ -92,7 +94,7 @@ public abstract class Either<L, R> implements Serializable {
         }
 
         public L left() {
-            throw new IllegalStateException("Cannot retrieve Left value on a Right");
+            throw new IllegalStateException("Cannot retrieve left value on a right");
         }
 
         public R right() {
@@ -117,7 +119,7 @@ public abstract class Either<L, R> implements Serializable {
         }
 
         public String toString() {
-            return "Right(" + this.value.toString() + ")";
+            return "right(" + this.value.toString() + ")";
         }
 
         public static <L, R> Right<L, R> of(R right) {
