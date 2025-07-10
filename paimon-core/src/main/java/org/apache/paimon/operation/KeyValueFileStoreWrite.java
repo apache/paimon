@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -203,7 +202,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         partition, bucket, compactStrategy, compactExecutor, levels, dvMaintainer);
 
         return new MergeTreeWriter(
-                bufferSpillable(),
+                options.writeBufferSpillable(),
                 options.writeBufferSpillDiskSize(),
                 options.localSortMaxNumFileHandles(),
                 options.spillCompressOptions(),
@@ -217,11 +216,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.changelogProducer(),
                 restoreIncrement,
                 UserDefinedSeqComparator.create(valueType, options));
-    }
-
-    @VisibleForTesting
-    public boolean bufferSpillable() {
-        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode, true);
     }
 
     private CompactStrategy createCompactStrategy(CoreOptions options) {

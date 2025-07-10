@@ -81,13 +81,6 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      */
     void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck);
 
-    /**
-     * We detect whether it is in batch mode, if so, we do some optimization.
-     *
-     * @param isStreamingMode whether in streaming mode
-     */
-    void withExecutionMode(boolean isStreamingMode);
-
     /** With metrics to measure compaction. */
     FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
 

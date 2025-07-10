@@ -546,9 +546,8 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             key("write-buffer-spillable")
                     .booleanType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Whether the write buffer can be spillable. Enabled by default when using object storage or when 'target-file-size' is greater than 'write-buffer-size'.");
+                    .defaultValue(true)
+                    .withDescription("Whether the write buffer can be spillable.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
             key("write-buffer-for-append")
@@ -2172,14 +2171,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_SIZE).getBytes();
     }
 
-    public boolean writeBufferSpillable(
-            boolean usingObjectStore, boolean isStreaming, boolean hasPrimaryKey) {
-        // if not streaming mode, we turn spillable on by default.
-        return options.getOptional(WRITE_BUFFER_SPILLABLE)
-                .orElse(
-                        usingObjectStore
-                                || !isStreaming
-                                || targetFileSize(hasPrimaryKey) > writeBufferSize());
+    public boolean writeBufferSpillable() {
+        return options.get(WRITE_BUFFER_SPILLABLE);
     }
 
     public MemorySize writeBufferSpillDiskSize() {

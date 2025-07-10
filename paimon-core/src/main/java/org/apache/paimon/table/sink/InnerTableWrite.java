@@ -26,7 +26,4 @@ public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
     InnerTableWrite withWriteRestore(WriteRestore writeRestore);
 
     InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
-
-    // we detect whether in streaming mode, and do some optimization
-    InnerTableWrite withExecutionMode(boolean isStreamingMode);
 }
