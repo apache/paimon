@@ -174,6 +174,9 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
+        // `filter` may contains partition related predicate, but `partitionFilter` will overwrite
+        // it if `partitionFilter` is not null. So we must avoid to put part of partition filter in
+        // `filter`, another part in `partitionFilter`
         scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
@@ -220,6 +223,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         ReadBuilderImpl that = (ReadBuilderImpl) o;
         return Objects.equals(table.name(), that.table.name())
                 && Objects.equals(filter, that.filter)
+                && Objects.equals(partitionFilter, that.partitionFilter)
                 && Objects.equals(readType, that.readType);
     }
 
