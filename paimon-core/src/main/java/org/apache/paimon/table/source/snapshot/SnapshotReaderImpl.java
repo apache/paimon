@@ -211,8 +211,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
         if (partitions != null) {
             scan.withPartitionsFilter(partitions);
-        } else {
-            scan.withPartitionsFilter(Collections.emptyList());
         }
         return this;
     }
