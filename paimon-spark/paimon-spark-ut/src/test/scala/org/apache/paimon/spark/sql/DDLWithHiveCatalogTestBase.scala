@@ -741,16 +741,16 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           withDatabase(databaseName) {
             withTable("t1", "t2") {
               // test paimon table
-              sql("CREATE TABLE t1 (a INT, b int default 3) using paimon")
-              sql("INSERT INTO t1 (a) VALUES (1)")
-              checkAnswer(sql("SELECT * FROM t1"), Seq(Row(1, 3)))
+              spark.sql("CREATE TABLE t1 (a INT, b int default 3) using paimon")
+              spark.sql("INSERT INTO t1 (a) VALUES (1)")
+              checkAnswer(spark.sql("SELECT * FROM t1"), Seq(Row(1, 3)))
 
               // test non paimon table
               // todo: support default value for paimon format table
               if (catalogName != paimonHiveCatalogName) {
-                sql("CREATE TABLE t2 (a INT, b int default 3) using csv")
-                sql("INSERT INTO t2 (a) VALUES (1)")
-                checkAnswer(sql("SELECT * FROM t2"), Seq(Row(1, 3)))
+                spark.sql("CREATE TABLE t2 (a INT, b int default 3) using csv")
+                spark.sql("INSERT INTO t2 (a) VALUES (1)")
+                checkAnswer(spark.sql("SELECT * FROM t2"), Seq(Row(1, 3)))
               }
             }
           }
