@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -90,7 +91,9 @@ public class AppendCompactCoordinator {
     }
 
     public AppendCompactCoordinator(
-            FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+            FileStoreTable table,
+            boolean isStreaming,
+            @Nullable Either<Predicate, List<Map<String, String>>> partitionsFilter) {
         checkArgument(table.primaryKeys().isEmpty());
         this.snapshotManager = table.snapshotManager();
         CoreOptions options = table.coreOptions();
@@ -103,7 +106,7 @@ public class AppendCompactCoordinator {
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
                         : null;
-        this.filesIterator = new FilesIterator(table, isStreaming, filter);
+        this.filesIterator = new FilesIterator(table, isStreaming, partitionsFilter);
     }
 
     public List<AppendCompactTask> run() {
@@ -389,10 +392,16 @@ public class AppendCompactCoordinator {
         @Nullable private Iterator<ManifestEntry> currentIterator;
 
         public FilesIterator(
-                FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+                FileStoreTable table,
+                boolean isStreaming,
+                @Nullable Either<Predicate, List<Map<String, String>>> partitions) {
             this.snapshotReader = table.newSnapshotReader();
-            if (filter != null) {
-                snapshotReader.withFilter(filter);
+            if (partitions != null) {
+                if (partitions.isLeft()) {
+                    snapshotReader.withFilter(partitions.left());
+                } else {
+                    snapshotReader.withPartitionsFilter(partitions.right());
+                }
             }
             // drop stats to reduce memory
             if (table.coreOptions().manifestDeleteFileDropStats()) {

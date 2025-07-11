@@ -46,6 +46,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -363,7 +364,7 @@ public class CompactProcedure extends BaseProcedure {
             JavaSparkContext javaSparkContext) {
         List<AppendCompactTask> compactionTasks;
         try {
-            compactionTasks = new AppendCompactCoordinator(table, false, filter).run();
+            compactionTasks = new AppendCompactCoordinator(table, false, Either.left(filter)).run();
         } catch (EndOfScanException e) {
             compactionTasks = new ArrayList<>();
         }

@@ -26,6 +26,8 @@ import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -45,7 +47,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Integer shardIndexOfThisSubtask;
     private Integer shardNumberOfParallelSubtasks;
 
-    private Map<String, String> partitionSpec;
+    private @Nullable List<Map<String, String>> partitionFilter;
 
     private @Nullable Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter;
@@ -84,7 +86,13 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
-        this.partitionSpec = partitionSpec;
+        return withPartitionFilter(
+                partitionSpec == null ? null : Collections.singletonList(partitionSpec));
+    }
+
+    @Override
+    public ReadBuilder withPartitionFilter(@Nullable List<Map<String, String>> partitions) {
+        this.partitionFilter = partitions;
         return this;
     }
 
@@ -154,7 +162,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
-        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionSpec);
+        scan.withFilter(filter).withReadType(readType).withPartitionsFilter(partitionFilter);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "

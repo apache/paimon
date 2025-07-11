@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Either;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -44,6 +45,7 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 /** Log {@link SourceFactory} from {@link StaticFileStoreSplitEnumerator}. */
@@ -73,7 +75,7 @@ public class LogHybridSourceFactory
     public static FlinkSource buildHybridFirstSource(
             Table table,
             @Nullable RowType readType,
-            @Nullable Predicate predicate,
+            @Nullable Either<Predicate, List<Map<String, String>>> partitions,
             @Nullable NestedProjectedRowData rowData) {
         if (!(table instanceof DataTable)) {
             throw new UnsupportedOperationException(
@@ -89,8 +91,16 @@ public class LogHybridSourceFactory
             readBuilder.withReadType(readType);
         }
 
+        if (partitions != null) {
+            if (partitions.isLeft()) {
+                readBuilder.withFilter(partitions.left());
+            } else {
+                readBuilder.withPartitionFilter(partitions.right());
+            }
+        }
+
         return new FlinkHybridFirstSource(
-                readBuilder.withFilter(predicate),
+                readBuilder,
                 dataTable.snapshotManager(),
                 dataTable.coreOptions().toConfiguration(),
                 rowData);

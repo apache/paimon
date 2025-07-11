@@ -200,7 +200,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
-        scan.withPartitionsFilter(partitions);
+        if (partitions != null) {
+            scan.withPartitionsFilter(partitions);
+        } else {
+            scan.withPartitionsFilter(Collections.emptyList());
+        }
         return this;
     }
 
