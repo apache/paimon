@@ -44,7 +44,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 4L;
 
     protected final Map<String, String> options;
-    protected final boolean unawareBucket;
+    protected final boolean unordered;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
@@ -55,11 +55,11 @@ public class ContinuousFileStoreSource extends FlinkSource {
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            boolean unawareBucket,
+            boolean unordered,
             @Nullable NestedProjectedRowData rowData) {
         super(readBuilder, limit, rowData);
         this.options = options;
-        this.unawareBucket = unawareBucket;
+        this.unordered = unordered;
     }
 
     @Override
@@ -109,7 +109,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 nextSnapshotId,
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
-                unawareBucket,
+                unordered,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
                 options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));

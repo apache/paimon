@@ -223,11 +223,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             long monitorInterval,
             boolean emitSnapshotWatermark,
             boolean shuffleBucketWithPartition,
-            boolean unawareBucket,
+            boolean unordered,
             NestedProjectedRowData nestedProjectedRowData,
             boolean isBounded,
             @Nullable Long limit) {
-        SingleOutputStreamOperator<Split> singleOutputStreamOperator =
+        SingleOutputStreamOperator<Split> operator =
                 env.fromSource(
                                 new MonitorSource(
                                         readBuilder,
@@ -240,10 +240,9 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                         .forceNonParallel();
 
         DataStream<Split> sourceDataStream =
-                unawareBucket
-                        ? shuffleUnawareBucket(singleOutputStreamOperator)
-                        : shuffleNonUnawareBucket(
-                                singleOutputStreamOperator, shuffleBucketWithPartition);
+                unordered
+                        ? shuffleUnordered(operator)
+                        : shuffleOrdered(operator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
                 name + "-Reader",
@@ -251,12 +250,12 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                 new ReadOperator(readBuilder::newRead, nestedProjectedRowData, limit));
     }
 
-    private static DataStream<Split> shuffleUnawareBucket(
+    private static DataStream<Split> shuffleUnordered(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator) {
         return singleOutputStreamOperator.rebalance();
     }
 
-    private static DataStream<Split> shuffleNonUnawareBucket(
+    private static DataStream<Split> shuffleOrdered(
             SingleOutputStreamOperator<Split> singleOutputStreamOperator,
             boolean shuffleBucketWithPartition) {
         return singleOutputStreamOperator.partitionCustom(

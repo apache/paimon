@@ -87,31 +87,31 @@ public class FlinkSourceBuilderTest {
         // pk table && bucket-append-ordered is true
         Table table = createTable("t1", true, 2, true);
         FlinkSourceBuilder builder = new FlinkSourceBuilder(table);
-        assertFalse(builder.isUnawareBucket());
+        assertFalse(builder.isUnordered());
 
         // pk table && bucket-append-ordered is false
         table = createTable("t2", true, 2, false);
         builder = new FlinkSourceBuilder(table);
-        assertFalse(builder.isUnawareBucket());
+        assertFalse(builder.isUnordered());
 
         // pk table && bucket num == -1 && bucket-append-ordered is false
         table = createTable("t3", true, -1, false);
         builder = new FlinkSourceBuilder(table);
-        assertFalse(builder.isUnawareBucket());
+        assertFalse(builder.isUnordered());
 
         // append table && bucket num != 1 && bucket-append-ordered is true
         table = createTable("t4", false, 2, true);
         builder = new FlinkSourceBuilder(table);
-        assertFalse(builder.isUnawareBucket());
+        assertFalse(builder.isUnordered());
 
         // append table && bucket num == -1
         table = createTable("t5", false, -1, true);
         builder = new FlinkSourceBuilder(table);
-        assertTrue(builder.isUnawareBucket());
+        assertTrue(builder.isUnordered());
 
         // append table && bucket-append-ordered is false
         table = createTable("t6", false, 2, false);
         builder = new FlinkSourceBuilder(table);
-        assertTrue(builder.isUnawareBucket());
+        assertTrue(builder.isUnordered());
     }
 }

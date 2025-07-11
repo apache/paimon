@@ -84,7 +84,7 @@ public class FlinkSourceBuilder {
 
     private final Table table;
     private final Options conf;
-    private final boolean unawareBucket;
+    private final boolean unordered;
     private String sourceName;
     private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
@@ -100,12 +100,26 @@ public class FlinkSourceBuilder {
         this.table = table;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
-        this.unawareBucket =
-                (table instanceof FileStoreTable
-                                && ((FileStoreTable) table).bucketMode()
-                                        == BucketMode.BUCKET_UNAWARE)
-                        || (table.primaryKeys().isEmpty()
-                                && !this.conf.get(CoreOptions.BUCKET_APPEND_ORDERD));
+        this.unordered = unordered(table);
+    }
+
+    private static boolean unordered(Table table) {
+        if (!(table instanceof FileStoreTable)) {
+            return false;
+        }
+
+        if (!table.primaryKeys().isEmpty()) {
+            return false;
+        }
+
+        BucketMode bucketMode = ((FileStoreTable) table).bucketMode();
+        if (bucketMode == BucketMode.BUCKET_UNAWARE) {
+            return true;
+        } else if (bucketMode == BucketMode.HASH_FIXED) {
+            return !Options.fromMap(table.options()).get(CoreOptions.BUCKET_APPEND_ORDERED);
+        }
+
+        return false;
     }
 
     public FlinkSourceBuilder env(StreamExecutionEnvironment env) {
@@ -208,7 +222,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        unawareBucket,
+                        unordered,
                         outerProject()));
     }
 
@@ -219,7 +233,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(projectedRowType()),
                         table.options(),
                         limit,
-                        unawareBucket,
+                        unordered,
                         outerProject()));
     }
 
@@ -271,8 +285,8 @@ public class FlinkSourceBuilder {
     }
 
     @VisibleForTesting
-    public boolean isUnawareBucket() {
-        return unawareBucket;
+    public boolean isUnordered() {
+        return unordered;
     }
 
     /** Build source {@link DataStream} with {@link RowData}. */
@@ -360,7 +374,7 @@ public class FlinkSourceBuilder {
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
                         conf.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                        unawareBucket,
+                        unordered,
                         outerProject(),
                         isBounded,
                         limit);

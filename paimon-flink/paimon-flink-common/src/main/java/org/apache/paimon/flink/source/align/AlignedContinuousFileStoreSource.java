@@ -50,9 +50,9 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            boolean unawareBucket,
+            boolean unordered,
             @Nullable NestedProjectedRowData rowData) {
-        super(readBuilder, options, limit, unawareBucket, rowData);
+        super(readBuilder, options, limit, unordered, rowData);
     }
 
     @Override
@@ -81,7 +81,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 nextSnapshotId,
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
-                unawareBucket,
+                unordered,
                 options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
