@@ -33,7 +33,7 @@ under the License.
     <name>Paimon : Flink 1.x : Common</name>
 
     <properties>
-        <flink.version>${paimon-flink-common.flink.version}</flink.version>
+        <flink.version>1.20.1</flink.version>
     </properties>
 
     <dependencies>
