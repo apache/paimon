@@ -197,12 +197,10 @@ public class CompactAction extends TableActionBase {
         Predicate predicate = null;
         RowType partitionType = table.rowType().project(table.partitionKeys());
         if (partitions != null) {
-            return PartitionPredicate.fromMultiple(
+            return PartitionPredicate.fromMaps(
                     partitionType,
-                    PartitionPredicate.createBinaryPartitions(
-                            partitions,
-                            partitionType,
-                            ((FileStoreTable) table).coreOptions().partitionDefaultName()));
+                    partitions,
+                    ((FileStoreTable) table).coreOptions().partitionDefaultName());
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
                     new SimpleSqlPredicateConvertor(table.rowType());
