@@ -20,14 +20,21 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
+import org.apache.paimon.utils.Preconditions;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Config options for Paimon Iceberg compatibility. */
 public class IcebergOptions {
+
+    public static final String REST_CONFIG_PREFIX = "metadata.iceberg.rest.";
 
     public static final ConfigOption<StorageType> METADATA_ICEBERG_STORAGE =
             key("metadata.iceberg.storage")
@@ -79,7 +86,8 @@ public class IcebergOptions {
                     .intType()
                     .defaultValue(0)
                     .withDescription(
-                            "The number of old metadata files to keep after each table commit");
+                            "The number of old metadata files to keep after each table commit. "
+                                    + "For rest-catalog, it will keep 1 old metadata at least.");
 
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
@@ -147,6 +155,41 @@ public class IcebergOptions {
                     .defaultValue(false)
                     .withDescription("Skip updating Hive stats.");
 
+    private final Options options;
+
+    public IcebergOptions(Map<String, String> options) {
+        this(Options.fromMap(options));
+    }
+
+    public IcebergOptions(Options options) {
+        this.options = options;
+    }
+
+    public Map<String, String> icebergRestConfig() {
+        Map<String, String> restConfig = new HashMap<>();
+        options.keySet()
+                .forEach(
+                        key -> {
+                            if (key.startsWith(REST_CONFIG_PREFIX)) {
+                                String restConfigKey = key.substring(REST_CONFIG_PREFIX.length());
+                                Preconditions.checkArgument(
+                                        !restConfigKey.isEmpty(),
+                                        "config key '%s' for iceberg rest catalog is empty!",
+                                        key);
+                                restConfig.put(restConfigKey, options.get(key));
+                            }
+                        });
+        return restConfig;
+    }
+
+    public boolean deleteAfterCommitEnabled() {
+        return options.get(METADATA_DELETE_AFTER_COMMIT);
+    }
+
+    public int previousVersionsMax() {
+        return options.get(METADATA_PREVIOUS_VERSIONS_MAX);
+    }
+
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
         DISABLED("disabled", "Disable Iceberg compatibility support."),
@@ -158,7 +201,11 @@ public class IcebergOptions {
         HIVE_CATALOG(
                 "hive-catalog",
                 "Not only store Iceberg metadata like hadoop-catalog, "
-                        + "but also create Iceberg external table in Hive.");
+                        + "but also create Iceberg external table in Hive."),
+        REST_CATALOG(
+                "rest-catalog",
+                "Store Iceberg metadata in a REST catalog. "
+                        + "This allows integration with Iceberg REST catalog services.");
 
         private final String value;
         private final String description;
