@@ -206,6 +206,41 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/register:
+    post:
+      tags:
+        - table
+      summary: Register table
+      operationId: RegisterTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/DatabaseNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/TableAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables:
     get:
       tags:
@@ -1929,6 +1964,13 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/Schema'
+    RegisterTableRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        path:
+          type: string
     CreateViewRequest:
       type: object
       properties:

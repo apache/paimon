@@ -562,6 +562,18 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
+     * Register a paimon table to the catalog if it does not exist. It is an asynchronous operation
+     *
+     * @param identifier a table identifier
+     * @param path the path of the table
+     * @throws TableAlreadyExistException if the table already exists in the catalog.
+     */
+    default void registerTable(Identifier identifier, String path)
+            throws TableAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Whether this catalog supports list objects paged. If not, corresponding methods will fall
      * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
      * String)} would fall back to {@link #listTables(String)}.

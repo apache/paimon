@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -674,6 +675,13 @@ public class RESTApi {
     public void dropTable(Identifier identifier) {
         client.delete(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
+    }
+
+    public void registerTable(Identifier identifier, String path) {
+        client.post(
+                resourcePaths.registerTable(identifier.getDatabaseName()),
+                new RegisterTableRequest(identifier, path),
                 restAuthFunction);
     }
 
