@@ -70,6 +70,8 @@ public class CdcActionCommonUtils {
     public static final String METADATA_COLUMN = "metadata_column";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
     public static final String EAGER_INIT = "eager_init";
+    public static final String USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA =
+            "use_pkeys_from_source_for_paimon_schema";
 
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
@@ -122,7 +124,8 @@ public class CdcActionCommonUtils {
             CdcMetadataConverter[] metadataConverters,
             boolean caseSensitive,
             boolean strictlyCheckSpecified,
-            boolean requirePrimaryKeys) {
+            boolean requirePrimaryKeys,
+            boolean usePKeysFromSourceForPaimonSchema) {
         Schema.Builder builder = Schema.newBuilder();
 
         // options
@@ -165,7 +168,8 @@ public class CdcActionCommonUtils {
                 sourceSchemaPrimaryKeys,
                 allFieldNames,
                 strictlyCheckSpecified,
-                requirePrimaryKeys);
+                requirePrimaryKeys,
+                usePKeysFromSourceForPaimonSchema);
 
         // partition keys
         specifiedPartitionKeys = listCaseConvert(specifiedPartitionKeys, caseSensitive);
@@ -185,7 +189,8 @@ public class CdcActionCommonUtils {
             List<String> sourceSchemaPrimaryKeys,
             List<String> allFieldNames,
             boolean strictlyCheckSpecified,
-            boolean requirePrimaryKeys) {
+            boolean requirePrimaryKeys,
+            boolean usePKeysFromSourceForPaimonSchema) {
         if (!specifiedPrimaryKeys.isEmpty()) {
             if (allFieldNames.containsAll(specifiedPrimaryKeys)) {
                 builder.primaryKey(specifiedPrimaryKeys);
@@ -205,7 +210,7 @@ public class CdcActionCommonUtils {
             }
         }
 
-        if (!sourceSchemaPrimaryKeys.isEmpty()) {
+        if (usePKeysFromSourceForPaimonSchema && !sourceSchemaPrimaryKeys.isEmpty()) {
             builder.primaryKey(sourceSchemaPrimaryKeys);
             return;
         }
