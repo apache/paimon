@@ -87,6 +87,9 @@ public class SpecialFields {
             new DataField(
                     Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
 
+    public static final DataField ROW_ID =
+            new DataField(Integer.MAX_VALUE - 5, "_row_id", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
             Stream.of(SEQUENCE_NUMBER.name(), VALUE_KIND.name(), LEVEL.name(), ROW_KIND.name())
                     .collect(Collectors.toSet());

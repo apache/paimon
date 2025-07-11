@@ -58,9 +58,11 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
         if (dataSplit.beforeFiles().isEmpty()) {
-            return fullPhaseMergeRead.createReader(dataSplit); // full reading phase
+            return fullPhaseMergeRead
+                    .withRowId(withRowId)
+                    .createReader(dataSplit); // full reading phase
         } else {
-            return incrementalDiffRead.createReader((DataSplit) split);
+            return incrementalDiffRead.withRowId(withRowId).createReader((DataSplit) split);
         }
     }
 

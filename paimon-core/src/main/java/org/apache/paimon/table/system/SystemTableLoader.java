@@ -50,6 +50,7 @@ import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
 import static org.apache.paimon.table.system.TableIndexesTable.TABLE_INDEXES;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
+import static org.apache.paimon.table.system.WithRowIdTable.ROW_ID_TABLE;
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
@@ -72,6 +73,7 @@ public class SystemTableLoader {
                     .put(STATISTICS, StatisticTable::new)
                     .put(BINLOG, BinlogTable::new)
                     .put(TABLE_INDEXES, TableIndexesTable::new)
+                    .put(ROW_ID_TABLE, WithRowIdTable::new)
                     .build();
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());
