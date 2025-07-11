@@ -20,9 +20,11 @@ import json
 import logging
 import urllib.parse
 from abc import ABC, abstractmethod
+from packaging import version
 from typing import Dict, Optional, Type, TypeVar, Callable
 
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
@@ -78,13 +80,28 @@ class ExponentialRetryInterceptor:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def create_retry_strategy(self) -> Retry:
-        return Retry(
-            total=self.max_retries,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
-            backoff_factor=1,
-            raise_on_status=False
-        )
+        # Check urllib3 version for compatibility
+        urllib3_version = version.parse(urllib3.__version__)
+
+        # Common retry parameters
+        retry_params = {
+            'total': self.max_retries,
+            'read': self.max_retries,
+            'connect': self.max_retries,
+            'backoff_factor': 1,
+            'status_forcelist': [429, 500, 502, 503, 504],
+            'raise_on_status': False,
+            'raise_on_redirect': False,
+        }
+
+        # Handle version-specific parameter names
+        if urllib3_version >= version.parse("1.26.0"):
+            # For urllib3 >= 1.26.0, use 'allowed_methods'
+            retry_params['allowed_methods'] = ["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"]
+        else:
+            # For urllib3 < 1.26.0, use 'method_whitelist'
+            retry_params['method_whitelist'] = ["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"]
+        return Retry(**retry_params)
 
 
 class LoggingInterceptor:
