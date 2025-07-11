@@ -266,7 +266,6 @@ class GetDatabaseResponse(AuditRESTResponse):
                 f"updated_by={self.updated_by!r})")
 
 
-# 具体的响应类
 @dataclass
 class ConfigResponse(RESTResponse):
     defaults: Dict[str, Any]

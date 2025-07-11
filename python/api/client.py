@@ -207,7 +207,7 @@ class HttpClient(RESTClient):
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-        self.session.timeout = (180, 180)  # (连接超时, 读取超时) 3分钟
+        self.session.timeout = (180, 180)
 
         self.session.headers.update({
             'Accept': 'application/json'

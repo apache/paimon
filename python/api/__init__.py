@@ -112,8 +112,6 @@ class RESTApi:
     FUNCTION_NAME_PATTERN = "functionNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
 
-    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000  # 1小时
-
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
 
