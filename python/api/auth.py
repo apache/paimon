@@ -25,52 +25,130 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-from requests import PreparedRequest
-from requests.auth import AuthBase
 
 @dataclass
 class RESTAuthParameter:
-    """REST 认证参数"""
     method: str
     path: str
     data: str
     parameters: Dict[str, str]
 
 
-
 @dataclass
 class DLFToken:
-    """DLF Token 信息"""
     access_key_id: str
     access_key_secret: str
     security_token: Optional[str] = None
 
+    def __init__(self, options: Dict[str, str]):
+        from api import RESTCatalogOptions
+        self.access_key_id = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID)
+        self.access_key_secret = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET)
 
-class DLFAuthProvider:
-    """DLF 认证提供者常量"""
-    DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version"
-    DLF_CONTENT_MD5_HEADER_KEY = "content-md5"
-    DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256"
-    DLF_CONTENT_TYPE_KEY = "content-type"
+
+class AuthProvider(ABC):
+
+    @abstractmethod
+    def merge_auth_header(self, base_header: Dict[str, str], parammeter: RESTAuthParameter) -> Dict[str, str]:
+        """Merge authorization header into header."""
+
+
+class RESTAuthFunction:
+
+    def __init__(self, init_header: Dict[str, str], auth_provider: AuthProvider):
+        self.init_header = init_header.copy() if init_header else {}
+        self.auth_provider = auth_provider
+
+    def __call__(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
+        return self.auth_provider.merge_auth_header(self.init_header, rest_auth_parameter)
+
+    def apply(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
+        return self.__call__(rest_auth_parameter)
+
+
+class DLFAuthProvider(AuthProvider):
+    DLF_AUTHORIZATION_HEADER_KEY = "Authorization"
+    DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5"
+    DLF_CONTENT_TYPE_KEY = "Content-Type"
     DLF_DATE_HEADER_KEY = "x-dlf-date"
     DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token"
+    DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version"
+    DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256"
     DLF_CONTENT_SHA56_VALUE = "UNSIGNED-PAYLOAD"
+
+    AUTH_DATE_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
+    MEDIA_TYPE = "application/json"
+
+    def __init__(self,
+                 token: DLFToken,
+                 region: str):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.token = token
+        self.region = region
+        self._lock = threading.Lock()
+
+    def merge_auth_header(self,
+                          base_header: Dict[str, str],
+                          rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
+        try:
+            date_time = base_header.get(
+                self.DLF_DATE_HEADER_KEY.lower(),
+                datetime.now(timezone.utc).strftime(self.AUTH_DATE_TIME_FORMAT)
+            )
+            date = date_time[:8]
+
+            sign_headers = self.generate_sign_headers(
+                rest_auth_parameter.data,
+                date_time,
+                self.token.security_token
+            )
+
+            authorization = DLFAuthSignature.get_authorization(
+                rest_auth_parameter=rest_auth_parameter,
+                dlf_token=self.token,
+                region=self.region,
+                headers=sign_headers,
+                date_time=date_time,
+                date=date
+            )
+
+            headers_with_auth = base_header.copy()
+            headers_with_auth.update(sign_headers)
+            headers_with_auth[self.DLF_AUTHORIZATION_HEADER_KEY] = authorization
+
+            return headers_with_auth
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to merge auth header: {e}")
+
+    @classmethod
+    def generate_sign_headers(cls,
+                              data: Optional[str],
+                              date_time: str,
+                              security_token: Optional[str]) -> Dict[str, str]:
+        sign_headers = {}
+
+        sign_headers[cls.DLF_DATE_HEADER_KEY] = date_time
+        sign_headers[cls.DLF_CONTENT_SHA56_HEADER_KEY] = cls.DLF_CONTENT_SHA56_VALUE
+        sign_headers[cls.DLF_AUTH_VERSION_HEADER_KEY] = "v1"  # DLFAuthSignature.VERSION
+
+        if data is not None and data != "":
+            sign_headers[cls.DLF_CONTENT_TYPE_KEY] = cls.MEDIA_TYPE
+            sign_headers[cls.DLF_CONTENT_MD5_HEADER_KEY] = DLFAuthSignature.md5(data)
+
+        if security_token is not None:
+            sign_headers[cls.DLF_SECURITY_TOKEN_HEADER_KEY] = security_token
+        return sign_headers
 
 
 class DLFAuthSignature:
-    """生成阿里云 DLF 的授权签名"""
-
     VERSION = "v1"
-
-    # 常量定义
     SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256"
     PRODUCT = "DlfNext"
     HMAC_SHA256 = "sha256"
     REQUEST_TYPE = "aliyun_v4_request"
     SIGNATURE_KEY = "Signature"
     NEW_LINE = "\n"
-
-    # 需要签名的头部列表
     SIGNED_HEADERS = [
         DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY.lower(),
         DLFAuthProvider.DLF_CONTENT_TYPE_KEY.lower(),
@@ -89,10 +167,8 @@ class DLFAuthSignature:
                           date_time: str,
                           date: str) -> str:
         try:
-            # 构建规范请求
             canonical_request = cls.get_canonical_request(rest_auth_parameter, headers)
 
-            # 构建待签名字符串
             string_to_sign = cls.NEW_LINE.join([
                 cls.SIGNATURE_ALGORITHM,
                 date_time,
@@ -100,17 +176,14 @@ class DLFAuthSignature:
                 cls._sha256_hex(canonical_request)
             ])
 
-            # 计算签名密钥
             date_key = cls._hmac_sha256(f"aliyun_v4{dlf_token.access_key_secret}".encode('utf-8'), date)
             date_region_key = cls._hmac_sha256(date_key, region)
             date_region_service_key = cls._hmac_sha256(date_region_key, cls.PRODUCT)
             signing_key = cls._hmac_sha256(date_region_service_key, cls.REQUEST_TYPE)
 
-            # 计算最终签名
             result = cls._hmac_sha256(signing_key, string_to_sign)
             signature = cls._hex_encode(result)
 
-            # 构建授权字符串
             credential = f"{cls.SIGNATURE_ALGORITHM} Credential={dlf_token.access_key_id}/{date}/{region}/{cls.PRODUCT}/{cls.REQUEST_TYPE}"
             signature_part = f"{cls.SIGNATURE_KEY}={signature}"
 
@@ -208,150 +281,3 @@ class DLFAuthSignature:
     @classmethod
     def _trim(cls, value: str) -> str:
         return value.strip() if value else ""
-
-class AuthProvider(ABC):
-
-    @abstractmethod
-    def merge_auth_header(self, base_header: Dict[str, str], parammeter: RESTAuthParameter) -> Dict[str, str]:
-        """Merge authorization header into header."""
-
-class DLFAuthProvider(AuthProvider):
-    """阿里云 DLF 认证提供者"""
-
-    # 常量定义
-    DLF_AUTHORIZATION_HEADER_KEY = "Authorization"
-    DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5"
-    DLF_CONTENT_TYPE_KEY = "Content-Type"
-    DLF_DATE_HEADER_KEY = "x-dlf-date"
-    DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token"
-    DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version"
-    DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256"
-    DLF_CONTENT_SHA56_VALUE = "UNSIGNED-PAYLOAD"
-
-    # 日期时间格式化器
-    AUTH_DATE_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
-    MEDIA_TYPE = "application/json"
-
-    def __init__(self,
-                 token: DLFToken,
-                 region: str = "cn-hangzhou"):
-        """
-        初始化 DLF 认证提供者
-
-        Args:
-            token_loader: Token 加载器
-            token: 静态 Token
-            region: 区域
-        """
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.token = token
-        self.region = region
-        self._lock = threading.Lock()
-
-    def merge_auth_header(self,
-                          base_header: Dict[str, str],
-                          rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
-        """
-        合并认证头部
-
-        Args:
-            base_header: 基础头部
-            rest_auth_parameter: REST 认证参数
-
-        Returns:
-            包含认证信息的头部字典
-        """
-        try:
-            # 获取或生成日期时间
-            date_time = base_header.get(
-                self.DLF_DATE_HEADER_KEY.lower(),
-                datetime.now(timezone.utc).strftime(self.AUTH_DATE_TIME_FORMAT)
-            )
-            date = date_time[:8]  # 提取日期部分
-
-            # 生成签名头部
-            sign_headers = self.generate_sign_headers(
-                rest_auth_parameter.data,
-                date_time,
-                self.token.security_token
-            )
-
-            authorization = DLFAuthSignature.get_authorization(
-                rest_auth_parameter=rest_auth_parameter,
-                dlf_token=self.token,
-                region=self.region,
-                headers=sign_headers,
-                date_time=date_time,
-                date=date
-            )
-
-            # 合并所有头部
-            headers_with_auth = base_header.copy()
-            headers_with_auth.update(sign_headers)
-            headers_with_auth[self.DLF_AUTHORIZATION_HEADER_KEY] = authorization
-
-            return headers_with_auth
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to merge auth header: {e}")
-
-    @classmethod
-    def generate_sign_headers(cls,
-                              data: Optional[str],
-                              date_time: str,
-                              security_token: Optional[str]) -> Dict[str, str]:
-        sign_headers = {}
-
-        # 必需的头部
-        sign_headers[cls.DLF_DATE_HEADER_KEY] = date_time
-        sign_headers[cls.DLF_CONTENT_SHA56_HEADER_KEY] = cls.DLF_CONTENT_SHA56_VALUE
-        sign_headers[cls.DLF_AUTH_VERSION_HEADER_KEY] = "v1"  # DLFAuthSignature.VERSION
-        sign_headers[cls.DLF_CONTENT_TYPE_KEY] = cls.MEDIA_TYPE
-
-        # 如果有数据，添加内容相关头部
-        if data is not None and data != "":
-            sign_headers[cls.DLF_CONTENT_MD5_HEADER_KEY] = DLFAuthSignature.md5(data)
-
-        # 如果有安全令牌，添加安全令牌头部
-        if security_token is not None:
-            sign_headers[cls.DLF_SECURITY_TOKEN_HEADER_KEY] = security_token
-        return sign_headers
-
-# 方式2: 使用类实现函数对象
-class RESTAuthFunction:
-    """REST 认证函数实现类"""
-
-    def __init__(self, init_header: Dict[str, str], auth_provider: AuthProvider):
-        """
-        初始化 REST 认证函数
-
-        Args:
-            init_header: 初始头部信息
-            auth_provider: 认证提供者
-        """
-        self.init_header = init_header.copy() if init_header else {}
-        self.auth_provider = auth_provider
-
-    def __call__(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
-        """
-        应用认证函数
-
-        Args:
-            rest_auth_parameter: REST 认证参数
-
-        Returns:
-            包含认证信息的头部字典
-        """
-        return self.auth_provider.merge_auth_header(self.init_header, rest_auth_parameter)
-
-    def apply(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
-        """
-        应用认证函数（与 Java 接口保持一致）
-
-        Args:
-            rest_auth_parameter: REST 认证参数
-
-        Returns:
-            包含认证信息的头部字典
-        """
-        return self.__call__(rest_auth_parameter)
