@@ -18,11 +18,13 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from auth import RESTAuthFunction
-from api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, GetDatabaseResponse, ConfigResponse, PagedResponse, \
-    T
+from api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, GetDatabaseResponse, \
+    ConfigResponse, PagedResponse, T
 from api_resquest import Identifier, CreateDatabaseRequest
 
+
 class RESTCatalogOptions:
+
     URI = "uri"
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
@@ -66,6 +68,7 @@ class RESTUtil:
 
 
 class ResourcePaths:
+
     V1 = "v1"
     DATABASES = "databases"
     TABLES = "tables"
@@ -105,12 +108,8 @@ class RESTApi:
     HEADER_PREFIX = "header."
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
-
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
-    VIEW_NAME_PATTERN = "viewNamePattern"
-    FUNCTION_NAME_PATTERN = "functionNamePattern"
-    PARTITION_NAME_PATTERN = "partitionNamePattern"
 
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)

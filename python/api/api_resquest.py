@@ -24,10 +24,12 @@ from typing import Dict, List, Any, Optional
 class RESTRequest(ABC):
     pass
 
+
 @dataclass
 class Identifier:
     database_name: str
     object_name: str
+
 
 @dataclass
 class CreateDatabaseRequest(RESTRequest):

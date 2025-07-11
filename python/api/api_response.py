@@ -25,6 +25,7 @@ from api_resquest import Identifier
 
 T = TypeVar('T')
 
+
 @dataclass
 class PagedList(Generic[T]):
     elements: List[T]
