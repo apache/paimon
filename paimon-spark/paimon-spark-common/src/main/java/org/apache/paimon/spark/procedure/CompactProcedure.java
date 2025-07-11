@@ -47,6 +47,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -238,17 +239,18 @@ public class CompactProcedure extends BaseProcedure {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
+        RowType partitionType = table.schema().logicalPartitionType();
         Predicate filter =
                 condition == null
                         ? null
                         : ExpressionUtils.convertConditionToPaimonPredicate(
                                         condition,
                                         ((LogicalPlan) relation).output(),
-                                        table.rowType(),
+                                        partitionType,
                                         false)
                                 .getOrElse(null);
         PartitionPredicate partitionPredicate =
-                PartitionPredicate.fromPredicate(table.schema().logicalPartitionType(), filter);
+                PartitionPredicate.fromPredicate(partitionType, filter);
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
