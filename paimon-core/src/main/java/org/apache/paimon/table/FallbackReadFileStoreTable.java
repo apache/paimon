@@ -32,6 +32,7 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -334,6 +335,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
             mainScan.withPartitionsFilter(partitions);
             fallbackScan.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+            mainScan.withPartitionFilter(partitionPredicate);
+            fallbackScan.withPartitionFilter(partitionPredicate);
             return this;
         }
 

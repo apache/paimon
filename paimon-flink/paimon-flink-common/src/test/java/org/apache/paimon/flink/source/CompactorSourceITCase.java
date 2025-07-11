@@ -27,7 +27,7 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -60,7 +60,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -264,16 +263,15 @@ public class CompactorSourceITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
-        Predicate partitionPredicate =
-                createPartitionPredicate(
-                        specifiedPartitions,
-                        table.rowType(),
-                        table.coreOptions().partitionDefaultName());
         DataStreamSource<RowData> compactorSource =
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(isStreaming)
                         .withEnv(env)
-                        .withPartitionPredicate(partitionPredicate)
+                        .withPartitionPredicate(
+                                PartitionPredicate.fromMaps(
+                                        table.schema().logicalPartitionType(),
+                                        specifiedPartitions,
+                                        table.coreOptions().partitionDefaultName()))
                         .build();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 

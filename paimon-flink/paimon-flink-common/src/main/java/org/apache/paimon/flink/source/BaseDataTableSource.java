@@ -218,7 +218,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .sourceBounded(!unbounded)
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
-                        .predicate(getPredicateWithScanPartitions())
+                        .predicate(predicate)
+                        .partitionPredicate(partitionPredicate)
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
@@ -373,7 +374,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                 table.newReadBuilder()
                         .dropStats()
                         .withProjection(new int[0])
-                        .withFilter(getPredicateWithScanPartitions())
+                        .withFilter(predicate)
+                        .withPartitionFilter(partitionPredicate)
                         .newScan()
                         .plan()
                         .splits();

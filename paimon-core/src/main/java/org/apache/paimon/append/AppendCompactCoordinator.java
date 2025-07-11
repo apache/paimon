@@ -28,7 +28,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -90,7 +90,9 @@ public class AppendCompactCoordinator {
     }
 
     public AppendCompactCoordinator(
-            FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+            FileStoreTable table,
+            boolean isStreaming,
+            @Nullable PartitionPredicate partitionPredicate) {
         checkArgument(table.primaryKeys().isEmpty());
         this.snapshotManager = table.snapshotManager();
         CoreOptions options = table.coreOptions();
@@ -103,7 +105,7 @@ public class AppendCompactCoordinator {
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
                         : null;
-        this.filesIterator = new FilesIterator(table, isStreaming, filter);
+        this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate);
     }
 
     public List<AppendCompactTask> run() {
@@ -389,10 +391,12 @@ public class AppendCompactCoordinator {
         @Nullable private Iterator<ManifestEntry> currentIterator;
 
         public FilesIterator(
-                FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+                FileStoreTable table,
+                boolean isStreaming,
+                @Nullable PartitionPredicate partitionPredicate) {
             this.snapshotReader = table.newSnapshotReader();
-            if (filter != null) {
-                snapshotReader.withFilter(filter);
+            if (partitionPredicate != null) {
+                snapshotReader.withPartitionFilter(partitionPredicate);
             }
             // drop stats to reduce memory
             if (table.coreOptions().manifestDeleteFileDropStats()) {

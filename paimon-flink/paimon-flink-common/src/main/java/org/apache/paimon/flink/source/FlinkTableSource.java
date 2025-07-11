@@ -71,6 +71,12 @@ public abstract class FlinkTableSource
     protected final Options options;
 
     @Nullable protected Predicate predicate;
+    /**
+     * This field is only used for normal source (not lookup source). Specified partitions in lookup
+     * sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}.
+     */
+    @Nullable protected PartitionPredicate partitionPredicate;
+
     @Nullable protected int[][] projectFields;
     @Nullable protected Long limit;
     protected SplitStatistics splitStatistics;
@@ -86,6 +92,7 @@ public abstract class FlinkTableSource
             @Nullable Long limit) {
         this.table = table;
         this.options = Options.fromMap(table.options());
+        this.partitionPredicate = getPartitionPredicateWithOptions();
 
         this.predicate = predicate;
         this.projectFields = projectFields;
@@ -130,32 +137,30 @@ public abstract class FlinkTableSource
      * This method is only used for normal source (not lookup source). Specified partitions in
      * lookup sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}.
      */
-    protected Predicate getPredicateWithScanPartitions() {
+    private PartitionPredicate getPartitionPredicateWithOptions() {
         if (options.contains(FlinkConnectorOptions.SCAN_PARTITIONS)) {
-            Predicate partitionPredicate;
+            PartitionPredicate partitionPredicate;
             try {
                 partitionPredicate =
-                        PartitionPredicate.createPartitionPredicate(
-                                ParameterUtils.getPartitions(
-                                        options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
-                                                .split(";")),
-                                table.rowType(),
-                                options.get(CoreOptions.PARTITION_DEFAULT_NAME));
+                        PartitionPredicate.fromPredicate(
+                                table.rowType().project(table.partitionKeys()),
+                                PartitionPredicate.createPartitionPredicate(
+                                        ParameterUtils.getPartitions(
+                                                options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
+                                                        .split(";")),
+                                        table.rowType(),
+                                        options.get(CoreOptions.PARTITION_DEFAULT_NAME)));
+                return partitionPredicate;
             } catch (IllegalArgumentException e) {
                 // In older versions of Flink, however, lookup sources will first be treated as
                 // normal sources. So this method will also be visited by lookup tables, whose
                 // option value might be max_pt() or max_two_pt(). In this case we ignore the
                 // filters.
-                return predicate;
+                return null;
             }
 
-            if (predicate == null) {
-                return partitionPredicate;
-            } else {
-                return PredicateBuilder.and(predicate, partitionPredicate);
-            }
         } else {
-            return predicate;
+            return null;
         }
     }
 
@@ -222,7 +227,8 @@ public abstract class FlinkTableSource
                 List<PartitionEntry> partitionEntries =
                         table.newReadBuilder()
                                 .dropStats()
-                                .withFilter(getPredicateWithScanPartitions())
+                                .withFilter(predicate)
+                                .withPartitionFilter(partitionPredicate)
                                 .newScan()
                                 .listPartitionEntries();
                 long totalSize = 0;
@@ -238,7 +244,8 @@ public abstract class FlinkTableSource
                 List<Split> splits =
                         table.newReadBuilder()
                                 .dropStats()
-                                .withFilter(getPredicateWithScanPartitions())
+                                .withFilter(predicate)
+                                .withPartitionFilter(partitionPredicate)
                                 .withProjection(new int[0])
                                 .newScan()
                                 .plan()

@@ -31,6 +31,7 @@ import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -90,6 +91,7 @@ public class FlinkSourceBuilder {
     private StreamExecutionEnvironment env;
     @Nullable private int[][] projectedFields;
     @Nullable private Predicate predicate;
+    @Nullable private PartitionPredicate partitionPredicate;
     @Nullable private LogSourceProvider logSourceProvider;
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
@@ -154,6 +156,11 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder partitionPredicate(PartitionPredicate partitionPredicate) {
+        this.partitionPredicate = partitionPredicate;
+        return this;
+    }
+
     public FlinkSourceBuilder limit(@Nullable Long limit) {
         this.limit = limit;
         return this;
@@ -197,7 +204,12 @@ public class FlinkSourceBuilder {
         if (readType != null) {
             readBuilder.withReadType(readType);
         }
-        readBuilder.withFilter(predicate);
+        if (predicate != null) {
+            readBuilder.withFilter(predicate);
+        }
+        if (partitionPredicate != null) {
+            readBuilder.withPartitionFilter(partitionPredicate);
+        }
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
@@ -340,6 +352,7 @@ public class FlinkSourceBuilder {
                                                 table,
                                                 projectedRowType(),
                                                 predicate,
+                                                partitionPredicate,
                                                 outerProject()))
                                 .addSource(
                                         new LogHybridSourceFactory(logSourceProvider),

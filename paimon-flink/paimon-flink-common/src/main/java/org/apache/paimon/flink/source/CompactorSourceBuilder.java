@@ -24,7 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.CompactBucketsTable;
@@ -62,7 +62,7 @@ public class CompactorSourceBuilder {
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
-    @Nullable private Predicate partitionPredicate = null;
+    @Nullable private PartitionPredicate partitionPredicate = null;
     @Nullable private Duration partitionIdleTime = null;
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
@@ -89,8 +89,10 @@ public class CompactorSourceBuilder {
         compactBucketsTable =
                 compactBucketsTable.copy(
                         isContinuous ? streamingCompactOptions() : batchCompactOptions());
-        ReadBuilder readBuilder =
-                compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
+        ReadBuilder readBuilder = compactBucketsTable.newReadBuilder();
+        if (partitionPredicate != null) {
+            readBuilder.withPartitionFilter(partitionPredicate);
+        }
         if (CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
             readBuilder = readBuilder.dropStats();
         }
@@ -174,7 +176,8 @@ public class CompactorSourceBuilder {
         };
     }
 
-    public CompactorSourceBuilder withPartitionPredicate(@Nullable Predicate partitionPredicate) {
+    public CompactorSourceBuilder withPartitionPredicate(
+            @Nullable PartitionPredicate partitionPredicate) {
         this.partitionPredicate = partitionPredicate;
         return this;
     }

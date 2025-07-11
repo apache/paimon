@@ -24,11 +24,8 @@ import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -98,14 +95,12 @@ public class RescaleAction extends TableActionBase {
                 String.valueOf(snapshot.id()));
         fileStoreTable = fileStoreTable.copy(dynamicOptions);
 
-        RowType partitionType = fileStoreTable.schema().logicalPartitionType();
-        Predicate partitionPredicate =
-                PartitionPredicate.createPartitionPredicate(
-                        partitionType,
-                        InternalRowPartitionComputer.convertSpecToInternal(
-                                partition,
-                                partitionType,
-                                fileStoreTable.coreOptions().partitionDefaultName()));
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMap(
+                        fileStoreTable.schema().logicalPartitionType(),
+                        partition,
+                        fileStoreTable.coreOptions().partitionDefaultName());
+
         DataStream<RowData> source =
                 new FlinkSourceBuilder(fileStoreTable)
                         .env(env)
@@ -114,7 +109,7 @@ public class RescaleAction extends TableActionBase {
                                 scanParallelism == null
                                         ? currentBucketNum(snapshot)
                                         : scanParallelism)
-                        .predicate(partitionPredicate)
+                        .partitionPredicate(predicate)
                         .build();
 
         Map<String, String> bucketOptions = new HashMap<>(fileStoreTable.options());

@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -329,6 +330,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate) {
+            wrapped.withPartitionFilter(partitionPredicate);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
             wrapped.withPartitionsFilter(partitions);
             return this;
@@ -482,6 +489,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
             batchScan.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+            batchScan.withPartitionFilter(partitionPredicate);
             return this;
         }
 

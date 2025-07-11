@@ -359,6 +359,45 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testLotsOfPartitionsCompact() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        List<String> partitions = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            partitions.add("--partition");
+            partitions.add("k=" + i);
+        }
+
+        // repairing that the ut don't specify the real partition of table
+        runActionForUnawareTable(false, partitions);
+
+        // first compaction, snapshot will be 3.
+        checkFileAndRowSize(table, 3L, 0L, 1, 6);
+    }
+
+    @Test
     public void testTableConf() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),
@@ -440,14 +479,20 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void runAction(boolean isStreaming) throws Exception {
-        runAction(isStreaming, false);
+        runAction(isStreaming, false, Collections.emptyList());
+    }
+
+    private void runActionForUnawareTable(boolean isStreaming, List<String> extra)
+            throws Exception {
+        runAction(isStreaming, true, extra);
     }
 
     private void runActionForUnawareTable(boolean isStreaming) throws Exception {
-        runAction(isStreaming, true);
+        runAction(isStreaming, true, Collections.emptyList());
     }
 
-    private void runAction(boolean isStreaming, boolean unawareBucket) throws Exception {
+    private void runAction(boolean isStreaming, boolean unawareBucket, List<String> extra)
+            throws Exception {
         StreamExecutionEnvironment env;
         if (isStreaming) {
             env = streamExecutionEnvironmentBuilder().streamingMode().build();
@@ -485,6 +530,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                                 "dt=20221209,hh=15"));
             }
         }
+
+        baseArgs.addAll(extra);
 
         CompactAction action = createAction(CompactAction.class, baseArgs.toArray(new String[0]));
 

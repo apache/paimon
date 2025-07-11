@@ -91,7 +91,7 @@ public class SortCompactAction extends CompactAction {
                                                 identifier.getObjectName())
                                         .asSummaryString());
 
-        sourceBuilder.predicate(getPredicate());
+        sourceBuilder.partitionPredicate(getPredicate());
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
