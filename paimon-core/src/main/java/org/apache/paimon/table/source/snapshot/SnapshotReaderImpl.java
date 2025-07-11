@@ -201,7 +201,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate) {
-        scan.withPartitionFilter(partitionPredicate);
+        if (partitionPredicate != null) {
+            scan.withPartitionFilter(partitionPredicate);
+        }
         return this;
     }
 
