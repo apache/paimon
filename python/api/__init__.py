@@ -66,6 +66,10 @@ class RESTUtil:
 
 
 class ResourcePaths:
+    V1 = "v1"
+    DATABASES = "databases"
+    TABLES = "tables"
+    TABLE_DETAILS = "table-details"
 
     def __init__(self, base_path: str = ""):
         self.base_path = base_path.rstrip('/')
@@ -73,27 +77,27 @@ class ResourcePaths:
     @classmethod
     def for_catalog_properties(cls, options: dict[str, str]) -> 'ResourcePaths':
         prefix = options.get(RESTCatalogOptions.PREFIX, "")
-        return cls(f"/v1/{prefix}" if prefix else "/v1")
+        return cls(f"/{cls.V1}/{prefix}" if prefix else f"/{cls.V1}")
 
     def config(self) -> str:
-        return "/v1/config"
+        return f"/{self.V1}/config"
 
     def databases(self) -> str:
-        return f"{self.base_path}/databases"
+        return f"{self.base_path}/{self.DATABASES}"
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/databases/{name}"
+        return f"{self.base_path}/{self.DATABASES}/{name}"
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/databases/{database_name}/tables"
-        return f"{self.base_path}/tables"
+            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
+        return f"{self.base_path}/{self.TABLES}"
 
     def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/databases/{database_name}/tables/{table_name}"
+        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
 
     def table_details(self, database_name: str) -> str:
-        return f"{self.base_path}/databases/{database_name}/table-details"
+        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
 
 
 class RESTApi:
