@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
@@ -135,6 +136,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public AbstractDataTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
         snapshotReader.withPartitionsFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public AbstractDataTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        snapshotReader.withPartitionFilter(partitionPredicate);
         return this;
     }
 

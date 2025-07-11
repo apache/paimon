@@ -21,7 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 
@@ -58,17 +58,17 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
     private final FileStoreTable table;
     private final boolean streaming;
     private final long scanInterval;
-    private final Predicate filter;
+    private final PartitionPredicate partitionFilter;
 
     public AppendTableCompactSource(
             FileStoreTable table,
             boolean isStreaming,
             long scanInterval,
-            @Nullable Predicate filter) {
+            @Nullable PartitionPredicate partitionFilter) {
         this.table = table;
         this.streaming = isStreaming;
         this.scanInterval = scanInterval;
-        this.filter = filter;
+        this.partitionFilter = partitionFilter;
     }
 
     @Override
@@ -82,7 +82,7 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
         Preconditions.checkArgument(
                 readerContext.currentParallelism() == 1,
                 "Compaction Operator parallelism in paimon MUST be one.");
-        return new CompactSourceReader(table, streaming, filter, scanInterval);
+        return new CompactSourceReader(table, streaming, partitionFilter, scanInterval);
     }
 
     /** BucketUnawareCompactSourceReader. */
@@ -92,9 +92,12 @@ public class AppendTableCompactSource extends AbstractNonCoordinatedSource<Appen
         private final long scanInterval;
 
         public CompactSourceReader(
-                FileStoreTable table, boolean streaming, Predicate filter, long scanInterval) {
+                FileStoreTable table,
+                boolean streaming,
+                PartitionPredicate partitions,
+                long scanInterval) {
             this.scanInterval = scanInterval;
-            compactionCoordinator = new AppendCompactCoordinator(table, streaming, filter);
+            compactionCoordinator = new AppendCompactCoordinator(table, streaming, partitions);
         }
 
         @Override

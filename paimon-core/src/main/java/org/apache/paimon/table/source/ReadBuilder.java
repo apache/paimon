@@ -20,11 +20,14 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.List;
@@ -95,10 +98,13 @@ public interface ReadBuilder extends Serializable {
      * Push filters, will filter the data as much as possible, but it is not guaranteed that it is a
      * complete filter.
      */
-    ReadBuilder withFilter(Predicate predicate);
+    ReadBuilder withFilter(@Nullable Predicate predicate);
 
     /** Push partition filter. */
     ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
+
+    /** Push partition filters. */
+    ReadBuilder withPartitionFilter(PartitionPredicate partitionPredicate);
 
     ReadBuilder withBucket(int bucket);
 

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
@@ -29,6 +31,8 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Implementation for {@link ReadBuilder}. */
@@ -37,6 +41,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     private static final long serialVersionUID = 1L;
 
     private final InnerTable table;
+    private final RowType partitionType;
+    private final String defaultPartitionName;
 
     private Predicate filter;
 
@@ -45,7 +51,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Integer shardIndexOfThisSubtask;
     private Integer shardNumberOfParallelSubtasks;
 
-    private Map<String, String> partitionSpec;
+    private @Nullable PartitionPredicate partitionFilter;
 
     private @Nullable Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter;
@@ -56,6 +62,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
+        this.partitionType = table.rowType().project(table.partitionKeys());
+        this.defaultPartitionName = new CoreOptions(table.options()).partitionDefaultName();
     }
 
     @Override
@@ -84,7 +92,19 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
-        this.partitionSpec = partitionSpec;
+        if (partitionSpec != null) {
+            this.partitionFilter =
+                    fromPredicate(
+                            partitionType,
+                            createPartitionPredicate(
+                                    partitionSpec, partitionType, defaultPartitionName));
+        }
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withPartitionFilter(@Nullable PartitionPredicate partitions) {
+        this.partitionFilter = partitions;
         return this;
     }
 
@@ -154,7 +174,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
-        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionSpec);
+        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "

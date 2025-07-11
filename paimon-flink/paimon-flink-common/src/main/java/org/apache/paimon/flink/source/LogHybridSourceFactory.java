@@ -24,6 +24,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
@@ -74,6 +75,7 @@ public class LogHybridSourceFactory
             Table table,
             @Nullable RowType readType,
             @Nullable Predicate predicate,
+            @Nullable PartitionPredicate partitionPredicate,
             @Nullable NestedProjectedRowData rowData) {
         if (!(table instanceof DataTable)) {
             throw new UnsupportedOperationException(
@@ -88,9 +90,15 @@ public class LogHybridSourceFactory
         if (readType != null) {
             readBuilder.withReadType(readType);
         }
+        if (predicate != null) {
+            readBuilder.withFilter(predicate);
+        }
+        if (partitionPredicate != null) {
+            readBuilder.withPartitionFilter(partitionPredicate);
+        }
 
         return new FlinkHybridFirstSource(
-                readBuilder.withFilter(predicate),
+                readBuilder,
                 dataTable.snapshotManager(),
                 dataTable.coreOptions().toConfiguration(),
                 rowData);

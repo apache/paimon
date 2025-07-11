@@ -37,6 +37,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.ScanMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
@@ -199,8 +200,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate) {
+        scan.withPartitionFilter(partitionPredicate);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
-        scan.withPartitionsFilter(partitions);
+        if (partitions != null) {
+            scan.withPartitionsFilter(partitions);
+        } else {
+            scan.withPartitionsFilter(Collections.emptyList());
+        }
         return this;
     }
 

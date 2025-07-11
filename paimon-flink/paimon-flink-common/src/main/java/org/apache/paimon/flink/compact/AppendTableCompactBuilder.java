@@ -25,7 +25,7 @@ import org.apache.paimon.flink.sink.AppendTableCompactSink;
 import org.apache.paimon.flink.source.AppendTableCompactSource;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -62,7 +62,7 @@ public class AppendTableCompactBuilder {
 
     private boolean isContinuous = false;
 
-    @Nullable private Predicate partitionPredicate;
+    @Nullable private PartitionPredicate partitionPredicate;
     @Nullable private Duration partitionIdleTime = null;
 
     public AppendTableCompactBuilder(
@@ -76,8 +76,8 @@ public class AppendTableCompactBuilder {
         this.isContinuous = isContinuous;
     }
 
-    public void withPartitionPredicate(Predicate predicate) {
-        this.partitionPredicate = predicate;
+    public void withPartitionPredicate(PartitionPredicate partitionPredicate) {
+        this.partitionPredicate = partitionPredicate;
     }
 
     public void withPartitionIdleTime(@Nullable Duration partitionIdleTime) {

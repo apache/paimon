@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.PaimonSplitScan;
 import org.apache.paimon.spark.SparkUtils;
@@ -246,16 +247,23 @@ public class CompactProcedure extends BaseProcedure {
                                         table.rowType(),
                                         false)
                                 .getOrElse(null);
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(table.schema().logicalPartitionType(), filter);
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
                     compactAwareBucketTable(
-                            table, fullCompact, filter, partitionIdleTime, javaSparkContext);
+                            table,
+                            fullCompact,
+                            partitionPredicate,
+                            partitionIdleTime,
+                            javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    compactUnAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
+                    compactUnAwareBucketTable(
+                            table, partitionPredicate, partitionIdleTime, javaSparkContext);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -279,12 +287,12 @@ public class CompactProcedure extends BaseProcedure {
     private void compactAwareBucketTable(
             FileStoreTable table,
             boolean fullCompact,
-            @Nullable Predicate filter,
+            @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
-        if (filter != null) {
-            snapshotReader.withFilter(filter);
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
         }
         Set<BinaryRow> partitionToBeCompacted =
                 getHistoryPartition(snapshotReader, partitionIdleTime);
@@ -358,12 +366,12 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactUnAwareBucketTable(
             FileStoreTable table,
-            @Nullable Predicate filter,
+            @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
         List<AppendCompactTask> compactionTasks;
         try {
-            compactionTasks = new AppendCompactCoordinator(table, false, filter).run();
+            compactionTasks = new AppendCompactCoordinator(table, false, partitionPredicate).run();
         } catch (EndOfScanException e) {
             compactionTasks = new ArrayList<>();
         }
