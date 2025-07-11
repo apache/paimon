@@ -1,0 +1,324 @@
+"""
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
+import json
+import logging
+import urllib.parse
+from abc import ABC, abstractmethod
+from typing import Dict, Optional, Type, TypeVar, Callable
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3 import Retry
+
+from auth import RESTAuthParameter
+from api import RESTApi
+from api_response import ErrorResponse
+
+T = TypeVar('T', bound='RESTResponse')
+
+
+class RESTRequest(ABC):
+    pass
+
+
+class RESTException(Exception):
+
+    def __init__(self, message: str, cause: Optional[Exception] = None):
+        super().__init__(message)
+        self.cause = cause
+
+
+class ErrorHandler(ABC):
+
+    @abstractmethod
+    def accept(self, error: ErrorResponse, request_id: str) -> None:
+        pass
+
+
+class DefaultErrorHandler(ErrorHandler):
+
+    _instance = None
+
+    @classmethod
+    def get_instance(cls) -> 'DefaultErrorHandler':
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def accept(self, error: ErrorResponse, request_id: str) -> None:
+        message = f"REST API error (request_id: {request_id}): {error.message}"
+        if error.resource_name:
+            message += f" (resource: {error.resource_name})"
+        if error.resource_type:
+            message += f" (resource_type: {error.resource_type})"
+
+        raise RESTException(message)
+
+
+class ExponentialRetryInterceptor:
+
+    def __init__(self, max_retries: int = 5):
+        self.max_retries = max_retries
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def create_retry_strategy(self) -> Retry:
+        return Retry(
+            total=self.max_retries,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
+            backoff_factor=1,
+            raise_on_status=False
+        )
+
+
+class LoggingInterceptor:
+
+    REQUEST_ID_KEY = "x-request-id"
+    DEFAULT_REQUEST_ID = "unknown"
+
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def log_request(self, method: str, url: str, headers: Dict[str, str]) -> None:
+        request_id = headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
+        self.logger.debug(f"Request [{request_id}]: {method} {url}")
+
+    def log_response(self, status_code: int, headers: Dict[str, str]) -> None:
+        request_id = headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
+        self.logger.debug(f"Response [{request_id}]: {status_code}")
+
+
+class RESTClient(ABC):
+
+    @abstractmethod
+    def get(self, path: str, response_type: Type[T],
+            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+    @abstractmethod
+    def get_with_params(self, path: str, query_params: Dict[str, str],
+                        response_type: Type[T],
+                        rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+    @abstractmethod
+    def post(self, path: str, body: RESTRequest,
+             rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+    @abstractmethod
+    def post_with_response_type(self, path: str, body: RESTRequest, response_type: Type[T],
+                                rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+    @abstractmethod
+    def delete(self, path: str,
+               rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+    @abstractmethod
+    def delete_with_body(self, path: str, body: RESTRequest,
+                         rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        pass
+
+
+def _normalize_uri(uri: str) -> str:
+    if not uri or uri.strip() == "":
+        raise ValueError("uri is empty which must be defined.")
+
+    server_uri = uri.strip()
+
+    if server_uri.endswith("/"):
+        server_uri = server_uri[:-1]
+
+    if not server_uri.startswith("http://") and not server_uri.startswith("https://"):
+        server_uri = f"http://{server_uri}"
+
+    return server_uri
+
+
+def _parse_error_response(response_body: Optional[str], status_code: int) -> ErrorResponse:
+    if response_body:
+        try:
+            return ErrorResponse.from_json(response_body)
+        except Exception:
+            return ErrorResponse(
+                resource_type=None,
+                resource_name=None,
+                message=response_body,
+                code=status_code
+            )
+    else:
+        return ErrorResponse(
+            resource_type=None,
+            resource_name=None,
+            message="response body is null",
+            code=status_code
+        )
+
+
+def _get_headers_with_params(path: str, query_params: Dict[str, str],
+                             method: str, data: str,
+                             header_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> Dict[str, str]:
+    rest_auth_parameter = RESTAuthParameter(
+        path=path,
+        parameters=query_params,
+        method=method,
+        data=data
+    )
+    return header_function(rest_auth_parameter)
+
+
+def _get_headers(path: str, method: str, query_params: Dict[str, str], data: str,
+                 header_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> Dict[str, str]:
+    return _get_headers_with_params(path, query_params, method, data, header_function)
+
+
+class HttpClient(RESTClient):
+
+    def __init__(self, uri: str):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.uri = _normalize_uri(uri)
+        self.error_handler = DefaultErrorHandler.get_instance()
+        self.logging_interceptor = LoggingInterceptor()
+
+        self.session = requests.Session()
+
+        retry_interceptor = ExponentialRetryInterceptor(max_retries=5)
+        retry_strategy = retry_interceptor.create_retry_strategy()
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+        self.session.timeout = (180, 180)
+
+        self.session.headers.update({
+            'Accept': 'application/json'
+        })
+
+    def set_error_handler(self, error_handler: ErrorHandler) -> None:
+        self.error_handler = error_handler
+
+    def get(self, path: str, response_type: Type[T],
+            rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        auth_headers = _get_headers(path, "GET", {}, "", rest_auth_function)
+        url = self._get_request_url(path, None)
+
+        return self._execute_request("GET", url, headers=auth_headers,
+                                     response_type=response_type)
+
+    def get_with_params(self, path: str, query_params: Dict[str, str],
+                        response_type: Type[T],
+                        rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        auth_headers = _get_headers(path, "GET", query_params, None, rest_auth_function)
+        url = self._get_request_url(path, query_params)
+
+        return self._execute_request("GET", url, headers=auth_headers,
+                                     response_type=response_type)
+
+    def post(self, path: str, body: RESTRequest,
+             rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        return self.post_with_response_type(path, body, None, rest_auth_function)
+
+    def post_with_response_type(self, path: str, body: RESTRequest, response_type: Optional[Type[T]],
+                                rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        try:
+            body_str = RESTApi.to_json(body)
+            auth_headers = _get_headers(path, "POST", body_str, rest_auth_function)
+            url = self._get_request_url(path, None)
+
+            return self._execute_request("POST", url, data=body_str, headers=auth_headers,
+                                         response_type=response_type)
+        except json.JSONEncodeError as e:
+            raise RESTException("build request failed.", e)
+
+    def delete(self, path: str,
+               rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        auth_headers = _get_headers(path, "DELETE", "", rest_auth_function)
+        url = self._get_request_url(path, None)
+
+        return self._execute_request("DELETE", url, headers=auth_headers, response_type=None)
+
+    def delete_with_body(self, path: str, body: RESTRequest,
+                         rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
+        try:
+            body_str = RESTApi.to_json(body)
+            auth_headers = _get_headers(path, "DELETE", body_str, rest_auth_function)
+            url = self._get_request_url(path, None)
+
+            return self._execute_request("DELETE", url, data=body_str, headers=auth_headers,
+                                         response_type=None)
+        except json.JSONEncodeError as e:
+            raise RESTException("build request failed.", e)
+
+    def _get_request_url(self, path: str, query_params: Optional[Dict[str, str]]) -> str:
+        if not path or path.strip() == "":
+            full_path = self.uri
+        else:
+            full_path = self.uri + path
+
+        if query_params:
+            query_string = urllib.parse.urlencode(query_params)
+            full_path = f"{full_path}?{query_string}"
+
+        return full_path
+
+    def get_uri(self) -> str:
+        return self.uri
+
+    def _execute_request(self, method: str, url: str,
+                         data: Optional[str] = None,
+                         headers: Optional[Dict[str, str]] = None,
+                         response_type: Optional[Type[T]] = None) -> T:
+        try:
+            if headers:
+                self.logging_interceptor.log_request(method, url, headers)
+
+            response = self.session.request(
+                method=method,
+                url=url,
+                data=data.encode('utf-8') if data else None,
+                headers=headers
+            )
+
+            response_headers = dict(response.headers)
+            self.logging_interceptor.log_response(response.status_code, response_headers)
+
+            response_body_str = response.text if response.text else None
+
+            if not response.ok:
+                error = _parse_error_response(response_body_str, response.status_code)
+                request_id = response.headers.get(
+                    LoggingInterceptor.REQUEST_ID_KEY,
+                    LoggingInterceptor.DEFAULT_REQUEST_ID
+                )
+                self.error_handler.accept(error, request_id)
+
+            if response_type is not None and response_body_str is not None:
+                return response_type.from_json(response_body_str)
+            elif response_type is None:
+                return None
+            else:
+                raise RESTException("response body is null.")
+
+        except RESTException:
+            raise
+        except Exception as e:
+            raise RESTException("rest exception", e)
