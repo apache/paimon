@@ -27,7 +27,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.ResolverStyle;
-import java.time.format.SignStyle;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -41,62 +40,62 @@ public interface TagPeriodHandler {
 
     DateTimeFormatter HOUR_FORMATTER =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
                     .appendLiteral('-')
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2)
                     .appendLiteral('-')
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2)
                     .appendLiteral(" ")
-                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .appendValue(HOUR_OF_DAY, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     DateTimeFormatter HOUR_FORMATTER_WITHOUT_DASHES =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
+                    .appendValue(MONTH_OF_YEAR, 2)
+                    .appendValue(DAY_OF_MONTH, 2)
                     .appendLiteral(" ")
-                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .appendValue(HOUR_OF_DAY, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     DateTimeFormatter HOUR_FORMATTER_WITHOUT_DASHES_AND_SPACES =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
-                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
+                    .appendValue(MONTH_OF_YEAR, 2)
+                    .appendValue(DAY_OF_MONTH, 2)
+                    .appendValue(HOUR_OF_DAY, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     DateTimeFormatter MINUTE_FORMATTER =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
-                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
-                    .appendValue(MINUTE_OF_HOUR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
+                    .appendValue(MONTH_OF_YEAR, 2)
+                    .appendValue(DAY_OF_MONTH, 2)
+                    .appendValue(HOUR_OF_DAY, 2)
+                    .appendValue(MINUTE_OF_HOUR, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     DateTimeFormatter DAY_FORMATTER =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
                     .appendLiteral('-')
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2)
                     .appendLiteral('-')
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     DateTimeFormatter DAY_FORMATTER_WITHOUT_DASHES =
             new DateTimeFormatterBuilder()
-                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
-                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
-                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(YEAR, 4)
+                    .appendValue(MONTH_OF_YEAR, 2)
+                    .appendValue(DAY_OF_MONTH, 2)
                     .toFormatter()
-                    .withResolverStyle(ResolverStyle.LENIENT);
+                    .withResolverStyle(ResolverStyle.STRICT);
 
     void validateDelay(Duration delay);
 
