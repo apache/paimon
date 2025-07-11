@@ -139,29 +139,38 @@ public abstract class FlinkTableSource
      */
     private PartitionPredicate getPartitionPredicateWithOptions() {
         if (options.contains(FlinkConnectorOptions.SCAN_PARTITIONS)) {
-            PartitionPredicate partitionPredicate;
+            Predicate partitionPredicate = null;
+            org.apache.paimon.types.RowType partitionType =
+                    table.rowType().project(table.partitionKeys());
             try {
                 partitionPredicate =
-                        PartitionPredicate.fromPredicate(
-                                table.rowType().project(table.partitionKeys()),
-                                PartitionPredicate.createPartitionPredicate(
-                                        ParameterUtils.getPartitions(
-                                                options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
-                                                        .split(";")),
-                                        table.rowType(),
-                                        options.get(CoreOptions.PARTITION_DEFAULT_NAME)));
-                return partitionPredicate;
+                        PartitionPredicate.createPartitionPredicate(
+                                ParameterUtils.getPartitions(
+                                        options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
+                                                .split(";")),
+                                partitionType,
+                                options.get(CoreOptions.PARTITION_DEFAULT_NAME));
             } catch (IllegalArgumentException e) {
                 // In older versions of Flink, however, lookup sources will first be treated as
                 // normal sources. So this method will also be visited by lookup tables, whose
                 // option value might be max_pt() or max_two_pt(). In this case we ignore the
                 // filters.
-                return null;
             }
 
-        } else {
-            return null;
+            if (partitionPredicate != null) {
+                if (predicate != null) {
+                    partitionPredicate = PredicateBuilder.and(predicate, partitionPredicate);
+                }
+            } else {
+                partitionPredicate = predicate;
+            }
+
+            if (partitionPredicate != null) {
+                return PartitionPredicate.fromPredicate(partitionType, partitionPredicate);
+            }
         }
+
+        return null;
     }
 
     @Override
