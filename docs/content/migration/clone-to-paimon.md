@@ -70,7 +70,23 @@ clone \
 --target_database test \
 --parallelism 10 \
 --target_catalog_conf warehouse=my_warehouse
+--excluded_tables <excluded_tables_spec>
 ```
+You can use excluded tables spec to specify the tables that don't need to be cloned. The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+
+## Clone Hive Catalog
+
+```bash
+<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar \
+clone \
+--catalog_conf metastore=hive \
+--catalog_conf uri=thrift://localhost:9088 \
+--parallelism 10 \
+--target_catalog_conf warehouse=my_warehouse
+--excluded_tables <excluded_tables_spec>
+```
+You can use excluded tables spec to specify the tables that don't need to be cloned. The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+
 
 ## Clone Hudi Tables
 

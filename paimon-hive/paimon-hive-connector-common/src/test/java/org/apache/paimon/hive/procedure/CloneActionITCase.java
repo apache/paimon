@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -575,6 +576,87 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    @Test
+    public void testMigrateWholeCatalogWithExcludedTables() throws Exception {
+        String dbName1 = "hivedb" + StringUtils.randomNumericString(10);
+        String tableName1 = "hivetable1" + StringUtils.randomNumericString(10);
+        String tableName2 = "hivetable2" + StringUtils.randomNumericString(10);
+
+        String dbName2 = "hivedb" + StringUtils.randomNumericString(10);
+        String tableName3 = "hivetable1" + StringUtils.randomNumericString(10);
+        String tableName4 = "hivetable2" + StringUtils.randomNumericString(10);
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE " + dbName1);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING, id2 INT, id3 INT) STORED AS %s",
+                dbName1,
+                tableName1,
+                randomFormat());
+        sql(tEnv, "INSERT INTO TABLE %s.%s VALUES %s", dbName1, tableName1, data(100));
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING) PARTITIONED BY (id2 INT, id3 INT) STORED AS %s",
+                dbName1,
+                tableName2,
+                randomFormat());
+        sql(tEnv, "INSERT INTO TABLE %s.%s VALUES %s", dbName1, tableName2, data(100));
+
+        tEnv.executeSql("CREATE DATABASE " + dbName2);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING, id2 INT, id3 INT) STORED AS %s",
+                dbName2,
+                tableName3,
+                randomFormat());
+        sql(tEnv, "INSERT INTO TABLE %s.%s VALUES %s", dbName2, tableName3, data(100));
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING) PARTITIONED BY (id2 INT, id3 INT) STORED AS %s",
+                dbName2,
+                tableName4,
+                randomFormat());
+        sql(tEnv, "INSERT INTO TABLE %s.%s VALUES %s", dbName2, tableName4, data(100));
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+        List<String> db1Tables = ImmutableList.of(tableName2);
+        List<String> db2Tables = ImmutableList.of(tableName4);
+
+        sql(tEnv, "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '%s')", warehouse);
+        tEnv.useCatalog("PAIMON");
+
+        createAction(
+                        CloneAction.class,
+                        "clone",
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse,
+                        "--excluded_tables",
+                        dbName1 + "." + tableName1 + "," + dbName2 + "." + tableName3)
+                .run();
+
+        List<String> actualDB1Tables =
+                sql(tEnv, "show tables from %s", dbName1).stream()
+                        .map(row -> row.getField(0).toString())
+                        .collect(Collectors.toList());
+        List<String> actualDB2Tables =
+                sql(tEnv, "show tables from %s", dbName2).stream()
+                        .map(row -> row.getField(0).toString())
+                        .collect(Collectors.toList());
+
+        Assertions.assertThatList(actualDB1Tables).containsExactlyInAnyOrderElementsOf(db1Tables);
+        Assertions.assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
     }
 
     private String[] ddls(String format) {

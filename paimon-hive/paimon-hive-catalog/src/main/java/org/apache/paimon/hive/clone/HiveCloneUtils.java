@@ -25,6 +25,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -39,8 +40,10 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
@@ -64,23 +67,41 @@ public class HiveCloneUtils {
         return paimonOptions;
     }
 
-    public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws Exception {
+    public static List<Identifier> listTables(
+            HiveCatalog hiveCatalog, @Nullable List<String> excludedTables) throws Exception {
+        Set<String> excludedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(excludedTables)) {
+            excludedTableSet.addAll(excludedTables);
+        }
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         List<Identifier> results = new ArrayList<>();
         for (String database : client.getAllDatabases()) {
             for (String table : client.getAllTables(database)) {
-                results.add(Identifier.create(database, table));
+                Identifier identifier = Identifier.create(database, table);
+                if (excludedTableSet.contains(identifier.getFullName())) {
+                    continue;
+                }
+                results.add(identifier);
             }
         }
         return results;
     }
 
-    public static List<Identifier> listTables(HiveCatalog hiveCatalog, String database)
+    public static List<Identifier> listTables(
+            HiveCatalog hiveCatalog, String database, @Nullable List<String> excludedTables)
             throws Exception {
+        Set<String> excludedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(excludedTables)) {
+            excludedTableSet.addAll(excludedTables);
+        }
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         List<Identifier> results = new ArrayList<>();
         for (String table : client.getAllTables(database)) {
-            results.add(Identifier.create(database, table));
+            Identifier identifier = Identifier.create(database, table);
+            if (excludedTableSet.contains(identifier.getFullName())) {
+                continue;
+            }
+            results.add(identifier);
         }
         return results;
     }

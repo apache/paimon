@@ -37,6 +37,7 @@ import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 
 /** Clone source table to target table. */
@@ -52,6 +53,7 @@ public class CloneAction extends ActionBase {
 
     private final int parallelism;
     @Nullable private final String whereSql;
+    @Nullable private final List<String> excludedTables;
 
     public CloneAction(
             String sourceDatabase,
@@ -61,7 +63,8 @@ public class CloneAction extends ActionBase {
             String targetTableName,
             Map<String, String> targetCatalogConfig,
             @Nullable Integer parallelism,
-            @Nullable String whereSql) {
+            @Nullable String whereSql,
+            @Nullable List<String> excludedTables) {
         super(sourceCatalogConfig);
 
         Catalog sourceCatalog = catalog;
@@ -84,6 +87,7 @@ public class CloneAction extends ActionBase {
 
         this.parallelism = parallelism == null ? env.getParallelism() : parallelism;
         this.whereSql = whereSql;
+        this.excludedTables = excludedTables;
     }
 
     @Override
@@ -96,6 +100,7 @@ public class CloneAction extends ActionBase {
                         targetDatabase,
                         targetTableName,
                         catalog,
+                        excludedTables,
                         env);
 
         DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
