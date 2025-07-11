@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
@@ -97,11 +98,14 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
-        this.unawareBucket =
-                table instanceof FileStoreTable
-                        && ((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
+        this.unawareBucket =
+                (table instanceof FileStoreTable
+                                && ((FileStoreTable) table).bucketMode()
+                                        == BucketMode.BUCKET_UNAWARE)
+                        || (table.primaryKeys().isEmpty()
+                                && !this.conf.get(CoreOptions.BUCKET_APPEND_ORDERD));
     }
 
     public FlinkSourceBuilder env(StreamExecutionEnvironment env) {
@@ -264,6 +268,11 @@ public class FlinkSourceBuilder {
                 .map(Projection::of)
                 .map(p -> p.getOuterProjectRow(table.rowType()))
                 .orElse(null);
+    }
+
+    @VisibleForTesting
+    public boolean isUnawareBucket() {
+        return unawareBucket;
     }
 
     /** Build source {@link DataStream} with {@link RowData}. */

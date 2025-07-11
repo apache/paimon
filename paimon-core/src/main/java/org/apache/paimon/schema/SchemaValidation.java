@@ -542,7 +542,7 @@ public class SchemaValidation {
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(
-                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
+                        "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
             if (schema.primaryKeys().isEmpty()
