@@ -157,7 +157,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         StartingScanner.Result result;
         if (scanMode == FILE_MONITOR) {
             result = startingScanner.scan(snapshotReader);
-        } else if (options.needLookup()) {
+        } else if (skipLevel0()) {
             result = startingScanner.scan(snapshotReader.withLevelFilter(level -> level > 0));
             snapshotReader.withLevelFilter(Filter.alwaysTrue());
         } else if (options.changelogProducer().equals(FULL_COMPACTION)) {
@@ -174,16 +174,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             ScannedResult scannedResult = (ScannedResult) result;
             currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
-            LookupStrategy lookupStrategy = options.lookupStrategy();
-            if (scanMode == FILE_MONITOR) {
-                nextSnapshotId = currentSnapshotId + 1;
-            } else if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
-                // For DELETION_VECTOR_ONLY mode, we need to return the remaining data from level 0
-                // in the subsequent plan.
-                nextSnapshotId = currentSnapshotId;
-            } else {
-                nextSnapshotId = currentSnapshotId + 1;
-            }
+            nextSnapshotId = currentSnapshotId + 1;
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             LOG.debug(
@@ -202,6 +193,15 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             LOG.debug("There is no starting snapshot and currently there is no next snapshot.");
         }
         return SnapshotNotExistPlan.INSTANCE;
+    }
+
+    private boolean skipLevel0() {
+        LookupStrategy lookupStrategy = options.lookupStrategy();
+        if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
+            // Read level0 data for DELETION VECTOR ONLY mode
+            return false;
+        }
+        return lookupStrategy.needLookup;
     }
 
     private Plan nextPlan() {

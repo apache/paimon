@@ -22,14 +22,17 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 /** ITCase for deletion vector table. */
@@ -70,14 +73,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         try (BlockingIterator<Row, Row> iter =
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
-            assertThat(iter.collect(8))
+
+            // the first two values has will be merged
+            assertThat(iter.collect(6))
                     .containsExactlyInAnyOrder(
                             Row.ofKind(RowKind.INSERT, 1, "111111111"),
-                            Row.ofKind(RowKind.INSERT, 2, "2"),
-                            Row.ofKind(RowKind.INSERT, 3, "3"),
-                            Row.ofKind(RowKind.INSERT, 4, "4"),
                             Row.ofKind(RowKind.INSERT, 2, "2_1"),
                             Row.ofKind(RowKind.INSERT, 3, "3_1"),
+                            Row.ofKind(RowKind.INSERT, 4, "4"),
                             Row.ofKind(RowKind.INSERT, 2, "2_2"),
                             Row.ofKind(RowKind.INSERT, 4, "4_1"));
         }
@@ -118,20 +121,34 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         try (BlockingIterator<Row, Row> iter =
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
-            assertThat(iter.collect(12))
-                    .containsExactlyInAnyOrder(
-                            Row.ofKind(RowKind.INSERT, 1, "111111111"),
-                            Row.ofKind(RowKind.INSERT, 2, "2"),
-                            Row.ofKind(RowKind.INSERT, 3, "3"),
-                            Row.ofKind(RowKind.INSERT, 4, "4"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_1"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 3, "3"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 3, "3_1"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            if (changelogProducer.equals("none")) {
+                // the first two values has will be merged
+                assertThat(iter.collect(8))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.INSERT, 1, "111111111"),
+                                Row.ofKind(RowKind.INSERT, 2, "2_1"),
+                                Row.ofKind(RowKind.INSERT, 3, "3_1"),
+                                Row.ofKind(RowKind.INSERT, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            } else {
+                assertThat(iter.collect(12))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.INSERT, 1, "111111111"),
+                                Row.ofKind(RowKind.INSERT, 2, "2"),
+                                Row.ofKind(RowKind.INSERT, 3, "3"),
+                                Row.ofKind(RowKind.INSERT, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 3, "3"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 3, "3_1"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            }
         }
 
         // test read from COMPACT snapshot
@@ -379,5 +396,31 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         // disable dv and select
         sql("ALTER TABLE TT SET('deletion-vectors.enabled' = 'false')");
         assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
+    }
+
+    @Test
+    public void testStreamingReadLatestFullAppendWithCompactAndDv() throws Exception {
+        sql(
+                "CREATE TABLE test (a INT, b INT) WITH ('compaction.min.file-num' = '2', 'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO test VALUES (1, 1)");
+        sql("INSERT INTO test VALUES (2, 2)");
+        sql("CALL sys.compact('default.test')");
+
+        // wait compaction
+        waitUtil(
+                () -> sql("SELECT count(*) FROM `test$snapshots`").get(0).getField(0).equals(3L),
+                Duration.ofMinutes(1),
+                Duration.ofSeconds(20));
+
+        BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM test /*+ OPTIONS('scan.mode' = 'latest-full') */");
+        Assertions.assertThat(iter.collect(2))
+                .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+
+        sql("INSERT INTO test VALUES (3, 3)");
+        Assertions.assertThat(iter.collect(1)).containsExactly(Row.of(3, 3));
+
+        iter.close();
     }
 }
