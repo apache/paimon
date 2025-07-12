@@ -65,6 +65,8 @@ public class PrimaryKeyColumnTypeFileDataTest extends ColumnTypeFileDataTestBase
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
 
+                    // filter g: old file cannot apply filter, so the new file in the same partition
+                    // also cannot be filtered, the result contains all data
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
@@ -77,6 +79,9 @@ public class PrimaryKeyColumnTypeFileDataTest extends ColumnTypeFileDataTestBase
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
+                                    "1|100|101|102.0|103|104.00|105.0|106.0|107.00|108|109|110",
+                                    "1|500|501|502.0|503|504.00|505.0|506.0|507.00|508|509|510",
+                                    "1|600|601|602.0|603|604.00|605.0|606.0|607.00|608|609|610",
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",
                                     "2|300|301|302.0|303|304.00|305.0|306.0|307.00|308|309|310",
                                     "2|400|401|402.0|403|404.00|405.0|406.0|407.00|408|409|410");
