@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -718,7 +719,9 @@ public class HiveCatalog extends AbstractCatalog {
             } catch (UnsupportedOperationException ignored) {
             }
         }
-
+        if (!isPaimonTable(table)) {
+            throw new TableExistButNotPaimonException(identifier);
+        }
         throw new TableNotExistException(identifier);
     }
 
@@ -1021,7 +1024,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier, tableSchema, location, externalTable)));
         } catch (Exception e) {
             try {
-                if (!externalTable) {
+                if (!externalTable && !(e instanceof AlreadyExistsException)) {
                     fileIO.deleteDirectoryQuietly(location);
                 }
             } catch (Exception ee) {
