@@ -28,8 +28,14 @@ import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.connector.catalog.TableCatalogCapability;
 
 import javax.annotation.Nullable;
+
+import java.util.Collections;
+import java.util.Set;
+
+import static org.apache.spark.sql.connector.catalog.TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE;
 
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
@@ -40,6 +46,10 @@ public abstract class SparkBaseCatalog
     @Override
     public String name() {
         return catalogName;
+    }
+
+    public Set<TableCatalogCapability> capabilities() {
+        return Collections.singleton(SUPPORT_COLUMN_DEFAULT_VALUE);
     }
 
     @Override

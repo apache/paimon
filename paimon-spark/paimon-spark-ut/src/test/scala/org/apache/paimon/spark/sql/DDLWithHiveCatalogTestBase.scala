@@ -731,6 +731,33 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: default value") {
+    // Spark support default value since 3.4
+    if (gteqSpark3_4) {
+      Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+        catalogName =>
+          spark.sql(s"USE $catalogName")
+          val databaseName = "paimon_db"
+          withDatabase(databaseName) {
+            withTable("t1", "t2") {
+              // test paimon table
+              spark.sql("CREATE TABLE t1 (a INT, b int default 3) using paimon")
+              spark.sql("INSERT INTO t1 (a) VALUES (1)")
+              checkAnswer(spark.sql("SELECT * FROM t1"), Seq(Row(1, 3)))
+
+              // test non paimon table
+              // todo: support default value for paimon format table
+              if (catalogName != paimonHiveCatalogName) {
+                spark.sql("CREATE TABLE t2 (a INT, b int default 3) using csv")
+                spark.sql("INSERT INTO t2 (a) VALUES (1)")
+                checkAnswer(spark.sql("SELECT * FROM t2"), Seq(Row(1, 3)))
+              }
+            }
+          }
+      }
+    }
+  }
+
   def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
       .sql(s"DESC DATABASE EXTENDED $dbName")
