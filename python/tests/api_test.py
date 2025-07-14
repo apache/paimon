@@ -90,33 +90,6 @@ class ResourcePaths:
         return f"{self.prefix}/tables"
 
 
-class DataTokenStore:
-    """Data token storage"""
-    _tokens: Dict[str, RESTToken] = {}
-    _lock = threading.Lock()
-
-    @classmethod
-    def put_data_token(cls, warehouse: str, table_name: str, token: RESTToken) -> None:
-        """Store data token"""
-        key = f"{warehouse}#{table_name}"
-        with cls._lock:
-            cls._tokens[key] = token
-
-    @classmethod
-    def get_data_token(cls, warehouse: str, table_name: str) -> Optional[RESTToken]:
-        """Get data token"""
-        key = f"{warehouse}#{table_name}"
-        with cls._lock:
-            return cls._tokens.get(key)
-
-    @classmethod
-    def remove_data_token(cls, warehouse: str, table_name: str) -> None:
-        """Remove data token"""
-        key = f"{warehouse}#{table_name}"
-        with cls._lock:
-            cls._tokens.pop(key, None)
-
-
 # Exception classes
 class CatalogException(Exception):
     """Base catalog exception"""
@@ -743,14 +716,6 @@ class RESTCatalogServer:
 
         return self._mock_response(response, 200)
 
-    def set_data_token(self, identifier: Identifier, token: RESTToken) -> None:
-        """Set data token for testing"""
-        DataTokenStore.put_data_token(self.warehouse, identifier.get_full_name(), token)
-
-    def remove_data_token(self, identifier: Identifier) -> None:
-        """Remove data token"""
-        DataTokenStore.remove_data_token(self.warehouse, identifier.get_full_name())
-
     def add_no_permission_database(self, database: str) -> None:
         """Add no permission database"""
         self.no_permission_databases.append(database)
@@ -758,10 +723,6 @@ class RESTCatalogServer:
     def add_no_permission_table(self, identifier: Identifier) -> None:
         """Add no permission table"""
         self.no_permission_tables.append(identifier.get_full_name())
-
-    def get_data_token(self, identifier: Identifier) -> Optional[RESTToken]:
-        """Get data token"""
-        return DataTokenStore.get_data_token(self.warehouse, identifier.get_full_name())
 
     def mock_database(self, name: str, options: dict[str, str]) -> GetDatabaseResponse:
         return GetDatabaseResponse(
