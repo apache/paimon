@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.paimon.flink;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.CloneAction;
@@ -28,23 +28,17 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.apache.orc.OrcConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnJre;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.junit.jupiter.api.condition.JRE.JAVA_11;
-
-/** Test for clone iceberg tables. */
-@EnabledOnJre(value = JAVA_11)
+/** doc. */
 public class CloneActionForIcebergITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
@@ -98,9 +92,6 @@ public class CloneActionForIcebergITCase extends ActionITCaseBase {
         for (int i = 0; i < 50; i++) {
             insertValues.add(String.format("('%s', '%s', %s)", i, "A", i));
         }
-
-        URL location = OrcConf.class.getProtectionDomain().getCodeSource().getLocation();
-        System.out.println("Class " + OrcConf.class.getName() + " is loaded from: " + location);
 
         sql(
                 tEnv,
@@ -221,7 +212,6 @@ public class CloneActionForIcebergITCase extends ActionITCaseBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
         String[] formats = new String[] {"orc", "parquet", "avro"};
-        //        return formats[i];
-        return "orc";
+        return formats[i];
     }
 }

@@ -34,7 +34,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.iceberg.DataFile;
-import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.PartitionData;
@@ -49,6 +48,8 @@ import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.io.SeekableInputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -76,6 +77,9 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 
 /** A {@link HiveCloneExtractor} for Iceberg tables. */
 public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IcebergHiveCloneExtractor.class);
+
     @Override
     public boolean matches(Table table) {
         return table.getParameters()
@@ -99,15 +103,33 @@ public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
         TableMetadata metadata = TableMetadataParser.fromJson(metadataJson);
         Snapshot currentSnapshot = metadata.currentSnapshot();
 
+        if (metadata.schemas().size() > 1) {
+            LOG.warn("more than 1 schemas in iceberg!");
+        }
+        Preconditions.checkArgument(
+                metadata.specs().size() == 1,
+                "do not support clone iceberg table which had more than 1 partitionSpec."
+                        + "table: %s, specs: %s",
+                identifier.toString(),
+                metadata.specs());
+
         org.apache.iceberg.io.FileIO icebergFileIO = new IcebergFileIO(fileIO);
         List<ManifestFile> dataManifests = currentSnapshot.dataManifests(icebergFileIO);
         List<ManifestFile> deleteManifests = currentSnapshot.deleteManifests(icebergFileIO);
+        Preconditions.checkArgument(
+                deleteManifests.isEmpty(),
+                "do not support clone iceberg table which had 'DELETE' manifest file. "
+                        + "table: %s, size of deleteManifests: %s.",
+                identifier.toString(),
+                deleteManifests.size());
 
         List<DataFile> dataFiles = readDataEntries(dataManifests, icebergFileIO);
 
         if (partitionRowType.getFieldCount() == 0) {
+            // un-partition table
             return Collections.singletonList(toHivePartitionFiles(dataFiles, BinaryRow.EMPTY_ROW));
         } else {
+            // partition table
             List<HivePartitionFiles> results = new ArrayList<>();
             List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
             partitionRowType
@@ -175,7 +197,8 @@ public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
         List<Long> fileSizes = new ArrayList<>(dataFiles.size());
         String format = null;
         for (DataFile file : dataFiles) {
-            // note: file.path() will be deprecated in 2.0, file.location() was introduced in 1.7
+            // note: file.path() will be deprecated in 2.0, file.location() was introduced in 1.7,
+            // here using file.path() to be compatible with 1.7-
             org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(file.path().toString());
             if (format == null) {
                 format = file.format().toString();
@@ -196,17 +219,6 @@ public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
             }
         }
         return dateEntries;
-    }
-
-    private List<DeleteFile> readDeleteEntries(
-            List<ManifestFile> deleteManifests, org.apache.iceberg.io.FileIO io) {
-        List<DeleteFile> deleteEntries = new ArrayList<>();
-        for (ManifestFile deleteManifest : deleteManifests) {
-            for (DeleteFile dataFile : ManifestFiles.readDeleteManifest(deleteManifest, io, null)) {
-                deleteEntries.add(dataFile);
-            }
-        }
-        return deleteEntries;
     }
 
     private List<Object> partitionToObjects(RowType partitionRowType, PartitionData partition) {
