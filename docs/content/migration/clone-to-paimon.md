@@ -93,3 +93,9 @@ You can use excluded tables spec to specify the tables that don't need to be clo
 Clone Hudi needs dependency: [hudi-flink1.18-bundle-0.15.0.jar](https://repo1.maven.org/maven2/org/apache/hudi/hudi-flink1.18-bundle/0.15.0/hudi-flink1.18-bundle-0.15.0.jar)
 
 The execution method is the same as the Hive table mentioned above.
+
+## Clone Iceberg Tables
+
+Clone Iceberg needs dependency: [iceberg-flink-runtime-1.20-1.8.1.jar](https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.8.1/iceberg-flink-runtime-1.20-1.8.1.jar)
+
+The execution method is the same as the Hive table mentioned above.
