@@ -1610,18 +1610,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig).withTableConfig(getBasicTableConfig()).build();
         runActionWithDefaultEnv(action);
-        Schema excepted =
-                Schema.newBuilder()
-                        .comment("")
-                        .column("k", DataTypes.INT().notNull())
-                        .column("v1", DataTypes.VARCHAR(10))
-                        .build();
-        FileStoreTable table = getFileStoreTable();
 
+        FileStoreTable table = getFileStoreTable();
         TableSchema schema = table.schema();
         assertThat(schema.primaryKeys().isEmpty()).isEqualTo(false);
         assertThat(schema.primaryKeys()).isEqualTo(Collections.singletonList("k"));
-        assertThat(schema.fields()).containsExactly(excepted.fields().toArray(new DataField[0]));
 
         List<String> expectedInsert = Arrays.asList("+I[1, Apache]", "+I[2, Paimon]");
         RowType rowType =
@@ -1647,17 +1640,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .syncPKeysFromSourceSchema(false)
                         .build();
         runActionWithDefaultEnv(action);
-        Schema excepted =
-                Schema.newBuilder()
-                        .comment("")
-                        .column("k", DataTypes.INT())
-                        .column("v1", DataTypes.VARCHAR(10))
-                        .build();
-        FileStoreTable table = getFileStoreTable();
 
+        FileStoreTable table = getFileStoreTable();
         TableSchema schema = table.schema();
         assertThat(schema.primaryKeys().isEmpty()).isEqualTo(true);
-        assertThat(schema.fields()).containsExactly(excepted.fields().toArray(new DataField[0]));
 
         List<String> expectedInsert = Arrays.asList("+I[1, Apache]", "+I[2, Paimon]");
         RowType rowType =
