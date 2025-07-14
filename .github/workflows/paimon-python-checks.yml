@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: Check Code Style & Run Tests
+name: Check Code Style by Flake8 and Mypy
 
 on:
   push:
@@ -25,7 +25,7 @@ on:
       - '**/*.md'
 
 env:
-  PYTHON_VERSION: 3.10
+  PYTHON_VERSION: "3.10"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
