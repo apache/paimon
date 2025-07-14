@@ -19,6 +19,7 @@
 package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -91,6 +92,10 @@ public class IcebergSchema {
     @JsonIgnore
     public int highestFieldId() {
         return fields.stream().mapToInt(IcebergDataField::id).max().orElse(0);
+    }
+
+    public String toJson() {
+        return JsonSerdeUtil.toJson(this);
     }
 
     @Override

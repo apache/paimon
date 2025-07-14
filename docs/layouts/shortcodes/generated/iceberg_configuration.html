@@ -102,13 +102,13 @@ under the License.
             <td><h5>metadata.iceberg.previous-versions-max</h5></td>
             <td style="word-wrap: break-word;">0</td>
             <td>Integer</td>
-            <td>The number of old metadata files to keep after each table commit</td>
+            <td>The number of old metadata files to keep after each table commit. For rest-catalog, it will keep 1 old metadata at least.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.storage</h5></td>
             <td style="word-wrap: break-word;">disabled</td>
             <td><p>Enum</p></td>
-            <td>When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.<br /><br />Possible values:<ul><li>"disabled": Disable Iceberg compatibility support.</li><li>"table-location": Store Iceberg metadata in each table's directory.</li><li>"hadoop-catalog": Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li><li>"hive-catalog": Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li></ul></td>
+            <td>When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.<br /><br />Possible values:<ul><li>"disabled": Disable Iceberg compatibility support.</li><li>"table-location": Store Iceberg metadata in each table's directory.</li><li>"hadoop-catalog": Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li><li>"hive-catalog": Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li><li>"rest-catalog": Store Iceberg metadata in a REST catalog. This allows integration with Iceberg REST catalog services.</li></ul></td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.storage-location</h5></td>
