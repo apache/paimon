@@ -173,6 +173,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     partitionType,
                     keyType,
                     valueType,
+                    mfFactory,
                     this::pathFactory,
                     newReaderFactoryBuilder(),
                     snapshotManager(),

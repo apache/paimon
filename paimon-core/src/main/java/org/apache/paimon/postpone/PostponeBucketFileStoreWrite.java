@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.MemoryFileStoreWrite;
@@ -71,6 +72,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final FileIO fileIO;
     private final FileStorePathFactory pathFactory;
+    private final MergeFunctionFactory<KeyValue> mfFactory;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
 
     private boolean forceBufferSpill = false;
@@ -83,6 +85,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             RowType partitionType,
             RowType keyType,
             RowType valueType,
+            MergeFunctionFactory<KeyValue> mfFactory,
             BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder,
             SnapshotManager snapshotManager,
@@ -93,6 +96,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         super(snapshotManager, scan, options, partitionType, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
+        this.mfFactory = mfFactory;
         this.readerFactoryBuilder = readerFactoryBuilder;
 
         Options newOptions = new Options(options.toMap());
@@ -189,6 +193,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                 options.spillCompressOptions(),
                 options.writeBufferSpillDiskSize(),
                 ioManager,
+                mfFactory.create(),
                 writerFactory,
                 files -> newFileRead(partition, bucket, files),
                 forceBufferSpill,
