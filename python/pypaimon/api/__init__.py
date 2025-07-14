@@ -19,14 +19,14 @@ import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
 
-from api.auth import RESTAuthFunction
-from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
+from pypaimon.api.auth import RESTAuthFunction
+from pypaimon.api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, \
     ConfigResponse, PagedResponse, T
-from api.api_resquest import CreateDatabaseRequest
-from api.typedef import Identifier
-from api.client import HttpClient
-from api.auth import DLFAuthProvider, DLFToken
+from pypaimon.api.api_resquest import CreateDatabaseRequest
+from pypaimon.api.typedef import Identifier
+from pypaimon.api.client import HttpClient
+from pypaimon.api.auth import DLFAuthProvider, DLFToken
 
 
 class RESTCatalogOptions:

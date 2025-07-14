@@ -25,12 +25,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 import unittest
 
-import api
-from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, \
-    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, \
+from pypaimon import api
+from pypaimon.api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, \
     PaimonDataType
-from api.rest_json import JSON
-from api.typedef import Identifier
+from pypaimon.api.rest_json import JSON
+from pypaimon.api.typedef import Identifier
 
 
 @dataclass
@@ -780,7 +779,7 @@ class ApiTestCase(unittest.TestCase):
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
-            from api import RESTApi
+            from pypaimon.api import RESTApi
             options = {
                 'uri': f"http://localhost:{server.port}",
                 'warehouse': 'test_warehouse',
