@@ -1648,7 +1648,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         List<String> expectedInsert = Arrays.asList("+I[1, Apache]", "+I[2, Paimon]");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
                         new String[] {"k", "v1"});
         waitForResult(expectedInsert, table, rowType, Collections.emptyList());
     }
