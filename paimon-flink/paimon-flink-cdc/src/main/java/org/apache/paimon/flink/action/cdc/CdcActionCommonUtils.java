@@ -215,7 +215,7 @@ public class CdcActionCommonUtils {
             return;
         }
 
-        if (requirePrimaryKeys) {
+        if (requirePrimaryKeys && syncPKeysFromSourceSchema) {
             throw new IllegalArgumentException(
                     "Failed to set specified primary keys for sink table "
                             + tableName

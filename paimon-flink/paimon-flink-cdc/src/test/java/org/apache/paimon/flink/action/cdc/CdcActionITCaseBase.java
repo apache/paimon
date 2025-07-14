@@ -326,7 +326,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> computedColumnArgs = new ArrayList<>();
         private final List<String> typeMappingModes = new ArrayList<>();
         private final List<String> metadataColumns = new ArrayList<>();
-        private boolean usePKeysFromSourceForPaimonSchema = true;
+        private boolean syncPKeysFromSourceSchema = true;
 
         public SyncTableActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
             this.clazz = clazz;
@@ -372,8 +372,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
-        public SyncTableActionBuilder<T> usePKeysFromSourceForPaimonSchema(boolean flag) {
-            this.usePKeysFromSourceForPaimonSchema = flag;
+        public SyncTableActionBuilder<T> syncPKeysFromSourceSchema(boolean flag) {
+            this.syncPKeysFromSourceSchema = flag;
             return this;
         }
 
@@ -389,7 +389,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                                     "--table",
                                     tableName,
                                     "--sync_primary_keys_from_source_schema",
-                                    String.valueOf(usePKeysFromSourceForPaimonSchema)));
+                                    String.valueOf(syncPKeysFromSourceSchema)));
 
             args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));

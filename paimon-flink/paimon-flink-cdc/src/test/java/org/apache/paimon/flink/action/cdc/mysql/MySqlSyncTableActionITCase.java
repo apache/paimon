@@ -1633,7 +1633,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
-                        .usePKeysFromSourceForPaimonSchema(false)
+                        .syncPKeysFromSourceSchema(false)
                         .build();
         runActionWithDefaultEnv(action);
         Schema excepted =
