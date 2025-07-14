@@ -27,8 +27,8 @@ from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
 from api.auth import RESTAuthParameter
-from api import RESTApi, JSON
 from api.api_response import ErrorResponse
+from api.rest_json import JSON
 
 T = TypeVar('T', bound='RESTResponse')
 
@@ -249,7 +249,7 @@ class HttpClient(RESTClient):
     def post_with_response_type(self, path: str, body: RESTRequest, response_type: Optional[Type[T]],
                                 rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
-            body_str = RESTApi.to_json(body)
+            body_str = JSON.to_json(body)
             auth_headers = _get_headers(path, "POST", body_str, rest_auth_function)
             url = self._get_request_url(path, None)
 
@@ -268,7 +268,7 @@ class HttpClient(RESTClient):
     def delete_with_body(self, path: str, body: RESTRequest,
                          rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
-            body_str = RESTApi.to_json(body)
+            body_str = JSON.to_json(body)
             auth_headers = _get_headers(path, "DELETE", body_str, rest_auth_function)
             url = self._get_request_url(path, None)
 

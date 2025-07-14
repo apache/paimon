@@ -19,7 +19,6 @@ import logging
 import re
 import uuid
 from typing import Dict, List, Optional, Any, Union, Tuple
-from urllib.parse import unquote
 from dataclasses import dataclass
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -28,8 +27,11 @@ import unittest
 
 import api
 from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, \
-    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, PaimonDataType
+    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, \
+    PaimonDataType
+from api.rest_json import JSON
 from api.typedef import Identifier
+
 
 @dataclass
 class ErrorResponse(RESTResponse):
@@ -49,23 +51,6 @@ class ErrorResponse(RESTResponse):
     resource_name: Optional[str]
     message: str
     code: int
-
-
-# Utility classes
-class RESTUtil:
-    """REST utilities"""
-
-    @staticmethod
-    def decode_string(encoded: str) -> str:
-        """Decode URL-encoded string"""
-        return unquote(encoded)
-
-    @staticmethod
-    def validate_prefix_sql_pattern(pattern: str) -> None:
-        """Validate SQL pattern"""
-        # Simple validation - in real implementation would be more comprehensive
-        if not pattern:
-            raise ValueError("Pattern cannot be empty")
 
 
 class ResourcePaths:
@@ -358,7 +343,7 @@ class RESTCatalogServer:
                 for pair in query.split('&'):
                     if '=' in pair:
                         key, value = pair.split('=', 1)
-                        params[key.strip()] = RESTUtil.decode_string(value.strip())
+                        params[key.strip()] = api.RESTUtil.decode_string(value.strip())
                 return params
 
             def _authenticate(self, token: str, path: str, params: Dict[str, str],
@@ -434,7 +419,7 @@ class RESTCatalogServer:
         """Handle database-specific resource requests"""
         # Extract database name and resource path
         path_parts = resource_path[len(self.database_uri) + 1:].split('/')
-        database_name = RESTUtil.decode_string(path_parts[0])
+        database_name = api.RESTUtil.decode_string(path_parts[0])
 
         # Check database permissions
         if database_name in self.no_permission_databases:
@@ -458,7 +443,7 @@ class RESTCatalogServer:
         elif len(path_parts) >= 3:
             # Individual resource operations
             resource_type = path_parts[1]
-            resource_name = RESTUtil.decode_string(path_parts[2])
+            resource_name = api.RESTUtil.decode_string(path_parts[2])
             identifier = Identifier.create(database_name, resource_name)
 
             if resource_type == ResourcePaths.TABLES:
@@ -568,7 +553,7 @@ class RESTCatalogServer:
             return response, http_code
 
         try:
-            return api.JSON.to_json(response), http_code
+            return JSON.to_json(response), http_code
         except Exception as e:
             self.logger.error(f"Failed to serialize response: {e}")
             return str(e), 500
@@ -621,7 +606,8 @@ class RESTCatalogServer:
 
     def _match_name_pattern(self, name: str, pattern: str) -> bool:
         """Match name against SQL pattern"""
-        RESTUtil.validate_prefix_sql_pattern(pattern)
+        if not pattern:
+            raise ValueError("Pattern cannot be empty")
         regex_pattern = self._sql_pattern_to_regex(pattern)
         return re.match(regex_pattern, name) is not None
 
@@ -737,7 +723,8 @@ class RESTCatalogServer:
             updated_by="updated"
         )
 
-    def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str, schema: Schema) -> GetTableResponse:
+    def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str,
+                   schema: Schema) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
             name=identifier.get_object_name(),
@@ -787,7 +774,9 @@ class ApiTestCase(unittest.TestCase):
             }
             test_tables = {
                 "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True,
-                                              schema=TableSchema(1, [DataField("name", 0, "name", PaimonDataType('int'))], 1, [], [], {}, "")),
+                                              schema=TableSchema(1,
+                                                                 [DataField("name", 0, "name", PaimonDataType('int'))],
+                                                                 1, [], [], {}, "")),
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
@@ -804,7 +793,7 @@ class ApiTestCase(unittest.TestCase):
             self.assertSetEqual(set(api.list_databases()), {*test_databases})
             self.assertEqual(api.get_database('default'), test_databases.get('default'))
             table = api.get_table(Identifier.from_string('default.user'))
-            self.assertEqual(table.id , str(test_tables['default.user'].uuid))
+            self.assertEqual(table.id, str(test_tables['default.user'].uuid))
 
         finally:
             # Shutdown server

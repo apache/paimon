@@ -14,19 +14,22 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
-import json
+
 import logging
-from dataclasses import asdict
-from typing import Dict, List, Optional, Callable, Any, TypeVar, Type
+from typing import Dict, List, Optional, Callable
+from urllib.parse import unquote
+
 from api.auth import RESTAuthFunction
-from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, GetDatabaseResponse, \
+from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
+    GetDatabaseResponse, \
     ConfigResponse, PagedResponse, T
 from api.api_resquest import CreateDatabaseRequest
 from api.typedef import Identifier
+from api.client import HttpClient
+from api.auth import DLFAuthProvider, DLFToken
 
 
 class RESTCatalogOptions:
-
     URI = "uri"
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
@@ -59,6 +62,11 @@ class RESTUtil:
         return urllib.parse.quote(value)
 
     @staticmethod
+    def decode_string(encoded: str) -> str:
+        """Decode URL-encoded string"""
+        return unquote(encoded)
+
+    @staticmethod
     def extract_prefix_map(options: Dict[str, str], prefix: str) -> Dict[str, str]:
         result = {}
         config = options
@@ -70,7 +78,6 @@ class RESTUtil:
 
 
 class ResourcePaths:
-
     V1 = "v1"
     DATABASES = "databases"
     TABLES = "tables"
@@ -106,7 +113,6 @@ class ResourcePaths:
 
 
 class RESTApi:
-
     HEADER_PREFIX = "header."
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
@@ -115,10 +121,6 @@ class RESTApi:
 
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
-
-        from api.client import HttpClient
-        from api.auth import DLFAuthProvider, DLFToken
-
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
         auth_provider = DLFAuthProvider(
             DLFToken(options), options.get(RESTCatalogOptions.DLF_REGION)
@@ -264,34 +266,3 @@ class RESTApi:
             GetTableResponse,
             self.rest_auth_function
         )
-
-T = TypeVar('T')
-
-class JSON:
-    """Universal JSON serializer"""
-
-    @staticmethod
-    def from_json(json_str: str, target_class: Type[T]) -> T:
-        data = json.loads(json_str)
-        if hasattr(target_class, 'from_dict'):
-            return target_class.from_dict(data)
-        return data
-
-    @staticmethod
-    def to_json(obj: Any) -> str:
-        """Serialize any object to JSON"""
-        return json.dumps(obj, default=JSON._default_serializer)
-
-    @staticmethod
-    def _default_serializer(obj):
-        """Default serialization handler"""
-
-        # Handle objects with to_dict method
-        if hasattr(obj, 'to_dict') and callable(obj.to_dict):
-            return obj.to_dict()
-
-        # Handle dataclass objects
-        if hasattr(obj, '__dataclass_fields__'):
-            return asdict(obj)
-
-        raise TypeError(f"Object of type {type(obj).__name__} is not JSON")
