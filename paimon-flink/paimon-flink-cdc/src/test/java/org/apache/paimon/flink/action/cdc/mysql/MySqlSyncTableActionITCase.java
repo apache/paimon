@@ -1612,6 +1612,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         runActionWithDefaultEnv(action);
         Schema excepted =
                 Schema.newBuilder()
+                        .comment("")
                         .column("k", DataTypes.INT().notNull())
                         .column("v1", DataTypes.VARCHAR(10))
                         .build();
@@ -1630,14 +1631,18 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "check_sync_primary_keys_from_source_schema");
         mySqlConfig.put("table-name", "t");
 
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put("bucket", "1");
+
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(tableConfig)
                         .syncPKeysFromSourceSchema(false)
                         .build();
         runActionWithDefaultEnv(action);
         Schema excepted =
                 Schema.newBuilder()
+                        .comment("")
                         .column("k", DataTypes.INT())
                         .column("v1", DataTypes.VARCHAR(10))
                         .build();
