@@ -37,9 +37,9 @@ import java.util.Map;
 public class LanceUtils {
 
     private static final Class<?> ossFileIOKlass;
-    private static final Class<?> pluginFileIO;
+    private static final Class<?> pluginFileIOKlass;
     private static final Class<?> jindoFileIOKlass;
-    private static final Class<?> hadoopFileIO;
+    private static final Class<?> hadoopFileIOKlass;
 
     static {
         Class<?> klass;
@@ -62,14 +62,14 @@ public class LanceUtils {
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
             klass = null;
         }
-        pluginFileIO = klass;
+        pluginFileIOKlass = klass;
 
         try {
             klass = Class.forName("org.apache.paimon.fs.hadoop.HadoopFileIO");
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
             klass = null;
         }
-        hadoopFileIO = klass;
+        hadoopFileIOKlass = klass;
     }
 
     public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
@@ -90,9 +90,9 @@ public class LanceUtils {
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
             originOptions = ((JindoFileIO) fileIO).hadoopOptions();
-        } else if (pluginFileIO != null && pluginFileIO.isInstance(fileIO)) {
+        } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
-        } else if (hadoopFileIO != null && hadoopFileIO.isInstance(fileIO)) {
+        } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
             originOptions = new Options(((HadoopFileIO) fileIO).hadoopConf());
         } else {
             originOptions = new Options();
