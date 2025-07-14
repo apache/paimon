@@ -1599,4 +1599,52 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(expected, table, rowType, primaryKeys);
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testSyncPrimaryKeysFromSourceSchemaTrue() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_sync_primary_keys_from_source_schema");
+        mySqlConfig.put("table-name", "t");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig).withTableConfig(getBasicTableConfig()).build();
+        runActionWithDefaultEnv(action);
+        Schema excepted =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT().notNull())
+                        .column("v1", DataTypes.VARCHAR(10))
+                        .build();
+        checkTableSchema(excepted);
+        FileStoreTable table = getFileStoreTable();
+
+        TableSchema schema = table.schema();
+        assertThat(schema.primaryKeys().isEmpty()).isEqualTo(false);
+        assertThat(schema.primaryKeys()).isEqualTo(Collections.singletonList("k"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSyncPrimaryKeysFromSourceSchemaFalse() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_sync_primary_keys_from_source_schema");
+        mySqlConfig.put("table-name", "t");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .usePKeysFromSourceForPaimonSchema(false)
+                        .build();
+        runActionWithDefaultEnv(action);
+        Schema excepted =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v1", DataTypes.VARCHAR(10))
+                        .build();
+        checkTableSchema(excepted);
+        FileStoreTable table = getFileStoreTable();
+
+        TableSchema schema = table.schema();
+        assertThat(schema.primaryKeys().isEmpty()).isEqualTo(true);
+    }
 }

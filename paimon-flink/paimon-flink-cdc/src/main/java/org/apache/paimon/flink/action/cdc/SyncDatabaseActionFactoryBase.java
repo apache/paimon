@@ -34,13 +34,13 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.SYNC_PKEYS_FROM_SOURCE_SCHEMA;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_MAPPING;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX_DB;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX_DB;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA;
 
 /** Base {@link ActionFactory} for synchronizing into database. */
 public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseActionBase>
@@ -88,9 +88,9 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
                     new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
 
-        if (params.has(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA)) {
-            action.usePKeysFromSourceForPaimonSchema(
-                    Boolean.parseBoolean(params.get(USE_PKEYS_FROM_SOURCE_FOR_PAIMON_SCHEMA)));
+        if (params.has(SYNC_PKEYS_FROM_SOURCE_SCHEMA)) {
+            action.syncPKeysFromSourceSchema(
+                    Boolean.parseBoolean(params.get(SYNC_PKEYS_FROM_SOURCE_SCHEMA)));
         }
     }
 }

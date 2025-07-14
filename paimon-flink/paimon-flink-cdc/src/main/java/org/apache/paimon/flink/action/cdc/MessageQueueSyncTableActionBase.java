@@ -87,6 +87,6 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
                 caseSensitive,
                 true,
                 false,
-                this.usePKeysFromSourceForPaimonSchema);
+                this.syncPKeysFromSourceSchema);
     }
 }

@@ -202,7 +202,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         partitionKeys,
                         primaryKeys,
                         requirePrimaryKeys(),
-                        usePKeysFromSourceForPaimonSchema,
+                        syncPKeysFromSourceSchema,
                         partitionKeyMultiple,
                         metadataConverters);
         Pattern tblIncludingPattern = Pattern.compile(includingTables);

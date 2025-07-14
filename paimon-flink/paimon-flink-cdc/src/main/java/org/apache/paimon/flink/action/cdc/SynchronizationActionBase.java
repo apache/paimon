@@ -70,7 +70,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
     // this is to specify if we should use primary keys from source
     // in paimon schema if pkeys are not specified in action command
-    protected boolean usePKeysFromSourceForPaimonSchema = true;
+    protected boolean syncPKeysFromSourceSchema = true;
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
 
     public SynchronizationActionBase(
@@ -105,8 +105,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
         return this;
     }
 
-    public SynchronizationActionBase usePKeysFromSourceForPaimonSchema(boolean flag) {
-        this.usePKeysFromSourceForPaimonSchema = flag;
+    public SynchronizationActionBase syncPKeysFromSourceSchema(boolean flag) {
+        this.syncPKeysFromSourceSchema = flag;
         return this;
     }
 

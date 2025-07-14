@@ -457,3 +457,13 @@ CREATE TABLE t (
                    k INT PRIMARY KEY,
                    v1 VARCHAR(10)
 );
+
+-- ################################################################################
+--  testSyncPrimaryKeysFromSourceSchema{True/False}
+-- ################################################################################
+CREATE DATABASE check_sync_primary_keys_from_source_schema;
+USE check_sync_primary_keys_from_source_schema;
+CREATE TABLE t (
+    k INT PRIMARY KEY,
+    v1 VARCHAR(10)
+);

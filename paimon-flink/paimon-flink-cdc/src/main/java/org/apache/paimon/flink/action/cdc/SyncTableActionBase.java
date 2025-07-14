@@ -108,7 +108,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 caseSensitive,
                 true,
                 true,
-                this.usePKeysFromSourceForPaimonSchema);
+                this.syncPKeysFromSourceSchema);
     }
 
     @Override

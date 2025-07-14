@@ -155,7 +155,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             caseSensitive,
                             false,
                             true,
-                            this.usePKeysFromSourceForPaimonSchema);
+                            this.syncPKeysFromSourceSchema);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 Supplier<String> errMsg =
