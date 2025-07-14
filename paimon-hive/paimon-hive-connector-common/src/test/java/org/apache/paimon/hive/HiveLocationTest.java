@@ -85,7 +85,8 @@ public class HiveLocationTest {
 
     @Before
     public void before() throws IOException {
-        objectStorePath = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+        objectStorePath =
+                hiveShell.getBaseDir().toAbsolutePath().toString() + "/" + UUID.randomUUID();
 
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, objectStorePath);
@@ -246,19 +247,17 @@ public class HiveLocationTest {
         String[][] params =
                 new String[][] {
                     {"table1", objectStorePath},
-                    {"table2", hiveShell.getBaseDir().toAbsolutePath().toString()},
+                    {"table2", objectStorePath},
                 };
         for (String[] param : params) {
             String tableName = param[0];
             String warehouse = param[1];
-            boolean locationInProperties = true;
 
             Identifier identifier = Identifier.create(dbName, tableName);
             String location =
                     AbstractCatalog.newTableLocation(warehouse, identifier).toUri().toString();
 
-            String createTableSqlStr =
-                    getCreateTableSqlStr(tableName, location, locationInProperties);
+            String createTableSqlStr = getCreateTableSqlStr(tableName, location, false);
             testRWinHive(createTableSqlStr, location, tableName);
         }
         String associationSql = "select a,b from table1 union all select a,b from table2";
@@ -287,7 +286,7 @@ public class HiveLocationTest {
                                     + "'='%s' );",
                             location);
         } else {
-            partforLocation = String.format("location '%s'", location);
+            partforLocation = String.format("LOCATION '%s'", location);
         }
         return String.join("\n", createTable, partforLocation);
     }
