@@ -15,40 +15,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import logging
-import os
 import re
-import tempfile
-import time
 import uuid
-from collections import defaultdict
 from typing import Dict, List, Optional, Any, Union, Tuple
-from urllib.parse import parse_qs, unquote
-from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
+from urllib.parse import unquote
+from dataclasses import dataclass
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 import unittest
 
 import api
-from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, Identifier, \
-    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema
-from api import JSON
-
-
-@dataclass
-class PagedList:
-    """Paged list result"""
-    elements: List[Any]
-    next_page_token: Optional[str]
-
-# Response classes
-class RESTResponse(ABC):
-    """Base REST response"""
-    pass
-
+from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, \
+    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList
+from api.typedef import Identifier
 
 @dataclass
 class ErrorResponse(RESTResponse):
@@ -107,18 +88,6 @@ class ResourcePaths:
 
     def tables(self) -> str:
         return f"{self.prefix}/tables"
-
-    def views(self) -> str:
-        return f"{self.prefix}/views"
-
-    def functions(self) -> str:
-        return f"{self.prefix}/functions"
-
-    def rename_table(self) -> str:
-        return f"{self.prefix}/tables/rename"
-
-    def rename_view(self) -> str:
-        return f"{self.prefix}/views/rename"
 
 
 class DataTokenStore:
@@ -451,10 +420,6 @@ class RESTCatalogServer:
             # Databases endpoint
             if resource_path == self.database_uri or resource_path.startswith(self.database_uri + "?"):
                 return self._databases_api_handler(method, data, parameters)
-
-            # Rename endpoints
-            if resource_path == self.resource_paths.rename_table():
-                return self._rename_table_handle(data)
 
             # Global tables endpoint
             if resource_path.startswith(self.resource_paths.tables()):

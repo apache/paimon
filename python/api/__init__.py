@@ -20,8 +20,9 @@ from dataclasses import asdict
 from typing import Dict, List, Optional, Callable, Any, TypeVar, Type
 from api.auth import RESTAuthFunction
 from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, GetDatabaseResponse, \
-    ConfigResponse, PagedResponse, T, Identifier
+    ConfigResponse, PagedResponse, T
 from api.api_resquest import CreateDatabaseRequest
+from api.typedef import Identifier
 
 
 class RESTCatalogOptions:
