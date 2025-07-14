@@ -21,6 +21,7 @@ package org.apache.paimon.format.lance;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
+import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.jindo.JindoFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.oss.OSSFileIO;
@@ -38,6 +39,7 @@ public class LanceUtils {
     private static final Class<?> ossFileIOKlass;
     private static final Class<?> pluginFileIO;
     private static final Class<?> jindoFileIOKlass;
+    private static final Class<?> hadoopFileIO;
 
     static {
         Class<?> klass;
@@ -61,6 +63,13 @@ public class LanceUtils {
             klass = null;
         }
         pluginFileIO = klass;
+
+        try {
+            klass = Class.forName("org.apache.paimon.fs.hadoop.HadoopFileIO");
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            klass = null;
+        }
+        hadoopFileIO = klass;
     }
 
     public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
@@ -83,6 +92,8 @@ public class LanceUtils {
             originOptions = ((JindoFileIO) fileIO).hadoopOptions();
         } else if (pluginFileIO != null && pluginFileIO.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
+        } else if (hadoopFileIO != null && hadoopFileIO.isInstance(fileIO)) {
+            originOptions = new Options(((HadoopFileIO) fileIO).hadoopConf());
         } else {
             originOptions = new Options();
         }
@@ -90,6 +101,9 @@ public class LanceUtils {
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
         if ("oss".equals(schema)) {
+            assert originOptions.containsKey("fs.oss.endpoint");
+            assert originOptions.containsKey("fs.oss.accessKeyId");
+            assert originOptions.containsKey("fs.oss.accessKeySecret");
             storageOptions.put(
                     "endpoint",
                     "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));

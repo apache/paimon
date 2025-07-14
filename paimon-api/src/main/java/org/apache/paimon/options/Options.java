@@ -69,6 +69,11 @@ public class Options implements Serializable {
         map2.forEach(this::setString);
     }
 
+    public Options(Iterable<Map.Entry<String, String>> map) {
+        this();
+        map.forEach(entry -> setString(entry.getKey(), entry.getValue()));
+    }
+
     public static Options fromMap(Map<String, String> map) {
         return new Options(map);
     }
