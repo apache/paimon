@@ -42,7 +42,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
-        return generateSplits(table, jobConf);
+        return generateSplits(table, jobConf, numSplits);
     }
 
     @Override
