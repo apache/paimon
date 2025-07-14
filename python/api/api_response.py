@@ -19,7 +19,6 @@ limitations under the License.
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any, Generic, TypeVar, List
 from dataclasses import dataclass, field
-import json
 
 T = TypeVar('T')
 
@@ -267,7 +266,7 @@ class Schema:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            self.FIELD_FIELDS: self.fields,
+            self.FIELD_FIELDS: list(map(lambda f: DataField.to_dict(f), self.fields)),
             self.FIELD_PARTITION_KEYS: self.partition_keys,
             self.FIELD_PRIMARY_KEYS: self.primary_keys,
             self.FIELD_OPTIONS: self.options,
@@ -477,11 +476,6 @@ class ConfigResponse(RESTResponse):
 
     def to_dict(self) -> Dict[str, Any]:
         return {self.FILED_DEFAULTS: self.defaults}
-
-    @classmethod
-    def from_json(cls, json_str: str) -> 'ConfigResponse':
-        data = json.loads(json_str)
-        return cls.from_dict(data)
 
     def merge(self, options: Dict[str, str]) -> Dict[str, str]:
         merged = options.copy()
