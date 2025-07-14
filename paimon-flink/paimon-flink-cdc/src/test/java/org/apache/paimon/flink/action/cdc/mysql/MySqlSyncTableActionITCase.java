@@ -1621,6 +1621,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         TableSchema schema = table.schema();
         assertThat(schema.primaryKeys().isEmpty()).isEqualTo(false);
         assertThat(schema.primaryKeys()).isEqualTo(Collections.singletonList("k"));
+        assertThat(schema.fields()).containsExactly(excepted.fields().toArray(new DataField[0]));
     }
 
     @Test
@@ -1649,5 +1650,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         TableSchema schema = table.schema();
         assertThat(schema.primaryKeys().isEmpty()).isEqualTo(true);
+        assertThat(schema.fields()).containsExactly(excepted.fields().toArray(new DataField[0]));
     }
 }
