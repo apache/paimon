@@ -159,25 +159,127 @@ class ListTablesResponse(PagedResponse[str]):
     def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
 
+@dataclass
+class PaimonDataType:
+    FIELD_TYPE = "type"
+    FIELD_ELEMENT = "element"
+    FIELD_FIELDS = "fields"
+    FIELD_KEY = "key"
+    FIELD_VALUE = "value"
+
+    type: str
+    element: Optional['PaimonDataType'] = None
+    fields: List['DataField'] = field(default_factory=list)
+    key: Optional['PaimonDataType'] = None
+    value: Optional['PaimonDataType'] = None
+
+    @classmethod
+    def from_dict(cls, data: Any) -> 'PaimonDataType':
+        if isinstance(data, dict):
+            element = data.get(cls.FIELD_ELEMENT, None)
+            fields = data.get(cls.FIELD_FIELDS, None)
+            key = data.get(cls.FIELD_KEY, None)
+            value = data.get(cls.FIELD_VALUE, None)
+            if element is not None:
+                element = PaimonDataType.from_dict(data.get(cls.FIELD_ELEMENT)),
+            if fields is not None:
+                fields=list(map(lambda f: DataField.from_dict(f), fields)),
+            if key is not None:
+                key = PaimonDataType.from_dict(key)
+            if value is not None:
+                value = PaimonDataType.from_dict(value)
+            return cls(
+                type=data.get(cls.FIELD_TYPE),
+                element=element,
+                fields=fields,
+                key=key,
+                value=value,
+            )
+        else:
+            return cls(type=data)
+
+    def to_dict(self) -> Any:
+        if self.element is None and self.fields is None and self.key:
+            return self.type
+        if self.element is not None:
+            return {self.FIELD_TYPE: self.type, self.FIELD_ELEMENT: self.element}
+        elif self.fields is not None:
+            return {self.FIELD_TYPE: self.type, self.FIELD_FIELDS: self.fields}
+        elif self.value is not None:
+            return {self.FIELD_TYPE: self.type, self.FIELD_KEY: self.key, self.FIELD_VALUE: self.value}
+        elif self.key is not None and self.value is None:
+            return {self.FIELD_TYPE: self.type, self.FIELD_KEY: self.key}
+
+
+@dataclass
+class DataField:
+    FIELD_ID = "id"
+    FIELD_NAME = "name"
+    FIELD_TYPE = "type"
+    FIELD_DESCRIPTION = "description"
+
+    description: str
+    id: int
+    name: str
+    type: PaimonDataType
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'DataField':
+        return cls(
+            id=data.get(cls.FIELD_ID),
+            name=data.get(cls.FIELD_NAME),
+            type=PaimonDataType.from_dict(data.get(cls.FIELD_TYPE)),
+            description=data.get(cls.FIELD_DESCRIPTION),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            self.FIELD_ID: self.id,
+            self.FIELD_NAME: self.name,
+            self.FIELD_TYPE: PaimonDataType.to_dict(self.type),
+            self.FIELD_DESCRIPTION: self.description
+        }
+
 
 @dataclass
 class Schema:
-    """Table schema"""
-    fields: List[Dict[str, Any]]
+    FIELD_FIELDS = "fields"
+    FIELD_PARTITION_KEYS = "partitionKeys"
+    FIELD_PRIMARY_KEYS = "primaryKeys"
+    FIELD_OPTIONS = "options"
+    FIELD_COMMENT = "comment"
+
+    fields: List[DataField] = field(default_factory=list)
     partition_keys: List[str] = field(default_factory=list)
     primary_keys: List[str] = field(default_factory=list)
     options: Dict[str, str] = field(default_factory=dict)
     comment: Optional[str] = None
 
-    def field_names(self) -> List[str]:
-        return [field['name'] for field in self.fields]
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Schema':
+        return cls(
+            fields=list(map(lambda f: DataField.from_dict(f), data.get(cls.FIELD_FIELDS))),
+            partition_keys=data.get(cls.FIELD_PARTITION_KEYS),
+            primary_keys=data.get(cls.FIELD_PRIMARY_KEYS),
+            options=data.get(cls.FIELD_OPTIONS),
+            comment=data.get(cls.FIELD_COMMENT)
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            self.FIELD_FIELDS: self.fields,
+            self.FIELD_PARTITION_KEYS: self.partition_keys,
+            self.FIELD_PRIMARY_KEYS: self.primary_keys,
+            self.FIELD_OPTIONS: self.options,
+            self.FIELD_COMMENT: self.comment
+        }
 
 
 @dataclass
 class TableSchema:
     """Table schema with ID"""
     id: int
-    fields: List[Dict[str, Any]]
+    fields: List[DataField]
     highest_field_id: int
     partition_keys: List[str]
     primary_keys: List[str]
@@ -200,46 +302,6 @@ class TableMetadata:
     schema: TableSchema
     is_external: bool
     uuid: str
-
-
-@dataclass
-class Snapshot:
-    """Table snapshot"""
-    id: int
-    schema_id: int
-    base_manifest_list: str
-    delta_manifest_list: str
-    changelog_manifest_list: Optional[str]
-    commit_user: str
-    commit_identifier: int
-    commit_kind: str
-    time_millis: int
-    log_offsets: Dict[int, int]
-    total_record_count: int
-    delta_record_count: int
-    changelog_record_count: int
-    watermark: Optional[int]
-
-
-@dataclass
-class TableSnapshot:
-    """Table snapshot with statistics"""
-    snapshot: Snapshot
-    record_count: int
-    file_size_in_bytes: int
-    file_count: int
-    last_file_creation_time: int
-
-
-@dataclass
-class Partition:
-    """Table partition"""
-    spec: Dict[str, str]
-    record_count: int
-    file_size_in_bytes: int
-    file_count: int
-    last_file_creation_time: int
-    done: bool
 
 
 @dataclass
@@ -266,7 +328,7 @@ class GetTableResponse(AuditRESTResponse):
     path: Optional[str] = None
     is_external: Optional[bool] = None
     schema_id: Optional[int] = None
-    schema: Optional[Any] = None
+    schema: Optional[Schema] = None
 
     def __init__(self,
                  id: str,
@@ -274,7 +336,7 @@ class GetTableResponse(AuditRESTResponse):
                  path: str,
                  is_external: bool,
                  schema_id: int,
-                 schema: Any,
+                 schema: Schema,
                  owner: Optional[str] = None,
                  created_at: Optional[int] = None,
                  created_by: Optional[str] = None,
@@ -289,8 +351,20 @@ class GetTableResponse(AuditRESTResponse):
         self.schema = schema
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Dict[str, Any]:
-        return data
+    def from_dict(cls, data: Dict[str, Any]) -> 'GetTableResponse':
+        return cls(
+            id=data.get(cls.FIELD_ID),
+            name=data.get(cls.FIELD_NAME),
+            path=data.get(cls.FIELD_PATH),
+            is_external=data.get(cls.FIELD_IS_EXTERNAL),
+            schema_id=data.get(cls.FIELD_SCHEMA_ID),
+            schema=Schema.from_dict(data.get(cls.FIELD_SCHEMA)),
+            owner=data.get(cls.FIELD_OWNER),
+            created_at=data.get(cls.FIELD_CREATED_AT),
+            created_by=data.get(cls.FIELD_CREATED_BY),
+            updated_at=data.get(cls.FIELD_UPDATED_AT),
+            updated_by=data.get(cls.FIELD_UPDATED_BY)
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -299,7 +373,7 @@ class GetTableResponse(AuditRESTResponse):
             self.FIELD_PATH: self.path,
             self.FIELD_IS_EXTERNAL: self.is_external,
             self.FIELD_SCHEMA_ID: self.schema_id,
-            self.FIELD_SCHEMA: self.schema
+            self.FIELD_SCHEMA: Schema.to_dict(self.schema)
         }
         if self.owner is not None:
             result[self.FIELD_OWNER] = self.owner

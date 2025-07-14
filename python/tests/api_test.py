@@ -28,7 +28,7 @@ import unittest
 
 import api
 from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, \
-    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList
+    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, PaimonDataType
 from api.typedef import Identifier
 
 @dataclass
@@ -786,8 +786,8 @@ class ApiTestCase(unittest.TestCase):
                 "prod_db": server.mock_database("prod_db", {"env": "prod"})
             }
             test_tables = {
-                "default.user": TableMetadata(uuid=uuid.uuid4(), is_external=True,
-                                              schema=TableSchema(1, [{"name": "int"}], 1, [], [], {}, "")),
+                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True,
+                                              schema=TableSchema(1, [DataField("name", 0, "name", PaimonDataType('int'))], 1, [], [], {}, "")),
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
@@ -804,7 +804,7 @@ class ApiTestCase(unittest.TestCase):
             self.assertSetEqual(set(api.list_databases()), {*test_databases})
             self.assertEqual(api.get_database('default'), test_databases.get('default'))
             table = api.get_table(Identifier.from_string('default.user'))
-            self.assertEqual(table.get('id') , str(test_tables['default.user'].uuid))
+            self.assertEqual(table.id , str(test_tables['default.user'].uuid))
 
         finally:
             # Shutdown server
