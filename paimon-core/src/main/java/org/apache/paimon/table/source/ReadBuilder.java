@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
@@ -99,6 +100,9 @@ public interface ReadBuilder extends Serializable {
 
     /** Push partition filter. */
     ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
+
+    /** Push partition filters. */
+    ReadBuilder withPartitionFilter(PartitionPredicate partitionPredicate);
 
     ReadBuilder withBucket(int bucket);
 

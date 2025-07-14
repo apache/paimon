@@ -36,11 +36,14 @@ import org.apache.paimon.flink.sink.RowDataChannelComputer;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -66,6 +69,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Table compact action for Flink. */
@@ -191,24 +195,38 @@ public class CompactAction extends TableActionBase {
         builder.build();
     }
 
-    protected Predicate getPredicate() throws Exception {
+    protected PartitionPredicate getPredicate() throws Exception {
         Preconditions.checkArgument(
                 partitions == null || whereSql == null,
                 "partitions and where cannot be used together.");
         Predicate predicate = null;
+        RowType partitionType = table.rowType().project(table.partitionKeys());
+        String partitionDefaultName = ((FileStoreTable) table).coreOptions().partitionDefaultName();
         if (partitions != null) {
-            predicate =
-                    PredicateBuilder.or(
-                            partitions.stream()
-                                    .map(
-                                            p ->
-                                                    createPartitionPredicate(
-                                                            p,
-                                                            table.rowType(),
-                                                            ((FileStoreTable) table)
-                                                                    .coreOptions()
-                                                                    .partitionDefaultName()))
-                                    .toArray(Predicate[]::new));
+            boolean fullMode =
+                    partitions.stream()
+                            .allMatch(part -> part.size() == partitionType.getFieldCount());
+            PartitionPredicate partitionFilter;
+            if (fullMode) {
+                List<BinaryRow> binaryPartitions =
+                        createBinaryPartitions(partitions, partitionType, partitionDefaultName);
+                return PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
+            } else {
+                // partitions may be partial partition fields, so here must to use predicate way.
+                predicate =
+                        partitions.stream()
+                                .map(
+                                        partition ->
+                                                createPartitionPredicate(
+                                                        partition,
+                                                        table.rowType(),
+                                                        partitionDefaultName))
+                                .reduce(PredicateBuilder::or)
+                                .orElseThrow(
+                                        () ->
+                                                new RuntimeException(
+                                                        "Failed to get partition filter."));
+            }
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
                     new SimpleSqlPredicateConvertor(table.rowType());
@@ -223,9 +241,18 @@ public class CompactAction extends TableActionBase {
             Preconditions.checkArgument(
                     predicate.visit(partitionPredicateVisitor),
                     "Only partition key can be specialized in compaction action.");
+            predicate =
+                    predicate
+                            .visit(
+                                    new PredicateProjectionConverter(
+                                            table.rowType().projectNames(table.partitionKeys())))
+                            .orElseThrow(
+                                    () ->
+                                            new RuntimeException(
+                                                    "Failed to convert partition predicate."));
         }
 
-        return predicate;
+        return PartitionPredicate.fromPredicate(partitionType, predicate);
     }
 
     private boolean buildForPostponeBucketCompaction(

@@ -92,7 +92,10 @@ public class SystemTableSource extends FlinkTableSource {
         if (readType != null) {
             readBuilder.withReadType(readType);
         }
-        readBuilder.withFilter(getPredicateWithScanPartitions());
+        if (predicate != null) {
+            readBuilder.withFilter(predicate);
+        }
+        readBuilder.withPartitionFilter(partitionPredicate);
 
         if (unbounded && table instanceof DataTable) {
             source =

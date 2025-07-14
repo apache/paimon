@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -51,6 +52,10 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
+        return this;
+    }
+
+    default InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
         return this;
     }
 

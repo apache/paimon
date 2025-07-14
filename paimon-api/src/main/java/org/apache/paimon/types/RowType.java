@@ -323,6 +323,11 @@ public final class RowType extends DataType {
                 .copy(isNullable());
     }
 
+    public int[] projectNames(List<String> names) {
+        List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
+        return names.stream().mapToInt(fieldNames::indexOf).toArray();
+    }
+
     public RowType project(String... names) {
         return project(Arrays.asList(names));
     }

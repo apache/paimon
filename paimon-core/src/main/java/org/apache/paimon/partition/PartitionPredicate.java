@@ -35,6 +35,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -48,7 +49,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A special predicate to filter partition only, just like {@link Predicate}. */
-public interface PartitionPredicate {
+public interface PartitionPredicate extends Serializable {
 
     boolean test(BinaryRow part);
 
@@ -281,5 +282,17 @@ public interface PartitionPredicate {
             result.add(serializer.toBinaryRow(row).copy());
         }
         return result;
+    }
+
+    static PartitionPredicate fromMap(
+            RowType partitionType, Map<String, String> values, String defaultPartValue) {
+        return fromPredicate(
+                partitionType, createPartitionPredicate(values, partitionType, defaultPartValue));
+    }
+
+    static PartitionPredicate fromMaps(
+            RowType partitionType, List<Map<String, String>> values, String defaultPartValue) {
+        return fromMultiple(
+                partitionType, createBinaryPartitions(values, partitionType, defaultPartValue));
     }
 }

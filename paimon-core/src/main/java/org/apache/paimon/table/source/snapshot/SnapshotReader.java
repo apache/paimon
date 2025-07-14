@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -75,6 +76,8 @@ public interface SnapshotReader {
     SnapshotReader withPartitionFilter(Predicate predicate);
 
     SnapshotReader withPartitionFilter(List<BinaryRow> partitions);
+
+    SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate);
 
     SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions);
 
