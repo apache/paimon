@@ -148,7 +148,8 @@ public class SimpleSqlPredicateConvertor {
     public int getFieldIndex(String field) {
         int index = builder.indexOf(field);
         if (index == -1) {
-            throw new RuntimeException(String.format("Field `%s` not found", field));
+            throw new RuntimeException(
+                    String.format("Field `%s` not found in partition fields", field));
         }
         return index;
     }

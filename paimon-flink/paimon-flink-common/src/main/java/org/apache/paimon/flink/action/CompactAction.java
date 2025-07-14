@@ -39,6 +39,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
@@ -66,6 +68,9 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
@@ -196,14 +201,35 @@ public class CompactAction extends TableActionBase {
                 "partitions and where cannot be used together.");
         Predicate predicate = null;
         RowType partitionType = table.rowType().project(table.partitionKeys());
+        String partitionDefaultName = ((FileStoreTable) table).coreOptions().partitionDefaultName();
         if (partitions != null) {
-            return PartitionPredicate.fromMaps(
-                    partitionType,
-                    partitions,
-                    ((FileStoreTable) table).coreOptions().partitionDefaultName());
+            boolean fullMode =
+                    partitions.stream()
+                            .allMatch(part -> part.size() == partitionType.getFieldCount());
+            PartitionPredicate partitionFilter;
+            if (fullMode) {
+                List<BinaryRow> binaryPartitions =
+                        createBinaryPartitions(partitions, partitionType, partitionDefaultName);
+                return PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
+            } else {
+                // partitions may be partial partition fields, so here must to use predicate way.
+                predicate =
+                        partitions.stream()
+                                .map(
+                                        partition ->
+                                                createPartitionPredicate(
+                                                        partition,
+                                                        table.rowType(),
+                                                        partitionDefaultName))
+                                .reduce(PredicateBuilder::or)
+                                .orElseThrow(
+                                        () ->
+                                                new RuntimeException(
+                                                        "Failed to get partition filter."));
+            }
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                    new SimpleSqlPredicateConvertor(partitionType);
+                    new SimpleSqlPredicateConvertor(table.rowType());
             predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
         }
 
@@ -215,6 +241,15 @@ public class CompactAction extends TableActionBase {
             Preconditions.checkArgument(
                     predicate.visit(partitionPredicateVisitor),
                     "Only partition key can be specialized in compaction action.");
+            predicate =
+                    predicate
+                            .visit(
+                                    new PredicateProjectionConverter(
+                                            table.rowType().projectNames(table.partitionKeys())))
+                            .orElseThrow(
+                                    () ->
+                                            new RuntimeException(
+                                                    "Failed to convert partition predicate."));
         }
 
         return PartitionPredicate.fromPredicate(partitionType, predicate);
