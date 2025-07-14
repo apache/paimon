@@ -103,8 +103,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withPartitionFilter(@Nullable PartitionPredicate partitions) {
-        this.partitionFilter = partitions;
+    public ReadBuilder withPartitionFilter(@Nullable PartitionPredicate partitionPredicate) {
+        this.partitionFilter = partitionPredicate;
         return this;
     }
 

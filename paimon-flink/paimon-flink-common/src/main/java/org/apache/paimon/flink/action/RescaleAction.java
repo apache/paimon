@@ -95,7 +95,7 @@ public class RescaleAction extends TableActionBase {
                 String.valueOf(snapshot.id()));
         fileStoreTable = fileStoreTable.copy(dynamicOptions);
 
-        PartitionPredicate predicate =
+        PartitionPredicate partitionPredicate =
                 PartitionPredicate.fromMap(
                         fileStoreTable.schema().logicalPartitionType(),
                         partition,
@@ -109,7 +109,7 @@ public class RescaleAction extends TableActionBase {
                                 scanParallelism == null
                                         ? currentBucketNum(snapshot)
                                         : scanParallelism)
-                        .partitionPredicate(predicate)
+                        .partitionPredicate(partitionPredicate)
                         .build();
 
         Map<String, String> bucketOptions = new HashMap<>(fileStoreTable.options());

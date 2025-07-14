@@ -48,11 +48,26 @@ import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecTo
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** A special predicate to filter partition only, just like {@link Predicate}. */
+/**
+ * A special predicate to filter partition only, just like {@link Predicate}.
+ *
+ * @since 1.3.0
+ */
 public interface PartitionPredicate extends Serializable {
 
-    boolean test(BinaryRow part);
+    /**
+     * Test based on the specific partition.
+     *
+     * @return return true when hit, false when not hit.
+     */
+    boolean test(BinaryRow partition);
 
+    /**
+     * Test based on the statistical information to determine whether a hit is possible.
+     *
+     * @return return true is likely to hit (there may also be false positives), return false is
+     *     absolutely not possible to hit.
+     */
     boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
@@ -69,11 +84,13 @@ public interface PartitionPredicate extends Serializable {
         return new DefaultPartitionPredicate(predicate);
     }
 
+    /** Create {@link PartitionPredicate} from multiple partitions. */
     @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
         return fromMultiple(partitionType, new HashSet<>(partitions));
     }
 
+    /** Create {@link PartitionPredicate} from multiple partitions. */
     @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, Set<BinaryRow> partitions) {
         if (partitionType.getFieldCount() == 0 || partitions.isEmpty()) {
@@ -123,6 +140,8 @@ public interface PartitionPredicate extends Serializable {
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 
+        private static final long serialVersionUID = 1L;
+
         private final Predicate predicate;
 
         private DefaultPartitionPredicate(Predicate predicate) {
@@ -149,6 +168,8 @@ public interface PartitionPredicate extends Serializable {
      * effect may not be as good as {@link DefaultPartitionPredicate}.
      */
     class MultiplePartitionPredicate implements PartitionPredicate {
+
+        private static final long serialVersionUID = 1L;
 
         private final Set<BinaryRow> partitions;
         private final int fieldNum;

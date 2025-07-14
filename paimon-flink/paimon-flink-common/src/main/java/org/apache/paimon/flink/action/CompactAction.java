@@ -174,7 +174,7 @@ public class CompactAction extends TableActionBase {
                 new CompactorSourceBuilder(identifier.getFullName(), table);
         CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table, fullCompaction);
 
-        sourceBuilder.withPartitionPredicate(getPredicate());
+        sourceBuilder.withPartitionPredicate(getPartitionPredicate());
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
@@ -189,13 +189,13 @@ public class CompactAction extends TableActionBase {
             throws Exception {
         AppendTableCompactBuilder builder =
                 new AppendTableCompactBuilder(env, identifier.getFullName(), table);
-        builder.withPartitionPredicate(getPredicate());
+        builder.withPartitionPredicate(getPartitionPredicate());
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
         builder.build();
     }
 
-    protected PartitionPredicate getPredicate() throws Exception {
+    protected PartitionPredicate getPartitionPredicate() throws Exception {
         Preconditions.checkArgument(
                 partitions == null || whereSql == null,
                 "partitions and where cannot be used together.");
@@ -245,7 +245,7 @@ public class CompactAction extends TableActionBase {
                     predicate
                             .visit(
                                     new PredicateProjectionConverter(
-                                            table.rowType().projectNames(table.partitionKeys())))
+                                            table.rowType().projectIndexes(table.partitionKeys())))
                             .orElseThrow(
                                     () ->
                                             new RuntimeException(
