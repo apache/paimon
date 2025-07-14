@@ -206,7 +206,6 @@ public class CompactAction extends TableActionBase {
             boolean fullMode =
                     partitions.stream()
                             .allMatch(part -> part.size() == partitionType.getFieldCount());
-            PartitionPredicate partitionFilter;
             if (fullMode) {
                 List<BinaryRow> binaryPartitions =
                         createBinaryPartitions(partitions, partitionType, partitionDefaultName);
