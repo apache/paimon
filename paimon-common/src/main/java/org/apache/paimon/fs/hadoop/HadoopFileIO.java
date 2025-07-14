@@ -31,6 +31,7 @@ import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -69,6 +70,10 @@ public class HadoopFileIO implements FileIO {
     @Override
     public void configure(CatalogContext context) {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
+    }
+
+    public Configuration hadoopConf() {
+        return hadoopConf.get();
     }
 
     @Override

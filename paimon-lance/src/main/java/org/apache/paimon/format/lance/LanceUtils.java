@@ -21,6 +21,7 @@ package org.apache.paimon.format.lance;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
+import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.jindo.JindoFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.oss.OSSFileIO;
@@ -36,8 +37,9 @@ import java.util.Map;
 public class LanceUtils {
 
     private static final Class<?> ossFileIOKlass;
-    private static final Class<?> pluginFileIO;
+    private static final Class<?> pluginFileIOKlass;
     private static final Class<?> jindoFileIOKlass;
+    private static final Class<?> hadoopFileIOKlass;
 
     static {
         Class<?> klass;
@@ -60,7 +62,14 @@ public class LanceUtils {
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
             klass = null;
         }
-        pluginFileIO = klass;
+        pluginFileIOKlass = klass;
+
+        try {
+            klass = Class.forName("org.apache.paimon.fs.hadoop.HadoopFileIO");
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            klass = null;
+        }
+        hadoopFileIOKlass = klass;
     }
 
     public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
@@ -81,8 +90,10 @@ public class LanceUtils {
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
             originOptions = ((JindoFileIO) fileIO).hadoopOptions();
-        } else if (pluginFileIO != null && pluginFileIO.isInstance(fileIO)) {
+        } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
+        } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
+            originOptions = new Options(((HadoopFileIO) fileIO).hadoopConf());
         } else {
             originOptions = new Options();
         }
@@ -90,6 +101,9 @@ public class LanceUtils {
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
         if ("oss".equals(schema)) {
+            assert originOptions.containsKey("fs.oss.endpoint");
+            assert originOptions.containsKey("fs.oss.accessKeyId");
+            assert originOptions.containsKey("fs.oss.accessKeySecret");
             storageOptions.put(
                     "endpoint",
                     "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
