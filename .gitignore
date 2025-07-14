@@ -19,7 +19,7 @@ target
 .java-version
 dependency-reduced-pom.xml
 metastore_db/
-python/.idea/
+pypaimon/.idea/
 
 ### VS Code ###
 .vscode/
