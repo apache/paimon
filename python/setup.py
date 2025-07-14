@@ -37,11 +37,7 @@ PACKAGES = [
     'api'
 ]
 
-install_requires = [
-    'py4j==0.10.9.7',
-    'pandas>=1.3.0',
-    'pyarrow>=5.0.0'
-]
+install_requires = []
 
 long_description = 'See Apache Paimon Python API \
 [Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage.'
@@ -52,12 +48,7 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
-    extras_require={
-        'avro': [
-            'fastavro>=1.9.0',
-            'zstandard>=0.23.0'
-        ]
-    },
+    extras_require={},
     description='Apache Paimon Python API',
     long_description=long_description,
     long_description_content_type='text/markdown',
