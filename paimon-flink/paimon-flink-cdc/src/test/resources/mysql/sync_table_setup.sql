@@ -467,3 +467,4 @@ CREATE TABLE t (
     k INT PRIMARY KEY,
     v1 VARCHAR(10)
 );
+INSERT INTO t VALUES (1, 'Apache'), (2, 'Paimon');
