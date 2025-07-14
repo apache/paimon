@@ -26,12 +26,6 @@ class RESTRequest(ABC):
 
 
 @dataclass
-class Identifier:
-    database_name: str
-    object_name: str
-
-
-@dataclass
 class CreateDatabaseRequest(RESTRequest):
     name: str
     properties: Dict[str, str]

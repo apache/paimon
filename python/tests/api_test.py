@@ -1,4 +1,5 @@
 # Licensed to the Apache Software Foundation (ASF) under one
+# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -29,160 +30,12 @@ from abc import ABC, abstractmethod
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+import unittest
 
-
-# Mock classes for Paimon entities
-@dataclass
-class Identifier:
-    """Table/View/Function identifier"""
-    database_name: str
-    object_name: str
-    branch_name: Optional[str] = None
-
-    @classmethod
-    def create(cls, database_name: str, object_name: str) -> 'Identifier':
-        return cls(database_name, object_name)
-
-    @classmethod
-    def from_string(cls, full_name: str) -> 'Identifier':
-        parts = full_name.split('.')
-        if len(parts) == 2:
-            return cls(parts[0], parts[1])
-        elif len(parts) == 3:
-            return cls(parts[0], parts[1], parts[2])
-        else:
-            raise ValueError(f"Invalid identifier format: {full_name}")
-
-    def get_full_name(self) -> str:
-        if self.branch_name:
-            return f"{self.database_name}.{self.object_name}.{self.branch_name}"
-        return f"{self.database_name}.{self.object_name}"
-
-    def get_database_name(self) -> str:
-        return self.database_name
-
-    def get_table_name(self) -> str:
-        return self.object_name
-
-    def get_object_name(self) -> str:
-        return self.object_name
-
-    def get_branch_name(self) -> Optional[str]:
-        return self.branch_name
-
-    def is_system_table(self) -> bool:
-        return self.object_name.startswith('$')
-
-
-@dataclass
-class Database:
-    """Database entity"""
-    name: str
-    options: Dict[str, str] = field(default_factory=dict)
-    comment: Optional[str] = None
-
-    @classmethod
-    def of(cls, name: str, options: Dict[str, str], comment: Optional[str]) -> 'Database':
-        return cls(name, options, comment)
-
-
-@dataclass
-class Schema:
-    """Table schema"""
-    fields: List[Dict[str, Any]]
-    partition_keys: List[str] = field(default_factory=list)
-    primary_keys: List[str] = field(default_factory=list)
-    options: Dict[str, str] = field(default_factory=dict)
-    comment: Optional[str] = None
-
-    def field_names(self) -> List[str]:
-        return [field['name'] for field in self.fields]
-
-
-@dataclass
-class TableSchema:
-    """Table schema with ID"""
-    id: int
-    fields: List[Dict[str, Any]]
-    highest_field_id: int
-    partition_keys: List[str]
-    primary_keys: List[str]
-    options: Dict[str, str]
-    comment: Optional[str]
-
-    def to_schema(self) -> Schema:
-        return Schema(
-            fields=self.fields,
-            partition_keys=self.partition_keys,
-            primary_keys=self.primary_keys,
-            options=self.options,
-            comment=self.comment
-        )
-
-
-@dataclass
-class TableMetadata:
-    """Table metadata"""
-    schema: TableSchema
-    is_external: bool
-    uuid: str
-
-
-@dataclass
-class Snapshot:
-    """Table snapshot"""
-    id: int
-    schema_id: int
-    base_manifest_list: str
-    delta_manifest_list: str
-    changelog_manifest_list: Optional[str]
-    commit_user: str
-    commit_identifier: int
-    commit_kind: str
-    time_millis: int
-    log_offsets: Dict[int, int]
-    total_record_count: int
-    delta_record_count: int
-    changelog_record_count: int
-    watermark: Optional[int]
-
-
-@dataclass
-class TableSnapshot:
-    """Table snapshot with statistics"""
-    snapshot: Snapshot
-    record_count: int
-    file_size_in_bytes: int
-    file_count: int
-    last_file_creation_time: int
-
-
-@dataclass
-class Partition:
-    """Table partition"""
-    spec: Dict[str, str]
-    record_count: int
-    file_size_in_bytes: int
-    file_count: int
-    last_file_creation_time: int
-    done: bool
-
-
-@dataclass
-class PartitionStatistics:
-    """Partition statistics"""
-    spec: Dict[str, str]
-    record_count: int
-    file_size_in_bytes: int
-    file_count: int
-    last_file_creation_time: int
-
-
-@dataclass
-class RESTToken:
-    """REST authentication token"""
-    token: Dict[str, str]
-    expire_at_millis: int
+import api
+from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, RESTToken, Identifier, \
+    TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema
+from api import JSON
 
 
 @dataclass
@@ -190,132 +43,6 @@ class PagedList:
     """Paged list result"""
     elements: List[Any]
     next_page_token: Optional[str]
-
-
-# Request/Response classes
-@dataclass
-class CreateDatabaseRequest:
-    """Create database request"""
-    name: str
-    options: Dict[str, str] = field(default_factory=dict)
-
-    def get_name(self) -> str:
-        return self.name
-
-    def get_options(self) -> Dict[str, str]:
-        return self.options
-
-
-@dataclass
-class AlterDatabaseRequest:
-    """Alter database request"""
-    removals: List[str] = field(default_factory=list)
-    updates: Dict[str, str] = field(default_factory=dict)
-
-    def get_removals(self) -> List[str]:
-        return self.removals
-
-    def get_updates(self) -> Dict[str, str]:
-        return self.updates
-
-
-@dataclass
-class CreateTableRequest:
-    """Create table request"""
-    identifier: Identifier
-    schema: Schema
-
-    def get_identifier(self) -> Identifier:
-        return self.identifier
-
-    def get_schema(self) -> Schema:
-        return self.schema
-
-
-@dataclass
-class AlterTableRequest:
-    """Alter table request"""
-    changes: List[Any]
-
-    def get_changes(self) -> List[Any]:
-        return self.changes
-
-
-@dataclass
-class RenameTableRequest:
-    """Rename table request"""
-    source: Identifier
-    destination: Identifier
-
-    def get_source(self) -> Identifier:
-        return self.source
-
-    def get_destination(self) -> Identifier:
-        return self.destination
-
-
-@dataclass
-class CommitTableRequest:
-    """Commit table request"""
-    table_id: str
-    snapshot: Snapshot
-    statistics: List[PartitionStatistics]
-
-    def get_table_id(self) -> str:
-        return self.table_id
-
-    def get_snapshot(self) -> Snapshot:
-        return self.snapshot
-
-    def get_statistics(self) -> List[PartitionStatistics]:
-        return self.statistics
-
-
-@dataclass
-class AuthTableQueryRequest:
-    """Auth table query request"""
-    select_columns: Optional[List[str]] = None
-
-    def select(self) -> Optional[List[str]]:
-        return self.select_columns
-
-
-@dataclass
-class MarkDonePartitionsRequest:
-    """Mark done partitions request"""
-    partition_specs: List[Dict[str, str]]
-
-    def get_partition_specs(self) -> List[Dict[str, str]]:
-        return self.partition_specs
-
-
-@dataclass
-class AlterViewRequest:
-    """Alter view request"""
-    view_changes: List[Any]
-
-
-@dataclass
-class AlterFunctionRequest:
-    """Alter function request"""
-    changes: List[Any]
-
-
-@dataclass
-class RollbackTableRequest:
-    """Rollback table request"""
-    instant: Any
-
-    def get_instant(self) -> Any:
-        return self.instant
-
-
-@dataclass
-class CreateBranchRequest:
-    """Create branch request"""
-    branch: str
-    from_tag: Optional[str] = None
-
 
 # Response classes
 class RESTResponse(ABC):
@@ -343,135 +70,6 @@ class ErrorResponse(RESTResponse):
     code: int
 
 
-@dataclass
-class ConfigResponse(RESTResponse):
-    """Config response"""
-    defaults: Dict[str, str] = field(default_factory=dict)
-
-    def get_defaults(self) -> Dict[str, str]:
-        return self.defaults
-
-
-@dataclass
-class ListDatabasesResponse(RESTResponse):
-    """List databases response"""
-    databases: List[str]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class GetDatabaseResponse(RESTResponse):
-    """Get database response"""
-    id: str
-    name: str
-    location: str
-    options: Dict[str, str]
-    owner: str
-    created_at: int
-    created_by: str
-    updated_at: int
-    updated_by: str
-
-
-@dataclass
-class AlterDatabaseResponse(RESTResponse):
-    """Alter database response"""
-    removed: List[str]
-    updated: List[str]
-    missing: List[str]
-
-
-@dataclass
-class ListTablesResponse(RESTResponse):
-    """List tables response"""
-    tables: List[str]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class ListTablesGloballyResponse(RESTResponse):
-    """List tables globally response"""
-    tables: List[Identifier]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class GetTableResponse(RESTResponse):
-    """Get table response"""
-    id: str
-    name: str
-    location: str
-    is_external: bool
-    schema_id: int
-    schema: Schema
-    owner: str
-    created_at: int
-    created_by: str
-    updated_at: int
-    updated_by: str
-
-    def get_name(self) -> str:
-        return self.name
-
-
-@dataclass
-class ListTableDetailsResponse(RESTResponse):
-    """List table details response"""
-    tables: List[GetTableResponse]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class GetTableTokenResponse(RESTResponse):
-    """Get table token response"""
-    token: Dict[str, str]
-    expire_at_millis: int
-
-
-@dataclass
-class GetTableSnapshotResponse(RESTResponse):
-    """Get table snapshot response"""
-    snapshot: TableSnapshot
-
-
-@dataclass
-class ListSnapshotsResponse(RESTResponse):
-    """List snapshots response"""
-    snapshots: List[Snapshot]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class GetVersionSnapshotResponse(RESTResponse):
-    """Get version snapshot response"""
-    snapshot: Snapshot
-
-
-@dataclass
-class AuthTableQueryResponse(RESTResponse):
-    """Auth table query response"""
-    allowed_columns: List[str]
-
-
-@dataclass
-class CommitTableResponse(RESTResponse):
-    """Commit table response"""
-    success: bool
-
-
-@dataclass
-class ListPartitionsResponse(RESTResponse):
-    """List partitions response"""
-    partitions: List[Partition]
-    next_page_token: Optional[str]
-
-
-@dataclass
-class ListBranchesResponse(RESTResponse):
-    """List branches response"""
-    branches: Optional[List[str]]
-
-
 # Utility classes
 class RESTUtil:
     """REST utilities"""
@@ -487,24 +85,6 @@ class RESTUtil:
         # Simple validation - in real implementation would be more comprehensive
         if not pattern:
             raise ValueError("Pattern cannot be empty")
-
-
-class RESTApiParser:
-    """REST API utilities"""
-
-    @staticmethod
-    def from_json(json_str: str, cls: type) -> Any:
-        """Deserialize JSON to object"""
-        data = json.loads(json_str)
-        # Simple deserialization - in real implementation would use proper mapping
-        return cls(**data) if hasattr(cls, '__dataclass_fields__') else data
-
-    @staticmethod
-    def to_json(obj: Any) -> str:
-        """Serialize object to JSON"""
-        if hasattr(obj, '__dict__'):
-            return json.dumps(obj.__dict__, default=str, indent=2)
-        return json.dumps(obj, default=str, indent=2)
 
 
 class ResourcePaths:
@@ -739,16 +319,13 @@ class RESTCatalogServer:
         self.config_response = config
 
         # Initialize resource paths
-        prefix = self.config_response.get_defaults().get("prefix", "")
+        prefix = config.defaults.get("prefix")
         self.resource_paths = ResourcePaths(prefix)
         self.database_uri = self.resource_paths.databases()
 
         # Initialize storage
-        self.database_store: Dict[str, Database] = {}
+        self.database_store: Dict[str, GetDatabaseResponse] = {}
         self.table_metadata_store: Dict[str, TableMetadata] = {}
-        self.table_partitions_store: Dict[str, List[Partition]] = {}
-        self.table_latest_snapshot_store: Dict[str, TableSnapshot] = {}
-        self.table_with_snapshot_id_2_snapshot_store: Dict[str, TableSnapshot] = {}
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
 
@@ -965,31 +542,6 @@ class RESTCatalogServer:
 
         elif len(path_parts) >= 4:
             operation = path_parts[3]
-
-            # if operation == "token":
-            #     return self._get_data_token_handle(identifier)
-            # elif operation == "snapshot":
-            #     return self._snapshot_handle(identifier)
-            # elif operation == ResourcePaths.SNAPSHOTS:
-            #     if len(path_parts) == 4:
-            #         return self._list_snapshots(identifier)
-            #     else:
-            #         version = path_parts[4]
-            #         return self._load_snapshot(identifier, version)
-            # elif operation == "auth":
-            #     return self._auth_table(identifier, data)
-            # elif operation == "commit":
-            #     return self._commit_table_handle(identifier, data)
-            # elif operation == ResourcePaths.ROLLBACK:
-            #     return self._rollback_table_handle(identifier, data)
-            # elif operation.startswith("partitions"):
-            #     if len(path_parts) == 5 and path_parts[4] == "mark":
-            #         return self._mark_done_partitions_handle(identifier, data)
-            #     else:
-            #         return self._partitions_api_handle(method, parameters, identifier)
-            # elif operation == "branches":
-            #     return self._branch_api_handle(path_parts, method, data, identifier)
-
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     def _databases_api_handler(self, method: str, data: str,
@@ -1003,21 +555,6 @@ class RESTCatalogServer:
             ]
             return self._generate_final_list_databases_response(parameters, databases)
 
-        elif method == "POST":
-            request_body = RESTApiParser.from_json(data, CreateDatabaseRequest)
-            database_name = request_body.get_name()
-
-            if database_name in self.no_permission_databases:
-                raise DatabaseNoPermissionException(database_name)
-
-            if database_name in self.database_store:
-                raise DatabaseAlreadyExistException(database_name)
-
-            database = Database.of(database_name, request_body.get_options(), None)
-            self.database_store[database_name] = database
-
-            return self._mock_response("", 200)
-
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _database_handle(self, method: str, data: str, database_name: str) -> Tuple[str, int]:
@@ -1028,43 +565,12 @@ class RESTCatalogServer:
         database = self.database_store[database_name]
 
         if method == "GET":
-            response = GetDatabaseResponse(
-                id=str(uuid.uuid4()),
-                name=database.name,
-                location=f"{self.data_path}/{database_name}",
-                options=database.options,
-                owner="owner",
-                created_at=1,
-                created_by="created",
-                updated_at=1,
-                updated_by="updated"
-            )
+            response = database
             return self._mock_response(response, 200)
 
         elif method == "DELETE":
             del self.database_store[database_name]
             return self._mock_response("", 200)
-
-        elif method == "POST":
-            request_body = RESTApiParser.from_json(data, AlterDatabaseRequest)
-
-            # Apply changes
-            new_options = database.options.copy()
-            for key in request_body.get_removals():
-                new_options.pop(key, None)
-            new_options.update(request_body.get_updates())
-
-            # Update database
-            updated_database = Database.of(database_name, new_options, database.comment)
-            self.database_store[database_name] = updated_database
-
-            response = AlterDatabaseResponse(
-                removed=request_body.get_removals(),
-                updated=list(request_body.get_updates().keys()),
-                missing=[]
-            )
-            return self._mock_response(response, 200)
-
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _tables_handle(self, method: str = None, data: str = None, database_name: str = None,
@@ -1078,38 +584,6 @@ class RESTCatalogServer:
             if method == "GET":
                 tables = self._list_tables(database_name, parameters)
                 return self._generate_final_list_tables_response(parameters, tables)
-
-            elif method == "POST":
-                request_body = RESTApiParser.from_json(data, CreateTableRequest)
-                identifier = request_body.get_identifier()
-                schema = request_body.get_schema()
-
-                if identifier.get_full_name() in self.table_metadata_store:
-                    raise TableAlreadyExistException(identifier)
-
-                # Create table metadata
-                table_metadata = self._create_table_metadata(
-                    identifier, 0, schema, str(uuid.uuid4()), False
-                )
-                self.table_metadata_store[identifier.get_full_name()] = table_metadata
-
-                return self._mock_response("", 200)
-        else:
-            # Global tables
-            tables = self._list_tables_globally(parameters)
-            if tables:
-                max_results = self._get_max_results(parameters)
-                page_token = parameters.get(PAGE_TOKEN)
-                paged_tables = self._build_paged_entities(tables, max_results, page_token)
-                response = ListTablesGloballyResponse(
-                    tables=paged_tables.elements,
-                    next_page_token=paged_tables.next_page_token
-                )
-            else:
-                response = ListTablesResponse(tables=[], next_page_token=None)
-
-            return self._mock_response(response, 200)
-
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
@@ -1127,26 +601,14 @@ class RESTCatalogServer:
             schema = table_metadata.schema.to_schema()
             path = schema.options.pop(PATH, None)
 
-            response = GetTableResponse(
-                id=table_metadata.uuid,
-                name=identifier.get_object_name(),
-                location=path,
-                is_external=table_metadata.is_external,
-                schema_id=table_metadata.schema.id,
-                schema=schema,
-                owner="owner",
-                created_at=1,
-                created_by="created",
-                updated_at=1,
-                updated_by="updated"
-            )
+            response = self.mock_table(identifier, table_metadata, path, schema);
             return self._mock_response(response, 200)
-
-        elif method == "POST":
-            # Alter table
-            request_body = RESTApiParser.from_json(data, AlterTableRequest)
-            self._alter_table_impl(identifier, request_body.get_changes())
-            return self._mock_response("", 200)
+        #
+        # elif method == "POST":
+        #     # Alter table
+        #     request_body = JSON.from_json(data, AlterTableRequest)
+        #     self._alter_table_impl(identifier, request_body.get_changes())
+        #     return self._mock_response("", 200)
 
         elif method == "DELETE":
             # Drop table
@@ -1168,7 +630,7 @@ class RESTCatalogServer:
             return response, http_code
 
         try:
-            return RESTApiParser.to_json(response), http_code
+            return api.JSON.to_json(response), http_code
         except Exception as e:
             self.logger.error(f"Failed to serialize response: {e}")
             return str(e), 500
@@ -1316,20 +778,6 @@ class RESTCatalogServer:
 
         return self._mock_response(response, 200)
 
-    # Public API methods for test setup
-    def set_table_snapshot(self, identifier: Identifier, snapshot: Snapshot,
-                           record_count: int, file_size_in_bytes: int,
-                           file_count: int, last_file_creation_time: int) -> None:
-        """Set table snapshot for testing"""
-        table_snapshot = TableSnapshot(
-            snapshot=snapshot,
-            record_count=record_count,
-            file_size_in_bytes=file_size_in_bytes,
-            file_count=file_count,
-            last_file_creation_time=last_file_creation_time
-        )
-        self.table_latest_snapshot_store[identifier.get_full_name()] = table_snapshot
-
     def set_data_token(self, identifier: Identifier, token: RESTToken) -> None:
         """Set data token for testing"""
         DataTokenStore.put_data_token(self.warehouse, identifier.get_full_name(), token)
@@ -1350,62 +798,93 @@ class RESTCatalogServer:
         """Get data token"""
         return DataTokenStore.get_data_token(self.warehouse, identifier.get_full_name())
 
+    def mock_database(self, name: str, options: dict[str, str]) -> GetDatabaseResponse:
+        return GetDatabaseResponse(
+            id=str(uuid.uuid4()),
+            name=name,
+            location=f"{self.data_path}/{name}",
+            options=options,
+            owner="owner",
+            created_at=1,
+            created_by="created",
+            updated_at=1,
+            updated_by="updated"
+        )
 
-# Example usage
-def main():
-    """Example usage of RESTCatalogServer"""
-    # Setup logging
-    logging.basicConfig(level=logging.INFO)
+    def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str, schema: Schema) -> GetTableResponse:
+        return GetTableResponse(
+            id=str(table_metadata.uuid),
+            name=identifier.get_object_name(),
+            path=path,
+            is_external=table_metadata.is_external,
+            schema_id=table_metadata.schema.id,
+            schema=schema,
+            owner="owner",
+            created_at=1,
+            created_by="created",
+            updated_at=1,
+            updated_by="updated"
+        )
 
-    # Create config
-    config = ConfigResponse(defaults={"prefix": "mock-test"})
 
-    # Create mock auth provider
-    class MockAuthProvider:
-        def merge_auth_header(self, headers, auth_param):
-            return {AUTHORIZATION_HEADER_KEY: "Bearer test-token"}
+class ApiTestCase(unittest.TestCase):
 
-    # Create server
-    server = RESTCatalogServer(
-        data_path="/tmp/test_warehouse",
-        auth_provider=MockAuthProvider(),
-        config=config,
-        warehouse="test_warehouse"
-    )
-    try:
-        # Start server
-        server.start()
-        print(f"Server started at: {server.get_url()}")
-        test_databases = {
-            "default": Database.of("default", {"env": "test"}, "default"),
-            "test_db1": Database.of("test_db1", {"env": "test"}, "Test database 1"),
-            "test_db2": Database.of("test_db2", {"env": "test"}, "Test database 2"),
-            "prod_db": Database.of("prod_db", {"env": "prod"}, "Production database")
-        }
-        test_tables = {
-            "default.user": TableMetadata(uuid=uuid.uuid4(), is_external=True, schema=TableSchema(1, [{"name": "int"}], 1, [], [], {}, "")),
-        }
-        server.table_metadata_store.update(test_tables)
-        server.database_store.update(test_databases)
-        from api import RESTApi
-        options = {
-            'uri': f"http://localhost:{server.port}",
-            'warehouse': 'test_warehouse',
-            'dlf.region': 'cn-hangzhou',
-            "token.provider": "xxxx",
-            'dlf.access-key-id': 'xxxx',
-            'dlf.access-key-secret': 'xxxx'
-        }
-        api = RESTApi(options)
-        print(api.list_databases())
-        print(api.get_database('default'))
-        print(api.get_table(Identifier.from_string('default.user')))
+    def test(self):
+        """Example usage of RESTCatalogServer"""
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
 
-    finally:
-        # Shutdown server
-        server.shutdown()
-        print("Server stopped")
+        # Create config
+        config = ConfigResponse(defaults={"prefix": "mock-test"})
+
+        # Create mock auth provider
+        class MockAuthProvider:
+            def merge_auth_header(self, headers, auth_param):
+                return {AUTHORIZATION_HEADER_KEY: "Bearer test-token"}
+
+        # Create server
+        server = RESTCatalogServer(
+            data_path="/tmp/test_warehouse",
+            auth_provider=MockAuthProvider(),
+            config=config,
+            warehouse="test_warehouse"
+        )
+        try:
+            # Start server
+            server.start()
+            print(f"Server started at: {server.get_url()}")
+            test_databases = {
+                "default": server.mock_database("default", {"env": "test"}),
+                "test_db1": server.mock_database("test_db1", {"env": "test"}),
+                "test_db2": server.mock_database("test_db2", {"env": "test"}),
+                "prod_db": server.mock_database("prod_db", {"env": "prod"})
+            }
+            test_tables = {
+                "default.user": TableMetadata(uuid=uuid.uuid4(), is_external=True,
+                                              schema=TableSchema(1, [{"name": "int"}], 1, [], [], {}, "")),
+            }
+            server.table_metadata_store.update(test_tables)
+            server.database_store.update(test_databases)
+            from api import RESTApi
+            options = {
+                'uri': f"http://localhost:{server.port}",
+                'warehouse': 'test_warehouse',
+                'dlf.region': 'cn-hangzhou',
+                "token.provider": "xxxx",
+                'dlf.access-key-id': 'xxxx',
+                'dlf.access-key-secret': 'xxxx'
+            }
+            api = RESTApi(options)
+            self.assertSetEqual(set(api.list_databases()), {*test_databases})
+            self.assertEqual(api.get_database('default'), test_databases.get('default'))
+            table = api.get_table(Identifier.from_string('default.user'))
+            self.assertEqual(table.get('id') , str(test_tables['default.user'].uuid))
+
+        finally:
+            # Shutdown server
+            server.shutdown()
+            print("Server stopped")
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

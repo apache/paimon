@@ -28,9 +28,9 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from auth import RESTAuthParameter
-from api import RESTApi
-from api_response import ErrorResponse
+from api.auth import RESTAuthParameter
+from api import RESTApi, JSON
+from api.api_response import ErrorResponse
 
 T = TypeVar('T', bound='RESTResponse')
 
@@ -173,7 +173,7 @@ def _normalize_uri(uri: str) -> str:
 def _parse_error_response(response_body: Optional[str], status_code: int) -> ErrorResponse:
     if response_body:
         try:
-            return ErrorResponse.from_json(response_body)
+            return JSON.from_json(response_body, ErrorResponse)
         except Exception:
             return ErrorResponse(
                 resource_type=None,
@@ -217,7 +217,7 @@ class HttpClient(RESTClient):
 
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetryInterceptor(max_retries=5)
+        retry_interceptor = ExponentialRetryInterceptor(max_retries=1)
         retry_strategy = retry_interceptor.create_retry_strategy()
         adapter = HTTPAdapter(max_retries=retry_strategy)
 
@@ -329,7 +329,7 @@ class HttpClient(RESTClient):
                 self.error_handler.accept(error, request_id)
 
             if response_type is not None and response_body_str is not None:
-                return response_type.from_json(response_body_str)
+                return JSON.from_json(response_body_str, response_type)
             elif response_type is None:
                 return None
             else:
