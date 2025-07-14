@@ -44,8 +44,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
         run: |
-          ./dev/install_command.sh -q flake8==4.0.1 mypy==1.5.1 2>&1 >/dev/null
+          chmod +x python/dev/install_command.sh
+          ./python/dev/install_command.sh -q flake8==4.0.1 mypy==1.5.1 2>&1 >/dev/null
       - name: Run lint-python.sh
         run: |
-          chmod +x dev/lint-python.sh
-          ./dev/lint-python.sh
+          chmod +x python/dev/lint-python.sh
+          ./python/dev/lint-python.sh
