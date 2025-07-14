@@ -203,7 +203,7 @@ public class CompactAction extends TableActionBase {
                     ((FileStoreTable) table).coreOptions().partitionDefaultName());
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                    new SimpleSqlPredicateConvertor(table.rowType());
+                    new SimpleSqlPredicateConvertor(partitionType);
             predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
         }
 
