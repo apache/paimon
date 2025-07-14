@@ -66,7 +66,7 @@ public class KafkaDebeziumJsonDeserializationSchema
         try {
             byte[] key = message.key();
             JsonNode keyNode = null;
-            if (key != null) {
+            if (key != null && key.length > 0) {
                 keyNode = objectMapper.readValue(key, JsonNode.class);
             }
 
