@@ -56,6 +56,7 @@ import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
@@ -154,6 +155,7 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
     // hive default field delimiter is '\u0001'
     public static final String HIVE_FIELD_DELIM_DEFAULT = "\u0001";
+    public static final String DEFAULT_VALUE = "defaultValue";
 
     private final HiveConf hiveConf;
     private final String clientClassName;
@@ -1071,6 +1073,13 @@ public class HiveCatalog extends AbstractCatalog {
         FormatTable.Format provider = FormatTable.parseFormat(coreOptions.formatType());
 
         Map<String, String> tblProperties = new HashMap<>();
+        tableSchema.fields().stream()
+                .filter(dataField -> Objects.nonNull(dataField.defaultValue()))
+                .forEach(
+                        dataField ->
+                                tblProperties.put(
+                                        Joiner.on(".").join(dataField.name(), DEFAULT_VALUE),
+                                        dataField.defaultValue()));
 
         Table table = newHmsTable(identifier, tblProperties, provider, externalTable);
         updateHmsTable(table, identifier, tableSchema, provider, location);

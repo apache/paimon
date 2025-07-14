@@ -23,13 +23,18 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
+
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -37,6 +42,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
+import static org.apache.paimon.hive.HiveCatalog.DEFAULT_VALUE;
 import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
@@ -87,8 +93,20 @@ class HiveTableUtils {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
         }
 
+        Map<String, String> parameters =
+                Objects.nonNull(hiveTable.getParameters())
+                        ? hiveTable.getParameters()
+                        : new HashMap<>();
         Schema.Builder builder = Schema.newBuilder();
-        rowType.getFields().forEach(f -> builder.column(f.name(), f.type(), f.description()));
+        rowType.getFields()
+                .forEach(
+                        f ->
+                                builder.column(
+                                        f.name(),
+                                        f.type(),
+                                        f.description(),
+                                        parameters.get(
+                                                Joiner.on(".").join(f.name(), DEFAULT_VALUE))));
         options.set(PATH, location);
         options.set(TYPE, FORMAT_TABLE);
         options.set(FILE_FORMAT, format.name().toLowerCase());
