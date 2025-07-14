@@ -28,7 +28,7 @@ from urllib3 import Retry
 
 from auth import RESTAuthParameter
 from api import RESTApi
-from api_response import ErrorResponse
+from api_response import ErrorResponse, RESTResponse
 
 T = TypeVar('T', bound='RESTResponse')
 
