@@ -62,7 +62,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         super.withFilter(predicate);
-        snapshotReader.withFilter(predicate);
         return this;
     }
 

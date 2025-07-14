@@ -84,7 +84,6 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
-    @Nullable private Predicate predicate;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -99,7 +98,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        this.predicate = predicate;
+        snapshotReader.withFilter(predicate);
         return this;
     }
 
