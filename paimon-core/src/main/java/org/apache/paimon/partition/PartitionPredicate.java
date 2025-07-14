@@ -292,7 +292,7 @@ public interface PartitionPredicate extends Serializable {
 
     static PartitionPredicate fromMaps(
             RowType partitionType, List<Map<String, String>> values, String defaultPartValue) {
-        return fromPredicate(
-                partitionType, createPartitionPredicate(values, partitionType, defaultPartValue));
+        return fromMultiple(
+                partitionType, createBinaryPartitions(values, partitionType, defaultPartValue));
     }
 }
