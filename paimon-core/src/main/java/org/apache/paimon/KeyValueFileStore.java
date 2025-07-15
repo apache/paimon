@@ -202,7 +202,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options,
                 keyValueFieldsExtractor,
                 tableName);
-
     }
 
     @Override
