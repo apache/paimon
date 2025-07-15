@@ -26,8 +26,9 @@ from urllib.parse import urlparse
 import unittest
 
 import api
-from api.api_response import ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema, GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField, \
-    PaimonDataType
+from api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
+                              GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField,
+                              PaimonDataType)
 from api import RESTApi
 from api.rest_json import JSON
 from api.typedef import Identifier

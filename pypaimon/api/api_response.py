@@ -17,10 +17,9 @@ limitations under the License.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any, Generic, TypeVar, List
+from typing import Dict, Optional, Any, Generic, List
 from dataclasses import dataclass, field
-
-T = TypeVar('T')
+from api.typedef import T
 
 
 @dataclass
@@ -44,6 +43,16 @@ class ErrorResponse(RESTResponse):
     resource_name: Optional[str] = None
     message: Optional[str] = None
     code: Optional[int] = None
+
+    def __init__(self,
+                 resource_type: Optional[str] = None,
+                 resource_name: Optional[str] = None,
+                 message: Optional[str] = None,
+                 code: Optional[int] = None):
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        self.message = message
+        self.code = code
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ErrorResponse':
@@ -158,6 +167,7 @@ class ListTablesResponse(PagedResponse[str]):
     def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
 
+
 @dataclass
 class PaimonDataType:
     FIELD_TYPE = "type"
@@ -182,7 +192,7 @@ class PaimonDataType:
             if element is not None:
                 element = PaimonDataType.from_dict(data.get(cls.FIELD_ELEMENT)),
             if fields is not None:
-                fields=list(map(lambda f: DataField.from_dict(f), fields)),
+                fields = list(map(lambda f: DataField.from_dict(f), fields)),
             if key is not None:
                 key = PaimonDataType.from_dict(key)
             if value is not None:

@@ -17,9 +17,8 @@
 
 import json
 from dataclasses import asdict
-from typing import TypeVar, Any, Type
-
-T = TypeVar('T')
+from typing import Any, Type
+from api.typedef import T
 
 
 class JSON:

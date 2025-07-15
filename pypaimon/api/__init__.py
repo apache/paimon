@@ -21,12 +21,12 @@ from urllib.parse import unquote
 import api
 from api.auth import RESTAuthFunction
 from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
-    GetDatabaseResponse, \
-    ConfigResponse, PagedResponse, T
+    GetDatabaseResponse, ConfigResponse, PagedResponse
 from api.api_resquest import CreateDatabaseRequest
 from api.typedef import Identifier
 from api.client import HttpClient
 from api.auth import DLFAuthProvider, DLFToken
+from api.typedef import T
 
 
 class RESTCatalogOptions:
