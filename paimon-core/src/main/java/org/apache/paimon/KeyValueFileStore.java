@@ -154,16 +154,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
-        DynamicBucketIndexMaintainer.Factory indexFactory = null;
-        if (bucketMode() == BucketMode.HASH_DYNAMIC) {
-            indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
-        }
-        DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
-        if (options.deletionVectorsEnabled()) {
-            deletionVectorsMaintainerFactory =
-                    new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
-        }
-
         if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
@@ -181,29 +171,38 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     options,
                     tableName,
                     writeId);
-        } else {
-            return new KeyValueFileStoreWrite(
-                    fileIO,
-                    schemaManager,
-                    schema,
-                    commitUser,
-                    partitionType,
-                    keyType,
-                    valueType,
-                    keyComparatorSupplier,
-                    () -> UserDefinedSeqComparator.create(valueType, options),
-                    logDedupEqualSupplier,
-                    mfFactory,
-                    pathFactory(),
-                    this::pathFactory,
-                    snapshotManager(),
-                    newScan(),
-                    indexFactory,
-                    deletionVectorsMaintainerFactory,
-                    options,
-                    keyValueFieldsExtractor,
-                    tableName);
         }
+        DynamicBucketIndexMaintainer.Factory indexFactory = null;
+        if (bucketMode() == BucketMode.HASH_DYNAMIC) {
+            indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
+        }
+        DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
+        if (options.deletionVectorsEnabled()) {
+            deletionVectorsMaintainerFactory =
+                    new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
+        }
+        return new KeyValueFileStoreWrite(
+                fileIO,
+                schemaManager,
+                schema,
+                commitUser,
+                partitionType,
+                keyType,
+                valueType,
+                keyComparatorSupplier,
+                () -> UserDefinedSeqComparator.create(valueType, options),
+                logDedupEqualSupplier,
+                mfFactory,
+                pathFactory(),
+                this::pathFactory,
+                snapshotManager(),
+                newScan(),
+                indexFactory,
+                deletionVectorsMaintainerFactory,
+                options,
+                keyValueFieldsExtractor,
+                tableName);
+
     }
 
     @Override
