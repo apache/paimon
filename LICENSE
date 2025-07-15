@@ -294,6 +294,9 @@ paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/Vectorize
 paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaByteArrayEncodingTest.java
 paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaEncodingTest.java
 paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaLengthByteArrayEncodingTest.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/ShreddingUtils.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/VariantSchema.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/VariantShreddingWriter.java
 from https://spark.apache.org/ version 4.0.0-preview2
 
 MIT License
