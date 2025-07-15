@@ -18,17 +18,11 @@ limitations under the License.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 
 
 class RESTRequest(ABC):
     pass
-
-
-@dataclass
-class Identifier:
-    database_name: str
-    object_name: str
 
 
 @dataclass

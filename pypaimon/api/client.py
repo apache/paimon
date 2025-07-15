@@ -26,9 +26,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from auth import RESTAuthParameter
-from api import RESTApi
-from api_response import ErrorResponse
+from api.auth import RESTAuthParameter
+from api.api_response import ErrorResponse
+from api.rest_json import JSON
 
 T = TypeVar('T', bound='RESTResponse')
 
@@ -78,13 +78,22 @@ class ExponentialRetryInterceptor:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def create_retry_strategy(self) -> Retry:
-        return Retry(
-            total=self.max_retries,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
-            backoff_factor=1,
-            raise_on_status=False
-        )
+        retry_kwargs = {
+            'total': self.max_retries,
+            'read': self.max_retries,
+            'connect': self.max_retries,
+            'backoff_factor': 1,
+            'status_forcelist': [429, 502, 503, 504],
+            'raise_on_status': False,
+            'raise_on_redirect': False,
+        }
+        retry_methods = ["GET", "HEAD", "PUT", "DELETE", "TRACE", "OPTIONS"]
+        retry_instance = Retry()
+        if hasattr(retry_instance, 'allowed_methods'):
+            retry_kwargs['allowed_methods'] = retry_methods
+        else:
+            retry_kwargs['method_whitelist'] = retry_methods
+        return Retry(**retry_kwargs)
 
 
 class LoggingInterceptor:
@@ -156,7 +165,7 @@ def _normalize_uri(uri: str) -> str:
 def _parse_error_response(response_body: Optional[str], status_code: int) -> ErrorResponse:
     if response_body:
         try:
-            return ErrorResponse.from_json(response_body)
+            return JSON.from_json(response_body, ErrorResponse)
         except Exception:
             return ErrorResponse(
                 resource_type=None,
@@ -200,7 +209,7 @@ class HttpClient(RESTClient):
 
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetryInterceptor(max_retries=5)
+        retry_interceptor = ExponentialRetryInterceptor(max_retries=1)
         retry_strategy = retry_interceptor.create_retry_strategy()
         adapter = HTTPAdapter(max_retries=retry_strategy)
 
@@ -240,7 +249,7 @@ class HttpClient(RESTClient):
     def post_with_response_type(self, path: str, body: RESTRequest, response_type: Optional[Type[T]],
                                 rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
-            body_str = RESTApi.to_json(body)
+            body_str = JSON.to_json(body)
             auth_headers = _get_headers(path, "POST", body_str, rest_auth_function)
             url = self._get_request_url(path, None)
 
@@ -259,7 +268,7 @@ class HttpClient(RESTClient):
     def delete_with_body(self, path: str, body: RESTRequest,
                          rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
-            body_str = RESTApi.to_json(body)
+            body_str = JSON.to_json(body)
             auth_headers = _get_headers(path, "DELETE", body_str, rest_auth_function)
             url = self._get_request_url(path, None)
 
@@ -312,7 +321,7 @@ class HttpClient(RESTClient):
                 self.error_handler.accept(error, request_id)
 
             if response_type is not None and response_body_str is not None:
-                return response_type.from_json(response_body_str)
+                return JSON.from_json(response_body_str, response_type)
             elif response_type is None:
                 return None
             else:

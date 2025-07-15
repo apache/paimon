@@ -17,14 +17,19 @@
 
 import logging
 from typing import Dict, List, Optional, Callable
-from auth import RESTAuthFunction
-from api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, GetDatabaseResponse, \
-    ConfigResponse, PagedResponse, T
-from api_resquest import Identifier, CreateDatabaseRequest
+from urllib.parse import unquote
+import api
+from api.auth import RESTAuthFunction
+from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
+    GetDatabaseResponse, ConfigResponse, PagedResponse
+from api.api_resquest import CreateDatabaseRequest
+from api.typedef import Identifier
+from api.client import HttpClient
+from api.auth import DLFAuthProvider, DLFToken
+from api.typedef import T
 
 
 class RESTCatalogOptions:
-
     URI = "uri"
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
@@ -57,6 +62,11 @@ class RESTUtil:
         return urllib.parse.quote(value)
 
     @staticmethod
+    def decode_string(encoded: str) -> str:
+        """Decode URL-encoded string"""
+        return unquote(encoded)
+
+    @staticmethod
     def extract_prefix_map(options: Dict[str, str], prefix: str) -> Dict[str, str]:
         result = {}
         config = options
@@ -68,7 +78,6 @@ class RESTUtil:
 
 
 class ResourcePaths:
-
     V1 = "v1"
     DATABASES = "databases"
     TABLES = "tables"
@@ -104,7 +113,6 @@ class ResourcePaths:
 
 
 class RESTApi:
-
     HEADER_PREFIX = "header."
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
@@ -113,10 +121,6 @@ class RESTApi:
 
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
-
-        from client import HttpClient
-        from auth import DLFAuthProvider, DLFToken
-
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
         auth_provider = DLFAuthProvider(
             DLFToken(options), options.get(RESTCatalogOptions.DLF_REGION)
