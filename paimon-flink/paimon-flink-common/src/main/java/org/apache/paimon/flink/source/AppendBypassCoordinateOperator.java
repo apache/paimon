@@ -23,6 +23,7 @@ import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExecutorUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -56,6 +57,7 @@ public class AppendBypassCoordinateOperator<CommitT>
 
     private transient ScheduledExecutorService executorService;
     private transient LinkedBlockingQueue<AppendCompactTask> compactTasks;
+    private Throwable throwable;
 
     public AppendBypassCoordinateOperator(
             StreamOperatorParameters<Either<CommitT, AppendCompactTask>> parameters,
@@ -85,9 +87,15 @@ public class AppendBypassCoordinateOperator<CommitT>
 
     private void asyncPlan(AppendCompactCoordinator coordinator) {
         while (compactTasks.size() < MAX_PENDING_TASKS) {
-            List<AppendCompactTask> tasks = coordinator.run();
-            compactTasks.addAll(tasks);
-            if (tasks.isEmpty()) {
+            try {
+                List<AppendCompactTask> tasks = coordinator.run();
+                compactTasks.addAll(tasks);
+                if (tasks.isEmpty()) {
+                    break;
+                }
+            } catch (Throwable t) {
+                LOG.error("Fatal exception happened when generating compaction tasks.", t);
+                this.throwable = t;
                 break;
             }
         }
@@ -106,6 +114,11 @@ public class AppendBypassCoordinateOperator<CommitT>
 
     @Override
     public void processElement(StreamRecord<CommitT> record) throws Exception {
+        Preconditions.checkState(
+                throwable == null,
+                String.format(
+                        "Fatal exception happened when generating compaction tasks: %s",
+                        throwable));
         output.collect(new StreamRecord<>(Either.Left(record.getValue())));
     }
 
