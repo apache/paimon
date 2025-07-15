@@ -547,7 +547,9 @@ public class GenericVariantUtil {
         checkIndex(pos, value.length);
         int basicType = value[pos] & BASIC_TYPE_MASK;
         int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
-        if (basicType != PRIMITIVE || typeInfo != UUID) throw unexpectedType(Type.UUID);
+        if (basicType != PRIMITIVE || typeInfo != UUID) {
+            throw unexpectedType(Type.UUID);
+        }
         int start = pos + 1;
         checkIndex(start + 15, value.length);
         // UUID values are big-endian, so we can't use VariantUtil.readLong().
