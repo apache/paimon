@@ -119,6 +119,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     normalized.startsWith("show tags") ||
     (normalized.startsWith("alter table") &&
       (normalized.contains("create tag") ||
+        normalized.contains("create auto tag") ||
         normalized.contains("replace tag") ||
         normalized.contains("rename tag") ||
         normalized.contains("delete tag")))

@@ -215,4 +215,34 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Tag ddl: alter table t create auto tag syntax") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES (
+                |'primary-key'='id'
+                |)""".stripMargin)
+
+    spark.sql("insert into T values(1, 'a')")
+
+    val table = loadTable("T")
+    assertResult(1)(table.snapshotManager().snapshotCount())
+
+    assertResult(0)(spark.sql("show tags T").count())
+
+    spark.sql("""alter table T set tblproperties(
+                |'tag.automatic-creation'='process-time',
+                |'tag.creation-period'='daily',
+                |'tag.creation-delay'='10 m',
+                |'tag.num-retained-max'='90'
+                |)""".stripMargin)
+
+    spark.sql("alter table T create auto tag")
+    assertResult(1)(spark.sql("show tags T").count())
+    assertResult(
+      spark
+        .sql("select date_format(date_sub(current_date(), 1), 'yyyy-MM-dd')")
+        .head()
+        .getString(0))(loadTable("T").tagManager().tagObjects().get(0).getRight)
+  }
 }

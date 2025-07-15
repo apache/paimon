@@ -563,6 +563,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createAutoTag() {
+        store().newTagCreationManager(this).run();
+    }
+
+    @Override
     public void createTag(String tagName, long fromSnapshotId) {
         createTag(tagName, findSnapshot(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
     }

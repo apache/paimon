@@ -137,6 +137,12 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
         ifNotExists)
     }
 
+  /** Create a CREATE AUTO TAG logical command. */
+  override def visitCreateAutoTag(ctx: CreateAutoTagContext): CreateAutoTagCommand =
+    withOrigin(ctx) {
+      CreateAutoTagCommand(typedVisit[Seq[String]](ctx.multipartIdentifier));
+    }
+
   /** Create a DELETE TAG logical command. */
   override def visitDeleteTag(ctx: DeleteTagContext): DeleteTagCommand = withOrigin(ctx) {
     DeleteTagCommand(
