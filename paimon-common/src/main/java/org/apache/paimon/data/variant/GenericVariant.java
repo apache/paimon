@@ -35,6 +35,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
 
 import static org.apache.paimon.data.variant.GenericVariantUtil.BINARY_SEARCH_THRESHOLD;
 import static org.apache.paimon.data.variant.GenericVariantUtil.SIZE_LIMIT;
@@ -237,6 +238,11 @@ public final class GenericVariant implements Variant {
     // Get the value type of the variant.
     public Type getType() {
         return GenericVariantUtil.getType(value, pos);
+    }
+
+    // Get a UUID value from the variant.
+    public UUID getUuid() {
+        return GenericVariantUtil.getUuid(value, pos);
     }
 
     // Get the number of object fields in the variant.
@@ -456,8 +462,15 @@ public final class GenericVariant implements Variant {
                 sb.append(escapeJson(GenericVariantUtil.getString(value, pos)));
                 break;
             case DOUBLE:
-                sb.append(GenericVariantUtil.getDouble(value, pos));
-                break;
+                {
+                    double d = GenericVariantUtil.getDouble(value, pos);
+                    if (Double.isFinite(d)) {
+                        sb.append(d);
+                    } else {
+                        appendQuoted(sb, Double.toString(d));
+                    }
+                    break;
+                }
             case DECIMAL:
                 sb.append(GenericVariantUtil.getDecimal(value, pos).toPlainString());
                 break;
@@ -482,13 +495,23 @@ public final class GenericVariant implements Variant {
                                         .atZone(ZoneOffset.UTC)));
                 break;
             case FLOAT:
-                sb.append(GenericVariantUtil.getFloat(value, pos));
-                break;
+                {
+                    float f = GenericVariantUtil.getFloat(value, pos);
+                    if (Float.isFinite(f)) {
+                        sb.append(f);
+                    } else {
+                        appendQuoted(sb, Float.toString(f));
+                    }
+                    break;
+                }
             case BINARY:
                 appendQuoted(
                         sb,
                         Base64.getEncoder()
                                 .encodeToString(GenericVariantUtil.getBinary(value, pos)));
+                break;
+            case UUID:
+                appendQuoted(sb, GenericVariantUtil.getUuid(value, pos).toString());
                 break;
         }
     }
