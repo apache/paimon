@@ -48,5 +48,6 @@ public interface MergeFunction<T> {
     /** Get current merged value. */
     T getResult();
 
+    /** Require copy input kv, this may cache kv in memory. */
     boolean requireCopy();
 }

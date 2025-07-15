@@ -35,11 +35,46 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for postpone bucket tables. */
 public class PostponeBucketTableITCase extends AbstractTestBase {
 
     private static final int TIMEOUT = 120;
+
+    @Test
+    public void testRetractOnPartialUpdate() {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v1 INT,\n"
+                        + "  v2 INT,\n"
+                        + "  row_kind_col STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'merge-engine' = 'partial-update',\n"
+                        + "  'rowkind.field' = 'row_kind_col'\n"
+                        + ")");
+        assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 1, 1, '-D')").await())
+                .rootCause()
+                .hasMessageContaining("By default, Partial update can not accept delete records");
+    }
 
     @Test
     public void testWriteThenCompact() throws Exception {
