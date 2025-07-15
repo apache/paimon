@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
+import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.write.WriteHelper
@@ -233,15 +234,21 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
         }
 
       case BUCKET_UNAWARE | POSTPONE_MODE =>
-        if (
-          coreOptions.partitionSinkStrategy().equals(PartitionSinkStrategy.HASH) && !tableSchema
-            .partitionKeys()
-            .isEmpty
-        ) {
-          writeWithoutBucket(data.repartition(partitionCols(data): _*))
-        } else {
-          writeWithoutBucket(data)
+        var input = data
+        if (tableSchema.partitionKeys().size() > 0) {
+          coreOptions.partitionSinkStrategy match {
+            case PartitionSinkStrategy.HASH =>
+              input = data.repartition(partitionCols(data): _*)
+            case _ =>
+          }
         }
+        val clusteringColumns = coreOptions.clusteringColumns()
+        if (!clusteringColumns.isEmpty) {
+          val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
+          val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
+          input = sorter.sort(data)
+        }
+        writeWithoutBucket(input)
 
       case HASH_FIXED =>
         if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {

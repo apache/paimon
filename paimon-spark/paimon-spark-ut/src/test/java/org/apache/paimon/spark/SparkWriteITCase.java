@@ -35,6 +35,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -122,6 +124,18 @@ public class SparkWriteITCase {
         assertThat(rows.toString())
                 .isEqualTo(
                         "[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value], [5,3,my_value]]");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"order", "zorder", "hilbert"})
+    public void testWriteWithClustering(String clusterStrategy) {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT) TBLPROPERTIES ("
+                        + "'clustering.columns'='a,b',"
+                        + String.format("'clustering.strategy'='%s')", clusterStrategy));
+        spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
     }
 
     @Test

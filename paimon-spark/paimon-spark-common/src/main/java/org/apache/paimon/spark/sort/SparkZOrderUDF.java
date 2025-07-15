@@ -37,8 +37,6 @@ import org.apache.spark.sql.types.ShortType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.TimestampType;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 
@@ -51,13 +49,8 @@ import scala.collection.Seq;
 
 /** Spark udf to calculate zorder bytes. Copied from iceberg. */
 public class SparkZOrderUDF implements Serializable {
-    private static final byte[] PRIMITIVE_EMPTY = new byte[ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE];
 
-    /**
-     * Every Spark task runs iteratively on a rows in a single thread so ThreadLocal should protect
-     * from concurrent access to any of these structures.
-     */
-    private transient ThreadLocal<ByteBuffer> outputBuffer;
+    private static final byte[] PRIMITIVE_EMPTY = new byte[ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE];
 
     private transient ThreadLocal<byte[][]> inputHolder;
     private transient ThreadLocal<ByteBuffer[]> inputBuffers;
@@ -75,14 +68,10 @@ public class SparkZOrderUDF implements Serializable {
         this.maxOutputSize = maxOutputSize;
     }
 
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
-        inputBuffers = ThreadLocal.withInitial(() -> new ByteBuffer[numCols]);
-        inputHolder = ThreadLocal.withInitial(() -> new byte[numCols][]);
-        outputBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(totalOutputBytes));
-    }
-
     private ByteBuffer inputBuffer(int position, int size) {
+        if (inputBuffers == null) {
+            inputBuffers = ThreadLocal.withInitial(() -> new ByteBuffer[numCols]);
+        }
         ByteBuffer buffer = inputBuffers.get()[position];
         if (buffer == null) {
             buffer = ByteBuffer.allocate(size);
@@ -92,9 +81,14 @@ public class SparkZOrderUDF implements Serializable {
     }
 
     byte[] interleaveBits(Seq<byte[]> scalaBinary) {
+        if (inputHolder == null) {
+            inputHolder = ThreadLocal.withInitial(() -> new byte[numCols][]);
+        }
+
         byte[][] columnsBinary =
                 JavaConverters.seqAsJavaList(scalaBinary).toArray(inputHolder.get());
-        return ZOrderByteUtils.interleaveBits(columnsBinary, totalOutputBytes, outputBuffer.get());
+        return ZOrderByteUtils.interleaveBits(
+                columnsBinary, totalOutputBytes, ByteBuffer.allocate(totalOutputBytes));
     }
 
     private UserDefinedFunction tinyToOrderedBytesUDF() {
