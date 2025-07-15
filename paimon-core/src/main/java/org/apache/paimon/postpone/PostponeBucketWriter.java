@@ -66,6 +66,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     private SinkWriter<KeyValue> sinkWriter;
     private MemorySegmentPool memorySegmentPool;
+    private boolean retractValidated = false;
 
     public PostponeBucketWriter(
             FileIO fileIO,
@@ -119,9 +120,13 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     private void validateRetract(KeyValue kv) {
         if (kv.valueKind().isRetract()) {
+            if (retractValidated) {
+                return;
+            }
             mergeFunction.reset();
             mergeFunction.add(kv);
             mergeFunction.getResult();
+            retractValidated = true;
         }
     }
 
