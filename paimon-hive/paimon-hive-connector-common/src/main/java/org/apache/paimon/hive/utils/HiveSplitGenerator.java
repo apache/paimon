@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.utils;
 
+import org.apache.paimon.hive.HiveConnectorOptions;
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -59,10 +60,6 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 public class HiveSplitGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveSplitGenerator.class);
-    private static final String HIVE_PAIMON_RESPECT_MINMAXSPLITSIZE_ENABLED =
-            "paimon.respect.minmaxsplitsize.enabled";
-
-    private static final String HIVE_PAIMON_SPLIT_OPENFILECOST = "paimon.split.openfilecost";
 
     public static InputSplit[] generateSplits(
             FileStoreTable table, JobConf jobConf, int numSplits) {
@@ -115,7 +112,9 @@ public class HiveSplitGenerator {
                             .map(s -> (DataSplit) s)
                             .collect(Collectors.toList());
             List<DataSplit> packed = dataSplits;
-            if (jobConf.getBoolean(HIVE_PAIMON_RESPECT_MINMAXSPLITSIZE_ENABLED, false)) {
+            if (jobConf.getBoolean(
+                    HiveConnectorOptions.HIVE_PAIMON_RESPECT_MINMAXSPLITSIZE_ENABLED.key(),
+                    false)) {
                 packed = packSplits(table, jobConf, dataSplits, numSplits);
             }
             packed.forEach(ss -> splits.add(new PaimonInputSplit(location, ss, table)));
@@ -159,7 +158,8 @@ public class HiveSplitGenerator {
         }
         long openCostInBytes =
                 jobConf.getLong(
-                        HIVE_PAIMON_SPLIT_OPENFILECOST, table.coreOptions().splitOpenFileCost());
+                        HiveConnectorOptions.HIVE_PAIMON_SPLIT_OPENFILECOST.key(),
+                        table.coreOptions().splitOpenFileCost());
         long splitSize = computeSplitSize(jobConf, splits, numSplits, openCostInBytes);
         List<DataSplit> dataSplits = new ArrayList<>();
         List<DataSplit> toPack = new ArrayList<>();

@@ -44,6 +44,12 @@ Options for Hive catalog.
 
 {{< generated/hive_catalog_configuration >}}
 
+### HiveConnectorOptions
+
+Hive connector options for paimon.
+
+{{< generated/hive_connector_configuration >}}
+
 ### JdbcCatalogOptions
 
 Options for Jdbc catalog.
