@@ -19,7 +19,7 @@ limitations under the License.
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any, Generic, List
 from dataclasses import dataclass, field
-from api.typedef import T
+from api.typedef import T, DataField
 
 
 @dataclass
@@ -166,88 +166,6 @@ class ListTablesResponse(PagedResponse[str]):
 
     def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
-
-
-@dataclass
-class PaimonDataType:
-    FIELD_TYPE = "type"
-    FIELD_ELEMENT = "element"
-    FIELD_FIELDS = "fields"
-    FIELD_KEY = "key"
-    FIELD_VALUE = "value"
-
-    type: str
-    element: Optional['PaimonDataType'] = None
-    fields: List['DataField'] = field(default_factory=list)
-    key: Optional['PaimonDataType'] = None
-    value: Optional['PaimonDataType'] = None
-
-    @classmethod
-    def from_dict(cls, data: Any) -> 'PaimonDataType':
-        if isinstance(data, dict):
-            element = data.get(cls.FIELD_ELEMENT, None)
-            fields = data.get(cls.FIELD_FIELDS, None)
-            key = data.get(cls.FIELD_KEY, None)
-            value = data.get(cls.FIELD_VALUE, None)
-            if element is not None:
-                element = PaimonDataType.from_dict(data.get(cls.FIELD_ELEMENT)),
-            if fields is not None:
-                fields = list(map(lambda f: DataField.from_dict(f), fields)),
-            if key is not None:
-                key = PaimonDataType.from_dict(key)
-            if value is not None:
-                value = PaimonDataType.from_dict(value)
-            return cls(
-                type=data.get(cls.FIELD_TYPE),
-                element=element,
-                fields=fields,
-                key=key,
-                value=value,
-            )
-        else:
-            return cls(type=data)
-
-    def to_dict(self) -> Any:
-        if self.element is None and self.fields is None and self.key:
-            return self.type
-        if self.element is not None:
-            return {self.FIELD_TYPE: self.type, self.FIELD_ELEMENT: self.element}
-        elif self.fields is not None:
-            return {self.FIELD_TYPE: self.type, self.FIELD_FIELDS: self.fields}
-        elif self.value is not None:
-            return {self.FIELD_TYPE: self.type, self.FIELD_KEY: self.key, self.FIELD_VALUE: self.value}
-        elif self.key is not None and self.value is None:
-            return {self.FIELD_TYPE: self.type, self.FIELD_KEY: self.key}
-
-
-@dataclass
-class DataField:
-    FIELD_ID = "id"
-    FIELD_NAME = "name"
-    FIELD_TYPE = "type"
-    FIELD_DESCRIPTION = "description"
-
-    description: str
-    id: int
-    name: str
-    type: PaimonDataType
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DataField':
-        return cls(
-            id=data.get(cls.FIELD_ID),
-            name=data.get(cls.FIELD_NAME),
-            type=PaimonDataType.from_dict(data.get(cls.FIELD_TYPE)),
-            description=data.get(cls.FIELD_DESCRIPTION),
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            self.FIELD_ID: self.id,
-            self.FIELD_NAME: self.name,
-            self.FIELD_TYPE: PaimonDataType.to_dict(self.type),
-            self.FIELD_DESCRIPTION: self.description
-        }
 
 
 @dataclass
