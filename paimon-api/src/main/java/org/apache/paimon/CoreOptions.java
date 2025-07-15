@@ -2001,7 +2001,7 @@ public class CoreOptions implements Serializable {
 
     @Nullable
     public String changelogFileFormat() {
-        return options.get(CHANGELOG_FILE_FORMAT);
+        return normalizeFileFormat(options.get(CHANGELOG_FILE_FORMAT));
     }
 
     @Nullable
