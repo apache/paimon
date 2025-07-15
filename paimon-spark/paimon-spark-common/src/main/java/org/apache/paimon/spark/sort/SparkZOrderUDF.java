@@ -49,13 +49,8 @@ import scala.collection.Seq;
 
 /** Spark udf to calculate zorder bytes. Copied from iceberg. */
 public class SparkZOrderUDF implements Serializable {
-    private static final byte[] PRIMITIVE_EMPTY = new byte[ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE];
 
-    /**
-     * Every Spark task runs iteratively on a rows in a single thread so ThreadLocal should protect
-     * from concurrent access to any of these structures.
-     */
-    private transient ThreadLocal<ByteBuffer> outputBuffer;
+    private static final byte[] PRIMITIVE_EMPTY = new byte[ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE];
 
     private transient ThreadLocal<byte[][]> inputHolder;
     private transient ThreadLocal<ByteBuffer[]> inputBuffers;
@@ -89,13 +84,11 @@ public class SparkZOrderUDF implements Serializable {
         if (inputHolder == null) {
             inputHolder = ThreadLocal.withInitial(() -> new byte[numCols][]);
         }
-        if (outputBuffer == null) {
-            outputBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(totalOutputBytes));
-        }
 
         byte[][] columnsBinary =
                 JavaConverters.seqAsJavaList(scalaBinary).toArray(inputHolder.get());
-        return ZOrderByteUtils.interleaveBits(columnsBinary, totalOutputBytes, outputBuffer.get());
+        return ZOrderByteUtils.interleaveBits(
+                columnsBinary, totalOutputBytes, ByteBuffer.allocate(totalOutputBytes));
     }
 
     private UserDefinedFunction tinyToOrderedBytesUDF() {
