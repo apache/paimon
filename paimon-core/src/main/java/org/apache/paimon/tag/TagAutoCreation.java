@@ -179,15 +179,12 @@ public class TagAutoCreation {
                     int toDelete = tags.size() - numRetainedMax;
                     int i = 0;
                     for (List<String> tag : tags.values()) {
+                        String toDeleteTag = checkAndGetOneAutoTag(tag);
                         LOG.info(
                                 "Delete tag {}, because the number of auto-created tags reached numRetainedMax of {}.",
-                                tagName,
+                                toDeleteTag,
                                 numRetainedMax);
-                        tagManager.deleteTag(
-                                checkAndGetOneAutoTag(tag),
-                                tagDeletion,
-                                snapshotManager,
-                                callbacks);
+                        tagManager.deleteTag(toDeleteTag, tagDeletion, snapshotManager, callbacks);
                         i++;
                         if (i == toDelete) {
                             break;
