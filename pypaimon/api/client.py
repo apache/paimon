@@ -83,11 +83,11 @@ class ExponentialRetryInterceptor:
             'read': self.max_retries,
             'connect': self.max_retries,
             'backoff_factor': 1,
-            'status_forcelist': [429, 500, 502, 503, 504],
+            'status_forcelist': [429, 502, 503, 504],
             'raise_on_status': False,
             'raise_on_redirect': False,
         }
-        retry_methods = ["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"]
+        retry_methods = ["GET", "HEAD", "PUT", "DELETE", "TRACE", "OPTIONS"]
         retry_instance = Retry()
         if hasattr(retry_instance, 'allowed_methods'):
             retry_kwargs['allowed_methods'] = retry_methods
