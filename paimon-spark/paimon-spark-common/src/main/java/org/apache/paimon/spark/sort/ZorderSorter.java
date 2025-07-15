@@ -38,6 +38,7 @@ public class ZorderSorter extends TableSorter {
         checkNotEmpty();
     }
 
+    @Override
     public Dataset<Row> sort(Dataset<Row> df) {
         Column zColumn = zValue(df);
         Dataset<Row> zValueDF = df.withColumn(Z_COLUMN, zColumn);

@@ -404,26 +404,6 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Whether trigger partition mark done when recover from state.");
 
-    public static final ConfigOption<String> CLUSTERING_COLUMNS =
-            key("sink.clustering.by-columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. "
-                                    + "If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. "
-                                    + "This option will be effective only for bucket unaware table without primary keys and batch execution mode.");
-
-    public static final ConfigOption<String> CLUSTERING_STRATEGY =
-            key("sink.clustering.strategy")
-                    .stringType()
-                    .defaultValue("auto")
-                    .withDescription(
-                            "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
-                                    + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
-                                    + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
-                                    + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
-                                    + "and 'hilbert' for 5 or more columns.");
-
     public static final ConfigOption<Boolean> CLUSTERING_SORT_IN_CLUSTER =
             key("sink.clustering.sort-in-cluster")
                     .booleanType()

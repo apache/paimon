@@ -57,6 +57,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
+import static org.apache.paimon.CoreOptions.OrderType.ORDER;
+import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.options.MemorySize.VALUE_256_MB;
@@ -1835,6 +1838,28 @@ public class CoreOptions implements Serializable {
                                     + "starting from the snapshot after this one. If found, commit will be aborted. "
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
+    public static final ConfigOption<String> CLUSTERING_COLUMNS =
+            key("clustering.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys("sink.clustering.by-columns")
+                    .withDescription(
+                            "Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. "
+                                    + "If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. "
+                                    + "This option will be effective only for append table without primary keys and batch execution mode.");
+
+    public static final ConfigOption<String> CLUSTERING_STRATEGY =
+            key("clustering.strategy")
+                    .stringType()
+                    .defaultValue("auto")
+                    .withFallbackKeys("sink.clustering.strategy")
+                    .withDescription(
+                            "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
+                                    + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
+                                    + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
+                                    + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "and 'hilbert' for 5 or more columns.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2801,6 +2826,35 @@ public class CoreOptions implements Serializable {
 
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
         return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+    }
+
+    public List<String> clusteringColumns() {
+        return clusteringColumns(options.get(CLUSTERING_COLUMNS));
+    }
+
+    public OrderType clusteringStrategy(int columnSize) {
+        return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
+    }
+
+    public static List<String> clusteringColumns(String clusteringColumns) {
+        if (clusteringColumns == null || clusteringColumns.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return Arrays.asList(clusteringColumns.split(","));
+    }
+
+    public static OrderType clusteringStrategy(String clusteringStrategy, int columnSize) {
+        if (clusteringStrategy.equals(CLUSTERING_STRATEGY.defaultValue())) {
+            if (columnSize == 1) {
+                return ORDER;
+            } else if (columnSize < 5) {
+                return ZORDER;
+            } else {
+                return HILBERT;
+            }
+        } else {
+            return OrderType.of(clusteringStrategy);
+        }
     }
 
     /** Specifies the merge engine for table with primary key. */

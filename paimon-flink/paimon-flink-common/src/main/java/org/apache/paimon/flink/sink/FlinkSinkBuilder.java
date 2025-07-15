@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
@@ -48,17 +48,13 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
-import static org.apache.paimon.CoreOptions.OrderType.ORDER;
-import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
+import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -146,7 +142,8 @@ public class FlinkSinkBuilder {
             int sampleFactor) {
         // The clustering will be skipped if the clustering columns are empty or the execution
         // mode is STREAMING or the table type is illegal.
-        if (clusteringColumns == null || clusteringColumns.isEmpty()) {
+        List<String> columns = CoreOptions.clusteringColumns(clusteringColumns);
+        if (columns.isEmpty()) {
             return this;
         }
         checkState(input != null, "The input stream should be specified earlier.");
@@ -159,7 +156,6 @@ public class FlinkSinkBuilder {
         }
         // If the clustering is not skipped, check the clustering column names and sample
         // factor value.
-        List<String> columns = Arrays.asList(clusteringColumns.split(","));
         List<String> fieldNames = table.schema().fieldNames();
         checkState(
                 new HashSet<>(fieldNames).containsAll(new HashSet<>(columns)),
@@ -174,17 +170,7 @@ public class FlinkSinkBuilder {
                         + MIN_CLUSTERING_SAMPLE_FACTOR
                         + ".");
         TableSortInfo.Builder sortInfoBuilder = new TableSortInfo.Builder();
-        if (clusteringStrategy.equals(CLUSTERING_STRATEGY.defaultValue())) {
-            if (columns.size() == 1) {
-                sortInfoBuilder.setSortStrategy(ORDER);
-            } else if (columns.size() < 5) {
-                sortInfoBuilder.setSortStrategy(ZORDER);
-            } else {
-                sortInfoBuilder.setSortStrategy(HILBERT);
-            }
-        } else {
-            sortInfoBuilder.setSortStrategy(OrderType.of(clusteringStrategy));
-        }
+        sortInfoBuilder.setSortStrategy(clusteringStrategy(clusteringStrategy, columns.size()));
         int upstreamParallelism = input.getParallelism();
         String sinkParallelismValue =
                 table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());

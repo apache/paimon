@@ -57,6 +57,12 @@ under the License.
             <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), -2 (postpone bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
         </tr>
         <tr>
+            <td><h5>bucket-append-ordered</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
+        </tr>
+        <tr>
             <td><h5>bucket-function.type</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
@@ -67,12 +73,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
-        </tr>
-        <tr>
-            <td><h5>bucket-append-ordered</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
         </tr>
         <tr>
             <td><h5>cache-page-size</h5></td>
@@ -139,6 +139,18 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The maximum time of completed changelog to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. This option will be effective only for append table without primary keys and batch execution mode.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.strategy</h5></td>
+            <td style="word-wrap: break-word;">"auto"</td>
+            <td>String</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
             <td><h5>commit.callback.#.param</h5></td>
