@@ -21,17 +21,8 @@ import sys
 
 from setuptools import setup
 
-this_directory = os.path.abspath(os.path.dirname(__file__))
-version_file = os.path.join(this_directory, 'api/version.py')
 
-try:
-    exec(open(version_file).read())
-except IOError:
-    print("Failed to load PyPaimon version file for packaging. " +
-          "'%s' not found!" % version_file,
-          file=sys.stderr)
-    sys.exit(-1)
-VERSION = __version__  # noqa
+VERSION = "0.3.dev"  # noqa
 
 PACKAGES = [
     'api'

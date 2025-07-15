@@ -61,97 +61,6 @@ function contains_element() {
     fi
 }
 
-# Checkpoint the stage:step for convenient to re-exec the script with
-# skipping those success steps.
-# The format is "${Stage}:${Step}". e.g. Install:4
-function checkpoint_stage() {
-    if [ ! -d `dirname $STAGE_FILE` ]; then
-        mkdir -p `dirname $STAGE_FILE`
-    fi
-    echo "$1:$2">"$STAGE_FILE"
-}
-
-# Restore the stage:step
-function restore_stage() {
-    if [ -f "$STAGE_FILE" ]; then
-        local lines=$(awk '{print NR}' $STAGE_FILE)
-        if [ $lines -eq 1 ]; then
-            local first_field=$(cat $STAGE_FILE | cut -d ":" -f 1)
-            local second_field=$(cat $STAGE_FILE | cut -d ":" -f 2)
-            check_valid_stage $first_field $second_field
-            if [ $? -eq 0 ]; then
-                STAGE=$first_field
-                STEP=$second_field
-                return
-            fi
-        fi
-    fi
-    STAGE="install"
-    STEP=0
-}
-
-# Decide whether the stage:step is valid.
-function check_valid_stage() {
-    case $1 in
-        "install")
-            if [ $2 -le $STAGE_INSTALL_STEPS ] && [ $2 -ge 0 ]; then
-                return 0
-            fi
-            ;;
-        *)
-            ;;
-    esac
-    return 1
-}
-
-# Install flake8.
-# In some situations,you need to run the script with "sudo". e.g. sudo ./lint-python.sh
-function install_flake8() {
-    source $CONDA_HOME/bin/activate
-    if [ -f "$FLAKE8_PATH" ]; then
-        $PIP_PATH uninstall flake8 -y -q 2>&1 >/dev/null
-        if [ $? -ne 0 ]; then
-            echo "pip uninstall flake8 failed \
-            please try to exec the script again.\
-            if failed many times, you can try to exec in the form of sudo ./lint-python.sh -f"
-            exit 1
-        fi
-    fi
-
-    $CURRENT_DIR/install_command.sh -q flake8==4.0.1 2>&1 >/dev/null
-    if [ $? -ne 0 ]; then
-        echo "pip install flake8 failed \
-        please try to exec the script again.\
-        if failed many times, you can try to exec in the form of sudo ./lint-python.sh -f"
-        exit 1
-    fi
-    conda deactivate
-}
-
-# Install mypy.
-# In some situations, you need to run the script with "sudo". e.g. sudo ./lint-python.sh
-function install_mypy() {
-    source ${CONDA_HOME}/bin/activate
-    if [[ -f "$MYPY_PATH" ]]; then
-        ${PIP_PATH} uninstall mypy -y -q 2>&1 >/dev/null
-        if [[ $? -ne 0 ]]; then
-            echo "pip uninstall mypy failed \
-            please try to exec the script again.\
-            if failed many times, you can try to exec in the form of sudo ./lint-python.sh -f"
-            exit 1
-        fi
-    fi
-    ${CURRENT_DIR}/install_command.sh -q mypy==1.5.1 2>&1 >/dev/null
-    if [[ $? -ne 0 ]]; then
-        echo "pip install mypy failed \
-        please try to exec the script again.\
-        if failed many times, you can try to exec in the form of sudo ./lint-python.sh -f"
-        exit 1
-    fi
-    conda deactivate
-}
-
-
 # create dir if needed
 function create_dir() {
     if [ ! -d $1 ]; then
@@ -205,27 +114,6 @@ function get_all_supported_checks() {
         fi
     done
     IFS=$_OLD_IFS
-}
-
-# get all supported install components functions
-function get_all_supported_install_components() {
-    _OLD_IFS=$IFS
-    IFS=$'\n'
-    for fun in $(declare -F); do
-        if [[ `regexp_match "${fun:11}" "^install_"` = true ]]; then
-            SUPPORTED_INSTALLATION_COMPONENTS+=("${fun:19}")
-        fi
-    done
-    IFS=$_OLD_IFS
-    # we don't need to expose "install_wget" to user.
-    local DELETE_COMPONENTS=("wget")
-    local REAL_COMPONENTS=()
-    for component in ${SUPPORTED_INSTALLATION_COMPONENTS[@]}; do
-        if [[ `contains_element "${DELETE_COMPONENTS[*]}" "${component}"` = false ]]; then
-            REAL_COMPONENTS+=("${component}")
-        fi
-    done
-    SUPPORTED_INSTALLATION_COMPONENTS=(${REAL_COMPONENTS[@]})
 }
 
 # exec all selected check stages
@@ -308,8 +196,6 @@ function mypy_check() {
 # CURRENT_DIR is "paimon-python/dev/"
 CURRENT_DIR="$(cd "$( dirname "$0" )" && pwd)"
 
-# PAIMON_PYTHON_DIR is "paimon-python/"
-PAIMON_PYTHON_DIR=$(dirname "$CURRENT_DIR")
 
 # flake8 path
 #FLAKE8_PATH=$ENV_HOME/bin/flake8
@@ -333,10 +219,6 @@ create_dir $LOG_DIR
 # clean LOG_FILE content
 echo >$LOG_FILE
 
-
-# whether force to restart the script.
-FORCE_START=0
-
 SUPPORT_CHECKS=()
 
 # search all supported check functions and put them into SUPPORT_CHECKS array
@@ -354,13 +236,11 @@ usage: $0 [options]
             exclude checks which split by comma(,)
 -i [tox,flake8,sphinx,mypy]
             include checks which split by comma(,)
--f          force to exec from the progress of installing environment
 -l          list all checks supported.
 Examples:
   ./lint-python.sh                 =>  exec all checks.
   ./lint-python.sh -e tox,flake8   =>  exclude checks tox,flake8.
   ./lint-python.sh -i flake8       =>  include checks flake8.
-  ./lint-python.sh -f              =>  reinstall environment with all components and exec all checks.
   ./lint-python.sh -l              =>  list all checks supported.
 "
 while getopts "hfs:i:e:lr" arg; do
@@ -368,9 +248,6 @@ while getopts "hfs:i:e:lr" arg; do
         h)
             printf "%s\\n" "$USAGE"
             exit 2
-            ;;
-        f)
-            FORCE_START=1
             ;;
         e)
             EXCLUDE_CHECKS=($(echo $OPTARG | tr ',' ' ' ))
@@ -392,18 +269,8 @@ while getopts "hfs:i:e:lr" arg; do
     esac
 done
 
-
 # collect checks according to the options
 collect_checks
-
-# If exec the script with the param: -f, all progress will be re-run
-if [ $FORCE_START -eq 1 ]; then
-    STAGE="install"
-    STEP=0
-    checkpoint_stage $STAGE $STEP
-else
-    restore_stage
-fi
 
 check_stage
 

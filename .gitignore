@@ -20,6 +20,7 @@ target
 dependency-reduced-pom.xml
 metastore_db/
 python/.idea/
+python/dist/
 
 ### VS Code ###
 .vscode/
