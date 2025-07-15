@@ -96,6 +96,7 @@ public class AppendBypassCoordinateOperator<CommitT>
             } catch (Throwable t) {
                 LOG.error("Fatal exception happened when generating compaction tasks.", t);
                 this.throwable = t;
+                break;
             }
         }
     }
