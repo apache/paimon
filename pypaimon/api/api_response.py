@@ -19,7 +19,8 @@ limitations under the License.
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any, Generic, List
 from dataclasses import dataclass, field
-from api.typedef import T, DataField
+from api.typedef import T
+from api.types import DataField
 
 
 @dataclass

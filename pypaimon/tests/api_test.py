@@ -30,7 +30,8 @@ from api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabase
                               GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
 from api import RESTApi
 from api.rest_json import JSON
-from api.typedef import Identifier, AtomicInteger, DataTypeParser, DataType, AtomicType, ArrayType, MapType, RowType
+from api.typedef import Identifier
+from api.types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
 
 @dataclass
@@ -743,6 +744,24 @@ class RESTCatalogServer:
 class ApiTestCase(unittest.TestCase):
 
     def test_parse_data(self):
+        simple_type_test_cases = [
+            "DECIMAL",
+            "DECIMAL(5)",
+            "DECIMAL(10, 2)",
+            "DECIMAL(38, 18)",
+            "VARBINARY",
+            "VARBINARY(100)",
+            "VARBINARY(1024)",
+            "BYTES",
+            "VARCHAR(255)",
+            "CHAR(10)",
+            "INT",
+            "BOOLEAN"
+        ]
+        for type_str in simple_type_test_cases:
+            data_type = DataTypeParser.parse_data_type(type_str)
+            self.assertEqual(data_type.nullable, True)
+            self.assertEqual(data_type.type, type_str)
         field_id = AtomicInteger(0)
         simple_type = DataTypeParser.parse_data_type("VARCHAR(32)")
         self.assertEqual(simple_type.nullable, True)
@@ -786,25 +805,9 @@ class ApiTestCase(unittest.TestCase):
             ]
         }
 
-        row_type: RowType = DataTypeParser.parse_data_type(row_json, field_id)
+        row_type: RowType = DataTypeParser.parse_data_type(row_json, AtomicInteger(0))
         self.assertEqual(row_type.fields[0].type.type, 'BIGINT')
         self.assertEqual(row_type.fields[1].type.type, 'VARCHAR(100)')
-
-        field_json = {
-            "name": "user_profile",
-            "type": {
-                "type": "ROW",
-                "fields": [
-                    {"name": "age", "type": "INT"},
-                    {"name": "email", "type": "STRING"}
-                ]
-            },
-            "description": "User profile information",
-            "defaultValue": "null"
-        }
-
-        data_field = DataTypeParser.parse_data_field(field_json, field_id)
-        print(f"Data field: {data_field}")
 
         complex_json = {
             "type": "ARRAY",
@@ -821,8 +824,11 @@ class ApiTestCase(unittest.TestCase):
             }
         }
 
-        complex_type = DataTypeParser.parse_data_type(complex_json, field_id)
-        print(f"Complex type: {complex_type}")
+        complex_type: ArrayType = DataTypeParser.parse_data_type(complex_json, field_id)
+        element_type: MapType = complex_type.element
+        value_type: RowType = element_type.value
+        self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
+        self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
 
     def test_api(self):
         """Example usage of RESTCatalogServer"""
@@ -877,7 +883,6 @@ class ApiTestCase(unittest.TestCase):
             self.assertSetEqual(set(api.list_databases()), {*test_databases})
             self.assertEqual(api.get_database('default'), test_databases.get('default'))
             table = api.get_table(Identifier.from_string('default.user'))
-            print(JSON.to_json(table))
             self.assertEqual(table.id, str(test_tables['default.user'].uuid))
 
         finally:
