@@ -398,29 +398,28 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
     }
 
-    @Test
-    public void testStreamingReadLatestFullAppendWithCompactAndDv() throws Exception {
-        sql(
-                "CREATE TABLE test (a INT, b INT) WITH ('compaction.min.file-num' = '2', 'deletion-vectors.enabled' = 'true')");
-        sql("INSERT INTO test VALUES (1, 1)");
-        sql("INSERT INTO test VALUES (2, 2)");
-        sql("CALL sys.compact('default.test')");
+    // No compaction to test that data of full phase can be read
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStreamingReadFullWithoutCompact(boolean isPk) throws Exception {
+        if (isPk) {
+            sql(
+                    "CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b INT) "
+                            + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'none', 'write-only' = 'true')");
+        } else {
+            sql(
+                    "CREATE TABLE T (a INT, b INT) WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
+        }
 
-        // wait compaction
-        waitUtil(
-                () -> sql("SELECT count(*) FROM `test$snapshots`").get(0).getField(0).equals(3L),
-                Duration.ofMinutes(1),
-                Duration.ofSeconds(20));
+        sql("INSERT INTO T VALUES (1, 1)");
+        sql("INSERT INTO T VALUES (2, 2)");
+        sql("INSERT INTO T VALUES (3, 3)");
 
-        BlockingIterator<Row, Row> iter =
+        try (BlockingIterator<Row, Row> iter =
                 streamSqlBlockIter(
-                        "SELECT * FROM test /*+ OPTIONS('scan.mode' = 'latest-full') */");
-        Assertions.assertThat(iter.collect(2))
-                .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
-
-        sql("INSERT INTO test VALUES (3, 3)");
-        Assertions.assertThat(iter.collect(1)).containsExactly(Row.of(3, 3));
-
-        iter.close();
+                        "SELECT * FROM T /*+ OPTIONS('scan.mode' = 'from-snapshot-full', 'scan.snapshot-id' = '2') */")) {
+            assertThat(iter.collect(3))
+                    .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2), Row.of(3, 3));
+        }
     }
 }
