@@ -22,6 +22,7 @@ import org.apache.paimon.options.ConfigOption;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
+/** Options for hive connector. */
 public class HiveConnectorOptions {
 
     public static final ConfigOption<Boolean> HIVE_PAIMON_RESPECT_MINMAXSPLITSIZE_ENABLED =
