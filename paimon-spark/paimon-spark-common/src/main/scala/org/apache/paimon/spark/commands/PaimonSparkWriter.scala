@@ -239,6 +239,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
           coreOptions.partitionSinkStrategy match {
             case PartitionSinkStrategy.HASH =>
               input = data.repartition(partitionCols(data): _*)
+            case _ =>
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
