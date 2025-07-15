@@ -46,6 +46,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-connector-common</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-flink-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
