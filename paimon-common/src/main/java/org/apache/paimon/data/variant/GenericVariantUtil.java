@@ -20,7 +20,10 @@ package org.apache.paimon.data.variant;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.UUID;
 
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -120,6 +123,8 @@ public class GenericVariantUtil {
     // Long string value. The content is (4-byte little-endian unsigned integer representing the
     // string size) + (size bytes of string content).
     public static final int LONG_STR = 16;
+    // UUID, 16-byte big-endian.
+    public static final int UUID = 20;
 
     public static final byte VERSION = 1;
     // The lower 4 bits of the first metadata byte contain the version.
@@ -131,8 +136,8 @@ public class GenericVariantUtil {
     public static final int U24_SIZE = 3;
     public static final int U32_SIZE = 4;
 
-    // Both variant value and variant metadata need to be no longer than 16MiB.
-    public static final int SIZE_LIMIT = U24_MAX + 1;
+    // Both variant value and variant metadata need to be no longer than 128MiB.
+    public static final int SIZE_LIMIT = 128 * 1024 * 1024;
 
     public static final int MAX_DECIMAL4_PRECISION = 9;
     public static final int MAX_DECIMAL8_PRECISION = 18;
@@ -248,7 +253,8 @@ public class GenericVariantUtil {
         TIMESTAMP,
         TIMESTAMP_NTZ,
         FLOAT,
-        BINARY
+        BINARY,
+        UUID
     }
 
     public static int getTypeInfo(byte[] value, int pos) {
@@ -301,6 +307,8 @@ public class GenericVariantUtil {
                         return Type.BINARY;
                     case LONG_STR:
                         return Type.STRING;
+                    case UUID:
+                        return Type.UUID;
                     default:
                         throw unknownPrimitiveTypeInVariant(typeInfo);
                 }
@@ -367,6 +375,8 @@ public class GenericVariantUtil {
                     case BINARY:
                     case LONG_STR:
                         return 1 + U32_SIZE + readUnsigned(value, pos + 1, U32_SIZE);
+                    case UUID:
+                        return 17;
                     default:
                         throw unknownPrimitiveTypeInVariant(typeInfo);
                 }
@@ -531,7 +541,23 @@ public class GenericVariantUtil {
         throw unexpectedType(Type.STRING);
     }
 
-    /** 1. */
+    // Get a UUID value from variant value `value[pos...]`.
+    // Throw `MALFORMED_VARIANT` if the variant is malformed.
+    public static UUID getUuid(byte[] value, int pos) {
+        checkIndex(pos, value.length);
+        int basicType = value[pos] & BASIC_TYPE_MASK;
+        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+        if (basicType != PRIMITIVE || typeInfo != UUID) {
+            throw unexpectedType(Type.UUID);
+        }
+        int start = pos + 1;
+        checkIndex(start + 15, value.length);
+        // UUID values are big-endian, so we can't use VariantUtil.readLong().
+        ByteBuffer bb = ByteBuffer.wrap(value, start, 16).order(ByteOrder.BIG_ENDIAN);
+        return new UUID(bb.getLong(), bb.getLong());
+    }
+
+    /** ObjectHandler. */
     public interface ObjectHandler<T> {
         /**
          * @param size Number of object fields.
@@ -569,7 +595,7 @@ public class GenericVariantUtil {
         return handler.apply(size, idSize, offsetSize, idStart, offsetStart, dataStart);
     }
 
-    /** 1. */
+    /** ArrayHandler. */
     public interface ArrayHandler<T> {
         /**
          * @param size Number of array elements.

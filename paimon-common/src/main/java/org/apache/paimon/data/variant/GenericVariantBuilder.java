@@ -27,12 +27,15 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.exc.InputCoer
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.UUID;
 
 import static org.apache.paimon.data.variant.GenericVariantUtil.ARRAY;
 import static org.apache.paimon.data.variant.GenericVariantUtil.BASIC_TYPE_MASK;
@@ -61,9 +64,9 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.TIMESTAMP_NTZ;
 import static org.apache.paimon.data.variant.GenericVariantUtil.TRUE;
 import static org.apache.paimon.data.variant.GenericVariantUtil.U16_MAX;
 import static org.apache.paimon.data.variant.GenericVariantUtil.U24_MAX;
-import static org.apache.paimon.data.variant.GenericVariantUtil.U24_SIZE;
 import static org.apache.paimon.data.variant.GenericVariantUtil.U32_SIZE;
 import static org.apache.paimon.data.variant.GenericVariantUtil.U8_MAX;
+import static org.apache.paimon.data.variant.GenericVariantUtil.UUID;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION;
 import static org.apache.paimon.data.variant.GenericVariantUtil.arrayHeader;
 import static org.apache.paimon.data.variant.GenericVariantUtil.checkIndex;
@@ -281,6 +284,18 @@ public class GenericVariantBuilder {
         writePos += U32_SIZE;
         System.arraycopy(binary, 0, writeBuffer, writePos, binary.length);
         writePos += binary.length;
+    }
+
+    public void appendUuid(UUID uuid) {
+        checkCapacity(1 + 16);
+        writeBuffer[writePos++] = primitiveHeader(UUID);
+
+        // UUID is stored big-endian, so don't use writeLong.
+        ByteBuffer buffer = ByteBuffer.wrap(writeBuffer, writePos, 16);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        buffer.putLong(writePos, uuid.getMostSignificantBits());
+        buffer.putLong(writePos + 8, uuid.getLeastSignificantBits());
+        writePos += 16;
     }
 
     // Add a key to the variant dictionary. If the key already exists, the dictionary is not
@@ -592,16 +607,19 @@ public class GenericVariantBuilder {
     }
 
     // Choose the smallest unsigned integer type that can store `value`. It must be within
-    // `[0, U24_MAX]`.
+    // `[0, SIZE_LIMIT]`.
     private int getIntegerSize(int value) {
-        assert value >= 0 && value <= U24_MAX;
+        assert value >= 0 && value <= SIZE_LIMIT;
         if (value <= U8_MAX) {
             return 1;
         }
         if (value <= U16_MAX) {
             return 2;
         }
-        return U24_SIZE;
+        if (value <= U24_MAX) {
+            return 3;
+        }
+        return 4;
     }
 
     private void parseFloatingPoint(JsonParser parser) throws IOException {
