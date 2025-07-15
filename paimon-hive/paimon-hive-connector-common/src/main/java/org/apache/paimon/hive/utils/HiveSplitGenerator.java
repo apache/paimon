@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -165,7 +166,9 @@ public class HiveSplitGenerator {
         List<DataSplit> toPack = new ArrayList<>();
         int numFiles = 0;
         for (DataSplit split : splits) {
-            if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
+            if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
+                dataSplits.add(split);
+            } else if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
                 numFiles += split.dataFiles().size();
                 toPack.add(split);
             } else {
