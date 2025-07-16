@@ -162,6 +162,16 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>trigger_tag_automatic_creation</td>
+      <td>
+         Trigger the tag automatic creation. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.trigger_tag_automatic_creation(table => 'default.T')
+      </td>
+    </tr>
+    <tr>
       <td>rollback</td>
       <td>
          To rollback to a specific version of target table, note version/snapshot/tag must set one of them. Argument:

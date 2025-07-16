@@ -270,6 +270,19 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>trigger_tag_automatic_creation</td>
+      <td>
+         CALL [catalog.]sys.trigger_tag_automatic_creation('identifier')
+      </td>
+      <td>
+         Trigger the tag automatic creation. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.trigger_tag_automatic_creation(table => 'default.T')
+      </td>
+   </tr>
+   <tr>
       <td>merge_into</td>
       <td>
          -- for Flink 1.18<br/>
