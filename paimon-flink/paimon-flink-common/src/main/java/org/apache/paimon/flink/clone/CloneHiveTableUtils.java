@@ -23,8 +23,8 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.flink.clone.files.CloneFileInfo;
+import org.apache.paimon.flink.clone.files.CloneFilesCommitOperator;
 import org.apache.paimon.flink.clone.files.CloneFilesFunction;
-import org.apache.paimon.flink.clone.files.CommitTableOperator;
 import org.apache.paimon.flink.clone.files.DataFileInfo;
 import org.apache.paimon.flink.clone.files.ListCloneFilesFunction;
 import org.apache.paimon.flink.clone.files.ShuffleDataFileByTableComputer;
@@ -184,7 +184,7 @@ public class CloneHiveTableUtils {
                         .transform(
                                 "Commit table",
                                 BasicTypeInfo.LONG_TYPE_INFO,
-                                new CommitTableOperator(targetCatalogConfig))
+                                new CloneFilesCommitOperator(targetCatalogConfig))
                         .setParallelism(parallelism);
         committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }

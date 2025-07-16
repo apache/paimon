@@ -34,6 +34,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
@@ -72,7 +73,11 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @Test
     public void testCloneFromPaimon() throws Exception {
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
         String warehouse1 = getTempDirPath();
         String warehouse2 = getTempDirPath();
         sql(tEnv, "CREATE CATALOG catalog1 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse1);
@@ -98,14 +103,13 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "--target_catalog_conf",
                         "warehouse=" + warehouse2,
                         "--clone_from",
-                        "paimon",
-                        "--bucket",
-                        "1")
+                        "paimon")
                 .run();
 
+        sql(tEnv, "CALL catalog2.sys.compact(`table` => 'default.target')");
         List<Row> result = sql(tEnv, "SELECT * FROM catalog2.`default`.target");
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
-        List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog1.`default`.src");
+        List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog2.`default`.target");
         assertThat(show.toString()).contains("PRIMARY KEY");
     }
 

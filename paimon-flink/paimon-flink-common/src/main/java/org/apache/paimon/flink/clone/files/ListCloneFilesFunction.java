@@ -50,7 +50,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** List files for table. */
 public class ListCloneFilesFunction
-        extends CloneProcessFunction<Tuple2<Identifier, Identifier>, CloneFileInfo> {
+        extends CloneFilesProcessFunction<Tuple2<Identifier, Identifier>, CloneFileInfo> {
 
     private static final long serialVersionUID = 1L;
 

@@ -52,7 +52,6 @@ public class ListCloneSplitsFunction
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
     @Nullable private final String whereSql;
-    @Nullable private final Integer bucket;
 
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
@@ -60,12 +59,10 @@ public class ListCloneSplitsFunction
     public ListCloneSplitsFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
-            @Nullable String whereSql,
-            @Nullable Integer bucket) {
+            @Nullable String whereSql) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.whereSql = whereSql;
-        this.bucket = bucket;
     }
 
     /**
@@ -99,9 +96,7 @@ public class ListCloneSplitsFunction
                 .rowType()
                 .getFields()
                 .forEach(
-                        f -> {
-                            builder.column(f.name(), f.type(), f.description(), f.defaultValue());
-                        });
+                        f -> builder.column(f.name(), f.type(), f.description(), f.defaultValue()));
         builder.partitionKeys(sourceTable.partitionKeys());
         builder.primaryKey(sourceTable.primaryKeys());
         sourceTable
@@ -110,14 +105,14 @@ public class ListCloneSplitsFunction
                         (k, v) -> {
                             if (k.equalsIgnoreCase(BUCKET.key())
                                     || k.equalsIgnoreCase(PATH.key())) {
-                                // use default bucket from catalog
                                 return;
                             }
                             builder.option(k, v);
                         });
 
-        if (bucket != null) {
-            builder.option(BUCKET.key(), bucket.toString());
+        if (!sourceTable.primaryKeys().isEmpty()) {
+            // for primary key table, only postpone bucket supports clone
+            builder.option(BUCKET.key(), "-2");
         }
 
         targetCatalog.createTable(tuple.f1, builder.build(), true);

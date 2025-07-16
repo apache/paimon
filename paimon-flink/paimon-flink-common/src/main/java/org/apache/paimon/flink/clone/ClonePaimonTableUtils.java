@@ -129,8 +129,7 @@ public class ClonePaimonTableUtils {
             Map<String, String> targetCatalogConfig,
             int parallelism,
             @Nullable String whereSql,
-            @Nullable List<String> excludedTables,
-            @Nullable Integer bucket)
+            @Nullable List<String> excludedTables)
             throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
@@ -151,7 +150,7 @@ public class ClonePaimonTableUtils {
                 partitionedSource
                         .process(
                                 new ListCloneSplitsFunction(
-                                        sourceCatalogConfig, targetCatalogConfig, whereSql, bucket))
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
                         .name("List Files")
                         .setParallelism(parallelism);
 

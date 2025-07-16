@@ -42,7 +42,7 @@ import java.util.Map;
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
 
 /** Commit table operator. */
-public class CommitTableOperator extends AbstractStreamOperator<Long>
+public class CloneFilesCommitOperator extends AbstractStreamOperator<Long>
         implements OneInputStreamOperator<DataFileInfo, Long>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
@@ -52,7 +52,7 @@ public class CommitTableOperator extends AbstractStreamOperator<Long>
     private transient DataFileMetaSerializer dataFileSerializer;
     private transient Map<Identifier, Map<BinaryRow, List<DataFileMeta>>> files;
 
-    public CommitTableOperator(Map<String, String> catalogConfig) {
+    public CloneFilesCommitOperator(Map<String, String> catalogConfig) {
         this.catalogConfig = catalogConfig;
     }
 
