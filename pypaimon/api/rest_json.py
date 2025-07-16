@@ -30,7 +30,18 @@ def json_field(json_name: str, **kwargs):
 class JSON:
 
     @staticmethod
-    def to_dict(obj: Any) -> Dict[str, Any]:
+    def to_json(obj: Any, **kwargs) -> str:
+        """Convert to JSON string"""
+        return json.dumps(JSON.__to_dict(obj), ensure_ascii=False, **kwargs)
+
+    @staticmethod
+    def from_json(json_str: str, target_class: Type[T]) -> T:
+        """Create instance from JSON string"""
+        data = json.loads(json_str)
+        return JSON.__from_dict(data, target_class)
+
+    @staticmethod
+    def __to_dict(obj: Any) -> Dict[str, Any]:
         """Convert to dictionary with custom field names"""
         result = {}
         for field_info in fields(obj):
@@ -41,7 +52,7 @@ class JSON:
 
             # Handle nested objects
             if is_dataclass(field_value):
-                result[json_name] = JSON.to_dict(field_value)
+                result[json_name] = JSON.__to_dict(field_value)
             elif hasattr(field_value, 'to_dict'):
                 result[json_name] = field_value.to_dict()
             elif isinstance(field_value, list):
@@ -55,7 +66,7 @@ class JSON:
         return result
 
     @staticmethod
-    def from_dict(data: Dict[str, Any], target_class: Type[T]) -> T:
+    def __from_dict(data: Dict[str, Any], target_class: Type[T]) -> T:
         """Create instance from dictionary"""
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
@@ -71,14 +82,3 @@ class JSON:
                 kwargs[field_name] = value
 
         return target_class(**kwargs)
-
-    @staticmethod
-    def to_json(obj: Any, **kwargs) -> str:
-        """Convert to JSON string"""
-        return json.dumps(JSON.to_dict(obj), ensure_ascii=False, **kwargs)
-
-    @staticmethod
-    def from_json(json_str: str, target_class: Type[T]) -> T:
-        """Create instance from JSON string"""
-        data = json.loads(json_str)
-        return JSON.from_dict(data, target_class)

@@ -27,7 +27,7 @@ class AtomicInteger:
 
     def __init__(self, initial_value: int = 0):
         self._value = initial_value
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def get(self) -> int:
         with self._lock:

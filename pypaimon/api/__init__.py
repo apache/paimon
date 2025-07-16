@@ -22,7 +22,6 @@ from api.auth import RESTAuthFunction
 from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, ConfigResponse, PagedResponse
 from api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from api.rest_json import JSON
 from api.typedef import Identifier
 from api.client import HttpClient
 from api.auth import DLFAuthProvider, DLFToken
@@ -236,10 +235,8 @@ class RESTApi:
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
 
-        # Create request
         request = AlterDatabaseRequest(removals, updates)
 
-        # Send request
         return self.client.post(
             self.resource_paths.database(name),
             request,
