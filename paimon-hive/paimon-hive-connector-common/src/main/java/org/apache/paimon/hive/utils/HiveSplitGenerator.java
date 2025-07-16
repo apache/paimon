@@ -18,19 +18,26 @@
 
 package org.apache.paimon.hive.utils;
 
+import org.apache.paimon.hive.HiveConnectorOptions;
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BinPacking;
 
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -41,6 +48,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -51,7 +60,10 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 /** Generator to generate hive input splits. */
 public class HiveSplitGenerator {
 
-    public static InputSplit[] generateSplits(FileStoreTable table, JobConf jobConf) {
+    private static final Logger LOG = LoggerFactory.getLogger(HiveSplitGenerator.class);
+
+    public static InputSplit[] generateSplits(
+            FileStoreTable table, JobConf jobConf, int numSplits) {
         List<Predicate> predicates = new ArrayList<>();
         createPredicate(table.schema(), jobConf, false).ifPresent(predicates::add);
 
@@ -102,14 +114,17 @@ public class HiveSplitGenerator {
                     scan.withFilter(PredicateBuilder.and(predicatePerPartition));
                 }
             }
-            scan.dropStats()
-                    .plan()
-                    .splits()
-                    .forEach(
-                            split ->
-                                    splits.add(
-                                            new PaimonInputSplit(
-                                                    location, (DataSplit) split, table)));
+            List<DataSplit> dataSplits =
+                    scan.dropStats().plan().splits().stream()
+                            .map(s -> (DataSplit) s)
+                            .collect(Collectors.toList());
+            List<DataSplit> packed = dataSplits;
+            if (jobConf.getBoolean(
+                    HiveConnectorOptions.HIVE_PAIMON_RESPECT_MINMAXSPLITSIZE_ENABLED.key(),
+                    false)) {
+                packed = packSplits(table, jobConf, dataSplits, numSplits);
+            }
+            packed.forEach(ss -> splits.add(new PaimonInputSplit(location, ss, table)));
         }
         return splits.toArray(new InputSplit[0]);
     }
@@ -141,5 +156,101 @@ public class HiveSplitGenerator {
                     PartitionPredicate.createPartitionPredicate(
                             partition, rowType, defaultPartName));
         }
+    }
+
+    private static List<DataSplit> packSplits(
+            FileStoreTable table, JobConf jobConf, List<DataSplit> splits, int numSplits) {
+        if (table.coreOptions().deletionVectorsEnabled()) {
+            return splits;
+        }
+        long openCostInBytes =
+                jobConf.getLong(
+                        HiveConnectorOptions.HIVE_PAIMON_SPLIT_OPENFILECOST.key(),
+                        table.coreOptions().splitOpenFileCost());
+        long splitSize = computeSplitSize(jobConf, splits, numSplits, openCostInBytes);
+        List<DataSplit> dataSplits = new ArrayList<>();
+        List<DataSplit> toPack = new ArrayList<>();
+        int numFiles = 0;
+        for (DataSplit split : splits) {
+            if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
+                dataSplits.add(split);
+            } else if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
+                numFiles += split.dataFiles().size();
+                toPack.add(split);
+            } else {
+                dataSplits.add(split);
+            }
+        }
+        Function<DataFileMeta, Long> weightFunc =
+                file -> Math.max(file.fileSize(), openCostInBytes);
+        DataSplit current = null;
+        List<DataFileMeta> bin = new ArrayList<>();
+        int numFilesAfterPacked = 0;
+        for (DataSplit split : toPack) {
+            if (current == null
+                    || (current.partition().equals(split.partition())
+                            && current.bucket() == split.bucket())) {
+                current = split;
+                bin.addAll(split.dataFiles());
+            } else {
+                // deal with files which belong to the previous partition or bucket.
+                List<List<DataFileMeta>> splitGroups =
+                        BinPacking.packForOrdered(bin, weightFunc, splitSize);
+                for (List<DataFileMeta> fileGroups : splitGroups) {
+                    DataSplit newSplit = buildDataSplit(current, fileGroups);
+                    numFilesAfterPacked += newSplit.dataFiles().size();
+                    dataSplits.add(newSplit);
+                }
+                current = split;
+                bin.clear();
+            }
+        }
+        if (!bin.isEmpty()) {
+            List<List<DataFileMeta>> splitGroups =
+                    BinPacking.packForOrdered(bin, weightFunc, splitSize);
+            for (List<DataFileMeta> fileGroups : splitGroups) {
+                DataSplit newSplit = buildDataSplit(current, fileGroups);
+                numFilesAfterPacked += newSplit.dataFiles().size();
+                dataSplits.add(newSplit);
+            }
+        }
+        LOG.info("The origin number of data files before pack: {}", numFiles);
+        LOG.info("The current number of data files after pack: {}", numFilesAfterPacked);
+        return dataSplits;
+    }
+
+    private static DataSplit buildDataSplit(DataSplit current, List<DataFileMeta> fileGroups) {
+        return DataSplit.builder()
+                .withSnapshot(current.snapshotId())
+                .withPartition(current.partition())
+                .withBucket(current.bucket())
+                .withTotalBuckets(current.totalBuckets())
+                .withDataFiles(fileGroups)
+                .rawConvertible(current.rawConvertible())
+                .withBucketPath(current.bucketPath())
+                .build();
+    }
+
+    private static Long computeSplitSize(
+            JobConf jobConf, List<DataSplit> splits, int numSplits, long openCostInBytes) {
+        long maxSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMAXSPLITSIZE);
+        long minSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMINSPLITSIZE);
+        long totalSize = 0;
+        for (DataSplit split : splits) {
+            totalSize +=
+                    split.dataFiles().stream()
+                            .map(f -> Math.max(f.fileSize(), openCostInBytes))
+                            .reduce(Long::sum)
+                            .orElse(0L);
+        }
+        long avgSize = totalSize / numSplits;
+        long splitSize = Math.min(maxSize, Math.max(avgSize, minSize));
+        LOG.info(
+                "Currently, minSplitSize: {}, maxSplitSize: {}, avgSize: {}, finalSplitSize: {}.",
+                minSize,
+                maxSize,
+                avgSize,
+                splitSize);
+        return splitSize;
     }
 }
