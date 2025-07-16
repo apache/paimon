@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.spits;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.options.Options;

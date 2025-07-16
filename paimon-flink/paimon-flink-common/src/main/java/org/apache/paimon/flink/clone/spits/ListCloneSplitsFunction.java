@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.spits;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -39,8 +39,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
-import static org.apache.paimon.flink.clone.ListCloneFilesFunction.getPartitionPredicate;
+import static org.apache.paimon.flink.clone.files.ListCloneFilesFunction.getPartitionPredicate;
 
 /** List splits for table. */
 public class ListCloneSplitsFunction
@@ -51,6 +52,7 @@ public class ListCloneSplitsFunction
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
     @Nullable private final String whereSql;
+    @Nullable private final Integer bucket;
 
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
@@ -58,10 +60,12 @@ public class ListCloneSplitsFunction
     public ListCloneSplitsFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
-            @Nullable String whereSql) {
+            @Nullable String whereSql,
+            @Nullable Integer bucket) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.whereSql = whereSql;
+        this.bucket = bucket;
     }
 
     /**
@@ -104,12 +108,17 @@ public class ListCloneSplitsFunction
                 .options()
                 .forEach(
                         (k, v) -> {
-                            if (k.equalsIgnoreCase(BUCKET.key())) {
+                            if (k.equalsIgnoreCase(BUCKET.key())
+                                    || k.equalsIgnoreCase(PATH.key())) {
                                 // use default bucket from catalog
                                 return;
                             }
                             builder.option(k, v);
                         });
+
+        if (bucket != null) {
+            builder.option(BUCKET.key(), bucket.toString());
+        }
 
         targetCatalog.createTable(tuple.f1, builder.build(), true);
 

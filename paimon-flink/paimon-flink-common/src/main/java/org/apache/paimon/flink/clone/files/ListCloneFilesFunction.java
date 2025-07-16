@@ -16,10 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.files;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
@@ -169,9 +168,8 @@ public class ListCloneFilesFunction
                 "source table partition keys is not compatible with existed paimon table partition keys.");
     }
 
-    @VisibleForTesting
     @Nullable
-    static PartitionPredicate getPartitionPredicate(
+    public static PartitionPredicate getPartitionPredicate(
             @Nullable String whereSql, RowType partitionType, Identifier tableId) throws Exception {
         if (whereSql == null) {
             return null;

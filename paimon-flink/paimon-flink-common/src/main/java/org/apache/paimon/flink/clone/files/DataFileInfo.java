@@ -16,38 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.files;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.clone.HivePartitionFiles;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Clone File (table, partition) with necessary information. */
-public class CloneFileInfo implements Serializable {
+/** Data File (table, partition) with necessary information. */
+public class DataFileInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private final Identifier identifier;
     private final byte[] partition;
-    private final Path path;
-    private final long fileSize;
-    private final String format;
+    private final byte[] dataFileMeta;
 
-    public CloneFileInfo(
-            Identifier identifier, BinaryRow partition, Path path, long fileSize, String format) {
+    public DataFileInfo(Identifier identifier, BinaryRow partition, byte[] dataFileMeta) {
         this.identifier = identifier;
         this.partition = serializeBinaryRow(partition);
-        this.path = path;
-        this.fileSize = fileSize;
-        this.format = format;
+        this.dataFileMeta = dataFileMeta;
     }
 
     public Identifier identifier() {
@@ -58,27 +49,7 @@ public class CloneFileInfo implements Serializable {
         return deserializeBinaryRow(partition);
     }
 
-    public Path path() {
-        return path;
-    }
-
-    public long fileSize() {
-        return fileSize;
-    }
-
-    public String format() {
-        return format;
-    }
-
-    public static List<CloneFileInfo> fromHive(Identifier identifier, HivePartitionFiles files) {
-        List<CloneFileInfo> result = new ArrayList<>();
-        for (int i = 0; i < files.paths().size(); i++) {
-            Path path = files.paths().get(i);
-            long fileSize = files.fileSizes().get(i);
-            result.add(
-                    new CloneFileInfo(
-                            identifier, files.partition(), path, fileSize, files.format()));
-        }
-        return result;
+    public byte[] dataFileMeta() {
+        return dataFileMeta;
     }
 }

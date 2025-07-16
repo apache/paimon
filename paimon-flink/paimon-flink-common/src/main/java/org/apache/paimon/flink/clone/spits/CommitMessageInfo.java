@@ -16,40 +16,41 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.spits;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.InstantiationUtil;
 
+import java.io.IOException;
 import java.io.Serializable;
 
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
-
-/** Data File (table, partition) with necessary information. */
-public class DataFileInfo implements Serializable {
+/** Commit message with necessary information. */
+public class CommitMessageInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private final Identifier identifier;
-    private final byte[] partition;
-    private final byte[] dataFileMeta;
+    private final byte[] commitMessage;
 
-    public DataFileInfo(Identifier identifier, BinaryRow partition, byte[] dataFileMeta) {
+    public CommitMessageInfo(Identifier identifier, CommitMessage commitMessage) {
         this.identifier = identifier;
-        this.partition = serializeBinaryRow(partition);
-        this.dataFileMeta = dataFileMeta;
+        try {
+            this.commitMessage = InstantiationUtil.serializeObject(commitMessage);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public Identifier identifier() {
         return identifier;
     }
 
-    public BinaryRow partition() {
-        return deserializeBinaryRow(partition);
-    }
-
-    public byte[] dataFileMeta() {
-        return dataFileMeta;
+    public CommitMessage commitMessage() {
+        try {
+            return InstantiationUtil.deserializeObject(commitMessage, getClass().getClassLoader());
+        } catch (IOException | ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.files;
 
 import org.apache.paimon.table.sink.ChannelComputer;
 
 import java.util.Objects;
 
-/** Shuffle by table. */
-public class ShuffleCommitMessageByTableComputer implements ChannelComputer<CommitMessageInfo> {
+/** Shuffle DataFile By Table Computer. */
+public class ShuffleDataFileByTableComputer implements ChannelComputer<DataFileInfo> {
 
     private static final long serialVersionUID = 1L;
 
@@ -35,7 +35,7 @@ public class ShuffleCommitMessageByTableComputer implements ChannelComputer<Comm
     }
 
     @Override
-    public int channel(CommitMessageInfo record) {
+    public int channel(DataFileInfo record) {
         return Math.floorMod(Objects.hash(record.identifier()), numChannels);
     }
 

@@ -71,6 +71,45 @@ public class CloneActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testCloneFromPaimon() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        String warehouse1 = getTempDirPath();
+        String warehouse2 = getTempDirPath();
+        sql(tEnv, "CREATE CATALOG catalog1 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse1);
+        sql(tEnv, "CREATE CATALOG catalog2 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse2);
+
+        sql(
+                tEnv,
+                "CREATE TABLE catalog1.`default`.src (a INT, b INT, PRIMARY KEY (a) NOT ENFORCED)");
+        sql(tEnv, "INSERT INTO catalog1.`default`.src VALUES (1, 1), (2, 2)");
+        createAction(
+                        CloneAction.class,
+                        "clone",
+                        "--database",
+                        "default",
+                        "--table",
+                        "src",
+                        "--catalog_conf",
+                        "warehouse=" + warehouse1,
+                        "--target_database",
+                        "default",
+                        "--target_table",
+                        "target",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse2,
+                        "--clone_from",
+                        "paimon",
+                        "--bucket",
+                        "1")
+                .run();
+
+        List<Row> result = sql(tEnv, "SELECT * FROM catalog2.`default`.target");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog1.`default`.src");
+        assertThat(show.toString()).contains("PRIMARY KEY");
+    }
+
+    @Test
     public void testMigrateOneNonPartitionedTable() throws Exception {
         String format = randomFormat();
         String dbName = "hivedb" + StringUtils.randomNumericString(10);

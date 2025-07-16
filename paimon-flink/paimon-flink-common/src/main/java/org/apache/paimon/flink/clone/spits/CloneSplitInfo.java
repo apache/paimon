@@ -16,11 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.spits;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.InstantiationUtil;
 
+import java.io.IOException;
 import java.io.Serializable;
 
 /** Clone split with necessary information. */
@@ -30,12 +32,16 @@ public class CloneSplitInfo implements Serializable {
 
     private final Identifier sourceIdentifier;
     private final Identifier targetidentifier;
-    private final Split split;
+    private final byte[] split;
 
     public CloneSplitInfo(Identifier sourceIdentifier, Identifier targetidentifier, Split split) {
         this.sourceIdentifier = sourceIdentifier;
         this.targetidentifier = targetidentifier;
-        this.split = split;
+        try {
+            this.split = InstantiationUtil.serializeObject(split);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public Identifier sourceIdentifier() {
@@ -47,6 +53,10 @@ public class CloneSplitInfo implements Serializable {
     }
 
     public Split split() {
-        return split;
+        try {
+            return InstantiationUtil.deserializeObject(split, getClass().getClassLoader());
+        } catch (IOException | ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

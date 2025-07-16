@@ -44,6 +44,7 @@ public class CloneAction extends ActionBase {
     @Nullable private final String whereSql;
     @Nullable private final List<String> excludedTables;
     private final String cloneFrom;
+    @Nullable private final Integer bucket;
 
     public CloneAction(
             String sourceDatabase,
@@ -55,8 +56,10 @@ public class CloneAction extends ActionBase {
             @Nullable Integer parallelism,
             @Nullable String whereSql,
             @Nullable List<String> excludedTables,
-            String cloneFrom) {
+            String cloneFrom,
+            @Nullable Integer bucket) {
         super(sourceCatalogConfig);
+        this.bucket = bucket;
 
         if (cloneFrom.equalsIgnoreCase("hive")) {
             Catalog sourceCatalog = catalog;
@@ -113,7 +116,8 @@ public class CloneAction extends ActionBase {
                         targetCatalogConfig,
                         parallelism,
                         whereSql,
-                        excludedTables);
+                        excludedTables,
+                        bucket);
                 break;
         }
     }

@@ -21,6 +21,12 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.flink.clone.spits.CloneSplitInfo;
+import org.apache.paimon.flink.clone.spits.CloneSplitsFunction;
+import org.apache.paimon.flink.clone.spits.CommitMessageInfo;
+import org.apache.paimon.flink.clone.spits.CommitMessageTableOperator;
+import org.apache.paimon.flink.clone.spits.ListCloneSplitsFunction;
+import org.apache.paimon.flink.clone.spits.ShuffleCommitMessageByTableComputer;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.utils.StringUtils;
 
@@ -123,7 +129,8 @@ public class ClonePaimonTableUtils {
             Map<String, String> targetCatalogConfig,
             int parallelism,
             @Nullable String whereSql,
-            @Nullable List<String> excludedTables)
+            @Nullable List<String> excludedTables,
+            @Nullable Integer bucket)
             throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
@@ -144,7 +151,7 @@ public class ClonePaimonTableUtils {
                 partitionedSource
                         .process(
                                 new ListCloneSplitsFunction(
-                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql, bucket))
                         .name("List Files")
                         .setParallelism(parallelism);
 
