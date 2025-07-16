@@ -18,14 +18,14 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-from api.auth import RESTAuthFunction
-from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
+from .auth import RESTAuthFunction
+from .api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, ConfigResponse, PagedResponse
-from api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from api.typedef import Identifier
-from api.client import HttpClient
-from api.auth import DLFAuthProvider, DLFToken
-from api.typedef import T
+from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
+from .typedef import Identifier
+from .client import HttpClient
+from .auth import DLFAuthProvider, DLFToken
+from .typedef import T
 
 
 class RESTCatalogOptions:

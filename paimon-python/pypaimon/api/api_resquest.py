@@ -20,7 +20,7 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
 
-from api.rest_json import json_field
+from .rest_json import json_field
 
 
 class RESTRequest(ABC):
