@@ -18,11 +18,11 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-import api
 from api.auth import RESTAuthFunction
 from api.api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, ConfigResponse, PagedResponse
-from api.api_resquest import CreateDatabaseRequest
+from api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
+from api.rest_json import JSON
 from api.typedef import Identifier
 from api.client import HttpClient
 from api.auth import DLFAuthProvider, DLFToken
@@ -217,8 +217,8 @@ class RESTApi:
         databases = response.data() or []
         return PagedList(databases, response.get_next_page_token())
 
-    def create_database(self, name: str, properties: Dict[str, str]) -> None:
-        request = CreateDatabaseRequest(name, properties)
+    def create_database(self, name: str, options: Dict[str, str]) -> None:
+        request = CreateDatabaseRequest(name, options)
         self.client.post(self.resource_paths.databases(), request, self.rest_auth_function)
 
     def get_database(self, name: str) -> GetDatabaseResponse:
@@ -230,6 +230,21 @@ class RESTApi:
 
     def drop_database(self, name: str) -> None:
         self.client.delete(self.resource_paths.database(name), self.rest_auth_function)
+
+    def alter_database(self, name: str, removals: Optional[List[str]] = None,
+                       updates: Optional[Dict[str, str]] = None):
+        if not name or not name.strip():
+            raise ValueError("Database name cannot be empty")
+
+        # Create request
+        request = AlterDatabaseRequest(removals, updates)
+
+        # Send request
+        return self.client.post(
+            self.resource_paths.database(name),
+            request,
+            self.rest_auth_function
+        )
 
     def list_tables(self, database_name: str) -> List[str]:
         return self.__list_data_from_page_api(

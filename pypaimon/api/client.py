@@ -18,9 +18,10 @@ limitations under the License.
 
 import json
 import logging
+import traceback
 import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, TypeVar, Callable
+from typing import Dict, Optional, Type, TypeVar, Callable, Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,10 +39,100 @@ class RESTRequest(ABC):
 
 
 class RESTException(Exception):
+    def __init__(self, message: str = None, *args: Any, cause: Optional[Exception] = None):
+        if message and args:
+            try:
+                formatted_message = message % args
+            except (TypeError, ValueError):
+                formatted_message = f"{message} {' '.join(str(arg) for arg in args)}"
+        else:
+            formatted_message = message or "REST API error occurred"
 
-    def __init__(self, message: str, cause: Optional[Exception] = None):
-        super().__init__(message)
-        self.cause = cause
+        super().__init__(formatted_message)
+        self.__cause__ = cause
+
+    def get_cause(self) -> Optional[Exception]:
+        return self.__cause__
+
+    def get_message(self) -> str:
+        return str(self)
+
+    def print_stack_trace(self) -> None:
+        traceback.print_exception(type(self), self, self.__traceback__)
+
+    def get_stack_trace(self) -> str:
+        return ''.join(traceback.format_exception(type(self), self, self.__traceback__))
+
+    def __repr__(self) -> str:
+        if self.__cause__:
+            return f"{self.__class__.__name__}('{self}', caused by {type(self.__cause__).__name__}: {self.__cause__})"
+        return f"{self.__class__.__name__}('{self}')"
+
+
+class BadRequestException(RESTException):
+
+    def __init__(self, message: str = None, *args: Any):
+        super().__init__(message, *args)
+
+
+class BadRequestException(RESTException):
+    """Exception for 400 Bad Request"""
+    pass
+
+
+class NotAuthorizedException(RESTException):
+    """Exception for not authorized (401)"""
+
+    def __init__(self, message: str, *args: Any):
+        super().__init__(message, *args)
+
+
+class ForbiddenException(RESTException):
+    """Exception for forbidden access (403)"""
+
+    def __init__(self, message: str, *args: Any):
+        super().__init__(message, *args)
+
+
+class NoSuchResourceException(RESTException):
+    """Exception for resource not found (404)"""
+
+    def __init__(self, resource_type: Optional[str], resource_name: Optional[str],
+                 message: str, *args: Any):
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        super().__init__(message, *args)
+
+
+class AlreadyExistsException(RESTException):
+    """Exception for resource already exists (409)"""
+
+    def __init__(self, resource_type: Optional[str], resource_name: Optional[str],
+                 message: str, *args: Any):
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        super().__init__(message, *args)
+
+
+class ServiceFailureException(RESTException):
+    """Exception for service failure (500)"""
+
+    def __init__(self, message: str, *args: Any):
+        super().__init__(message, *args)
+
+
+class NotImplementedException(RESTException):
+    """Exception for not implemented (501)"""
+
+    def __init__(self, message: str, *args: Any):
+        super().__init__(message, *args)
+
+
+class ServiceUnavailableException(RESTException):
+    """Exception for service unavailable (503)"""
+
+    def __init__(self, message: str, *args: Any):
+        super().__init__(message, *args)
 
 
 class ErrorHandler(ABC):
@@ -51,24 +142,95 @@ class ErrorHandler(ABC):
         pass
 
 
+# DefaultErrorHandler implementation
 class DefaultErrorHandler(ErrorHandler):
+    """
+    Default error handler that converts error responses to appropriate exceptions.
 
-    _instance = None
+    This class implements the singleton pattern and handles various HTTP error codes
+    by throwing corresponding exception types.
+    """
+
+    _instance: Optional['DefaultErrorHandler'] = None
+
+    def __new__(cls) -> 'DefaultErrorHandler':
+        """Implement singleton pattern"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     @classmethod
     def get_instance(cls) -> 'DefaultErrorHandler':
+        """Get the singleton instance of DefaultErrorHandler"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     def accept(self, error: ErrorResponse, request_id: str) -> None:
-        message = f"REST API error (request_id: {request_id}): {error.message}"
-        if error.resource_name:
-            message += f" (resource: {error.resource_name})"
-        if error.resource_type:
-            message += f" (resource_type: {error.resource_type})"
+        """
+        Handle an error response by throwing appropriate exception.
 
-        raise RESTException(message)
+        Args:
+            error: The error response to handle
+            request_id: The request ID associated with the error
+
+        Raises:
+            Appropriate exception based on error code
+        """
+        code = error.code
+
+        # Format message with request ID if not default
+        if LoggingInterceptor.DEFAULT_REQUEST_ID == request_id:
+            message = error.message
+        else:
+            # If we have a requestId, append it to the message
+            message = f"{error.message} requestId:{request_id}"
+
+        # Handle different error codes
+        if code == 400:
+            raise BadRequestException("%s", message)
+
+        elif code == 401:
+            raise NotAuthorizedException("Not authorized: %s", message)
+
+        elif code == 403:
+            raise ForbiddenException("Forbidden: %s", message)
+
+        elif code == 404:
+            raise NoSuchResourceException(
+                error.resource_type,
+                error.resource_name,
+                "%s",
+                message
+            )
+
+        elif code in [405, 406]:
+            # These codes are handled but don't throw exceptions
+            pass
+
+        elif code == 409:
+            raise AlreadyExistsException(
+                error.resource_type,
+                error.resource_name,
+                "%s",
+                message
+            )
+
+        elif code == 500:
+            raise ServiceFailureException("Server error: %s", message)
+
+        elif code == 501:
+            raise NotImplementedException(message)
+
+        elif code == 503:
+            raise ServiceUnavailableException("Service unavailable: %s", message)
+
+        else:
+            # Default case for unhandled codes
+            pass
+
+        # If no specific exception was thrown, throw generic RESTException
+        raise RESTException("Unable to process: %s", message)
 
 
 class ExponentialRetryInterceptor:
@@ -97,7 +259,6 @@ class ExponentialRetryInterceptor:
 
 
 class LoggingInterceptor:
-
     REQUEST_ID_KEY = "x-request-id"
     DEFAULT_REQUEST_ID = "unknown"
 
@@ -250,17 +411,17 @@ class HttpClient(RESTClient):
                                 rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
         try:
             body_str = JSON.to_json(body)
-            auth_headers = _get_headers(path, "POST", body_str, rest_auth_function)
+            auth_headers = _get_headers(path, "POST", None, body_str, rest_auth_function)
             url = self._get_request_url(path, None)
-
-            return self._execute_request("POST", url, data=body_str, headers=auth_headers,
-                                         response_type=response_type)
-        except json.JSONEncodeError as e:
-            raise RESTException("build request failed.", e)
+            return self._execute_request("POST", url, data=body_str, headers=auth_headers, response_type=response_type)
+        except RESTException as e:
+            raise e
+        except Exception as e:
+            raise RESTException("build request failed.", cause=e)
 
     def delete(self, path: str,
                rest_auth_function: Callable[[RESTAuthParameter], Dict[str, str]]) -> T:
-        auth_headers = _get_headers(path, "DELETE", "", rest_auth_function)
+        auth_headers = _get_headers(path, "DELETE", None, "", rest_auth_function)
         url = self._get_request_url(path, None)
 
         return self._execute_request("DELETE", url, headers=auth_headers, response_type=None)
@@ -327,7 +488,7 @@ class HttpClient(RESTClient):
             else:
                 raise RESTException("response body is null.")
 
-        except RESTException:
-            raise
+        except RESTException as e:
+            raise e
         except Exception as e:
-            raise RESTException("rest exception", e)
+            raise RESTException("rest exception", cause=e)

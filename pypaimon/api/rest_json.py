@@ -16,36 +16,69 @@
 #  under the License.
 
 import json
-from dataclasses import asdict
-from typing import Any, Type
+from dataclasses import field, fields, is_dataclass
+from typing import Any, Type, Dict
+
 from api.typedef import T
 
 
+def json_field(json_name: str, **kwargs):
+    """Create a field with custom JSON name"""
+    return field(metadata={'json_name': json_name}, **kwargs)
+
+
 class JSON:
-    """Universal JSON serializer"""
+
+    @staticmethod
+    def to_dict(obj: Any) -> Dict[str, Any]:
+        """Convert to dictionary with custom field names"""
+        result = {}
+        for field_info in fields(obj):
+            field_value = getattr(obj, field_info.name)
+
+            # Get custom JSON name from metadata
+            json_name = field_info.metadata.get('json_name', field_info.name)
+
+            # Handle nested objects
+            if is_dataclass(field_value):
+                result[json_name] = JSON.to_dict(field_value)
+            elif hasattr(field_value, 'to_dict'):
+                result[json_name] = field_value.to_dict()
+            elif isinstance(field_value, list):
+                result[json_name] = [
+                    item.to_dict() if hasattr(item, 'to_dict') else item
+                    for item in field_value
+                ]
+            else:
+                result[json_name] = field_value
+
+        return result
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any], target_class: Type[T]) -> T:
+        """Create instance from dictionary"""
+        # Create field name mapping (json_name -> field_name)
+        field_mapping = {}
+        for field_info in fields(target_class):
+            json_name = field_info.metadata.get('json_name', field_info.name)
+            field_mapping[json_name] = field_info.name
+
+        # Map JSON data to field names
+        kwargs = {}
+        for json_name, value in data.items():
+            if json_name in field_mapping:
+                field_name = field_mapping[json_name]
+                kwargs[field_name] = value
+
+        return target_class(**kwargs)
+
+    @staticmethod
+    def to_json(obj: Any, **kwargs) -> str:
+        """Convert to JSON string"""
+        return json.dumps(JSON.to_dict(obj), ensure_ascii=False, **kwargs)
 
     @staticmethod
     def from_json(json_str: str, target_class: Type[T]) -> T:
+        """Create instance from JSON string"""
         data = json.loads(json_str)
-        if hasattr(target_class, 'from_dict'):
-            return target_class.from_dict(data)
-        return data
-
-    @staticmethod
-    def to_json(obj: Any) -> str:
-        """Serialize any object to JSON"""
-        return json.dumps(obj, default=JSON._default_serializer)
-
-    @staticmethod
-    def _default_serializer(obj):
-        """Default serialization handler"""
-
-        # Handle objects with to_dict method
-        if hasattr(obj, 'to_dict') and callable(obj.to_dict):
-            return obj.to_dict()
-
-        # Handle dataclass objects
-        if hasattr(obj, '__dataclass_fields__'):
-            return asdict(obj)
-
-        raise TypeError(f"Object of type {type(obj).__name__} is not JSON")
+        return JSON.from_dict(data, target_class)

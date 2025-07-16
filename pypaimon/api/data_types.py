@@ -102,7 +102,6 @@ class ArrayType(DataType):
 
 
 @dataclass
-@dataclass
 class MultisetType(DataType):
     element: DataType
 

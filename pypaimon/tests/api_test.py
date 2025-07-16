@@ -31,7 +31,7 @@ from api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabase
 from api import RESTApi
 from api.rest_json import JSON
 from api.typedef import Identifier
-from api.types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
+from api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
 
 @dataclass
