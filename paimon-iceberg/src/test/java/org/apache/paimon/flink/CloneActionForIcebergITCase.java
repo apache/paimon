@@ -171,7 +171,8 @@ public class CloneActionForIcebergITCase extends ActionITCaseBase {
                 tableName,
                 String.join(",", insertValues));
 
-        List<Row> r1 = sql(tEnv, "SELECT * FROM my_iceberg.`%s`.`%s`", dbName, tableName);
+        List<Row> r1 =
+                sql(tEnv, "SELECT * FROM my_iceberg.`%s`.`%s` WHERE price > 0", dbName, tableName);
 
         sql(tEnv, "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '%s')", warehouse);
         tEnv.useCatalog("PAIMON");
@@ -193,7 +194,9 @@ public class CloneActionForIcebergITCase extends ActionITCaseBase {
                         "--target_table",
                         "test_table",
                         "--target_catalog_conf",
-                        "warehouse=" + warehouse)
+                        "warehouse=" + warehouse,
+                        "--where",
+                        "price > 0")
                 .run();
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");

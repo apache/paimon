@@ -143,7 +143,9 @@ public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
                 BinaryRow partitionRow =
                         FileMetaUtils.writePartitionValue(
                                 partitionRowType, partitionValues, valueSetters);
-                results.add(toHivePartitionFiles(entry.getValue(), partitionRow));
+                if (predicate == null || predicate.test(partitionRow)) {
+                    results.add(toHivePartitionFiles(entry.getValue(), partitionRow));
+                }
             }
             return results;
         }
