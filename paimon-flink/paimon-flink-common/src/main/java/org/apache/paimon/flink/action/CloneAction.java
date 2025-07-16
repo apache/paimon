@@ -18,8 +18,11 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.CachingCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.clone.CloneHiveTableUtils;
 import org.apache.paimon.flink.clone.ClonePaimonTableUtils;
+import org.apache.paimon.hive.HiveCatalog;
 
 import javax.annotation.Nullable;
 
@@ -54,6 +57,18 @@ public class CloneAction extends ActionBase {
             @Nullable List<String> excludedTables,
             String cloneFrom) {
         super(sourceCatalogConfig);
+
+        if (cloneFrom.equalsIgnoreCase("hive")) {
+            Catalog sourceCatalog = catalog;
+            if (sourceCatalog instanceof CachingCatalog) {
+                sourceCatalog = ((CachingCatalog) sourceCatalog).wrapped();
+            }
+            if (!(sourceCatalog instanceof HiveCatalog)) {
+                throw new UnsupportedOperationException(
+                        "Only support clone hive tables using HiveCatalog, but current source catalog is "
+                                + sourceCatalog.getClass().getName());
+            }
+        }
 
         this.sourceDatabase = sourceDatabase;
         this.sourceTableName = sourceTableName;
