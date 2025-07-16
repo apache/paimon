@@ -35,6 +35,7 @@ class RESTCatalogOptions:
     DLF_REGION = "dlf.region"
     DLF_ACCESS_KEY_ID = "dlf.access-key-id"
     DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
+    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
     PREFIX = 'prefix'
 
 
@@ -234,7 +235,8 @@ class RESTApi:
                        updates: Optional[Dict[str, str]] = None):
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
-
+        removals = removals or []
+        updates = updates or {}
         request = AlterDatabaseRequest(removals, updates)
 
         return self.client.post(

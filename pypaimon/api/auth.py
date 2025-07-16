@@ -45,6 +45,7 @@ class DLFToken:
         from api import RESTCatalogOptions
         self.access_key_id = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID)
         self.access_key_secret = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET)
+        self.security_token = options.get(RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
 
 
 class AuthProvider(ABC):
