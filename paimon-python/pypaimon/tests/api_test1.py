@@ -26,17 +26,36 @@ from urllib.parse import urlparse
 import unittest
 
 import pypaimon.api as api
-from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
-                                GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
+from ..api.api_response import (
+    ConfigResponse,
+    ListDatabasesResponse,
+    GetDatabaseResponse,
+    TableMetadata,
+    Schema,
+    GetTableResponse,
+    ListTablesResponse,
+    TableSchema,
+    RESTResponse,
+    PagedList,
+    DataField,
+)
 from ..api import RESTApi
 from ..api.rest_json import JSON
 from ..api.typedef import Identifier
-from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
+from ..api.data_types import (
+    AtomicInteger,
+    DataTypeParser,
+    AtomicType,
+    ArrayType,
+    MapType,
+    RowType,
+)
 
 
 @dataclass
 class ErrorResponse(RESTResponse):
     """Error response"""
+
     RESOURCE_TYPE_DATABASE = "database"
     RESOURCE_TYPE_TABLE = "table"
     RESOURCE_TYPE_VIEW = "view"
@@ -64,7 +83,7 @@ class ResourcePaths:
     ROLLBACK = "rollback"
 
     def __init__(self, prefix: str = ""):
-        self.prefix = prefix.rstrip('/')
+        self.prefix = prefix.rstrip("/")
 
     def config(self) -> str:
         return "/v1/config"
@@ -126,7 +145,8 @@ class TableNoPermissionException(CatalogException):
 
     def __init__(self, identifier: Identifier):
         self.identifier = identifier
-        super().__init__(f"No permission to access table {identifier.get_full_name()}")
+        super().__init__(
+            f"No permission to access table {identifier.get_full_name()}")
 
 
 class ViewNotExistException(CatalogException):
@@ -150,7 +170,8 @@ class FunctionNotExistException(CatalogException):
 
     def __init__(self, identifier: Identifier):
         self.identifier = identifier
-        super().__init__(f"Function {identifier.get_full_name()} does not exist")
+        super().__init__(
+            f"Function {identifier.get_full_name()} does not exist")
 
 
 class FunctionAlreadyExistException(CatalogException):
@@ -158,7 +179,8 @@ class FunctionAlreadyExistException(CatalogException):
 
     def __init__(self, identifier: Identifier):
         self.identifier = identifier
-        super().__init__(f"Function {identifier.get_full_name()} already exists")
+        super().__init__(
+            f"Function {identifier.get_full_name()} already exists")
 
 
 class ColumnNotExistException(CatalogException):
@@ -183,7 +205,9 @@ class DefinitionNotExistException(CatalogException):
     def __init__(self, identifier: Identifier, name: str):
         self.identifier = identifier
         self.name = name
-        super().__init__(f"Definition {name} does not exist in {identifier.get_full_name()}")
+        super().__init__(
+            f"Definition {name} does not exist in {identifier.get_full_name()}"
+        )
 
 
 class DefinitionAlreadyExistException(CatalogException):
@@ -192,7 +216,9 @@ class DefinitionAlreadyExistException(CatalogException):
     def __init__(self, identifier: Identifier, name: str):
         self.identifier = identifier
         self.name = name
-        super().__init__(f"Definition {name} already exists in {identifier.get_full_name()}")
+        super().__init__(
+            f"Definition {name} already exists in {identifier.get_full_name()}"
+        )
 
 
 class DialectNotExistException(CatalogException):
@@ -201,7 +227,9 @@ class DialectNotExistException(CatalogException):
     def __init__(self, identifier: Identifier, dialect: str):
         self.identifier = identifier
         self.dialect = dialect
-        super().__init__(f"Dialect {dialect} does not exist in {identifier.get_full_name()}")
+        super().__init__(
+            f"Dialect {dialect} does not exist in {identifier.get_full_name()}"
+        )
 
 
 class DialectAlreadyExistException(CatalogException):
@@ -210,7 +238,9 @@ class DialectAlreadyExistException(CatalogException):
     def __init__(self, identifier: Identifier, dialect: str):
         self.identifier = identifier
         self.dialect = dialect
-        super().__init__(f"Dialect {dialect} already exists in {identifier.get_full_name()}")
+        super().__init__(
+            f"Dialect {dialect} already exists in {identifier.get_full_name()}"
+        )
 
 
 # Constants
@@ -240,7 +270,12 @@ OBJECT_TABLE = "OBJECT_TABLE"
 class RESTCatalogServer:
     """Mock REST server for testing"""
 
-    def __init__(self, data_path: str, auth_provider, config: ConfigResponse, warehouse: str):
+    def __init__(
+            self,
+            data_path: str,
+            auth_provider,
+            config: ConfigResponse,
+            warehouse: str):
         self.logger = logging.getLogger(__name__)
         self.warehouse = warehouse
         self.config_response = config
@@ -268,7 +303,7 @@ class RESTCatalogServer:
     def start(self) -> None:
         """Start the mock server"""
         handler = self._create_request_handler()
-        self.server = HTTPServer(('localhost', 0), handler)
+        self.server = HTTPServer(("localhost", 0), handler)
         self.port = self.server.server_port
 
         self.server_thread = threading.Thread(target=self.server.serve_forever)
@@ -295,13 +330,13 @@ class RESTCatalogServer:
 
         class RequestHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                self._handle_request('GET')
+                self._handle_request("GET")
 
             def do_POST(self):
-                self._handle_request('POST')
+                self._handle_request("POST")
 
             def do_DELETE(self):
-                self._handle_request('DELETE')
+                self._handle_request("DELETE")
 
             def _handle_request(self, method: str):
                 try:
@@ -311,15 +346,21 @@ class RESTCatalogServer:
                     parameters = self._parse_query_params(parsed_url.query)
 
                     # Get request body
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else ""
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    data = (
+                        self.rfile.read(content_length).decode("utf-8")
+                        if content_length > 0
+                        else ""
+                    )
 
                     # Get headers
                     headers = dict(self.headers)
 
                     # Handle authentication
                     auth_token = headers.get(AUTHORIZATION_HEADER_KEY.lower())
-                    if not self._authenticate(auth_token, resource_path, parameters, method, data):
+                    if not self._authenticate(
+                        auth_token, resource_path, parameters, method, data
+                    ):
                         self._send_response(401, "Unauthorized")
                         return
 
@@ -331,7 +372,8 @@ class RESTCatalogServer:
                     self._send_response(status_code, response)
 
                 except Exception as e:
-                    server_instance.logger.error(f"Request handling error: {e}")
+                    server_instance.logger.error(
+                        f"Request handling error: {e}")
                     self._send_response(500, str(e))
 
             def _parse_query_params(self, query: str) -> Dict[str, str]:
@@ -340,14 +382,21 @@ class RESTCatalogServer:
                     return {}
 
                 params = {}
-                for pair in query.split('&'):
-                    if '=' in pair:
-                        key, value = pair.split('=', 1)
-                        params[key.strip()] = api.RESTUtil.decode_string(value.strip())
+                for pair in query.split("&"):
+                    if "=" in pair:
+                        key, value = pair.split("=", 1)
+                        params[key.strip()] = api.RESTUtil.decode_string(
+                            value.strip())
                 return params
 
-            def _authenticate(self, token: str, path: str, params: Dict[str, str],
-                              method: str, data: str) -> bool:
+            def _authenticate(
+                self,
+                token: str,
+                path: str,
+                params: Dict[str, str],
+                method: str,
+                data: str,
+            ) -> bool:
                 """Authenticate request"""
                 # Simplified authentication - always return True for mock
                 return True
@@ -355,9 +404,9 @@ class RESTCatalogServer:
             def _send_response(self, status_code: int, body: str):
                 """Send HTTP response"""
                 self.send_response(status_code)
-                self.send_header('Content-Type', 'application/json')
+                self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(body.encode('utf-8'))
+                self.wfile.write(body.encode("utf-8"))
 
             def log_message(self, format, *args):
                 """Override to use our logger"""
@@ -365,8 +414,14 @@ class RESTCatalogServer:
 
         return RequestHandler
 
-    def _route_request(self, method: str, resource_path: str, parameters: Dict[str, str],
-                       data: str, headers: Dict[str, str]) -> Tuple[str, int]:
+    def _route_request(
+        self,
+        method: str,
+        resource_path: str,
+        parameters: Dict[str, str],
+        data: str,
+        headers: Dict[str, str],
+    ) -> Tuple[str, int]:
         """Route HTTP request to appropriate handler"""
         try:
             # Config endpoint
@@ -376,7 +431,9 @@ class RESTCatalogServer:
                     return self._mock_response(self.config_response, 200)
 
             # Databases endpoint
-            if resource_path == self.database_uri or resource_path.startswith(self.database_uri + "?"):
+            if resource_path == self.database_uri or resource_path.startswith(
+                self.database_uri + "?"
+            ):
                 return self._databases_api_handler(method, data, parameters)
 
             # Global tables endpoint
@@ -385,9 +442,12 @@ class RESTCatalogServer:
 
             # Database-specific endpoints
             if resource_path.startswith(self.database_uri + "/"):
-                return self._handle_database_resource(method, resource_path, parameters, data)
+                return self._handle_database_resource(
+                    method, resource_path, parameters, data
+                )
 
-            return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+            return self._mock_response(ErrorResponse(
+                None, None, "Not Found", 404), 404)
 
         except DatabaseNotExistException as e:
             response = ErrorResponse(
@@ -396,7 +456,10 @@ class RESTCatalogServer:
             return self._mock_response(response, 404)
         except TableNotExistException as e:
             response = ErrorResponse(
-                ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_table_name(), str(e), 404
+                ErrorResponse.RESOURCE_TYPE_TABLE,
+                e.identifier.get_table_name(),
+                str(e),
+                404,
             )
             return self._mock_response(response, 404)
         except DatabaseNoPermissionException as e:
@@ -406,7 +469,10 @@ class RESTCatalogServer:
             return self._mock_response(response, 403)
         except TableNoPermissionException as e:
             response = ErrorResponse(
-                ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_table_name(), str(e), 403
+                ErrorResponse.RESOURCE_TYPE_TABLE,
+                e.identifier.get_table_name(),
+                str(e),
+                403,
             )
             return self._mock_response(response, 403)
         except Exception as e:
@@ -414,11 +480,12 @@ class RESTCatalogServer:
             response = ErrorResponse(None, None, str(e), 500)
             return self._mock_response(response, 500)
 
-    def _handle_database_resource(self, method: str, resource_path: str,
-                                  parameters: Dict[str, str], data: str) -> Tuple[str, int]:
+    def _handle_database_resource(
+        self, method: str, resource_path: str, parameters: Dict[str, str], data: str
+    ) -> Tuple[str, int]:
         """Handle database-specific resource requests"""
         # Extract database name and resource path
-        path_parts = resource_path[len(self.database_uri) + 1:].split('/')
+        path_parts = resource_path[len(self.database_uri) + 1:].split("/")
         database_name = api.RESTUtil.decode_string(path_parts[0])
 
         # Check database permissions
@@ -438,7 +505,8 @@ class RESTCatalogServer:
             resource_type = path_parts[1]
 
             if resource_type.startswith(ResourcePaths.TABLES):
-                return self._tables_handle(method, data, database_name, parameters)
+                return self._tables_handle(
+                    method, data, database_name, parameters)
 
         elif len(path_parts) >= 3:
             # Individual resource operations
@@ -447,13 +515,26 @@ class RESTCatalogServer:
             identifier = Identifier.create(database_name, resource_name)
 
             if resource_type == ResourcePaths.TABLES:
-                return self._handle_table_resource(method, path_parts, identifier, data, parameters)
+                return self._handle_table_resource(
+                    method, path_parts, identifier, data, parameters
+                )
 
-        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+        return self._mock_response(
+            ErrorResponse(
+                None,
+                None,
+                "Not Found",
+                404),
+            404)
 
-    def _handle_table_resource(self, method: str, path_parts: List[str],
-                               identifier: Identifier, data: str,
-                               parameters: Dict[str, str]) -> Tuple[str, int]:
+    def _handle_table_resource(
+        self,
+        method: str,
+        path_parts: List[str],
+        identifier: Identifier,
+        data: str,
+        parameters: Dict[str, str],
+    ) -> Tuple[str, int]:
         """Handle table-specific resource requests"""
         # Check table permissions
         if identifier.get_full_name() in self.no_permission_tables:
@@ -463,22 +544,36 @@ class RESTCatalogServer:
             # Basic table operations
             return self._table_handle(method, data, identifier)
 
-        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+        return self._mock_response(
+            ErrorResponse(
+                None,
+                None,
+                "Not Found",
+                404),
+            404)
 
-    def _databases_api_handler(self, method: str, data: str,
-                               parameters: Dict[str, str]) -> Tuple[str, int]:
+    def _databases_api_handler(
+        self, method: str, data: str, parameters: Dict[str, str]
+    ) -> Tuple[str, int]:
         """Handle databases API requests"""
         if method == "GET":
             database_name_pattern = parameters.get(DATABASE_NAME_PATTERN)
             databases = [
-                db_name for db_name in self.database_store.keys()
-                if not database_name_pattern or self._match_name_pattern(db_name, database_name_pattern)
+                db_name
+                for db_name in self.database_store.keys()
+                if not database_name_pattern
+                or self._match_name_pattern(db_name, database_name_pattern)
             ]
-            return self._generate_final_list_databases_response(parameters, databases)
+            return self._generate_final_list_databases_response(
+                parameters, databases)
 
-        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        return self._mock_response(
+            ErrorResponse(None, None, "Method Not Allowed", 405), 405
+        )
 
-    def _database_handle(self, method: str, data: str, database_name: str) -> Tuple[str, int]:
+    def _database_handle(
+        self, method: str, data: str, database_name: str
+    ) -> Tuple[str, int]:
         """Handle individual database operations"""
         if database_name not in self.database_store:
             raise DatabaseNotExistException(database_name)
@@ -492,10 +587,17 @@ class RESTCatalogServer:
         elif method == "DELETE":
             del self.database_store[database_name]
             return self._mock_response("", 200)
-        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        return self._mock_response(
+            ErrorResponse(None, None, "Method Not Allowed", 405), 405
+        )
 
-    def _tables_handle(self, method: str = None, data: str = None, database_name: str = None,
-                       parameters: Dict[str, str] = None) -> Tuple[str, int]:
+    def _tables_handle(
+        self,
+        method: str = None,
+        data: str = None,
+        database_name: str = None,
+        parameters: Dict[str, str] = None,
+    ) -> Tuple[str, int]:
         """Handle tables operations"""
         if parameters is None:
             parameters = {}
@@ -504,25 +606,36 @@ class RESTCatalogServer:
             # Database-specific tables
             if method == "GET":
                 tables = self._list_tables(database_name, parameters)
-                return self._generate_final_list_tables_response(parameters, tables)
-        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+                return self._generate_final_list_tables_response(
+                    parameters, tables)
+        return self._mock_response(
+            ErrorResponse(None, None, "Method Not Allowed", 405), 405
+        )
 
-    def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
+    def _table_handle(
+        self, method: str, data: str, identifier: Identifier
+    ) -> Tuple[str, int]:
         """Handle individual table operations"""
         if method == "GET":
             if identifier.is_system_table():
                 # Handle system table
-                schema = Schema(fields=[], options={PATH: f"/tmp/{identifier.get_full_name()}"})
-                table_metadata = self._create_table_metadata(identifier, 1, schema, None, False)
+                schema = Schema(
+                    fields=[], options={
+                        PATH: f"/tmp/{identifier.get_full_name()}"})
+                table_metadata = self._create_table_metadata(
+                    identifier, 1, schema, None, False
+                )
             else:
                 if identifier.get_full_name() not in self.table_metadata_store:
                     raise TableNotExistException(identifier)
-                table_metadata = self.table_metadata_store[identifier.get_full_name()]
+                table_metadata = self.table_metadata_store[identifier.get_full_name(
+                )]
 
             schema = table_metadata.schema.to_schema()
             path = schema.options.pop(PATH, None)
 
-            response = self.mock_table(identifier, table_metadata, path, schema)
+            response = self.mock_table(
+                identifier, table_metadata, path, schema)
             return self._mock_response(response, 200)
         #
         # elif method == "POST":
@@ -536,16 +649,21 @@ class RESTCatalogServer:
             if identifier.get_full_name() in self.table_metadata_store:
                 del self.table_metadata_store[identifier.get_full_name()]
             if identifier.get_full_name() in self.table_latest_snapshot_store:
-                del self.table_latest_snapshot_store[identifier.get_full_name()]
+                del self.table_latest_snapshot_store[identifier.get_full_name(
+                )]
             if identifier.get_full_name() in self.table_partitions_store:
                 del self.table_partitions_store[identifier.get_full_name()]
 
             return self._mock_response("", 200)
 
-        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        return self._mock_response(
+            ErrorResponse(None, None, "Method Not Allowed", 405), 405
+        )
 
     # Utility methods
-    def _mock_response(self, response: Union[RESTResponse, str], http_code: int) -> Tuple[str, int]:
+    def _mock_response(
+        self, response: Union[RESTResponse, str], http_code: int
+    ) -> Tuple[str, int]:
         """Create mock response"""
         if isinstance(response, str):
             return response, http_code
@@ -562,16 +680,29 @@ class RESTCatalogServer:
         if max_results_str:
             try:
                 max_results = int(max_results_str)
-                return min(max_results, DEFAULT_MAX_RESULTS) if max_results > 0 else DEFAULT_MAX_RESULTS
+                return (
+                    min(max_results, DEFAULT_MAX_RESULTS)
+                    if max_results > 0
+                    else DEFAULT_MAX_RESULTS
+                )
             except ValueError:
-                raise ValueError(f"Invalid maxResults value: {max_results_str}")
+                raise ValueError(
+                    f"Invalid maxResults value: {max_results_str}")
         return DEFAULT_MAX_RESULTS
 
-    def _build_paged_entities(self, entities: List[Any], max_results: int,
-                              page_token: Optional[str], desc: bool = False) -> PagedList:
+    def _build_paged_entities(
+        self,
+        entities: List[Any],
+        max_results: int,
+        page_token: Optional[str],
+        desc: bool = False,
+    ) -> PagedList:
         """Build paged entities"""
         # Sort entities
-        sorted_entities = sorted(entities, key=self._get_paged_key, reverse=desc)
+        sorted_entities = sorted(
+            entities,
+            key=self._get_paged_key,
+            reverse=desc)
 
         # Apply pagination
         paged_entities = []
@@ -584,20 +715,23 @@ class RESTCatalogServer:
 
         # Determine next page token
         next_page_token = None
-        if len(paged_entities) == max_results and len(sorted_entities) > max_results:
+        if len(paged_entities) == max_results and len(
+                sorted_entities) > max_results:
             next_page_token = self._get_paged_key(paged_entities[-1])
 
-        return PagedList(elements=paged_entities, next_page_token=next_page_token)
+        return PagedList(
+            elements=paged_entities,
+            next_page_token=next_page_token)
 
     def _get_paged_key(self, entity: Any) -> str:
         """Get paging key for entity"""
         if isinstance(entity, str):
             return entity
-        elif hasattr(entity, 'get_name'):
+        elif hasattr(entity, "get_name"):
             return entity.get_name()
-        elif hasattr(entity, 'get_full_name'):
+        elif hasattr(entity, "get_full_name"):
             return entity.get_full_name()
-        elif hasattr(entity, 'name'):
+        elif hasattr(entity, "name"):
             return entity.name
         else:
             return str(entity)
@@ -618,19 +752,25 @@ class RESTCatalogServer:
             if escaped:
                 regex.append(re.escape(char))
                 escaped = False
-            elif char == '\\':
+            elif char == "\\":
                 escaped = True
-            elif char == '%':
-                regex.append('.*')
-            elif char == '_':
-                regex.append('.')
+            elif char == "%":
+                regex.append(".*")
+            elif char == "_":
+                regex.append(".")
             else:
                 regex.append(re.escape(char))
 
-        return '^' + ''.join(regex) + '$'
+        return "^" + "".join(regex) + "$"
 
-    def _create_table_metadata(self, identifier: Identifier, schema_id: int,
-                               schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:
+    def _create_table_metadata(
+        self,
+        identifier: Identifier,
+        schema_id: int,
+        schema: Schema,
+        uuid_str: str,
+        is_external: bool,
+    ) -> TableMetadata:
         """Create table metadata"""
         options = schema.options.copy()
         path = f"/tmp/{identifier.get_full_name()}"
@@ -643,57 +783,67 @@ class RESTCatalogServer:
             partition_keys=schema.partition_keys,
             primary_keys=schema.primary_keys,
             options=options,
-            comment=schema.comment
+            comment=schema.comment,
         )
 
         return TableMetadata(
             schema=table_schema,
             is_external=is_external,
-            uuid=uuid_str or str(uuid.uuid4())
+            uuid=uuid_str or str(uuid.uuid4()),
         )
 
     # List methods
-    def _list_tables(self, database_name: str, parameters: Dict[str, str]) -> List[str]:
+    def _list_tables(self,
+                     database_name: str,
+                     parameters: Dict[str,
+                                      str]) -> List[str]:
         """List tables in database"""
         table_name_pattern = parameters.get(TABLE_NAME_PATTERN)
         tables = []
 
         for full_name, metadata in self.table_metadata_store.items():
             identifier = Identifier.from_string(full_name)
-            if (identifier.get_database_name() == database_name and
-                    (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
-                                                                        table_name_pattern))):
+            if identifier.get_database_name() == database_name and (
+                not table_name_pattern
+                or self._match_name_pattern(
+                    identifier.get_table_name(), table_name_pattern
+                )
+            ):
                 tables.append(identifier.get_table_name())
 
         return tables
 
     # Response generation methods
-    def _generate_final_list_databases_response(self, parameters: Dict[str, str],
-                                                databases: List[str]) -> Tuple[str, int]:
+    def _generate_final_list_databases_response(
+        self, parameters: Dict[str, str], databases: List[str]
+    ) -> Tuple[str, int]:
         """Generate final list databases response"""
         if databases:
             max_results = self._get_max_results(parameters)
             page_token = parameters.get(PAGE_TOKEN)
-            paged_dbs = self._build_paged_entities(databases, max_results, page_token)
+            paged_dbs = self._build_paged_entities(
+                databases, max_results, page_token)
             response = ListDatabasesResponse(
                 databases=paged_dbs.elements,
-                next_page_token=paged_dbs.next_page_token
-            )
+                next_page_token=paged_dbs.next_page_token)
         else:
-            response = ListDatabasesResponse(databases=[], next_page_token=None)
+            response = ListDatabasesResponse(
+                databases=[], next_page_token=None)
 
         return self._mock_response(response, 200)
 
-    def _generate_final_list_tables_response(self, parameters: Dict[str, str],
-                                             tables: List[str]) -> Tuple[str, int]:
+    def _generate_final_list_tables_response(
+        self, parameters: Dict[str, str], tables: List[str]
+    ) -> Tuple[str, int]:
         """Generate final list tables response"""
         if tables:
             max_results = self._get_max_results(parameters)
             page_token = parameters.get(PAGE_TOKEN)
-            paged_tables = self._build_paged_entities(tables, max_results, page_token)
+            paged_tables = self._build_paged_entities(
+                tables, max_results, page_token)
             response = ListTablesResponse(
                 tables=paged_tables.elements,
-                next_page_token=paged_tables.next_page_token
+                next_page_token=paged_tables.next_page_token,
             )
         else:
             response = ListTablesResponse(tables=[], next_page_token=None)
@@ -708,7 +858,10 @@ class RESTCatalogServer:
         """Add no permission table"""
         self.no_permission_tables.append(identifier.get_full_name())
 
-    def mock_database(self, name: str, options: dict[str, str]) -> GetDatabaseResponse:
+    def mock_database(self,
+                      name: str,
+                      options: dict[str,
+                                    str]) -> GetDatabaseResponse:
         return GetDatabaseResponse(
             id=str(uuid.uuid4()),
             name=name,
@@ -718,11 +871,16 @@ class RESTCatalogServer:
             created_at=1,
             created_by="created",
             updated_at=1,
-            updated_by="updated"
+            updated_by="updated",
         )
 
-    def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str,
-                   schema: Schema) -> GetTableResponse:
+    def mock_table(
+        self,
+        identifier: Identifier,
+        table_metadata: TableMetadata,
+        path: str,
+        schema: Schema,
+    ) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
             name=identifier.get_object_name(),
@@ -734,7 +892,7 @@ class RESTCatalogServer:
             created_at=1,
             created_by="created",
             updated_at=1,
-            updated_by="updated"
+            updated_by="updated",
         )
 
 
@@ -753,7 +911,7 @@ class ApiTestCase(unittest.TestCase):
             "VARCHAR(255)",
             "CHAR(10)",
             "INT",
-            "BOOLEAN"
+            "BOOLEAN",
         ]
         for type_str in simple_type_test_cases:
             data_type = DataTypeParser.parse_data_type(type_str)
@@ -762,49 +920,29 @@ class ApiTestCase(unittest.TestCase):
         field_id = AtomicInteger(0)
         simple_type = DataTypeParser.parse_data_type("VARCHAR(32)")
         self.assertEqual(simple_type.nullable, True)
-        self.assertEqual(simple_type.type, 'VARCHAR(32)')
+        self.assertEqual(simple_type.type, "VARCHAR(32)")
 
-        array_json = {
-            "type": "ARRAY",
-            "element": "INT"
-        }
+        array_json = {"type": "ARRAY", "element": "INT"}
         array_type = DataTypeParser.parse_data_type(array_json, field_id)
-        self.assertEqual(array_type.element.type, 'INT')
+        self.assertEqual(array_type.element.type, "INT")
 
-        map_json = {
-            "type": "MAP",
-            "key": "STRING",
-            "value": "INT"
-        }
+        map_json = {"type": "MAP", "key": "STRING", "value": "INT"}
         map_type = DataTypeParser.parse_data_type(map_json, field_id)
-        self.assertEqual(map_type.key.type, 'STRING')
-        self.assertEqual(map_type.value.type, 'INT')
+        self.assertEqual(map_type.key.type, "STRING")
+        self.assertEqual(map_type.value.type, "INT")
         row_json = {
             "type": "ROW",
             "fields": [
-                {
-                    "name": "id",
-                    "type": "BIGINT",
-                    "description": "Primary key"
-                },
-                {
-                    "name": "name",
-                    "type": "VARCHAR(100)",
-                    "description": "User name"
-                },
-                {
-                    "name": "scores",
-                    "type": {
-                        "type": "ARRAY",
-                        "element": "DOUBLE"
-                    }
-                }
-            ]
+                {"name": "id", "type": "BIGINT", "description": "Primary key"},
+                {"name": "name", "type": "VARCHAR(100)", "description": "User name"},
+                {"name": "scores", "type": {"type": "ARRAY", "element": "DOUBLE"}},
+            ],
         }
 
-        row_type: RowType = DataTypeParser.parse_data_type(row_json, AtomicInteger(0))
-        self.assertEqual(row_type.fields[0].type.type, 'BIGINT')
-        self.assertEqual(row_type.fields[1].type.type, 'VARCHAR(100)')
+        row_type: RowType = DataTypeParser.parse_data_type(
+            row_json, AtomicInteger(0))
+        self.assertEqual(row_type.fields[0].type.type, "BIGINT")
+        self.assertEqual(row_type.fields[1].type.type, "VARCHAR(100)")
 
         complex_json = {
             "type": "ARRAY",
@@ -815,17 +953,18 @@ class ApiTestCase(unittest.TestCase):
                     "type": "ROW",
                     "fields": [
                         {"name": "count", "type": "BIGINT"},
-                        {"name": "percentage", "type": "DOUBLE"}
-                    ]
-                }
-            }
+                        {"name": "percentage", "type": "DOUBLE"},
+                    ],
+                },
+            },
         }
 
-        complex_type: ArrayType = DataTypeParser.parse_data_type(complex_json, field_id)
+        complex_type: ArrayType = DataTypeParser.parse_data_type(
+            complex_json, field_id)
         element_type: MapType = complex_type.element
         value_type: RowType = element_type.value
-        self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
-        self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
+        self.assertEqual(value_type.fields[0].type.type, "BIGINT")
+        self.assertEqual(value_type.fields[1].type.type, "DOUBLE")
 
     def test_api(self):
         """Example usage of RESTCatalogServer"""
@@ -845,7 +984,7 @@ class ApiTestCase(unittest.TestCase):
             data_path="/tmp/test_warehouse",
             auth_provider=MockAuthProvider(),
             config=config,
-            warehouse="test_warehouse"
+            warehouse="test_warehouse",
         )
         try:
             # Start server
@@ -855,33 +994,49 @@ class ApiTestCase(unittest.TestCase):
                 "default": server.mock_database("default", {"env": "test"}),
                 "test_db1": server.mock_database("test_db1", {"env": "test"}),
                 "test_db2": server.mock_database("test_db2", {"env": "test"}),
-                "prod_db": server.mock_database("prod_db", {"env": "prod"})
+                "prod_db": server.mock_database("prod_db", {"env": "prod"}),
             }
             data_fields = [
-                DataField(0, "name", AtomicType('INT'), 'desc  name'),
-                DataField(1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
-                DataField(2, "map11", MapType(False, AtomicType('INT'),
-                                              MapType(False, AtomicType('INT'), AtomicType('INT'))), 'desc  arr11'),
+                DataField(0, "name", AtomicType("INT"), "desc  name"),
+                DataField(
+                    1, "arr11", ArrayType(True, AtomicType("INT")), "desc  arr11"
+                ),
+                DataField(
+                    2,
+                    "map11",
+                    MapType(
+                        False,
+                        AtomicType("INT"),
+                        MapType(False, AtomicType("INT"), AtomicType("INT")),
+                    ),
+                    "desc  arr11",
+                ),
             ]
-            schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
+            schema = TableSchema(
+                len(data_fields), data_fields, len(data_fields), [], [], {}, ""
+            )
             test_tables = {
-                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
+                "default.user": TableMetadata(
+                    uuid=str(uuid.uuid4()), is_external=True, schema=schema
+                ),
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
             options = {
-                'uri': f"http://localhost:{server.port}",
-                'warehouse': 'test_warehouse',
-                'dlf.region': 'cn-hangzhou',
+                "uri": f"http://localhost:{server.port}",
+                "warehouse": "test_warehouse",
+                "dlf.region": "cn-hangzhou",
                 "token.provider": "xxxx",
-                'dlf.access-key-id': 'xxxx',
-                'dlf.access-key-secret': 'xxxx'
+                "dlf.access-key-id": "xxxx",
+                "dlf.access-key-secret": "xxxx",
             }
             api = RESTApi(options)
             self.assertSetEqual(set(api.list_databases()), {*test_databases})
-            self.assertEqual(api.get_database('default'), test_databases.get('default'))
-            table = api.get_table(Identifier.from_string('default.user'))
-            self.assertEqual(table.id, str(test_tables['default.user'].uuid))
+            self.assertEqual(
+                api.get_database("default"),
+                test_databases.get("default"))
+            table = api.get_table(Identifier.from_string("default.user"))
+            self.assertEqual(table.id, str(test_tables["default.user"].uuid))
 
         finally:
             # Shutdown server

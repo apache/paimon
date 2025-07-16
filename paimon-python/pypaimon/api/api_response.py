@@ -43,11 +43,13 @@ class ErrorResponse(RESTResponse):
     message: Optional[str] = json_field("message", default=None)
     code: Optional[int] = json_field("code", default=None)
 
-    def __init__(self,
-                 resource_type: Optional[str] = None,
-                 resource_name: Optional[str] = None,
-                 message: Optional[str] = None,
-                 code: Optional[int] = None):
+    def __init__(
+        self,
+        resource_type: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        message: Optional[str] = None,
+        code: Optional[int] = None,
+    ):
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.message = message
@@ -115,7 +117,8 @@ class ListTablesResponse(PagedResponse[str]):
     FIELD_TABLES = "tables"
 
     tables: Optional[List[str]] = json_field(FIELD_TABLES)
-    next_page_token: Optional[str] = json_field(PagedResponse.FIELD_NEXT_PAGE_TOKEN)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN)
 
     def data(self) -> Optional[List[str]]:
         return self.tables
@@ -133,8 +136,10 @@ class Schema:
     FIELD_COMMENT = "comment"
 
     fields: List[DataField] = json_field(FIELD_FIELDS, default_factory=list)
-    partition_keys: List[str] = json_field(FIELD_PARTITION_KEYS, default_factory=list)
-    primary_keys: List[str] = json_field(FIELD_PRIMARY_KEYS, default_factory=list)
+    partition_keys: List[str] = json_field(
+        FIELD_PARTITION_KEYS, default_factory=list)
+    primary_keys: List[str] = json_field(
+        FIELD_PRIMARY_KEYS, default_factory=list)
     options: Dict[str, str] = json_field(FIELD_OPTIONS, default_factory=dict)
     comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
 
@@ -142,6 +147,7 @@ class Schema:
 @dataclass
 class TableSchema:
     """Table schema with ID"""
+
     id: int
     fields: List[DataField]
     highest_field_id: int
@@ -156,13 +162,14 @@ class TableSchema:
             partition_keys=self.partition_keys,
             primary_keys=self.primary_keys,
             options=self.options,
-            comment=self.comment
+            comment=self.comment,
         )
 
 
 @dataclass
 class TableMetadata:
     """Table metadata"""
+
     schema: TableSchema
     is_external: bool
     uuid: str
@@ -171,6 +178,7 @@ class TableMetadata:
 @dataclass
 class RESTToken:
     """REST authentication token"""
+
     token: Dict[str, str]
     expire_at_millis: int
 
@@ -194,18 +202,20 @@ class GetTableResponse(AuditRESTResponse):
     schema_id: Optional[int] = json_field(FIELD_SCHEMA_ID, default=None)
     schema: Optional[Schema] = json_field(FIELD_SCHEMA, default=None)
 
-    def __init__(self,
-                 id: str,
-                 name: str,
-                 path: str,
-                 is_external: bool,
-                 schema_id: int,
-                 schema: Schema,
-                 owner: Optional[str] = None,
-                 created_at: Optional[int] = None,
-                 created_by: Optional[str] = None,
-                 updated_at: Optional[int] = None,
-                 updated_by: Optional[str] = None):
+    def __init__(
+        self,
+        id: str,
+        name: str,
+        path: str,
+        is_external: bool,
+        schema_id: int,
+        schema: Schema,
+        owner: Optional[str] = None,
+        created_at: Optional[int] = None,
+        created_by: Optional[str] = None,
+        updated_at: Optional[int] = None,
+        updated_by: Optional[str] = None,
+    ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
         self.name = name
@@ -225,18 +235,21 @@ class GetDatabaseResponse(AuditRESTResponse):
     id: Optional[str] = json_field(FIELD_ID, default=None)
     name: Optional[str] = json_field(FIELD_NAME, default=None)
     location: Optional[str] = json_field(FIELD_LOCATION, default=None)
-    options: Optional[Dict[str, str]] = json_field(FIELD_OPTIONS, default_factory=dict)
+    options: Optional[Dict[str, str]] = json_field(
+        FIELD_OPTIONS, default_factory=dict)
 
-    def __init__(self,
-                 id: Optional[str] = None,
-                 name: Optional[str] = None,
-                 location: Optional[str] = None,
-                 options: Optional[Dict[str, str]] = None,
-                 owner: Optional[str] = None,
-                 created_at: Optional[int] = None,
-                 created_by: Optional[str] = None,
-                 updated_at: Optional[int] = None,
-                 updated_by: Optional[str] = None):
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        name: Optional[str] = None,
+        location: Optional[str] = None,
+        options: Optional[Dict[str, str]] = None,
+        owner: Optional[str] = None,
+        created_at: Optional[int] = None,
+        created_by: Optional[str] = None,
+        updated_at: Optional[int] = None,
+        updated_by: Optional[str] = None,
+    ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
         self.name = name

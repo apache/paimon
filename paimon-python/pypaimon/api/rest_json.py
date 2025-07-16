@@ -24,7 +24,7 @@ from .typedef import T
 
 def json_field(json_name: str, **kwargs):
     """Create a field with custom JSON name"""
-    return field(metadata={'json_name': json_name}, **kwargs)
+    return field(metadata={"json_name": json_name}, **kwargs)
 
 
 class JSON:
@@ -48,16 +48,16 @@ class JSON:
             field_value = getattr(obj, field_info.name)
 
             # Get custom JSON name from metadata
-            json_name = field_info.metadata.get('json_name', field_info.name)
+            json_name = field_info.metadata.get("json_name", field_info.name)
 
             # Handle nested objects
             if is_dataclass(field_value):
                 result[json_name] = JSON.__to_dict(field_value)
-            elif hasattr(field_value, 'to_dict'):
+            elif hasattr(field_value, "to_dict"):
                 result[json_name] = field_value.to_dict()
             elif isinstance(field_value, list):
                 result[json_name] = [
-                    item.to_dict() if hasattr(item, 'to_dict') else item
+                    item.to_dict() if hasattr(item, "to_dict") else item
                     for item in field_value
                 ]
             else:
@@ -71,7 +71,7 @@ class JSON:
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
         for field_info in fields(target_class):
-            json_name = field_info.metadata.get('json_name', field_info.name)
+            json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
 
         # Map JSON data to field names

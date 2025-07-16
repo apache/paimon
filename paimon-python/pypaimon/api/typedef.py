@@ -18,23 +18,24 @@
 from dataclasses import dataclass
 from typing import Optional, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @dataclass
 class Identifier:
     """Table/View/Function identifier"""
+
     database_name: str
     object_name: str
     branch_name: Optional[str] = None
 
     @classmethod
-    def create(cls, database_name: str, object_name: str) -> 'Identifier':
+    def create(cls, database_name: str, object_name: str) -> "Identifier":
         return cls(database_name, object_name)
 
     @classmethod
-    def from_string(cls, full_name: str) -> 'Identifier':
-        parts = full_name.split('.')
+    def from_string(cls, full_name: str) -> "Identifier":
+        parts = full_name.split(".")
         if len(parts) == 2:
             return cls(parts[0], parts[1])
         elif len(parts) == 3:
@@ -60,4 +61,4 @@ class Identifier:
         return self.branch_name
 
     def is_system_table(self) -> bool:
-        return self.object_name.startswith('$')
+        return self.object_name.startswith("$")

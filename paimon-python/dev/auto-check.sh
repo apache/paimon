@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 ################################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
@@ -16,36 +17,10 @@
 # limitations under the License.
 ################################################################################
 
-name: Check Code Style and Test
 
-on:
-  push:
-  pull_request:
-    paths-ignore:
-      - '**/*.md'
+# CURRENT_DIR is "paimon-python/"
+SCRIPT_PATH="$(readlink -f "$0")"
+cd "$(dirname "$SCRIPT_PATH")/.." || exit
 
-env:
-  PYTHON_VERSION: "3.10"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
-
-jobs:
-  lint-python:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install dependencies
-        run: |
-          python -m pip install -q flake8==4.0.1 pytest~=7.0 requests 2>&1 >/dev/null
-      - name: Run lint-python.sh
-        run: |
-          chmod +x paimon-python/dev/lint-python.sh
-          ./paimon-python/dev/lint-python.sh
+autopep8  ./ --global-config=./dev/cfg.ini
+autoflake --config=./dev/cfg.ini ./
