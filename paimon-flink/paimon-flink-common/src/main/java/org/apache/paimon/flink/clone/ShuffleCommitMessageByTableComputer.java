@@ -18,7 +18,29 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.table.sink.ChannelComputer;
 
-/** Utils for building {@link CloneAction}. */
-public class CloneUtils {}
+import java.util.Objects;
+
+/** Shuffle by table. */
+public class ShuffleCommitMessageByTableComputer implements ChannelComputer<CommitMessageInfo> {
+
+    private static final long serialVersionUID = 1L;
+
+    private transient int numChannels;
+
+    @Override
+    public void setup(int numChannels) {
+        this.numChannels = numChannels;
+    }
+
+    @Override
+    public int channel(CommitMessageInfo record) {
+        return Math.floorMod(Objects.hash(record.identifier()), numChannels);
+    }
+
+    @Override
+    public String toString() {
+        return "shuffle by identifier hash";
+    }
+}

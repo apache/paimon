@@ -18,7 +18,29 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.sink.CommitMessage;
 
-/** Utils for building {@link CloneAction}. */
-public class CloneUtils {}
+import java.io.Serializable;
+
+/** Commit message with necessary information. */
+public class CommitMessageInfo implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private final Identifier identifier;
+    private final CommitMessage commitMessage;
+
+    public CommitMessageInfo(Identifier identifier, CommitMessage commitMessage) {
+        this.identifier = identifier;
+        this.commitMessage = commitMessage;
+    }
+
+    public Identifier identifier() {
+        return identifier;
+    }
+
+    public CommitMessage commitMessage() {
+        return commitMessage;
+    }
+}

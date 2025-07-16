@@ -35,7 +35,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
-import static org.apache.paimon.flink.clone.CloneUtils.getRootHiveCatalog;
+import static org.apache.paimon.flink.clone.CloneHiveTableUtils.getRootHiveCatalog;
 
 /** Abstract function for copying tables. */
 public abstract class CloneProcessFunction<I, O> extends ProcessFunction<I, O> {

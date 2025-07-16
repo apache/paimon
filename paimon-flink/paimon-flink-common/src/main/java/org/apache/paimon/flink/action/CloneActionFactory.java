@@ -37,6 +37,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String PARALLELISM = "parallelism";
     private static final String WHERE = "where";
     private static final String EXCLUDED_TABLES = "excluded_tables";
+    private static final String CLONE_FROM = "clone_from";
 
     @Override
     public String identifier() {
@@ -62,6 +63,11 @@ public class CloneActionFactory implements ActionFactory {
                         ? null
                         : Arrays.asList(StringUtils.split(excludedTablesStr, ","));
 
+        String cloneFrom = params.get(CLONE_FROM);
+        if (StringUtils.isNullOrWhitespaceOnly(cloneFrom)) {
+            cloneFrom = "hive";
+        }
+
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -72,7 +78,8 @@ public class CloneActionFactory implements ActionFactory {
                         targetCatalogConfig,
                         parallelism == null ? null : Integer.parseInt(parallelism),
                         params.get(WHERE),
-                        excludedTables);
+                        excludedTables,
+                        cloneFrom);
 
         return Optional.of(cloneAction);
     }
