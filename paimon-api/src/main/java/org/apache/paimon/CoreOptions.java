@@ -1983,7 +1983,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static String normalizeFileFormat(String fileFormat) {
-        return fileFormat.toLowerCase();
+        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase();
     }
 
     public String dataFilePrefix() {
@@ -2001,7 +2001,7 @@ public class CoreOptions implements Serializable {
 
     @Nullable
     public String changelogFileFormat() {
-        return options.get(CHANGELOG_FILE_FORMAT);
+        return normalizeFileFormat(options.get(CHANGELOG_FILE_FORMAT));
     }
 
     @Nullable
