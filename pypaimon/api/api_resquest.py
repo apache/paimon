@@ -20,6 +20,8 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
 
+from api.rest_json import json_field
+
 
 class RESTRequest(ABC):
     pass
@@ -27,11 +29,17 @@ class RESTRequest(ABC):
 
 @dataclass
 class CreateDatabaseRequest(RESTRequest):
-    name: str
-    properties: Dict[str, str]
+    FIELD_NAME = "name"
+    FIELD_OPTIONS = "options"
+
+    name: str = json_field(FIELD_NAME)
+    options: Dict[str, str] = json_field(FIELD_OPTIONS)
 
 
 @dataclass
 class AlterDatabaseRequest(RESTRequest):
-    removals: List[str]
-    updates: Dict[str, str]
+    FIELD_REMOVALS = "removals"
+    FIELD_UPDATES = "updates"
+
+    removals: List[str] = json_field(FIELD_REMOVALS)
+    updates: Dict[str, str] = json_field(FIELD_UPDATES)

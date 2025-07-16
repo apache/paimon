@@ -27,11 +27,11 @@ import unittest
 
 import api
 from api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
-                              GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField,
-                              PaimonDataType)
+                              GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
 from api import RESTApi
 from api.rest_json import JSON
 from api.typedef import Identifier
+from api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
 
 @dataclass
@@ -743,7 +743,94 @@ class RESTCatalogServer:
 
 class ApiTestCase(unittest.TestCase):
 
-    def test(self):
+    def test_parse_data(self):
+        simple_type_test_cases = [
+            "DECIMAL",
+            "DECIMAL(5)",
+            "DECIMAL(10, 2)",
+            "DECIMAL(38, 18)",
+            "VARBINARY",
+            "VARBINARY(100)",
+            "VARBINARY(1024)",
+            "BYTES",
+            "VARCHAR(255)",
+            "CHAR(10)",
+            "INT",
+            "BOOLEAN"
+        ]
+        for type_str in simple_type_test_cases:
+            data_type = DataTypeParser.parse_data_type(type_str)
+            self.assertEqual(data_type.nullable, True)
+            self.assertEqual(data_type.type, type_str)
+        field_id = AtomicInteger(0)
+        simple_type = DataTypeParser.parse_data_type("VARCHAR(32)")
+        self.assertEqual(simple_type.nullable, True)
+        self.assertEqual(simple_type.type, 'VARCHAR(32)')
+
+        array_json = {
+            "type": "ARRAY",
+            "element": "INT"
+        }
+        array_type = DataTypeParser.parse_data_type(array_json, field_id)
+        self.assertEqual(array_type.element.type, 'INT')
+
+        map_json = {
+            "type": "MAP",
+            "key": "STRING",
+            "value": "INT"
+        }
+        map_type = DataTypeParser.parse_data_type(map_json, field_id)
+        self.assertEqual(map_type.key.type, 'STRING')
+        self.assertEqual(map_type.value.type, 'INT')
+        row_json = {
+            "type": "ROW",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "BIGINT",
+                    "description": "Primary key"
+                },
+                {
+                    "name": "name",
+                    "type": "VARCHAR(100)",
+                    "description": "User name"
+                },
+                {
+                    "name": "scores",
+                    "type": {
+                        "type": "ARRAY",
+                        "element": "DOUBLE"
+                    }
+                }
+            ]
+        }
+
+        row_type: RowType = DataTypeParser.parse_data_type(row_json, AtomicInteger(0))
+        self.assertEqual(row_type.fields[0].type.type, 'BIGINT')
+        self.assertEqual(row_type.fields[1].type.type, 'VARCHAR(100)')
+
+        complex_json = {
+            "type": "ARRAY",
+            "element": {
+                "type": "MAP",
+                "key": "STRING",
+                "value": {
+                    "type": "ROW",
+                    "fields": [
+                        {"name": "count", "type": "BIGINT"},
+                        {"name": "percentage", "type": "DOUBLE"}
+                    ]
+                }
+            }
+        }
+
+        complex_type: ArrayType = DataTypeParser.parse_data_type(complex_json, field_id)
+        element_type: MapType = complex_type.element
+        value_type: RowType = element_type.value
+        self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
+        self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
+
+    def test_api(self):
         """Example usage of RESTCatalogServer"""
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -773,11 +860,14 @@ class ApiTestCase(unittest.TestCase):
                 "test_db2": server.mock_database("test_db2", {"env": "test"}),
                 "prod_db": server.mock_database("prod_db", {"env": "prod"})
             }
+            data_fields = [
+                DataField( 0, "name", AtomicType('INT'), 'desc  name'),
+                DataField( 1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
+                DataField( 2, "map11", MapType(False, AtomicType('INT'), MapType(False, AtomicType('INT'), AtomicType('INT'))), 'desc  arr11'),
+            ]
+            schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
             test_tables = {
-                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True,
-                                              schema=TableSchema(1,
-                                                                 [DataField("name", 0, "name", PaimonDataType('int'))],
-                                                                 1, [], [], {}, "")),
+                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True,schema=schema),
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
