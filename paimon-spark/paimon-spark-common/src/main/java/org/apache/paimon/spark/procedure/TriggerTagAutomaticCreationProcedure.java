@@ -23,10 +23,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -39,7 +39,7 @@ public class TriggerTagAutomaticCreationProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", StringType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
     private TriggerTagAutomaticCreationProcedure(TableCatalog tableCatalog) {
@@ -63,12 +63,12 @@ public class TriggerTagAutomaticCreationProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     try {
-                        ((FileStoreTable) table).purgeFiles();
+                        ((FileStoreTable) table).createAutoTag();
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
 
-                    return new InternalRow[] {newInternalRow(UTF8String.fromString("Success"))};
+                    return new InternalRow[] {newInternalRow(true)};
                 });
     }
 
