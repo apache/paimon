@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
 import static org.apache.paimon.flink.clone.files.ListCloneFilesFunction.getPartitionPredicate;
@@ -110,7 +111,13 @@ public class ListCloneSplitsFunction
                             builder.option(k, v);
                         });
 
-        if (!sourceTable.primaryKeys().isEmpty()) {
+        if (sourceTable.primaryKeys().isEmpty()) {
+            // for append table with bucket
+            if (sourceTable.options().containsKey(BUCKET_KEY.key())) {
+                builder.option(BUCKET.key(), sourceTable.options().get(BUCKET.key()));
+                builder.option(BUCKET_KEY.key(), sourceTable.options().get(BUCKET_KEY.key()));
+            }
+        } else {
             // for primary key table, only postpone bucket supports clone
             builder.option(BUCKET.key(), "-2");
         }
