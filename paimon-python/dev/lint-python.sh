@@ -218,7 +218,7 @@ function pytest_check() {
 
 # CURRENT_DIR is "paimon-python/dev/"
 pwd
-CURRENT_DIR="$(cd "$(dirname "$(basename "$0")")" && pwd)"
+CURRENT_DIR="$(cd "$( dirname "$0" )" && pwd)"
 pwd
 # go back to python project root path
 cd ..
