@@ -80,7 +80,7 @@ public class VFSOperations {
         catalog = new RESTCatalog(context);
     }
 
-    public VFSIdentifier getVFSIdentifier(String virtualPath) throws TableNotFoundException {
+    public VFSIdentifier getVFSIdentifier(String virtualPath) throws IOException {
         if (virtualPath.startsWith("/")) {
             virtualPath = virtualPath.substring(1);
         }
@@ -104,6 +104,9 @@ public class VFSOperations {
             } else {
                 return new VFSTableObjectIdentifier(databaseName, tableName);
             }
+        }
+        if (table.isExternal()) {
+            throw new IOException("Do not support visiting external table " + identifier);
         }
         Options options = new Options(table.schema().options());
         // Get real path
