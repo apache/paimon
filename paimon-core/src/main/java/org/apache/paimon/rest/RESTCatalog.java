@@ -370,7 +370,7 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    public TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+    private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table
         Identifier loadTableIdentifier =
@@ -940,7 +940,7 @@ public class RESTCatalog implements Catalog {
         return api;
     }
 
-    public GetTableTokenResponse loadTableToken(Identifier identifier)
+    protected GetTableTokenResponse loadTableToken(Identifier identifier)
             throws TableNotExistException {
         try {
             return api.loadTableToken(identifier);
