@@ -222,10 +222,10 @@ CURRENT_DIR="$(pwd)"
 echo ${CURRENT_DIR}
 # flake8 path
 #FLAKE8_PATH=$ENV_HOME/bin/flake8
-FLAKE8_PATH="$(which flake8)"
+FLAKE8_PATH="$(where flake8)"
 echo $FLAKE8_PATH
 # mypy path
-MYPY_PATH="$(which mypy)"
+MYPY_PATH="$(whereis mypy)"
 echo $MYPY_PATH
 # pytest path
 PYTEST_PATH="$(which pytest)"
