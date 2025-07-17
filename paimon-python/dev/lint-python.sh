@@ -217,8 +217,9 @@ function pytest_check() {
 ###############################################################All Checks Definitions###############################################################
 
 # CURRENT_DIR is "paimon-python/dev/"
-CURRENT_DIR="$(cd "$( dirname "$0" )" && pwd)"
-
+CURRENT_DIR="$(cd "$(dirname "$(basename "$0")")" && pwd)"
+# go back to python project root path
+cd ..
 # flake8 path
 #FLAKE8_PATH=$ENV_HOME/bin/flake8
 FLAKE8_PATH="$(which flake8)"
