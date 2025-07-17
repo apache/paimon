@@ -230,15 +230,18 @@ class DefaultErrorHandler(ErrorHandler):
 
 class ExponentialRetry:
 
-    def __init__(self, max_retries: int = 5):
-        self.max_retries = max_retries
-        self.logger = logging.getLogger(self.__class__.__name__)
+    adapter: HTTPAdapter
 
-    def create_retry_strategy(self) -> Retry:
+    def __init__(self, max_retries: int = 5):
+        retry = self.__create_retry_strategy(max_retries)
+        self.adapter = HTTPAdapter(max_retries=retry)
+
+    @staticmethod
+    def __create_retry_strategy(max_retries: int) -> Retry:
         retry_kwargs = {
-            'total': self.max_retries,
-            'read': self.max_retries,
-            'connect': self.max_retries,
+            'total': max_retries,
+            'read': max_retries,
+            'connect': max_retries,
             'backoff_factor': 1,
             'status_forcelist': [429, 502, 503, 504],
             'raise_on_status': False,
@@ -366,8 +369,7 @@ class HttpClient(RESTClient):
         self.session = requests.Session()
 
         retry_interceptor = ExponentialRetry(max_retries=3)
-        retry_strategy = retry_interceptor.create_retry_strategy()
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        adapter = HTTPAdapter(max_retries=retry_interceptor.adapter)
 
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)

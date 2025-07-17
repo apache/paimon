@@ -93,8 +93,7 @@ class HTTPClient:
 
         # Add retry adapter
         retry_interceptor = ExponentialRetry(max_retries=3)
-        retry_strategy = retry_interceptor.create_retry_strategy()
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        adapter = HTTPAdapter(max_retries=retry_interceptor.adapter)
 
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
