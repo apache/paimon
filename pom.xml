@@ -966,16 +966,19 @@ under the License.
                     </executions>
                 </plugin>
 
-
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-javadoc-plugin</artifactId>
-                    <version>3.1.1</version><!--$NO-MVN-MAN-VER$-->
+                    <version>3.11.2</version><!--$NO-MVN-MAN-VER$-->
                     <configuration>
                         <quiet>true</quiet>
                         <detectOfflineLinks>false</detectOfflineLinks>
-                        <additionalJOptions combine.children="append">
+                        <release>8</release>
+                        <failOnError>false</failOnError>
+                        <additionalJOptions>
                             <additionalJOption>-Xdoclint:none</additionalJOption>
+                            <!-- Suppress the error that is accepted by JDK 8 but not by JDK 11. -->
+                            <additionalJOption>--ignore-source-errors</additionalJOption>
                         </additionalJOptions>
                     </configuration>
                 </plugin>
