@@ -296,7 +296,7 @@ done
 
 # collect checks according to the options
 collect_checks
-
+pwd
 pip install -q -r ./dev/requirements.txt
 check_stage
 
