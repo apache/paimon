@@ -69,7 +69,7 @@ class ResourcePaths:
         self.prefix = prefix.rstrip('/')
 
     def config(self) -> str:
-        return f"/v1/config"
+        return "/v1/config"
 
     def databases(self) -> str:
         return f"/v1/{self.prefix}/databases"
