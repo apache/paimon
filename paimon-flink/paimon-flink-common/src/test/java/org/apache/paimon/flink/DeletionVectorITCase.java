@@ -395,7 +395,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
     }
 
-    // No compaction to test that data of full phase can be read
+    // No compaction to verify that level0 data can be read at full phase
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testStreamingReadFullWithoutCompact(boolean isPk) throws Exception {
