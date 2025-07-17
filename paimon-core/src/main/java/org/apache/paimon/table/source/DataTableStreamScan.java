@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StreamScanMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
-import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
