@@ -59,7 +59,7 @@ class DLFToken:
 
     @classmethod
     def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from api.typedef import RESTCatalogOptions
+        from .typedef import RESTCatalogOptions
         if (options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID) is None
                 or options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None

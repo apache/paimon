@@ -948,8 +948,3 @@ class ApiTestCase(unittest.TestCase):
             # Shutdown server
             server.shutdown()
             print("Server stopped")
-
-
-
-if __name__ == "__main__":
-    unittest.main()
