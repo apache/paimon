@@ -52,3 +52,7 @@ jobs:
             -Dlog4j.configurationFile=file://$(pwd)/tools/ci/log4j.properties
         env:
           MAVEN_OPTS: -Xmx4096m
+      - name: Check python licensing
+        run: |
+          chmod +x paimon-python/dev/check-licensing.sh
+          ./paimon-python/dev/check-licensing.sh

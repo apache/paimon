@@ -17,12 +17,12 @@ limitations under the License.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any, Generic, List
-from dataclasses import dataclass, field
+from typing import Dict, Optional, Generic, List
+from dataclasses import dataclass
 
-from api.rest_json import json_field
-from api.typedef import T
-from api.data_types import DataField
+from .rest_json import json_field
+from .typedef import T
+from .data_types import DataField
 
 
 @dataclass

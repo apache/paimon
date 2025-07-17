@@ -42,7 +42,7 @@ class DLFToken:
     security_token: Optional[str] = None
 
     def __init__(self, options: Dict[str, str]):
-        from api import RESTCatalogOptions
+        from . import RESTCatalogOptions
         self.access_key_id = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID)
         self.access_key_secret = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET)
         self.security_token = options.get(RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
@@ -186,7 +186,8 @@ class DLFAuthSignature:
             result = cls._hmac_sha256(signing_key, string_to_sign)
             signature = cls._hex_encode(result)
 
-            credential = f"{cls.SIGNATURE_ALGORITHM} Credential={dlf_token.access_key_id}/{date}/{region}/{cls.PRODUCT}/{cls.REQUEST_TYPE}"
+            credential = (f"{cls.SIGNATURE_ALGORITHM} "
+                          f"Credential={dlf_token.access_key_id}/{date}/{region}/{cls.PRODUCT}/{cls.REQUEST_TYPE}")
             signature_part = f"{cls.SIGNATURE_KEY}={signature}"
 
             return f"{credential},{signature_part}"

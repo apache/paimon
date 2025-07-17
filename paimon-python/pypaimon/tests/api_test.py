@@ -25,13 +25,13 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 import unittest
 
-import api
-from api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
-                              GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
-from api import RESTApi
-from api.rest_json import JSON
-from api.typedef import Identifier
-from api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
+import pypaimon.api as api
+from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
+                                GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
+from ..api import RESTApi
+from ..api.rest_json import JSON
+from ..api.typedef import Identifier
+from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
 
 @dataclass
@@ -67,7 +67,7 @@ class ResourcePaths:
         self.prefix = prefix.rstrip('/')
 
     def config(self) -> str:
-        return f"/v1/config"
+        return "/v1/config"
 
     def databases(self) -> str:
         return f"/v1/{self.prefix}/databases"
@@ -464,8 +464,6 @@ class RESTCatalogServer:
             # Basic table operations
             return self._table_handle(method, data, identifier)
 
-        elif len(path_parts) >= 4:
-            operation = path_parts[3]
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     def _databases_api_handler(self, method: str, data: str,
@@ -525,7 +523,7 @@ class RESTCatalogServer:
             schema = table_metadata.schema.to_schema()
             path = schema.options.pop(PATH, None)
 
-            response = self.mock_table(identifier, table_metadata, path, schema);
+            response = self.mock_table(identifier, table_metadata, path, schema)
             return self._mock_response(response, 200)
         #
         # elif method == "POST":
@@ -861,13 +859,14 @@ class ApiTestCase(unittest.TestCase):
                 "prod_db": server.mock_database("prod_db", {"env": "prod"})
             }
             data_fields = [
-                DataField( 0, "name", AtomicType('INT'), 'desc  name'),
-                DataField( 1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
-                DataField( 2, "map11", MapType(False, AtomicType('INT'), MapType(False, AtomicType('INT'), AtomicType('INT'))), 'desc  arr11'),
+                DataField(0, "name", AtomicType('INT'), 'desc  name'),
+                DataField(1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
+                DataField(2, "map11", MapType(False, AtomicType('INT'),
+                                              MapType(False, AtomicType('INT'), AtomicType('INT'))), 'desc  arr11'),
             ]
             schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
             test_tables = {
-                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True,schema=schema),
+                "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
             }
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)

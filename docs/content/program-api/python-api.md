@@ -67,7 +67,7 @@ classpath via one of the following ways:
 
 ```python
 import os
-from pypaimon.py4j import constants
+from pypaimon import constants
 
 os.environ[constants.PYPAIMON_JAVA_CLASSPATH] = '/path/to/jars/*'
 ```
@@ -81,7 +81,7 @@ You can set JVM args via one of the following ways:
 
 ```python
 import os
-from pypaimon.py4j import constants
+from pypaimon import constants
 
 os.environ[constants.PYPAIMON_JVM_ARGS] = 'arg1 arg2 ...'
 ```
@@ -98,7 +98,7 @@ Otherwise, you should set hadoop classpath via one of the following ways:
 
 ```python
 import os
-from pypaimon.py4j import constants
+from pypaimon import constants
 
 os.environ[constants.PYPAIMON_HADOOP_CLASSPATH] = '/path/to/jars/*'
 ```
@@ -111,7 +111,7 @@ If you just want to test codes in local, we recommend to use [Flink Pre-bundled 
 Before coming into contact with the Table, you need to create a Catalog.
 
 ```python
-from pypaimon.py4j import Catalog
+from pypaimon import Catalog
 
 # Note that keys and values are all string
 catalog_options = {

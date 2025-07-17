@@ -27,9 +27,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from api.auth import RESTAuthParameter
-from api.api_response import ErrorResponse
-from api.rest_json import JSON
+from .auth import RESTAuthParameter
+from .api_response import ErrorResponse
+from .rest_json import JSON
 
 T = TypeVar('T', bound='RESTResponse')
 
@@ -73,11 +73,6 @@ class BadRequestException(RESTException):
 
     def __init__(self, message: str = None, *args: Any):
         super().__init__(message, *args)
-
-
-class BadRequestException(RESTException):
-    """Exception for 400 Bad Request"""
-    pass
 
 
 class NotAuthorizedException(RESTException):
