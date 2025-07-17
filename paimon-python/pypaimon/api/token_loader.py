@@ -28,9 +28,9 @@ from .rest_json import json_field, JSON
 from .typedef import RESTCatalogOptions
 from .client import ExponentialRetry
 
+
 @dataclass
 class DLFToken:
-
     TOKEN_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
     access_key_id: str = json_field('AccessKeyId')
@@ -206,7 +206,10 @@ class DLFTokenLoaderFactory:
         """Create ECS token loader"""
         loader = options.get(RESTCatalogOptions.DLF_TOKEN_LOADER)
         if loader == 'ecs':
-            ecs_metadata_url = options.get(RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL, 'http://100.100.100.200/latest/meta-data/Ram/security-credentials/')
+            ecs_metadata_url = options.get(
+                RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL,
+                'http://100.100.100.200/latest/meta-data/Ram/security-credentials/'
+            )
             role_name = options.get(RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME)
             return DLFECSTokenLoader(ecs_metadata_url, role_name)
         return None
