@@ -138,8 +138,7 @@ function flake8_check() {
 
     print_function "STAGE" "flake8 checks"
     if [ ! -f "$FLAKE8_PATH" ]; then
-        echo "For some unknown reasons, the flake8 package is not complete,\
-        you should exec the script with the parameter: -f"
+        echo "For some unknown reasons, the flake8 package is not complete."
     fi
 
     if [[ ! "$PYTHON_SOURCE" ]]; then
@@ -224,10 +223,13 @@ echo ${CURRENT_DIR}
 # flake8 path
 #FLAKE8_PATH=$ENV_HOME/bin/flake8
 FLAKE8_PATH="$(which flake8)"
+echo $FLAKE8_PATH
 # mypy path
 MYPY_PATH="$(which mypy)"
+echo $MYPY_PATH
 # pytest path
 PYTEST_PATH="$(which pytest)"
+echo $PYTEST_PATH
 
 LOG_DIR=$CURRENT_DIR/dev/log
 

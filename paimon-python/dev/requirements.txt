@@ -19,7 +19,6 @@
 pip>=20.3
 setuptools>=18.0
 wheel
-ray~=2.10.0
 flake8==4.0.1
 mypy==1.5.1
 pytest~=7.0
