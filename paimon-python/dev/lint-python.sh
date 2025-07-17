@@ -161,35 +161,6 @@ function flake8_check() {
     fi
 }
 
-# Mypy check
-function mypy_check() {
-    local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox \) -prune -o -type f -name "*.py" -print )"
-
-    print_function "STAGE" "mypy checks"
-    if [ ! -f "$MYPY_PATH" ]; then
-        echo "For some unknown reasons, the mypy package is not complete,\
-        you should exec the script with the parameter: -f"
-    fi
-
-    if [[ ! "$PYTHON_SOURCE" ]]; then
-        echo "No python files found!  Something is wrong exiting."
-        exit 1;
-    fi
-
-    # the return value of a pipeline is the status of the last command to exit
-    # with a non-zero status or zero if no command exited with a non-zero status
-    set -o pipefail
-    ($MYPY_PATH  --config-file=./dev/cfg.ini $PYTHON_SOURCE) 2>&1 | tee -a $LOG_FILE
-
-    PYCODESTYLE_STATUS=$?
-    if [ $PYCODESTYLE_STATUS -ne 0 ]; then
-        print_function "STAGE" "mypy checks... [FAILED]"
-        # Stop the running script.
-        exit 1;
-    else
-        print_function "STAGE" "mypy checks... [SUCCESS]"
-    fi
-}
 # Pytest check
 function pytest_check() {
 

@@ -75,11 +75,6 @@ class BadRequestException(RESTException):
         super().__init__(message, *args)
 
 
-class BadRequestException(RESTException):
-    """Exception for 400 Bad Request"""
-    pass
-
-
 class NotAuthorizedException(RESTException):
     """Exception for not authorized (401)"""
 
