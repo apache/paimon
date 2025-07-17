@@ -220,12 +220,12 @@ SCRIPT_PATH="$(readlink -f "$0")"
 cd "$(dirname "$SCRIPT_PATH")/.." || exit
 CURRENT_DIR="$(pwd)"
 echo ${CURRENT_DIR}
+
 # flake8 path
-#FLAKE8_PATH=$ENV_HOME/bin/flake8
-FLAKE8_PATH="$(where flake8)"
+FLAKE8_PATH="$(which flake8)"
 echo $FLAKE8_PATH
 # mypy path
-MYPY_PATH="$(whereis mypy)"
+MYPY_PATH="$(which mypy)"
 echo $MYPY_PATH
 # pytest path
 PYTEST_PATH="$(which pytest)"
@@ -300,6 +300,5 @@ done
 # collect checks according to the options
 collect_checks
 
-python -m pip install -r ./dev/requirements.txt
 check_stage
 
