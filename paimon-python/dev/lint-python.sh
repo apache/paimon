@@ -300,6 +300,6 @@ done
 # collect checks according to the options
 collect_checks
 
-pip install -q -r ./dev/requirements.txt
+pip install -r ./dev/requirements.txt
 check_stage
 
