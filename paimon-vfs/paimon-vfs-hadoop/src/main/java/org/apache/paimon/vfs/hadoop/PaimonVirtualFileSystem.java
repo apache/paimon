@@ -62,7 +62,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         super.initialize(uri, conf);
 
         this.workingDirectory = new Path(uri);
-        this.uri = URI.create(uri.getScheme() + "://" + uri.getAuthority());
+        this.uri = URI.create(uri.getScheme() + "://" + uri.getAuthority() + "/");
 
         initVFSOperations();
     }

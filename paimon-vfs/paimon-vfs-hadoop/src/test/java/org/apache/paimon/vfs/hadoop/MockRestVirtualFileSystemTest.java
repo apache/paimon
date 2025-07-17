@@ -119,7 +119,7 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
         conf.set(FS_TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         conf.set(FS_TOKEN, initToken);
         this.vfs = new PaimonVirtualFileSystem();
-        this.vfsRoot = new Path("pas://" + restWarehouse);
+        this.vfsRoot = new Path("pas://" + restWarehouse + "/");
         this.vfs.initialize(vfsRoot.toUri(), conf);
     }
 }
