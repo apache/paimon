@@ -299,5 +299,5 @@ done
 collect_checks
 
 pip install -q -r ./dev/requirements.txt
-#check_stage
+check_stage
 
