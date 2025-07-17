@@ -71,7 +71,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
 
-            // the first two values has will be merged
+            // the first two values will be merged
             assertThat(iter.collect(6))
                     .containsExactlyInAnyOrder(
                             Row.ofKind(RowKind.INSERT, 1, "111111111"),
@@ -119,7 +119,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
             if (changelogProducer.equals("none")) {
-                // the first two values has will be merged
+                // the first two values will be merged
                 assertThat(iter.collect(8))
                         .containsExactlyInAnyOrder(
                                 Row.ofKind(RowKind.INSERT, 1, "111111111"),
