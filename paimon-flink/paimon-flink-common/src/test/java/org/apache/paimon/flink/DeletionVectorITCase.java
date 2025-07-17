@@ -70,14 +70,14 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         try (BlockingIterator<Row, Row> iter =
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
-            assertThat(iter.collect(8))
+
+            // the first two values will be merged
+            assertThat(iter.collect(6))
                     .containsExactlyInAnyOrder(
                             Row.ofKind(RowKind.INSERT, 1, "111111111"),
-                            Row.ofKind(RowKind.INSERT, 2, "2"),
-                            Row.ofKind(RowKind.INSERT, 3, "3"),
-                            Row.ofKind(RowKind.INSERT, 4, "4"),
                             Row.ofKind(RowKind.INSERT, 2, "2_1"),
                             Row.ofKind(RowKind.INSERT, 3, "3_1"),
+                            Row.ofKind(RowKind.INSERT, 4, "4"),
                             Row.ofKind(RowKind.INSERT, 2, "2_2"),
                             Row.ofKind(RowKind.INSERT, 4, "4_1"));
         }
@@ -118,20 +118,34 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         try (BlockingIterator<Row, Row> iter =
                 streamSqlBlockIter(
                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '3') */")) {
-            assertThat(iter.collect(12))
-                    .containsExactlyInAnyOrder(
-                            Row.ofKind(RowKind.INSERT, 1, "111111111"),
-                            Row.ofKind(RowKind.INSERT, 2, "2"),
-                            Row.ofKind(RowKind.INSERT, 3, "3"),
-                            Row.ofKind(RowKind.INSERT, 4, "4"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_1"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 3, "3"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 3, "3_1"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
-                            Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
-                            Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            if (changelogProducer.equals("none")) {
+                // the first two values will be merged
+                assertThat(iter.collect(8))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.INSERT, 1, "111111111"),
+                                Row.ofKind(RowKind.INSERT, 2, "2_1"),
+                                Row.ofKind(RowKind.INSERT, 3, "3_1"),
+                                Row.ofKind(RowKind.INSERT, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            } else {
+                assertThat(iter.collect(12))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.INSERT, 1, "111111111"),
+                                Row.ofKind(RowKind.INSERT, 2, "2"),
+                                Row.ofKind(RowKind.INSERT, 3, "3"),
+                                Row.ofKind(RowKind.INSERT, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 3, "3"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 3, "3_1"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, "2_1"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, "2_2"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
+            }
         }
 
         // test read from COMPACT snapshot
@@ -379,5 +393,30 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         // disable dv and select
         sql("ALTER TABLE TT SET('deletion-vectors.enabled' = 'false')");
         assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
+    }
+
+    // No compaction to verify that level0 data can be read at full phase
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStreamingReadFullWithoutCompact(boolean isPk) throws Exception {
+        if (isPk) {
+            sql(
+                    "CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b INT) "
+                            + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'none', 'write-only' = 'true')");
+        } else {
+            sql(
+                    "CREATE TABLE T (a INT, b INT) WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
+        }
+
+        sql("INSERT INTO T VALUES (1, 1)");
+        sql("INSERT INTO T VALUES (2, 2)");
+        sql("INSERT INTO T VALUES (3, 3)");
+
+        try (BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM T /*+ OPTIONS('scan.mode' = 'from-snapshot-full', 'scan.snapshot-id' = '2') */")) {
+            assertThat(iter.collect(3))
+                    .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2), Row.of(3, 3));
+        }
     }
 }

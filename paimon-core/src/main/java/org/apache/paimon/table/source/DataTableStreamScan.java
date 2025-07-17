@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StreamScanMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
-import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
@@ -50,6 +49,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
@@ -157,7 +157,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         StartingScanner.Result result;
         if (scanMode == FILE_MONITOR) {
             result = startingScanner.scan(snapshotReader);
-        } else if (options.needLookup()) {
+        } else if (options.changelogProducer().equals(LOOKUP)) {
+            // level0 data will be compacted to produce changelog in the future
             result = startingScanner.scan(snapshotReader.withLevelFilter(level -> level > 0));
             snapshotReader.withLevelFilter(Filter.alwaysTrue());
         } else if (options.changelogProducer().equals(FULL_COMPACTION)) {
@@ -174,16 +175,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             ScannedResult scannedResult = (ScannedResult) result;
             currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
-            LookupStrategy lookupStrategy = options.lookupStrategy();
-            if (scanMode == FILE_MONITOR) {
-                nextSnapshotId = currentSnapshotId + 1;
-            } else if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
-                // For DELETION_VECTOR_ONLY mode, we need to return the remaining data from level 0
-                // in the subsequent plan.
-                nextSnapshotId = currentSnapshotId;
-            } else {
-                nextSnapshotId = currentSnapshotId + 1;
-            }
+            nextSnapshotId = currentSnapshotId + 1;
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             LOG.debug(
