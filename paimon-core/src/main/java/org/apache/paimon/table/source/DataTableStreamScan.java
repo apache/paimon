@@ -50,6 +50,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
@@ -157,7 +158,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         StartingScanner.Result result;
         if (scanMode == FILE_MONITOR) {
             result = startingScanner.scan(snapshotReader);
-        } else if (skipLevel0()) {
+        } else if (options.changelogProducer().equals(LOOKUP)) {
+            // level0 data will be compacted to produce changelog in the future
             result = startingScanner.scan(snapshotReader.withLevelFilter(level -> level > 0));
             snapshotReader.withLevelFilter(Filter.alwaysTrue());
         } else if (options.changelogProducer().equals(FULL_COMPACTION)) {
@@ -193,15 +195,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             LOG.debug("There is no starting snapshot and currently there is no next snapshot.");
         }
         return SnapshotNotExistPlan.INSTANCE;
-    }
-
-    private boolean skipLevel0() {
-        LookupStrategy lookupStrategy = options.lookupStrategy();
-        if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
-            // Read level0 data for DELETION VECTOR ONLY mode
-            return false;
-        }
-        return lookupStrategy.needLookup;
     }
 
     private Plan nextPlan() {
