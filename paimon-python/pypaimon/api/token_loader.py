@@ -15,27 +15,29 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from dataclasses import dataclass
+from typing import Optional, Dict
 from urllib.parse import urljoin
 import requests
+from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
+from .rest_json import json_field, JSON
 from .typedef import RESTCatalogOptions
-from .client import ExponentialRetryInterceptor
+from .client import ExponentialRetry
 
-
+@dataclass
 class DLFToken:
 
     TOKEN_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
-    access_key_id: str
-    access_key_secret: str
-    security_token: Optional[str] = None
-    expiration: Optional[str] = None
-    expiration_at_millis: Optional[int] = None
+    access_key_id: str = json_field('AccessKeyId')
+    access_key_secret: str = json_field('AccessKeySecret')
+    security_token: Optional[str] = json_field('SecurityToken')
+    expiration: Optional[str] = json_field('Expiration')
+    expiration_at_millis: Optional[int] = json_field('ExpirationAt', default=None)
 
     @staticmethod
     def parse_expiration_to_millis(expiration: str) -> int:
@@ -45,11 +47,15 @@ class DLFToken:
         return expiration_at_millis
 
     def __init__(self, access_key_id: str, access_key_secret: str,
-                 session_token: str, expiration: str = None):
+                 security_token: str, expiration: str = None, expiration_at_millis: int = None):
         self.access_key_id = access_key_id
         self.access_key_secret = access_key_secret
-        self.session_token = session_token
+        self.security_token = security_token
         self.expiration = expiration
+        if expiration_at_millis is not None:
+            self.expiration_at_millis = expiration_at_millis
+        if expiration is not None:
+            self.expiration_at_millis = self.parse_expiration_to_millis(expiration)
 
     @classmethod
     def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
@@ -61,25 +67,8 @@ class DLFToken:
             return cls(
                 access_key_id=options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
                 access_key_secret=options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET),
-                session_token=options.get(RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
+                security_token=options.get(RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
             )
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DLFToken':
-        return cls(
-            access_key_id=data.get('AccessKeyId', ''),
-            access_key_secret=data.get('AccessKeySecret', ''),
-            session_token=data.get('SecurityToken', ''),
-            expiration=data.get('Expiration', '')
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'AccessKeyId': self.access_key_id,
-            'AccessKeySecret': self.access_key_secret,
-            'SecurityToken': self.session_token,
-            'Expiration': self.expiration
-        }
 
 
 class DLFTokenLoader(ABC):
@@ -103,9 +92,12 @@ class HTTPClient:
         self.session = requests.Session()
 
         # Add retry adapter
-        retry_adapter = ExponentialRetryInterceptor(max_retries=max_retries)
-        self.session.mount("http://", retry_adapter)
-        self.session.mount("https://", retry_adapter)
+        retry_interceptor = ExponentialRetry(max_retries=3)
+        retry_strategy = retry_interceptor.create_retry_strategy()
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
         # Set timeouts
         self.session.timeout = (connect_timeout, read_timeout)
@@ -139,17 +131,6 @@ class DLFECSTokenLoader(DLFTokenLoader):
                 max_retries=3
             )
         return cls._http_client
-
-    @staticmethod
-    def from_json(json_str: str) -> 'DLFToken':
-        """Parse JSON string to target class"""
-        try:
-            data = json.loads(json_str)
-            return DLFToken.from_dict(data)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid token: {e}")
-        except Exception as e:
-            raise RuntimeError("Failed to parse token")
 
     def __init__(self, ecs_metadata_url: str, role_name: Optional[str] = None):
         """
@@ -185,7 +166,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
     def _get_token(self, url: str) -> DLFToken:
         try:
             token_json = self._get_response_body(url)
-            return DLFECSTokenLoader.from_json(token_json)
+            return JSON.from_json(token_json, DLFToken)
         except OSError as e:
             # Python equivalent of UncheckedIOException
             raise OSError(f"IO error while getting token: {e}") from e

@@ -228,7 +228,7 @@ class DefaultErrorHandler(ErrorHandler):
         raise RESTException("Unable to process: %s", message)
 
 
-class ExponentialRetryInterceptor:
+class ExponentialRetry:
 
     def __init__(self, max_retries: int = 5):
         self.max_retries = max_retries
@@ -365,7 +365,7 @@ class HttpClient(RESTClient):
 
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetryInterceptor(max_retries=3)
+        retry_interceptor = ExponentialRetry(max_retries=3)
         retry_strategy = retry_interceptor.create_retry_strategy()
         adapter = HTTPAdapter(max_retries=retry_strategy)
 

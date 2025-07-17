@@ -30,7 +30,7 @@ from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDataba
                               GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
 from ..api import RESTApi, CreateDatabaseRequest, AlterDatabaseRequest
 from ..api.rest_json import JSON
-from ..api.token_loader import DLFTokenLoaderFactory, DLFECSTokenLoader
+from ..api.token_loader import DLFTokenLoaderFactory, DLFECSTokenLoader, DLFToken
 from ..api.typedef import Identifier
 from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
@@ -242,7 +242,8 @@ OBJECT_TABLE = "OBJECT_TABLE"
 class RESTCatalogServer:
     """Mock REST server for testing"""
 
-    def __init__(self, data_path: str, auth_provider, config: ConfigResponse, warehouse: str):
+    def __init__(self, data_path: str, auth_provider, config: ConfigResponse, warehouse: str,
+                 role_name: str = None, token_json: str = None):
         self.logger = logging.getLogger(__name__)
         self.warehouse = warehouse
         self.config_response = config
@@ -261,6 +262,8 @@ class RESTCatalogServer:
         # Initialize mock catalog (simplified)
         self.data_path = data_path
         self.auth_provider = auth_provider
+        self.role_name = role_name
+        self.token_json = token_json
 
         # HTTP server setup
         self.server = None
@@ -376,6 +379,13 @@ class RESTCatalogServer:
                 warehouse_param = parameters.get(WAREHOUSE)
                 if warehouse_param == self.warehouse:
                     return self._mock_response(self.config_response, 200)
+
+            # ecs role
+            if resource_path == '/ram/security-credential/':
+                return self._mock_response(self.role_name, 200)
+
+            if resource_path == f'/ram/security-credential/{self.role_name}':
+                return self._mock_response(self.token_json, 200)
 
             # Databases endpoint
             if resource_path == self.database_uri or resource_path.startswith(self.database_uri + "?"):
@@ -891,37 +901,53 @@ class ApiTestCase(unittest.TestCase):
             server.shutdown()
             print("Server stopped")
 
-    def test_token(self):
-
-        ecs_metadata_url = "http://169.254.170.2/v2/credentials/"
+    def test_ecs_loader_token(self):
+        token = DLFToken(
+            access_key_id='AccessKeyId',
+            access_key_secret='AccessKeySecret',
+            security_token='AQoDYXdzEJr...<remainder of security token>',
+            expiration="2023-12-01T12:00:00Z"
+        )
+        token_json = JSON.to_json(token)
+        role_name = 'test_role'
+        config = ConfigResponse(defaults={"prefix": "mock-test"})
+        server = RESTCatalogServer(
+            data_path="/tmp/test_warehouse",
+            auth_provider=None,
+            config=config,
+            warehouse="test_warehouse",
+            role_name=role_name,
+            token_json=token_json
+        )
         try:
+            # Start server
+            server.start()
+            ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
             options = {
                 api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
-                api.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: "my-role",
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
             }
             loader = DLFTokenLoaderFactory.create_token_loader(options)
-            print(f"Factory loader description: {loader.description()}")
-
-        except Exception as e:
-            print(f"Factory usage failed: {e}")
-        sample_token_json = '''
-        {
-            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
-            "AccessKeySecret": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "SecurityToken": "AQoDYXdzEJr...<remainder of security token>",
-            "Expiration": "2023-12-01T12:00:00Z"
-        }
-        '''
-
-        try:
-            # Test JSON parsing
-            token = DLFECSTokenLoader.from_json(sample_token_json)
-            print(f"Parsed token: {token}")
-            print(f"Token dict: {token.to_dict()}")
-
-        except Exception as e:
-            print(f"Token parsing failed: {e}")
+            load_token = loader.load_token()
+            self.assertEqual(load_token.access_key_id, token.access_key_id)
+            self.assertEqual(load_token.access_key_secret, token.access_key_secret)
+            self.assertEqual(load_token.security_token, token.security_token)
+            self.assertEqual(load_token.expiration, token.expiration)
+            options_with_role = {
+                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+            }
+            loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
+            token = loader.load_token()
+            self.assertEqual(load_token.access_key_id, token.access_key_id)
+            self.assertEqual(load_token.access_key_secret, token.access_key_secret)
+            self.assertEqual(load_token.security_token, token.security_token)
+            self.assertEqual(load_token.expiration, token.expiration)
+        finally:
+            # Shutdown server
+            server.shutdown()
+            print("Server stopped")
 
 
 

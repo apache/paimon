@@ -22,7 +22,6 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
