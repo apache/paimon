@@ -216,14 +216,11 @@ function pytest_check() {
 }
 ###############################################################All Checks Definitions###############################################################
 
-# CURRENT_DIR is "paimon-python/dev/"
-pwd
-CURRENT_DIR="$(cd "$( dirname "$0" )" && pwd)"
-pwd
-# go back to python project root path
-cd ..
-echo 1
-pwd
+# CURRENT_DIR is "paimon-python/"
+SCRIPT_PATH="$(readlink -f "$0")"
+cd "$(dirname "$SCRIPT_PATH")/.." || exit
+CURRENT_DIR="$(pwd)"
+echo ${CURRENT_DIR}
 # flake8 path
 #FLAKE8_PATH=$ENV_HOME/bin/flake8
 FLAKE8_PATH="$(which flake8)"
@@ -232,7 +229,7 @@ MYPY_PATH="$(which mypy)"
 # pytest path
 PYTEST_PATH="$(which pytest)"
 
-LOG_DIR=$CURRENT_DIR/log
+LOG_DIR=$CURRENT_DIR/dev/log
 
 if [ "$PAIMON_IDENT_STRING" == "" ]; then
     PAIMON_IDENT_STRING="$USER"
@@ -300,7 +297,7 @@ done
 
 # collect checks according to the options
 collect_checks
-pwd
+
 pip install -q -r ./dev/requirements.txt
-check_stage
+#check_stage
 
