@@ -312,13 +312,6 @@ DROP VIEW v1;
 ```
 
 ## Tag
-### Create Auto Tag
-Create an auto tag for a table with tag.automatic-creation.
-- If not with tag.automatic-creation, nothing would happen.
-```sql
-ALTER TABLE T CREATE AUTOP TAG;
-```
-    
 ### Create Or Replace Tag
 Create or replace a tag syntax with the following options.
 - Create a tag with or without the snapshot id and time retention.
