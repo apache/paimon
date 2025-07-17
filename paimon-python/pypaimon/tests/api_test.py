@@ -27,9 +27,10 @@ import unittest
 
 import pypaimon.api as api
 from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
-                                GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
-from ..api import RESTApi
+                              GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
+from ..api import RESTApi, CreateDatabaseRequest, AlterDatabaseRequest
 from ..api.rest_json import JSON
+from ..api.token_loader import DLFTokenLoaderFactory, DLFECSTokenLoader
 from ..api.typedef import Identifier
 from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
@@ -889,6 +890,39 @@ class ApiTestCase(unittest.TestCase):
             # Shutdown server
             server.shutdown()
             print("Server stopped")
+
+    def test_token(self):
+
+        ecs_metadata_url = "http://169.254.170.2/v2/credentials/"
+        try:
+            options = {
+                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: "my-role",
+            }
+            loader = DLFTokenLoaderFactory.create_token_loader(options)
+            print(f"Factory loader description: {loader.description()}")
+
+        except Exception as e:
+            print(f"Factory usage failed: {e}")
+        sample_token_json = '''
+        {
+            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
+            "AccessKeySecret": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "SecurityToken": "AQoDYXdzEJr...<remainder of security token>",
+            "Expiration": "2023-12-01T12:00:00Z"
+        }
+        '''
+
+        try:
+            # Test JSON parsing
+            token = DLFECSTokenLoader.from_json(sample_token_json)
+            print(f"Parsed token: {token}")
+            print(f"Token dict: {token.to_dict()}")
+
+        except Exception as e:
+            print(f"Token parsing failed: {e}")
+
 
 
 if __name__ == "__main__":

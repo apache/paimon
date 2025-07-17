@@ -21,22 +21,13 @@ from urllib.parse import unquote
 from .auth import RESTAuthFunction
 from .api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, ConfigResponse, PagedResponse
+
 from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from .typedef import Identifier
+from .typedef import Identifier, RESTCatalogOptions
 from .client import HttpClient
-from .auth import DLFAuthProvider, DLFToken
+from .auth import DLFAuthProvider
+from .token_loader import DLFToken, DLFTokenLoaderFactory
 from .typedef import T
-
-
-class RESTCatalogOptions:
-    URI = "uri"
-    WAREHOUSE = "warehouse"
-    TOKEN_PROVIDER = "token.provider"
-    DLF_REGION = "dlf.region"
-    DLF_ACCESS_KEY_ID = "dlf.access-key-id"
-    DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
-    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
-    PREFIX = 'prefix'
 
 
 class RESTException(Exception):
@@ -123,7 +114,9 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
         auth_provider = DLFAuthProvider(
-            DLFToken(options), options.get(RESTCatalogOptions.DLF_REGION)
+            options.get(RESTCatalogOptions.DLF_REGION),
+            DLFToken.from_options(options),
+            DLFTokenLoaderFactory.create_token_loader(options)
         )
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 

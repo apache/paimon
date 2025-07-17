@@ -27,7 +27,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from .auth import RESTAuthParameter
+from .typedef import RESTAuthParameter
 from .api_response import ErrorResponse
 from .rest_json import JSON
 
@@ -365,7 +365,7 @@ class HttpClient(RESTClient):
 
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetryInterceptor(max_retries=1)
+        retry_interceptor = ExponentialRetryInterceptor(max_retries=3)
         retry_strategy = retry_interceptor.create_retry_strategy()
         adapter = HTTPAdapter(max_retries=retry_strategy)
 
