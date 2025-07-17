@@ -28,6 +28,8 @@ import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
+
 /** A {@link StreamPartitioner} which wraps a {@link ChannelComputer}. */
 public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
 
@@ -73,7 +75,11 @@ public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
         FlinkStreamPartitioner<T> partitioner = new FlinkStreamPartitioner<>(channelComputer);
         PartitionTransformation<T> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
-        partitioned.setParallelism(parallelism == null ? input.getParallelism() : parallelism);
+        if (parallelism == null) {
+            forwardParallelism(partitioned, input);
+        } else {
+            partitioned.setParallelism(parallelism);
+        }
         return new DataStream<>(input.getExecutionEnvironment(), partitioned);
     }
 
