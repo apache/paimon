@@ -18,8 +18,8 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
 
 object MinorVersionShim {
 
@@ -28,4 +28,14 @@ object MinorVersionShim {
       resolved: Boolean,
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output)
+
+  def createMergeIntoTable(
+      targetTable: LogicalPlan,
+      sourceTable: LogicalPlan,
+      mergeCondition: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction]): MergeIntoTable = {
+    MergeIntoTable(targetTable, sourceTable, mergeCondition, matchedActions, notMatchedActions)
+  }
 }

@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
@@ -87,6 +87,24 @@ class Spark4Shim extends SparkShim {
       aggregateExpressions: Seq[AggregateExpression],
       groupByExpressions: Seq[Expression]): Boolean =
     Aggregate.supportsObjectHashAggregate(aggregateExpressions.toSeq, groupByExpressions.toSeq)
+
+  override def createMergeIntoTable(
+      targetTable: LogicalPlan,
+      sourceTable: LogicalPlan,
+      mergeCondition: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction],
+      withSchemaEvolution: Boolean): MergeIntoTable = {
+    MergeIntoTable(
+      targetTable,
+      sourceTable,
+      mergeCondition,
+      matchedActions,
+      notMatchedActions,
+      notMatchedBySourceActions,
+      withSchemaEvolution)
+  }
 
   override def toPaimonVariant(o: Object): Variant = {
     val v = o.asInstanceOf[VariantVal]
