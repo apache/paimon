@@ -1,0 +1,65 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.vfs.hadoop;
+
+import org.apache.paimon.fs.SeekableInputStream;
+
+import org.apache.hadoop.fs.FSInputStream;
+
+import java.io.IOException;
+
+/**
+ * VFSInputStream wrap over paimon SeekableInputStream to support hadoop FSDataInputStream. TODO:
+ * SeekableInputStream interface is too simple to fully support all FSDataInputStream operations: 1.
+ * ByteBufferReadable and ByteBufferPositionedReadable should be implemented for full support. 2.
+ * Positioned read is not supported in SeekableInputStream, so it is by default implemented by
+ * sequence read, which is not a good solution.
+ */
+public class VFSInputStream extends FSInputStream {
+    private SeekableInputStream in;
+    private byte[] oneByteBuf = new byte[1];
+
+    public VFSInputStream(SeekableInputStream in) {
+        this.in = in;
+    }
+
+    public void seek(long pos) throws IOException {
+        in.seek(pos);
+    }
+
+    public long getPos() throws IOException {
+        return in.getPos();
+    }
+
+    public boolean seekToNewSource(long var1) throws IOException {
+        return false;
+    }
+
+    public int read(byte[] b, int off, int len) throws IOException {
+        return in.read(b, off, len);
+    }
+
+    public int read() throws IOException {
+        int n;
+        while ((n = read(oneByteBuf, 0, 1)) == 0) {
+            /* no op */
+        }
+        return (n == -1) ? -1 : oneByteBuf[0] & 0xff;
+    }
+}
