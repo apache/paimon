@@ -1,4 +1,4 @@
-################################################################################
+##########################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
 #  distributed with this work for additional information
@@ -14,37 +14,38 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 # limitations under the License.
-################################################################################
+##########################################################################
 from setuptools import setup, find_packages
 
 VERSION = "0.3.dev"  # noqa
 
-PACKAGES = find_packages(include=['pypaimon*'])
+PACKAGES = find_packages(include=["pypaimon*"])
 
 install_requires = []
 
-long_description = 'See Apache Paimon Python API \
-[Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage.'
+long_description = "See Apache Paimon Python API \
+[Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage."
 
 setup(
-    name='pypaimon',
+    name="pypaimon",
     version=VERSION,
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
     extras_require={},
-    description='Apache Paimon Python API',
+    description="Apache Paimon Python API",
     long_description=long_description,
-    long_description_content_type='text/markdown',
-    author='Apache Software Foundation',
-    author_email='dev@paimon.apache.org',
-    url='https://paimon.apache.org',
+    long_description_content_type="text/markdown",
+    author="Apache Software Foundation",
+    author_email="dev@paimon.apache.org",
+    url="https://paimon.apache.org",
     classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11'],
-    python_requires='>=3.8'
+        "Development Status :: 5 - Production/Stable",
+        "License :: OSI Approved :: Apache Software License",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+    ],
+    python_requires=">=3.8",
 )

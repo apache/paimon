@@ -79,7 +79,6 @@ class ResourcePaths:
 # Exception classes
 class CatalogException(Exception):
     """Base catalog exception"""
-    pass
 
 
 class DatabaseNotExistException(CatalogException):

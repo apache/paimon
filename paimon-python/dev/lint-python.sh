@@ -131,7 +131,6 @@ function check_stage() {
 # This part defines all check functions such as tox_check and flake8_check
 # We make a rule that all check functions are suffixed with _ check. e.g. tox_check, flake8_check
 #########################
-
 # Flake8 check
 function flake8_check() {
     local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox \) -prune -o -type f -name "*.py" -print )"
@@ -166,8 +165,7 @@ function pytest_check() {
 
     print_function "STAGE" "pytest checks"
     if [ ! -f "$PYTEST_PATH" ]; then
-        echo "For some unknown reasons, the pytest package is not complete,\
-        you should exec the script with the parameter: -f"
+        echo "For some unknown reasons, the pytest package is not complete."
     fi
 
     # the return value of a pipeline is the status of the last command to exit
@@ -185,7 +183,6 @@ function pytest_check() {
     fi
 }
 ###############################################################All Checks Definitions###############################################################
-
 # CURRENT_DIR is "paimon-python/"
 SCRIPT_PATH="$(readlink -f "$0")"
 cd "$(dirname "$SCRIPT_PATH")/.." || exit
@@ -194,10 +191,6 @@ echo ${CURRENT_DIR}
 
 # flake8 path
 FLAKE8_PATH="$(which flake8)"
-echo $FLAKE8_PATH
-# mypy path
-MYPY_PATH="$(which mypy)"
-echo $MYPY_PATH
 # pytest path
 PYTEST_PATH="$(which pytest)"
 echo $PYTEST_PATH
@@ -270,6 +263,6 @@ done
 
 # collect checks according to the options
 collect_checks
-
+# run checks
 check_stage
 
