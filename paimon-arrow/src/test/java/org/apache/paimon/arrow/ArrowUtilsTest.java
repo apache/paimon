@@ -19,11 +19,13 @@
 package org.apache.paimon.arrow;
 
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -92,5 +94,18 @@ public class ArrowUtilsTest {
                                             .get(ArrowUtils.PARQUET_FIELD_ID)))
                     .isEqualTo(i);
         }
+    }
+
+    @Test
+    public void testMap() {
+        DataType type = DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING());
+        FieldType fieldType =
+                ArrowUtils.toArrowField("test", 0, type, 0)
+                        .getChildren()
+                        .get(0)
+                        .getChildren()
+                        .get(1)
+                        .getFieldType();
+        Assertions.assertThat(fieldType.isNullable()).isTrue();
     }
 }
