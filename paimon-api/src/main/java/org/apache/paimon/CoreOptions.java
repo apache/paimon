@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1461,6 +1462,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create tag automatically. And how to generate tags.");
 
+    public static final ConfigOption<String> TAG_PROCESS_TIME_ZONE =
+            key("tag.process-time-zone")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When using tag.automatic-creation = process-time, use this option to set the time zone to "
+                                    + "parse the process time in milliseconds to TIMESTAMP value. The default value is "
+                                    + "JVM's default time zone. If you want to specify a time zone, you should either set "
+                                    + "a full name such as 'America/Los_Angeles' or a custom zone id such as 'GMT-08:00'.");
+
     public static final ConfigOption<Boolean> TAG_CREATE_SUCCESS_FILE =
             key("tag.create-success-file")
                     .booleanType()
@@ -2644,6 +2655,11 @@ public class CoreOptions implements Serializable {
 
     public TagCreationMode tagCreationMode() {
         return options.get(TAG_AUTOMATIC_CREATION);
+    }
+
+    public ZoneId tagProcessTimeZone() {
+        String zoneId = options.get(TAG_PROCESS_TIME_ZONE);
+        return zoneId == null ? ZoneId.systemDefault() : ZoneId.of(zoneId);
     }
 
     public TagCreationPeriod tagCreationPeriod() {
