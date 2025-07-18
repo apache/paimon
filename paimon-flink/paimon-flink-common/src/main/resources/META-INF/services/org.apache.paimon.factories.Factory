@@ -95,3 +95,4 @@ org.apache.paimon.flink.procedure.CreateFunctionProcedure
 org.apache.paimon.flink.procedure.DropFunctionProcedure
 org.apache.paimon.flink.procedure.AlterFunctionProcedure
 org.apache.paimon.flink.procedure.AlterColumnDefaultValueProcedure
+org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure

@@ -49,6 +49,7 @@ import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
+import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -106,6 +107,8 @@ public class SparkProcedures {
         procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
         procedureBuilders.put("alter_function", AlterFunctionProcedure::builder);
         procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
+        procedureBuilders.put(
+                "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         return procedureBuilders.build();
     }
 }
