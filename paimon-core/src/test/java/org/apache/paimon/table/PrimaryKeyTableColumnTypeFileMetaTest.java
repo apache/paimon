@@ -18,25 +18,19 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsEvolution;
-import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataField;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,54 +99,12 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
                                                     .between(6, 200F, 500F))
                                     .read()
                                     .dataSplits();
-                    // filtered and only 3 rows left
-                    checkFilterRowCount(toDataFileMetas(splits), 3L);
+                    // filter g: old file cannot apply filter, so the new file in the same partition
+                    // also cannot be filtered, the result contains all data
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
                 this::createFileStoreTable);
-    }
-
-    /** We can only validate the values in primary keys for changelog with key table. */
-    @Override
-    protected void validateValuesWithNewSchema(
-            Map<Long, TableSchema> tableSchemas,
-            long schemaId,
-            List<String> filesName,
-            List<DataFileMeta> fileMetaList) {
-        Function<Long, List<DataField>> schemaFields =
-                id -> tableSchemas.get(id).logicalTrimmedPrimaryKeysType().getFields();
-        SimpleStatsEvolutions converters = new SimpleStatsEvolutions(schemaFields, schemaId);
-        for (DataFileMeta fileMeta : fileMetaList) {
-            SimpleStats stats = getTableValueStats(fileMeta);
-            SimpleStatsEvolution.Result result =
-                    converters.getOrCreate(fileMeta.schemaId()).evolution(stats, null, null);
-            InternalRow min = result.minValues();
-            InternalRow max = result.maxValues();
-            assertThat(min.getFieldCount()).isEqualTo(4);
-            if (filesName.contains(fileMeta.fileName())) {
-                // parquet does not support padding
-                assertThat(min.getString(0).toString()).startsWith("200");
-                assertThat(max.getString(0).toString()).startsWith("300");
-
-                assertThat(min.getString(1)).isEqualTo(BinaryString.fromString("201"));
-                assertThat(max.getString(1)).isEqualTo(BinaryString.fromString("301"));
-
-                assertThat(min.getDouble(2)).isEqualTo(202D);
-                assertThat(max.getDouble(2)).isEqualTo(302D);
-
-                assertThat(min.getInt(3)).isEqualTo(203);
-                assertThat(max.getInt(3)).isEqualTo(303);
-            } else {
-                assertThat(min.getString(0))
-                        .isEqualTo(max.getString(0))
-                        .isEqualTo(BinaryString.fromString("400"));
-                assertThat(min.getString(1))
-                        .isEqualTo(max.getString(1))
-                        .isEqualTo(BinaryString.fromString("401"));
-                assertThat(min.getDouble(2)).isEqualTo(max.getDouble(2)).isEqualTo(402D);
-                assertThat(min.getInt(3)).isEqualTo(max.getInt(3)).isEqualTo(403);
-            }
-        }
     }
 }
