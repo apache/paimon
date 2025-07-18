@@ -149,8 +149,8 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNoCompactionInBatchMode() {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
+    public void testNoCompactionInBatchMode() throws Exception {
+        batchSql("ALTER TABLE append_table SET ('compaction.max.file-num' = '4')");
 
         assertExecuteExpected(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
@@ -207,6 +207,124 @@ public class AppendTableITCase extends CatalogITCaseBase {
                         Row.of(12, "MMM"),
                         Row.of(13, "NNN"),
                         Row.of(14, "OOO"));
+    }
+
+    @Test
+    public void testBatchWriteGenerateRowId() {
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND);
+
+        List<Row> rows = batchSql("SELECT * FROM append_table$with_row_id");
+        assertThat(rows.size()).isEqualTo(8);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(0L, 1, "AAA"),
+                        Row.of(1L, 2, "BBB"),
+                        Row.of(2L, 3, "CCC"),
+                        Row.of(3L, 4, "DDD"),
+                        Row.of(4L, 1, "AAA"),
+                        Row.of(5L, 2, "BBB"),
+                        Row.of(6L, 3, "CCC"),
+                        Row.of(7L, 4, "DDD"));
+    }
+
+    @Test
+    public void testCompactionWithRowId() throws Exception {
+        batchSql("ALTER TABLE append_table SET ('compaction.max.file-num' = '4')");
+
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')",
+                4L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')",
+                5L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (9, 'JJJ'), (10, 'KKK')",
+                6L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
+                7L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (13, 'NNN'), (14, 'OOO')",
+                8L,
+                Snapshot.CommitKind.APPEND);
+
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(18);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"),
+                        Row.of(2, "BBB"),
+                        Row.of(3, "CCC"),
+                        Row.of(4, "DDD"),
+                        Row.of(1, "AAA"),
+                        Row.of(2, "BBB"),
+                        Row.of(3, "CCC"),
+                        Row.of(4, "DDD"),
+                        Row.of(5, "EEE"),
+                        Row.of(6, "FFF"),
+                        Row.of(7, "HHH"),
+                        Row.of(8, "III"),
+                        Row.of(9, "JJJ"),
+                        Row.of(10, "KKK"),
+                        Row.of(11, "LLL"),
+                        Row.of(12, "MMM"),
+                        Row.of(13, "NNN"),
+                        Row.of(14, "OOO"));
+
+        List<Row> originRowsWithId = batchSql("SELECT * FROM append_table$with_row_id");
+        assertBatchHasCompact("call sys.compact('default.append_table')", 60000L);
+        List<Row> files = batchSql("SELECT * FROM append_table$files");
+        assertThat(files.size()).isEqualTo(1);
+        List<Row> rowsWithId = batchSql("SELECT * FROM append_table$with_row_id");
+        assertThat(originRowsWithId).isEqualTo(rowsWithId);
+
+        assertThat(rowsWithId)
+                .containsExactly(
+                        Row.of(0L, 1, "AAA"),
+                        Row.of(1L, 2, "BBB"),
+                        Row.of(2L, 3, "CCC"),
+                        Row.of(3L, 4, "DDD"),
+                        Row.of(4L, 1, "AAA"),
+                        Row.of(5L, 2, "BBB"),
+                        Row.of(6L, 3, "CCC"),
+                        Row.of(7L, 4, "DDD"),
+                        Row.of(8L, 5, "EEE"),
+                        Row.of(9L, 6, "FFF"),
+                        Row.of(10L, 7, "HHH"),
+                        Row.of(11L, 8, "III"),
+                        Row.of(12L, 9, "JJJ"),
+                        Row.of(13L, 10, "KKK"),
+                        Row.of(14L, 11, "LLL"),
+                        Row.of(15L, 12, "MMM"),
+                        Row.of(16L, 13, "NNN"),
+                        Row.of(17L, 14, "OOO"));
     }
 
     @Test
@@ -590,10 +708,19 @@ public class AppendTableITCase extends CatalogITCaseBase {
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 
+    private void assertBatchHasCompact(String sql, long timeout) throws Exception {
+        batchSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
     private void assertStreamingHasCompact(String sql, long timeout) throws Exception {
+        sEnv.executeSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
+    private void waitCompactSnapshot(long timeout) throws Exception {
         long start = System.currentTimeMillis();
         long currentId = 1;
-        sEnv.executeSql(sql);
         Snapshot snapshot;
         while (true) {
             snapshot = findSnapshot("append_table", currentId);

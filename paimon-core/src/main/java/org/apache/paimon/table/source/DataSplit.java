@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
 import org.apache.paimon.io.DataFileMeta10LegacySerializer;
+import org.apache.paimon.io.DataFileMeta12LegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
@@ -58,7 +59,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 6;
+    private static final int VERSION = 7;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -426,7 +427,10 @@ public class DataSplit implements Split {
         } else if (version == 3 || version == 4) {
             DataFileMeta10LegacySerializer serializer = new DataFileMeta10LegacySerializer();
             return serializer::deserialize;
-        } else if (version >= 5) {
+        } else if (version == 5 || version == 6) {
+            DataFileMeta12LegacySerializer serializer = new DataFileMeta12LegacySerializer();
+            return serializer::deserialize;
+        } else if (version >= 7) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {

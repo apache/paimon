@@ -21,6 +21,8 @@ package org.apache.paimon.reader;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.RowIdSequence;
+import org.apache.paimon.utils.RowIdSequenceIterator;
 
 import javax.annotation.Nullable;
 
@@ -65,6 +67,16 @@ public interface RecordReader<T> extends Closeable {
         T next() throws IOException;
 
         /**
+         * Returns the row ID of the last returned record. Default null.
+         *
+         * @return
+         */
+        @Nullable
+        default Long rowId() {
+            return null;
+        }
+
+        /**
          * Releases the batch that this iterator iterated over. This is not supposed to close the
          * reader and its resources, but is simply a signal that this iterator is not used anymore.
          * This method can be used as a hook to recycle/reuse heavyweight object structures.
@@ -83,6 +95,12 @@ public interface RecordReader<T> extends Closeable {
                         return null;
                     }
                     return function.apply(next);
+                }
+
+                @Nullable
+                @Override
+                public Long rowId() {
+                    return thisIterator.rowId();
                 }
 
                 @Override
@@ -108,6 +126,42 @@ public interface RecordReader<T> extends Closeable {
                             return next;
                         }
                     }
+                }
+
+                @Nullable
+                @Override
+                public Long rowId() {
+                    return thisIterator.rowId();
+                }
+
+                @Override
+                public void releaseBatch() {
+                    thisIterator.releaseBatch();
+                }
+            };
+        }
+
+        default RecordReader.RecordIterator<T> withRowId(
+                final RowIdSequenceIterator idSequenceIterator) {
+            RecordReader.RecordIterator<T> thisIterator = this;
+            return new RecordReader.RecordIterator<T>() {
+                @Nullable private Long rowId;
+
+                @Nullable
+                @Override
+                public T next() throws IOException {
+                    T next = thisIterator.next();
+                    if (next == null) {
+                        return null;
+                    }
+                    rowId = idSequenceIterator.next();
+                    return next;
+                }
+
+                @Nullable
+                @Override
+                public Long rowId() {
+                    return rowId;
                 }
 
                 @Override
@@ -196,6 +250,28 @@ public interface RecordReader<T> extends Closeable {
                     return null;
                 }
                 return iterator.filter(filter);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
+
+    default RecordReader<T> withRowId(RowIdSequence rowIdSequence) {
+        final RowIdSequenceIterator rowIdSequenceIterator =
+                new RowIdSequenceIterator(rowIdSequence);
+        RecordReader<T> thisReader = this;
+        return new RecordReader<T>() {
+            @Nullable
+            @Override
+            public RecordIterator<T> readBatch() throws IOException {
+                RecordIterator<T> iterator = thisReader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return iterator.withRowId(rowIdSequenceIterator);
             }
 
             @Override

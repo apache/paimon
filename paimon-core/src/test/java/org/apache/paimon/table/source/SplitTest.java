@@ -216,6 +216,7 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         null,
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -278,6 +279,7 @@ public class SplitTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
+                        null,
                         null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
@@ -342,6 +344,7 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -409,6 +412,7 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -476,7 +480,8 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
-                        "hdfs:///path/to/warehouse");
+                        "hdfs:///path/to/warehouse",
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
@@ -543,7 +548,8 @@ public class SplitTest {
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
-                        "hdfs:///path/to/warehouse");
+                        "hdfs:///path/to/warehouse",
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
@@ -597,6 +603,7 @@ public class SplitTest {
                 null,
                 null,
                 valueStatsCols,
+                null,
                 null);
     }
 
