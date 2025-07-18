@@ -1599,4 +1599,57 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(expected, table, rowType, primaryKeys);
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testSyncPrimaryKeysFromSourceSchemaTrue() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_sync_primary_keys_from_source_schema");
+        mySqlConfig.put("table-name", "t");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig).withTableConfig(getBasicTableConfig()).build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        TableSchema schema = table.schema();
+        assertThat(schema.primaryKeys().isEmpty()).isEqualTo(false);
+        assertThat(schema.primaryKeys()).isEqualTo(Collections.singletonList("k"));
+
+        List<String> expectedInsert = Arrays.asList("+I[1, Apache]", "+I[2, Paimon]");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k", "v1"});
+        waitForResult(expectedInsert, table, rowType, Collections.singletonList("k"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSyncPrimaryKeysFromSourceSchemaFalse() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_sync_primary_keys_from_source_schema");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put("bucket-key", "v1");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withTableConfig(tableConfig)
+                        .syncPKeysFromSourceSchema(false)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        TableSchema schema = table.schema();
+        assertThat(schema.primaryKeys().isEmpty()).isEqualTo(true);
+
+        List<String> expectedInsert = Arrays.asList("+I[1, Apache]", "+I[2, Paimon]");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k", "v1"});
+        waitForResult(expectedInsert, table, rowType, Collections.emptyList());
+    }
 }
