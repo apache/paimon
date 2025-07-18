@@ -22,15 +22,22 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.flink.clone.files.CloneFileInfo;
+import org.apache.paimon.flink.clone.files.CloneFilesCommitOperator;
+import org.apache.paimon.flink.clone.files.CloneFilesFunction;
+import org.apache.paimon.flink.clone.files.DataFileInfo;
+import org.apache.paimon.flink.clone.files.ListCloneFilesFunction;
+import org.apache.paimon.flink.clone.files.ShuffleDataFileByTableComputer;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hive.clone.HiveCloneUtils;
-import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,15 +45,15 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Utils for building {@link CloneAction}. */
-public class CloneUtils {
+/** Utils for building {@link CloneAction} for append tables. */
+public class CloneHiveTableUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CloneUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CloneHiveTableUtils.class);
 
     public static DataStream<Tuple2<Identifier, Identifier>> buildSource(
             String sourceDatabase,
@@ -70,7 +77,9 @@ public class CloneUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier : HiveCloneUtils.listTables(hiveCatalog, excludedTables)) {
+            for (Identifier identifier :
+                    org.apache.paimon.hive.clone.HiveCloneUtils.listTables(
+                            hiveCatalog, excludedTables)) {
                 result.add(new Tuple2<>(identifier, identifier));
             }
         } else if (StringUtils.isNullOrWhitespaceOnly(sourceTableName)) {
@@ -82,7 +91,8 @@ public class CloneUtils {
                     "targetTableName must be blank when clone all tables in a catalog.");
 
             for (Identifier identifier :
-                    HiveCloneUtils.listTables(hiveCatalog, sourceDatabase, excludedTables)) {
+                    org.apache.paimon.hive.clone.HiveCloneUtils.listTables(
+                            hiveCatalog, sourceDatabase, excludedTables)) {
                 result.add(
                         new Tuple2<>(
                                 identifier,
@@ -121,54 +131,61 @@ public class CloneUtils {
         return (HiveCatalog) rootCatalog;
     }
 
-    // ---------------------------------- Classes ----------------------------------
+    public static void build(
+            StreamExecutionEnvironment env,
+            Catalog sourceCatalog,
+            String sourceDatabase,
+            String sourceTableName,
+            Map<String, String> sourceCatalogConfig,
+            String targetDatabase,
+            String targetTableName,
+            Map<String, String> targetCatalogConfig,
+            int parallelism,
+            @Nullable String whereSql,
+            @Nullable List<String> excludedTables)
+            throws Exception {
+        // list source tables
+        DataStream<Tuple2<Identifier, Identifier>> source =
+                buildSource(
+                        sourceDatabase,
+                        sourceTableName,
+                        targetDatabase,
+                        targetTableName,
+                        sourceCatalog,
+                        excludedTables,
+                        env);
 
-    /** Shuffle tables. */
-    public static class TableChannelComputer
-            implements ChannelComputer<Tuple2<Identifier, Identifier>> {
+        DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
+                FlinkStreamPartitioner.partition(
+                        source, new ShuffleIdentifierByTableComputer(), parallelism);
 
-        private static final long serialVersionUID = 1L;
+        // create target table, list files and group by <table, partition>
+        DataStream<CloneFileInfo> files =
+                partitionedSource
+                        .process(
+                                new ListCloneFilesFunction(
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
+                        .name("List Files")
+                        .setParallelism(parallelism);
 
-        private transient int numChannels;
+        // copy files and commit
+        DataStream<DataFileInfo> dataFile =
+                files.rebalance()
+                        .process(new CloneFilesFunction(sourceCatalogConfig, targetCatalogConfig))
+                        .name("Copy Files")
+                        .setParallelism(parallelism);
 
-        @Override
-        public void setup(int numChannels) {
-            this.numChannels = numChannels;
-        }
+        DataStream<DataFileInfo> partitionedDataFile =
+                FlinkStreamPartitioner.partition(
+                        dataFile, new ShuffleDataFileByTableComputer(), parallelism);
 
-        @Override
-        public int channel(Tuple2<Identifier, Identifier> record) {
-            return Math.floorMod(
-                    Objects.hash(record.f1.getDatabaseName(), record.f1.getTableName()),
-                    numChannels);
-        }
-
-        @Override
-        public String toString() {
-            return "shuffle by identifier hash";
-        }
-    }
-
-    /** Shuffle tables. */
-    public static class DataFileChannelComputer implements ChannelComputer<DataFileInfo> {
-
-        private static final long serialVersionUID = 1L;
-
-        private transient int numChannels;
-
-        @Override
-        public void setup(int numChannels) {
-            this.numChannels = numChannels;
-        }
-
-        @Override
-        public int channel(DataFileInfo record) {
-            return Math.floorMod(Objects.hash(record.identifier()), numChannels);
-        }
-
-        @Override
-        public String toString() {
-            return "shuffle by identifier hash";
-        }
+        DataStream<Long> committed =
+                partitionedDataFile
+                        .transform(
+                                "Commit table",
+                                BasicTypeInfo.LONG_TYPE_INFO,
+                                new CloneFilesCommitOperator(targetCatalogConfig))
+                        .setParallelism(parallelism);
+        committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 }
