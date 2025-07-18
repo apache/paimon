@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -428,6 +429,7 @@ public class RESTCatalog implements Catalog {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema);
+            createExternalTablePathIfNotExist(schema);
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
@@ -978,6 +980,18 @@ public class RESTCatalog implements Catalog {
             return FileIO.get(path, context);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private void createExternalTablePathIfNotExist(Schema schema) throws IOException {
+        Map<String, String> options = schema.options();
+        if (options.containsKey(CoreOptions.PATH.key())) {
+            Path path = new Path(options.get(PATH.key()));
+            try (FileIO fileIO = fileIOFromOptions(path)) {
+                if (!fileIO.exists(path)) {
+                    fileIO.mkdirs(path);
+                }
+            }
         }
     }
 }
