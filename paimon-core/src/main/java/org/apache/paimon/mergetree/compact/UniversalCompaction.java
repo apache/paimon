@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.OffPeakHours;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -47,6 +48,8 @@ public class UniversalCompaction implements CompactStrategy {
     private final int maxSizeAmp;
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
+    private final OffPeakHours offPeakHours;
+    private final int compactOffPeakRatio;
 
     @Nullable private final Long opCompactionInterval;
     @Nullable private Long lastOptimizedCompaction;
@@ -55,15 +58,22 @@ public class UniversalCompaction implements CompactStrategy {
     @Nullable private final AtomicInteger lookupCompactTriggerCount;
 
     public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
-        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null);
+        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null, OffPeakHours.DISABLED, 0);
     }
 
     public UniversalCompaction(
             int maxSizeAmp,
             int sizeRatio,
             int numRunCompactionTrigger,
-            @Nullable Duration opCompactionInterval) {
-        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, opCompactionInterval, null);
+            OffPeakHours offPeakHours,
+            int compactOffPeakRatio) {
+        this(
+                maxSizeAmp,
+                sizeRatio,
+                numRunCompactionTrigger,
+                null,
+                offPeakHours,
+                compactOffPeakRatio);
     }
 
     public UniversalCompaction(
@@ -71,15 +81,36 @@ public class UniversalCompaction implements CompactStrategy {
             int sizeRatio,
             int numRunCompactionTrigger,
             @Nullable Duration opCompactionInterval,
-            @Nullable Integer maxLookupCompactInterval) {
+            OffPeakHours offPeakHours,
+            int compactOffPeakRatio) {
+        this(
+                maxSizeAmp,
+                sizeRatio,
+                numRunCompactionTrigger,
+                opCompactionInterval,
+                null,
+                offPeakHours,
+                compactOffPeakRatio);
+    }
+
+    public UniversalCompaction(
+            int maxSizeAmp,
+            int sizeRatio,
+            int numRunCompactionTrigger,
+            @Nullable Duration opCompactionInterval,
+            @Nullable Integer maxLookupCompactInterval,
+            OffPeakHours offPeakHours,
+            int compactOffPeakRatio) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
+        this.offPeakHours = offPeakHours;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
         this.opCompactionInterval =
                 opCompactionInterval == null ? null : opCompactionInterval.toMillis();
         this.maxLookupCompactInterval = maxLookupCompactInterval;
         this.lookupCompactTriggerCount =
                 maxLookupCompactInterval == null ? null : new AtomicInteger(0);
+        this.compactOffPeakRatio = compactOffPeakRatio;
     }
 
     @Override
@@ -203,7 +234,12 @@ public class UniversalCompaction implements CompactStrategy {
         long candidateSize = candidateSize(runs, candidateCount);
         for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
-            if (candidateSize * (100.0 + sizeRatio) / 100.0 < next.run().totalSize()) {
+            if (candidateSize
+                            * (100.0
+                                    + sizeRatio
+                                    + (offPeakHours.isOffPeak() ? compactOffPeakRatio : 0))
+                            / 100.0
+                    < next.run().totalSize()) {
                 break;
             }
 

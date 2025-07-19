@@ -680,6 +680,32 @@ public class CoreOptions implements Serializable {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
+    public static final ConfigOption<Integer> OFFPEAK_START_HOUR =
+            key("offpeak.start.hour")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "The start of off-peak hours, expressed as an integer between 0 and 23, inclusive"
+                                    + " Set to -1 to disable off-peak");
+
+    public static final ConfigOption<Integer> OFFPEAK_END_HOUR =
+            key("offpeak.end.hour")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set"
+                                    + " to -1 to disable off-peak.");
+
+    public static final ConfigOption<Integer> COMPACTION_OFFPEAK_RATIO =
+            key("compaction.offpeak-ratio")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Allows you to set a different (by default, more aggressive) percentage ratio for determining "
+                                    + " whether larger sorted run's size are included in compactions during off-peak hours. Works in the "
+                                    + " same way as compaction.size-ratio. Only applies if offpeak.start.hour and "
+                                    + " offpeak.end.hour are also enabled.");
+
     public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
             key("compaction.optimization-interval")
                     .durationType()
@@ -2317,6 +2343,15 @@ public class CoreOptions implements Serializable {
 
     public int sortedRunSizeRatio() {
         return options.get(COMPACTION_SIZE_RATIO);
+    }
+
+    public OffPeakHours offPeakHours() {
+        return OffPeakHours.getInstance(
+                options.get(OFFPEAK_START_HOUR), options.get(OFFPEAK_END_HOUR));
+    }
+
+    public int compactOffPeakRatio() {
+        return options.get(COMPACTION_OFFPEAK_RATIO);
     }
 
     public int compactionMinFileNum() {

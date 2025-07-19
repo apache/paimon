@@ -57,6 +57,12 @@ under the License.
             <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), -2 (postpone bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
         </tr>
         <tr>
+            <td><h5>bucket-append-ordered</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
+        </tr>
+        <tr>
             <td><h5>bucket-function.type</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
@@ -67,12 +73,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
-        </tr>
-        <tr>
-            <td><h5>bucket-append-ordered</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
         </tr>
         <tr>
             <td><h5>cache-page-size</h5></td>
@@ -229,6 +229,12 @@ under the License.
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
             <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak-ratio</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>Allows you to set a different (by default, more aggressive) percentage ratio for determining  whether larger sorted run's size are included in compactions during off-peak hours. Works in the  same way as compaction.size-ratio. Only applies if offpeak.start.hour and  offpeak.end.hour are also enabled.</td>
         </tr>
         <tr>
             <td><h5>compaction.optimization-interval</h5></td>
@@ -688,6 +694,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
+        </tr>
+        <tr>
+            <td><h5>offpeak.end.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set to -1 to disable off-peak.</td>
+        </tr>
+        <tr>
+            <td><h5>offpeak.start.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive Set to -1 to disable off-peak</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>
