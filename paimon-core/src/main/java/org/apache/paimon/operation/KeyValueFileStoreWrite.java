@@ -226,14 +226,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                 options.maxSizeAmplificationPercent(),
                                 options.sortedRunSizeRatio(),
                                 options.numSortedRunCompactionTrigger(),
-                                options.optimizedCompactionInterval()));
+                                options.optimizedCompactionInterval(),
+                                options.offPeakHours(),
+                                options.compactOffPeakRatio()));
             } else if (CoreOptions.LookupCompactMode.GENTLE.equals(options.lookupCompact())) {
                 return new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
                         options.optimizedCompactionInterval(),
-                        options.lookupCompactMaxInterval());
+                        options.lookupCompactMaxInterval(),
+                        options.offPeakHours(),
+                        options.compactOffPeakRatio());
             }
         }
 
@@ -242,7 +246,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
-                        options.optimizedCompactionInterval());
+                        options.optimizedCompactionInterval(),
+                        options.offPeakHours(),
+                        options.compactOffPeakRatio());
         if (options.compactionForceUpLevel0()) {
             return new ForceUpLevel0Compaction(universal);
         } else {

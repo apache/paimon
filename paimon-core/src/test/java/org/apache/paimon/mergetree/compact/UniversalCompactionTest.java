@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.OffPeakHours;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
@@ -86,7 +87,8 @@ public class UniversalCompactionTest {
     public void testOptimizedCompactionInterval() {
         AtomicLong time = new AtomicLong(0);
         UniversalCompaction compaction =
-                new UniversalCompaction(100, 1, 3, Duration.ofMillis(1000)) {
+                new UniversalCompaction(
+                        100, 1, 3, Duration.ofMillis(1000), OffPeakHours.DISABLED, 0) {
                     @Override
                     long currentTimeMillis() {
                         return time.get();
@@ -266,6 +268,23 @@ public class UniversalCompactionTest {
     }
 
     @Test
+    public void testOffPeakRatioThreshold() {
+
+        OffPeakHours offPeakHours = OffPeakHours.getInstance(0, 23);
+        long[] sizes = new long[] {8, 9, 10};
+        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2, offPeakHours, 0), sizes))
+                .isEqualTo(new long[] {8, 9, 10});
+        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2, offPeakHours, 10), sizes))
+                .isEqualTo(new long[] {27});
+
+        assertThat(
+                        pickForSizeRatio(
+                                new UniversalCompaction(25, 10, 2, OffPeakHours.DISABLED, 10),
+                                sizes))
+                .isEqualTo(new long[] {8, 9, 10});
+    }
+
+    @Test
     public void testLookup() {
         ForceUpLevel0Compaction compaction =
                 new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
@@ -295,7 +314,8 @@ public class UniversalCompactionTest {
     @Test
     public void testForcePickL0() {
         int maxInterval = 5;
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 5, null, maxInterval);
+        UniversalCompaction compaction =
+                new UniversalCompaction(25, 1, 5, null, maxInterval, OffPeakHours.DISABLED, 0);
 
         // level 0 to max level
         List<LevelSortedRun> level0ToMax = level0(1, 2, 2, 2);
