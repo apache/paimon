@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
 
-class DataFrameWriteTest extends PaimonSparkTestBase {
+abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
@@ -35,30 +35,152 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
 
   import testImplicits._
 
+  test("Paimon dataframe: insert into partitioned table") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("t") {
+          // create table
+          Seq((1, "x1", "p1"), (2, "x2", "p2"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .option("primary-key", "a,pt")
+            .partitionBy("pt")
+            .saveAsTable("t")
+
+          // insert into
+          Seq((3, "x3", "p3"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .mode("append")
+            .insertInto("t")
+          checkAnswer(
+            spark.read.format("paimon").table("t").orderBy("a"),
+            Seq(Row(1, "x1", "p1"), Row(2, "x2", "p2"), Row(3, "x3", "p3"))
+          )
+          checkAnswer(
+            sql("SHOW PARTITIONS t"),
+            Seq(Row("pt=p1"), Row("pt=p2"), Row("pt=p3"))
+          )
+
+          // dynamic insert overwrite
+          withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+            Seq((4, "x4", "p1"))
+              .toDF("a", "b", "pt")
+              .write
+              .format("paimon")
+              .mode("overwrite")
+              .insertInto("t")
+          }
+          checkAnswer(
+            spark.read.format("paimon").table("t").orderBy("a"),
+            Seq(Row(2, "x2", "p2"), Row(3, "x3", "p3"), Row(4, "x4", "p1"))
+          )
+          checkAnswer(
+            sql("SHOW PARTITIONS t"),
+            Seq(Row("pt=p1"), Row("pt=p2"), Row("pt=p3"))
+          )
+
+          // insert overwrite
+          Seq((5, "x5", "p1"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .mode("overwrite")
+            .insertInto("t")
+          checkAnswer(
+            spark.read.format("paimon").table("t").orderBy("a"),
+            Seq(Row(5, "x5", "p1"))
+          )
+          checkAnswer(
+            sql("SHOW PARTITIONS t"),
+            Seq(Row("pt=p1"))
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon dataframe: save as partitioned table") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("t") {
+          // create table
+          Seq((1, "x1", "p1"), (2, "x2", "p2"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .mode("append")
+            .option("primary-key", "a,pt")
+            .partitionBy("pt")
+            .saveAsTable("t")
+
+          // saveAsTable with append mode
+          Seq((3, "x3", "p3"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .mode("append")
+            .saveAsTable("t")
+          checkAnswer(
+            spark.read.format("paimon").table("t").orderBy("a"),
+            Seq(Row(1, "x1", "p1"), Row(2, "x2", "p2"), Row(3, "x3", "p3"))
+          )
+          checkAnswer(
+            sql("SHOW PARTITIONS t"),
+            Seq(Row("pt=p1"), Row("pt=p2"), Row("pt=p3"))
+          )
+
+          // saveAsTable with overwrite mode will call replace table internal,
+          // so here we set the props and partitions again.
+          Seq((5, "x5", "p1"))
+            .toDF("a", "b", "pt")
+            .write
+            .format("paimon")
+            .option("primary-key", "a,pt")
+            .partitionBy("pt")
+            .mode("overwrite")
+            .saveAsTable("t")
+          checkAnswer(
+            spark.read.format("paimon").table("t").orderBy("a"),
+            Seq(Row(5, "x5", "p1"))
+          )
+          checkAnswer(
+            sql("SHOW PARTITIONS t"),
+            Seq(Row("pt=p1"))
+          )
+        }
+      }
+    }
+  }
+
   test("Paimon: DataFrameWrite.saveAsTable") {
-    Seq((1L, "x1"), (2L, "x2"))
-      .toDF("a", "b")
-      .write
-      .format("paimon")
-      .mode("append")
-      .option("primary-key", "a")
-      .option("bucket", "-1")
-      .option("target-file-size", "256MB")
-      .option("write.merge-schema", "true")
-      .option("write.merge-schema.explicit-cast", "true")
-      .saveAsTable("test_ctas")
+    withTable("test_ctas") {
+      Seq((1L, "x1"), (2L, "x2"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("append")
+        .option("primary-key", "a")
+        .option("bucket", "-1")
+        .option("target-file-size", "256MB")
+        .option("write.merge-schema", "true")
+        .option("write.merge-schema.explicit-cast", "true")
+        .saveAsTable("test_ctas")
 
-    val paimonTable = loadTable("test_ctas")
-    Assertions.assertEquals(1, paimonTable.primaryKeys().size())
-    Assertions.assertEquals("a", paimonTable.primaryKeys().get(0))
+      val paimonTable = loadTable("test_ctas")
+      Assertions.assertEquals(1, paimonTable.primaryKeys().size())
+      Assertions.assertEquals("a", paimonTable.primaryKeys().get(0))
 
-    // check all the core options
-    Assertions.assertEquals("-1", paimonTable.options().get("bucket"))
-    Assertions.assertEquals("256MB", paimonTable.options().get("target-file-size"))
+      // check all the core options
+      Assertions.assertEquals("-1", paimonTable.options().get("bucket"))
+      Assertions.assertEquals("256MB", paimonTable.options().get("target-file-size"))
 
-    // non-core options should not be here.
-    Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
-    Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
+      // non-core options should not be here.
+      Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
+      Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
+    }
   }
 
   test("Paimon: DataFrameWrite partition table") {
@@ -490,7 +612,11 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .writeTo("t")
               .overwrite($"p1" === $"c2")
           }.getMessage
-          assert(msg2.contains("Table does not support overwrite by expression"))
+          if (gteqSpark3_4) {
+            assert(msg2.contains("Table does not support overwrite by expression"))
+          } else {
+            assert(msg2.contains("cannot translate expression to source filter"))
+          }
 
           val msg3 = intercept[Exception] {
             spark
