@@ -996,6 +996,23 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
+        try {
+            boolean tableExists =
+                    clients.run(
+                            (client ->
+                                    client.tableExists(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName())));
+            if (tableExists) {
+                throw new RuntimeException(
+                        "Table "
+                                + identifier.getFullName()
+                                + " already exists, but this table is not a paimon table.");
+            }
+        } catch (TException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
         Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
         Path location = pair.getLeft();
         boolean externalTable = pair.getRight();
