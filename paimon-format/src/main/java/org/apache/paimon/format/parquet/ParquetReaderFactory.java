@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
@@ -31,6 +32,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -97,6 +99,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
+        setVariantShreddingSchemas(fileSchema);
         MessageType requestedSchema = clipParquetSchema(fileSchema);
 
         if (LOG.isDebugEnabled()) {
@@ -242,5 +245,24 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                             0);
         }
         return columns;
+    }
+
+    private void setVariantShreddingSchemas(GroupType fileSchema) {
+        for (int i = 0; i < readFields.length; i++) {
+            DataField field = readFields[i];
+            if (field.type() instanceof VariantType
+                    && fileSchema
+                            .getType(field.name())
+                            .asGroupType()
+                            .containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)) {
+                VariantType variantType = (VariantType) field.type().copy();
+                variantType.setShreddingSchema(
+                        (RowType)
+                                ParquetSchemaConverter.convertToPaimonField(
+                                                fileSchema.getType(field.name()))
+                                        .type());
+                readFields[i] = field.newType(variantType);
+            }
+        }
     }
 }

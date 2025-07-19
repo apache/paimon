@@ -249,6 +249,12 @@ public class ParquetSplitReaderUtil {
                 }
                 return new HeapRowVector(batchSize, columnVectors);
             case VARIANT:
+                if (((VariantType) fieldType).shreddingSchema() != null) {
+                    fieldType = ((VariantType) fieldType).shreddingSchema();
+                    return createWritableColumnVector(
+                            batchSize, fieldType, type, descriptors, depth);
+                }
+
                 WritableColumnVector[] vectors = new WritableColumnVector[2];
                 vectors[0] = new HeapBytesVector(batchSize);
                 vectors[1] = new HeapBytesVector(batchSize);
@@ -316,6 +322,12 @@ public class ParquetSplitReaderUtil {
         }
 
         if (type instanceof VariantType) {
+            VariantType variantType = (VariantType) type;
+            if (variantType.shreddingSchema() != null) {
+                return constructField(dataField.newType(variantType.shreddingSchema()), columnIO)
+                        .asShreddedVariant();
+            }
+
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
             PrimitiveColumnIO value =
