@@ -149,7 +149,7 @@ public class RESTApi {
 
     public static final ObjectMapper OBJECT_MAPPER = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE;
 
-    private final HttpClient client;
+    private final RESTClient client;
     private final RESTAuthFunction restAuthFunction;
     private final Options options;
     private final ResourcePaths resourcePaths;
@@ -176,7 +176,7 @@ public class RESTApi {
      * @param configRequired is there one REST request to merge configurations during initialization
      */
     public RESTApi(Options options, boolean configRequired) {
-        this.client = new HttpClient(options.get(RESTCatalogOptions.URI));
+        this.client = new HttpClient(options);
         AuthProvider authProvider = createAuthProvider(options);
         Map<String, String> baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
         if (configRequired) {

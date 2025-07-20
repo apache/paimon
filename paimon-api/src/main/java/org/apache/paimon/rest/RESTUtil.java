@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -33,6 +34,8 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
+
+    private static final Joiner.MapJoiner FORM_JOINER = Joiner.on("&").withKeyValueSeparator("=");
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
@@ -126,5 +129,15 @@ public class RESTUtil {
                 }
             }
         }
+    }
+
+    public static String encodeFormData(Map<?, ?> formData) {
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+        formData.forEach(
+                (key, value) ->
+                        builder.put(
+                                encodeString(String.valueOf(key)),
+                                encodeString(String.valueOf(value))));
+        return FORM_JOINER.join(builder.build());
     }
 }
