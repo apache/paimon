@@ -1133,6 +1133,70 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testComputedColumnsCrossReference() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_computed_column2");
+
+        List<String> computedColumnDefs =
+                Arrays.asList(
+                        "_lower_of_upper=lower(_upper)",
+                        "_upper=upper(_value)",
+                        "_trim_lower=trim(_lower_of_upper)",
+                        "_constant=cast(11,INT)");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withComputedColumnArgs(computedColumnDefs)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "INSERT INTO test_computed_column2 VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10', ' vaLUE ')");
+            statement.executeUpdate(
+                    "INSERT INTO test_computed_column2 VALUES (2, '2023-03-23', null, null, null)");
+        }
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.DATE(),
+                            DataTypes.TIMESTAMP(0),
+                            DataTypes.TIMESTAMP(0),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
+                            DataTypes.INT(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {
+                            "pk",
+                            "_date",
+                            "_datetime",
+                            "_timestamp",
+                            "_value",
+                            "_upper",
+                            "_constant",
+                            "_lower_of_upper",
+                            "_trim_lower"
+                        });
+        List<String> expected =
+                Arrays.asList(
+                        // sort according to reference
+
+                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10,  vaLUE ,  VALUE , 11,  value , value]",
+                        "+I[2, 19439, NULL, NULL, NULL, NULL, 11, NULL, NULL]");
+
+        waitForResult(expected, table, rowType, Arrays.asList("pk"));
+    }
+
+    @Test
+    @Timeout(60)
     public void testSyncShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 

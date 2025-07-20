@@ -157,7 +157,10 @@ public interface MongoVersionStrategy {
                 computedColumn -> {
                     String columnName = computedColumn.columnName();
                     String fieldReference = computedColumn.fieldReference();
-                    String computedValue = computedColumn.eval(parsedRow.get(fieldReference));
+                    String computedValue =
+                            computedColumn.eval(
+                                    parsedRow.get(fieldReference),
+                                    schemaBuilder.getFieldType(fieldReference));
 
                     resultMap.put(columnName, computedValue);
                     schemaBuilder.column(columnName, computedColumn.columnType());

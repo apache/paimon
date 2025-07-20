@@ -43,7 +43,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
@@ -58,10 +57,7 @@ public interface Expression extends Serializable {
     DataType outputType();
 
     /** Compute value from given input. Input and output are serialized to string. */
-    String eval(String input);
-
-    /** Compute value from given input. Input and output are serialized to string. */
-    String eval(String input, DataType inputType);
+    String eval(String input, @Nullable DataType inputType);
 
     /** Return name of this expression. */
     default String name() {
@@ -232,14 +228,8 @@ public interface Expression extends Serializable {
             String referencedFieldCheckForm =
                     StringUtils.toLowerCaseIfNeed(referencedField, caseSensitive);
 
-            DataType fieldType =
-                    typeMapping.isEmpty()
-                            ? null
-                            : checkNotNull(
-                                    typeMapping.get(referencedFieldCheckForm),
-                                    String.format(
-                                            "Referenced field '%s' is not in given fields: %s.",
-                                            referencedFieldCheckForm, typeMapping.keySet()));
+            // if fieldType is null, it would be provided during the evaluation
+            DataType fieldType = typeMapping.get(referencedFieldCheckForm);
             return new ReferencedField(referencedField, fieldType, literals);
         }
 
@@ -381,17 +371,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
-            if (converter == null) {
-                this.converter = createConverter();
-            }
-
-            T result = converter.apply(toLocalDateTime(input));
-            return String.valueOf(result);
-        }
-
-        @Override
-        public String eval(String input, DataType inputType) {
+        public String eval(String input, @Nullable DataType inputType) {
             if (this.fieldReferenceType == null) {
                 this.fieldReferenceType = inputType;
 
@@ -402,7 +382,12 @@ public interface Expression extends Serializable {
                 }
             }
 
-            return eval(input);
+            if (converter == null) {
+                this.converter = createConverter();
+            }
+
+            T result = converter.apply(toLocalDateTime(input));
+            return String.valueOf(result);
         }
 
         private LocalDateTime toLocalDateTime(String input) {
@@ -550,7 +535,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
             try {
                 if (endExclusive == null) {
                     return input.substring(beginInclusive);
@@ -563,11 +548,6 @@ public interface Expression extends Serializable {
                                 "Cannot get substring from '%s' because the indexes are out of range. Begin index: %s, end index: %s.",
                                 input, beginInclusive, endExclusive));
             }
-        }
-
-        @Override
-        public String eval(String input, DataType inputType) {
-            return eval(input);
         }
     }
 
@@ -610,7 +590,11 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
+            checkArgument(
+                    inputType != null,
+                    "Field reference type must be set before evaluating the truncate expression.");
+            this.fieldType = inputType;
             switch (fieldType.getTypeRoot()) {
                 case TINYINT:
                 case SMALLINT:
@@ -636,14 +620,6 @@ public interface Expression extends Serializable {
                                     "Unsupported field type for truncate function: %s.",
                                     fieldType.getTypeRoot().toString()));
             }
-        }
-
-        @Override
-        public String eval(String input, DataType inputType) {
-            if (this.fieldType == null) {
-                this.fieldType = inputType;
-            }
-            return eval(input);
         }
 
         private short truncateShort(int width, short value) {
@@ -701,12 +677,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
-            return value;
-        }
-
-        @Override
-        public String eval(String input, DataType inputType) {
+        public String eval(String input, @Nullable DataType inputType) {
             return value;
         }
     }
@@ -729,13 +700,8 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
             return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
-        }
-
-        @Override
-        public String eval(String input, DataType inputType) {
-            return eval(input);
         }
     }
 
@@ -747,7 +713,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
             return StringUtils.toUpperCase(input);
         }
 
@@ -765,7 +731,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
             return StringUtils.toLowerCase(input);
         }
 
@@ -783,7 +749,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
+        public String eval(String input, @Nullable DataType inputType) {
             return StringUtils.trim(input);
         }
 
@@ -807,7 +773,9 @@ public interface Expression extends Serializable {
                     fieldType == null || fieldType.getTypeRoot() == DataTypeRoot.VARCHAR,
                     String.format(
                             "'%s' expression only supports type root of '%s', but found '%s'.",
-                            name(), DataTypeRoot.VARCHAR, fieldType.getTypeRoot()));
+                            name(),
+                            DataTypeRoot.VARCHAR,
+                            fieldType == null ? "null" : fieldType.getTypeRoot()));
             checkArgument(
                     literals.length == 0,
                     String.format(
@@ -831,7 +799,7 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input, DataType inputType) {
+        public String eval(String input, @Nullable DataType inputType) {
             if (this.fieldReferenceType == null) {
                 checkArgument(
                         inputType.getTypeRoot() == DataTypeRoot.VARCHAR,
@@ -840,7 +808,7 @@ public interface Expression extends Serializable {
                                 name(), DataTypeRoot.VARCHAR, inputType.getTypeRoot()));
                 this.fieldReferenceType = inputType;
             }
-            return eval(input);
+            return "";
         }
     }
 }

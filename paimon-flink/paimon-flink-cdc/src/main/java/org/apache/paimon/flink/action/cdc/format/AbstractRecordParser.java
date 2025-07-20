@@ -104,17 +104,11 @@ public abstract class AbstractRecordParser
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
-                    String result;
-                    if (computedColumn.fieldReference() != null
-                            && computedColumn.fieldReferenceType() == null) {
-                        DataType inputType =
-                                schemaBuilder.getFieldType(computedColumn.fieldReference());
-                        result =
-                                computedColumn.eval(
-                                        rowData.get(computedColumn.fieldReference()), inputType);
-                    } else {
-                        result = computedColumn.eval(rowData.get(computedColumn.fieldReference()));
-                    }
+                    DataType inputType =
+                            schemaBuilder.getFieldType(computedColumn.fieldReference());
+                    String result =
+                            computedColumn.eval(
+                                    rowData.get(computedColumn.fieldReference()), inputType);
 
                     rowData.put(computedColumn.columnName(), result);
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
