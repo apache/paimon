@@ -26,10 +26,12 @@ from urllib.parse import urlparse
 import unittest
 
 import pypaimon.api as api
-from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse, TableMetadata, Schema,
-                                GetTableResponse, ListTablesResponse, TableSchema, RESTResponse, PagedList, DataField)
+from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse,
+                                TableMetadata, Schema, GetTableResponse, ListTablesResponse,
+                                TableSchema, RESTResponse, PagedList, DataField)
 from ..api import RESTApi
 from ..api.rest_json import JSON
+from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 from ..api.typedef import Identifier
 from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType
 
@@ -240,7 +242,8 @@ OBJECT_TABLE = "OBJECT_TABLE"
 class RESTCatalogServer:
     """Mock REST server for testing"""
 
-    def __init__(self, data_path: str, auth_provider, config: ConfigResponse, warehouse: str):
+    def __init__(self, data_path: str, auth_provider, config: ConfigResponse, warehouse: str,
+                 role_name: str = None, token_json: str = None):
         self.logger = logging.getLogger(__name__)
         self.warehouse = warehouse
         self.config_response = config
@@ -259,6 +262,8 @@ class RESTCatalogServer:
         # Initialize mock catalog (simplified)
         self.data_path = data_path
         self.auth_provider = auth_provider
+        self.role_name = role_name
+        self.token_json = token_json
 
         # HTTP server setup
         self.server = None
@@ -375,6 +380,13 @@ class RESTCatalogServer:
                 if warehouse_param == self.warehouse:
                     return self._mock_response(self.config_response, 200)
 
+            # ecs role
+            if resource_path == '/ram/security-credential/':
+                return self._mock_response(self.role_name, 200)
+
+            if resource_path == f'/ram/security-credential/{self.role_name}':
+                return self._mock_response(self.token_json, 200)
+
             # Databases endpoint
             if resource_path == self.database_uri or resource_path.startswith(self.database_uri + "?"):
                 return self._databases_api_handler(method, data, parameters)
@@ -462,7 +474,6 @@ class RESTCatalogServer:
         if len(path_parts) == 3:
             # Basic table operations
             return self._table_handle(method, data, identifier)
-
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     def _databases_api_handler(self, method: str, data: str,
@@ -861,7 +872,8 @@ class ApiTestCase(unittest.TestCase):
                 DataField(0, "name", AtomicType('INT'), 'desc  name'),
                 DataField(1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
                 DataField(2, "map11", MapType(False, AtomicType('INT'),
-                                              MapType(False, AtomicType('INT'), AtomicType('INT'))), 'desc  arr11'),
+                                              MapType(False, AtomicType('INT'), AtomicType('INT'))),
+                          'desc  arr11'),
             ]
             schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
             test_tables = {
@@ -888,6 +900,50 @@ class ApiTestCase(unittest.TestCase):
             server.shutdown()
             print("Server stopped")
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_ecs_loader_token(self):
+        token = DLFToken(
+            access_key_id='AccessKeyId',
+            access_key_secret='AccessKeySecret',
+            security_token='AQoDYXdzEJr...<remainder of security token>',
+            expiration="2023-12-01T12:00:00Z"
+        )
+        token_json = JSON.to_json(token)
+        role_name = 'test_role'
+        config = ConfigResponse(defaults={"prefix": "mock-test"})
+        server = RESTCatalogServer(
+            data_path="/tmp/test_warehouse",
+            auth_provider=None,
+            config=config,
+            warehouse="test_warehouse",
+            role_name=role_name,
+            token_json=token_json
+        )
+        try:
+            # Start server
+            server.start()
+            ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
+            options = {
+                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
+            }
+            loader = DLFTokenLoaderFactory.create_token_loader(options)
+            load_token = loader.load_token()
+            self.assertEqual(load_token.access_key_id, token.access_key_id)
+            self.assertEqual(load_token.access_key_secret, token.access_key_secret)
+            self.assertEqual(load_token.security_token, token.security_token)
+            self.assertEqual(load_token.expiration, token.expiration)
+            options_with_role = {
+                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
+                api.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+            }
+            loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
+            token = loader.load_token()
+            self.assertEqual(load_token.access_key_id, token.access_key_id)
+            self.assertEqual(load_token.access_key_secret, token.access_key_secret)
+            self.assertEqual(load_token.security_token, token.security_token)
+            self.assertEqual(load_token.expiration, token.expiration)
+        finally:
+            # Shutdown server
+            server.shutdown()
+            print("Server stopped")

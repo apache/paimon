@@ -18,32 +18,15 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-from .auth import RESTAuthFunction
-from .api_response import (
-    PagedList,
-    GetTableResponse,
-    ListDatabasesResponse,
-    ListTablesResponse,
-    GetDatabaseResponse,
-    ConfigResponse,
-    PagedResponse,
-)
+
+from .api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
+    GetDatabaseResponse, ConfigResponse, PagedResponse
 from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from .typedef import Identifier
+from .typedef import Identifier, RESTCatalogOptions
 from .client import HttpClient
-from .auth import DLFAuthProvider, DLFToken
+from .auth import DLFAuthProvider, RESTAuthFunction
+from .token_loader import DLFToken, DLFTokenLoaderFactory
 from .typedef import T
-
-
-class RESTCatalogOptions:
-    URI = "uri"
-    WAREHOUSE = "warehouse"
-    TOKEN_PROVIDER = "token.provider"
-    DLF_REGION = "dlf.region"
-    DLF_ACCESS_KEY_ID = "dlf.access-key-id"
-    DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
-    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
-    PREFIX = "prefix"
 
 
 class RESTException(Exception):
@@ -133,7 +116,9 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
         auth_provider = DLFAuthProvider(
-            DLFToken(options), options.get(RESTCatalogOptions.DLF_REGION)
+            options.get(RESTCatalogOptions.DLF_REGION),
+            DLFToken.from_options(options),
+            DLFTokenLoaderFactory.create_token_loader(options)
         )
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
@@ -160,9 +145,9 @@ class RESTApi:
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
     def __build_paged_query_params(
-        max_results: Optional[int],
-        page_token: Optional[str],
-        name_patterns: Dict[str, str],
+            max_results: Optional[int],
+            page_token: Optional[str],
+            name_patterns: Dict[str, str],
     ) -> Dict[str, str]:
         query_params = {}
         if max_results is not None and max_results > 0:
@@ -178,7 +163,7 @@ class RESTApi:
         return query_params
 
     def __list_data_from_page_api(
-        self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]
+            self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]
     ) -> List[T]:
         results = []
         query_params = {}
@@ -216,10 +201,10 @@ class RESTApi:
         )
 
     def list_databases_paged(
-        self,
-        max_results: Optional[int] = None,
-        page_token: Optional[str] = None,
-        database_name_pattern: Optional[str] = None,
+            self,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            database_name_pattern: Optional[str] = None,
     ) -> PagedList[str]:
 
         response = self.client.get_with_params(
@@ -255,10 +240,10 @@ class RESTApi:
             self.rest_auth_function)
 
     def alter_database(
-        self,
-        name: str,
-        removals: Optional[List[str]] = None,
-        updates: Optional[Dict[str, str]] = None,
+            self,
+            name: str,
+            removals: Optional[List[str]] = None,
+            updates: Optional[Dict[str, str]] = None,
     ):
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
@@ -282,11 +267,11 @@ class RESTApi:
         )
 
     def list_tables_paged(
-        self,
-        database_name: str,
-        max_results: Optional[int] = None,
-        page_token: Optional[str] = None,
-        table_name_pattern: Optional[str] = None,
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            table_name_pattern: Optional[str] = None,
     ) -> PagedList[str]:
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),

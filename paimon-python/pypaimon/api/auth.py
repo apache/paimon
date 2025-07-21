@@ -19,36 +19,14 @@ import base64
 import hashlib
 import hmac
 import logging
-import threading
+import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-
-@dataclass
-class RESTAuthParameter:
-    method: str
-    path: str
-    data: str
-    parameters: Dict[str, str]
-
-
-@dataclass
-class DLFToken:
-    access_key_id: str
-    access_key_secret: str
-    security_token: Optional[str] = None
-
-    def __init__(self, options: Dict[str, str]):
-        from . import RESTCatalogOptions
-
-        self.access_key_id = options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID)
-        self.access_key_secret = options.get(
-            RESTCatalogOptions.DLF_ACCESS_KEY_SECRET)
-        self.security_token = options.get(
-            RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
+from .token_loader import DLFTokenLoader, DLFToken
+from .typedef import RESTAuthParameter
 
 
 class AuthProvider(ABC):
@@ -92,11 +70,33 @@ class DLFAuthProvider(AuthProvider):
     AUTH_DATE_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
     MEDIA_TYPE = "application/json"
 
-    def __init__(self, token: DLFToken, region: str):
+    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
+
+    token: DLFToken
+    token_loader: DLFTokenLoader
+    region: str
+
+    def __init__(self,
+                 region: str,
+                 token: DLFToken = None,
+                 token_loader: DLFTokenLoader = None):
         self.logger = logging.getLogger(self.__class__.__name__)
+        if token is None and token_loader is None:
+            raise ValueError("Either token or token_loader must be provided")
         self.token = token
+        self.token_loader = token_loader
         self.region = region
-        self._lock = threading.Lock()
+
+    def get_token(self):
+        if self.token_loader is not None:
+            if self.token is None:
+                self.token = self.token_loader.load_token()
+            elif self.token is not None and self.token.expiration_at_millis is not None:
+                if self.token.expiration_at_millis - int(time.time() * 1000) < self.TOKEN_EXPIRATION_SAFE_TIME_MILLIS:
+                    self.token = self.token_loader.load_token()
+        if self.token is None:
+            raise ValueError("Either token or token_loader must be provided")
+        return self.token
 
     def merge_auth_header(
         self, base_header: Dict[str, str], rest_auth_parameter: RESTAuthParameter
@@ -109,12 +109,14 @@ class DLFAuthProvider(AuthProvider):
             date = date_time[:8]
 
             sign_headers = self.generate_sign_headers(
-                rest_auth_parameter.data, date_time, self.token.security_token
+                rest_auth_parameter.data,
+                date_time,
+                self.get_token().security_token
             )
 
             authorization = DLFAuthSignature.get_authorization(
                 rest_auth_parameter=rest_auth_parameter,
-                dlf_token=self.token,
+                dlf_token=self.get_token(),
                 region=self.region,
                 headers=sign_headers,
                 date_time=date_time,
