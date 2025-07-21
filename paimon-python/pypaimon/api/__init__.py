@@ -29,21 +29,10 @@ from pypaimon.api.api_response import (
     PagedResponse, GetTableTokenResponse,
 )
 from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from pypaimon.api.typedef import Identifier
+from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.api.client import HttpClient
 from pypaimon.api.auth import DLFAuthProvider, DLFToken
 from pypaimon.api.typedef import T
-
-
-class RESTCatalogOptions:
-    URI = "uri"
-    WAREHOUSE = "warehouse"
-    TOKEN_PROVIDER = "token.provider"
-    DLF_REGION = "dlf.region"
-    DLF_ACCESS_KEY_ID = "dlf.access-key-id"
-    DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
-    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
-    PREFIX = "prefix"
 
 
 class RESTException(Exception):
@@ -108,21 +97,18 @@ class ResourcePaths:
         return f"{self.base_path}/{self.DATABASES}"
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(name)}"
+        return f"{self.base_path}/{self.DATABASES}/{name}"
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}"
+            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
         return f"{self.base_path}/{self.TABLES}"
 
     def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}/{RESTUtil.encode_string(table_name)}"
+        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
 
     def table_details(self, database_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLE_DETAILS}"
-
-    def table_token(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token"
+        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
 
 
 class RESTApi:
@@ -136,7 +122,8 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
         auth_provider = DLFAuthProvider(
-            DLFToken(options), options.get(RESTCatalogOptions.DLF_REGION)
+            options.get(RESTCatalogOptions.DLF_REGION),
+            DLFToken.from_options(options)
         )
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
@@ -311,13 +298,3 @@ class RESTApi:
             GetTableResponse,
             self.rest_auth_function,
         )
-
-    def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
-        return self.client.get(
-            self.resource_paths.table_token(
-                identifier.database_name,
-                identifier.object_name),
-            GetTableTokenResponse,
-            self.rest_auth_function,
-        )
-

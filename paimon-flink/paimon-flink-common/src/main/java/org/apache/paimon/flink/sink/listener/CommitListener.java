@@ -19,11 +19,18 @@
 package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.sink.CommitCallback;
 
 import java.io.Closeable;
 import java.util.List;
 
-/** The commit listener. */
+/**
+ * The commit listener for Flink sink.
+ *
+ * <p>The biggest difference between this class and {@link CommitCallback} is that it can implement
+ * the {@link #snapshotState()} method, which allows for customized requirements based on Flink's
+ * stream computing features.
+ */
 public interface CommitListener extends Closeable {
 
     void notifyCommittable(List<ManifestCommittable> committables);

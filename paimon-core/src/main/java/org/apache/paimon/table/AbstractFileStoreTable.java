@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
@@ -448,7 +449,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser, this),
                 newExpireRunnable(),
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagCreationManager(this),
+                options.writeOnly() ? null : store().newTagAutoManager(this),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
@@ -563,8 +564,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void createAutoTag() {
-        store().newTagCreationManager(this).run();
+    public TagAutoManager newTagAutoManager() {
+        return store().newTagAutoManager(this);
     }
 
     @Override
