@@ -92,12 +92,22 @@ public class SchemaEvolutionUtilTest {
 
         List<Predicate> filters =
                 SchemaEvolutionUtil.devolveDataFilters(tableFields2, dataFields, predicates);
-        assert filters != null;
-        assertThat(filters.size()).isEqualTo(1);
+        assertThat(filters).isNotNull();
+        assertThat(filters.size()).isEqualTo(3);
 
         LeafPredicate child1 = (LeafPredicate) filters.get(0);
         assertThat(child1.function()).isEqualTo(IsNull.INSTANCE);
         assertThat(child1.fieldName()).isEqualTo("b");
         assertThat(child1.index()).isEqualTo(1);
+
+        LeafPredicate child2 = (LeafPredicate) filters.get(1);
+        assertThat(child2.function()).isEqualTo(IsNotNull.INSTANCE);
+        assertThat(child2.fieldName()).isEqualTo("e");
+        assertThat(child2.index()).isEqualTo(9);
+
+        LeafPredicate child3 = (LeafPredicate) filters.get(2);
+        assertThat(child3.function()).isEqualTo(IsNull.INSTANCE);
+        assertThat(child3.fieldName()).isEqualTo("a");
+        assertThat(child3.index()).isEqualTo(7);
     }
 }
