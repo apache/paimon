@@ -70,6 +70,7 @@ import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
@@ -581,6 +582,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         assertListTablesPagedGloballyWithTablePattern(
                 databaseName, databaseNamePattern, expectedTableNames);
+    }
+
+    @Test
+    public void testCreateFormatTableWithNonExistingPath(@TempDir java.nio.file.Path path)
+            throws Exception {
+        Path nonExistingPath = new Path(path.toString(), "non_existing_path");
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", TableType.FORMAT_TABLE.toString());
+        options.put("path", nonExistingPath.toString());
+        Schema formatTableSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        restCatalog.createDatabase("test_format_table_db", true);
+        Identifier identifier = Identifier.create("test_format_table_db", "test_format_table");
+        catalog.createTable(identifier, formatTableSchema, false);
+
+        FileIO fileIO = catalog.getTable(identifier).fileIO();
+        assertTrue(fileIO.exists(nonExistingPath));
     }
 
     protected void prepareDataForListTablesPagedGlobally(
