@@ -18,21 +18,21 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-from .auth import RESTAuthFunction
-from .api_response import (
+from pypaimon.api.auth import RESTAuthFunction
+from pypaimon.api.api_response import (
     PagedList,
     GetTableResponse,
     ListDatabasesResponse,
     ListTablesResponse,
     GetDatabaseResponse,
     ConfigResponse,
-    PagedResponse,
+    PagedResponse, GetTableTokenResponse,
 )
-from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from .typedef import Identifier
-from .client import HttpClient
-from .auth import DLFAuthProvider, DLFToken
-from .typedef import T
+from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
+from pypaimon.api.typedef import Identifier
+from pypaimon.api.client import HttpClient
+from pypaimon.api.auth import DLFAuthProvider, DLFToken
+from pypaimon.api.typedef import T
 
 
 class RESTCatalogOptions:
@@ -108,18 +108,21 @@ class ResourcePaths:
         return f"{self.base_path}/{self.DATABASES}"
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{name}"
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(name)}"
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
+            return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}"
         return f"{self.base_path}/{self.TABLES}"
 
     def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}/{RESTUtil.encode_string(table_name)}"
 
     def table_details(self, database_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLE_DETAILS}"
+
+    def table_token(self, database_name: str, table_name: str) -> str:
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token"
 
 
 class RESTApi:
@@ -308,3 +311,13 @@ class RESTApi:
             GetTableResponse,
             self.rest_auth_function,
         )
+
+    def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
+        return self.client.get(
+            self.resource_paths.table_token(
+                identifier.database_name,
+                identifier.object_name),
+            GetTableTokenResponse,
+            self.rest_auth_function,
+        )
+
