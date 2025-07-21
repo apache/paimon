@@ -42,7 +42,9 @@ public class TriggerTagAutomaticCreationProcedure extends ProcedureBase {
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
     public @DataTypeHint("ROW<result STRING>") Row[] call(
             ProcedureContext procedureContext, String tableId) throws Exception {
-        ((FileStoreTable) catalog.getTable(Identifier.fromString(tableId))).createAutoTag();
+        ((FileStoreTable) catalog.getTable(Identifier.fromString(tableId)))
+                .newTagAutoManager()
+                .run();
         return new Row[] {Row.of("Success")};
     }
 

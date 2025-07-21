@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -150,9 +151,9 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public void createAutoTag() {
+    public TagAutoManager newTagAutoManager() {
         privilegeChecker.assertCanInsert(identifier);
-        wrapped.createAutoTag();
+        return wrapped.newTagAutoManager();
     }
 
     @Override

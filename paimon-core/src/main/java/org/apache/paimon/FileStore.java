@@ -110,7 +110,7 @@ public interface FileStore<T> {
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy);
 
-    TagAutoManager newTagCreationManager(FileStoreTable table);
+    TagAutoManager newTagAutoManager(FileStoreTable table);
 
     ServiceManager newServiceManager();
 

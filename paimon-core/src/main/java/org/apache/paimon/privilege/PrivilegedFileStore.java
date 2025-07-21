@@ -201,9 +201,9 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public TagAutoManager newTagCreationManager(FileStoreTable table) {
+    public TagAutoManager newTagAutoManager(FileStoreTable table) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newTagCreationManager(table);
+        return wrapped.newTagAutoManager(table);
     }
 
     @Override

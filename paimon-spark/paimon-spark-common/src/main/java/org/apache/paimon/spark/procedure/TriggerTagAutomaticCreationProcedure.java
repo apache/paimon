@@ -63,7 +63,7 @@ public class TriggerTagAutomaticCreationProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     try {
-                        ((FileStoreTable) table).createAutoTag();
+                        ((FileStoreTable) table).newTagAutoManager().run();
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
