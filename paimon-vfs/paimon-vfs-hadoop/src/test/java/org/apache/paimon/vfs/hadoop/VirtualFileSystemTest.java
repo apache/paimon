@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 
@@ -36,6 +37,7 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.paimon.types.DataTypes;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,13 +87,25 @@ public abstract class VirtualFileSystemTest {
         }
     }
 
-    private void createObjectTable(String databaseName, String tableName) throws Exception {
+    protected void createObjectTable(String databaseName, String tableName) throws Exception {
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, tableName);
         Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
         catalog.createTable(identifier, schema, false);
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(ObjectTable.class);
+    }
+
+    protected void createNormalTable(String databaseName, String tableName) throws Exception {
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        Schema schema = Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .column("name", DataTypes.STRING())
+                .build();
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FileStoreTable.class);
     }
 
     private void createDatabase(String databaseName) throws Exception {
@@ -399,5 +413,21 @@ public abstract class VirtualFileSystemTest {
             Assert.fail();
         } catch (IOException e) {
         }
+    }
+
+    @Test
+    public void testVisitNormalTable() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "normal_table";
+        createNormalTable(databaseName, tableName);
+        Path vfsPath = new Path(vfsRoot, databaseName + "/" + tableName);
+        // List normal table, directory schema should exist
+        FileStatus fileStatus = vfs.getFileStatus(vfsPath);
+        Assert.assertTrue(fileStatus.isDirectory());
+        Assert.assertEquals(vfsPath.toString(), fileStatus.getPath().toString());
+        FileStatus[] fileStatuses = vfs.listStatus(vfsPath);
+        Assert.assertEquals(1, fileStatuses.length);
+        Assert.assertTrue(fileStatuses[0].isDirectory());
+        Assert.assertEquals(new Path(vfsPath, "schema").toString(), fileStatuses[0].getPath().toString());
     }
 }

@@ -290,11 +290,9 @@ public class PaimonVirtualFileSystem extends FileSystem {
                             + " does not start with table location "
                             + vfsIdentifier.getTableLocation());
         }
-        String childPath = null;
-        if (vfsIdentifier.getTableLocation().endsWith("/")) {
-            childPath = realPath.substring(vfsIdentifier.getTableLocation().length());
-        } else {
-            childPath = realPath.substring(vfsIdentifier.getTableLocation().length() + 1);
+        String childPath = realPath.substring(vfsIdentifier.getTableLocation().length());
+        if (!childPath.startsWith("/")) {
+            childPath = "/" + childPath;
         }
         Path virtualPath =
                 new Path(
@@ -302,7 +300,6 @@ public class PaimonVirtualFileSystem extends FileSystem {
                         vfsIdentifier.getDatabaseName()
                                 + "/"
                                 + vfsIdentifier.getTableName()
-                                + "/"
                                 + childPath);
         return new FileStatus(
                 paimonFileStatus.getLen(),
