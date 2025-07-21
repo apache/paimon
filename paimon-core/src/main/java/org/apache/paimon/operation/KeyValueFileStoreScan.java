@@ -125,7 +125,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         Predicate safeKeyFilter =
-                fieldKeyStatsConverters.toEvolutionSafeFilter(entry.file().schemaId(), keyFilter);
+                fieldKeyStatsConverters.toEvolutionSafeStatsFilter(
+                        entry.file().schemaId(), keyFilter);
         if (safeKeyFilter == null) {
             return true;
         }
@@ -159,7 +160,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                     schemaId2DataFilter.computeIfAbsent(
                             entry.file().schemaId(),
                             id ->
-                                    fieldValueStatsConverters.toEvolutionSafeFilter(
+                                    fieldValueStatsConverters.toEvolutionSafeStatsFilter(
                                             entry.file().schemaId(), valueFilter));
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
@@ -229,7 +230,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         Predicate safeValueFilter =
-                fieldValueStatsConverters.toEvolutionSafeFilter(
+                fieldValueStatsConverters.toEvolutionSafeStatsFilter(
                         entry.file().schemaId(), valueFilter);
         if (safeValueFilter == null) {
             return true;

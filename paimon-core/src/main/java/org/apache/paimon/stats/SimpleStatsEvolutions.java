@@ -82,7 +82,7 @@ public class SimpleStatsEvolutions {
      * filter or null if can't.
      */
     @Nullable
-    public Predicate toEvolutionSafeFilter(long dataSchemaId, @Nullable Predicate filter) {
+    public Predicate toEvolutionSafeStatsFilter(long dataSchemaId, @Nullable Predicate filter) {
         if (filter == null || dataSchemaId == tableSchemaId) {
             return filter;
         }
@@ -92,8 +92,8 @@ public class SimpleStatsEvolutions {
         List<Predicate> filters = PredicateBuilder.splitAnd(filter);
         List<Predicate> devolved =
                 Objects.requireNonNull(
-                        SchemaEvolutionUtil.devolveDataFilters(
-                                tableDataFields, schemaFields.apply(dataSchemaId), filters));
+                        SchemaEvolutionUtil.devolveFilters(
+                                tableDataFields, schemaFields.apply(dataSchemaId), filters, false));
 
         return devolved.isEmpty() ? null : PredicateBuilder.and(devolved);
     }
