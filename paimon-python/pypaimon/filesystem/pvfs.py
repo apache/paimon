@@ -61,6 +61,7 @@ class PVFSTableIdentifier(PVFSIdentifier):
     catalog: str
     database: str
     name: str
+    sub_path: str = None
 
     def __hash__(self) -> int:
         return hash((self.catalog, self.database, self.name))
@@ -104,15 +105,25 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def ls(self, path, detail=True, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
-            return self.rest_api.list_databases(pvfs_identifier.name)
+            databases = self.rest_api.list_databases(pvfs_identifier.name)
+            return [
+                self._convert_database_actual_path(pvfs_identifier.name, database)
+                for database in databases
+            ]
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
-            return self.rest_api.list_tables(pvfs_identifier.name)
+            tables = self.rest_api.list_tables(pvfs_identifier.name)
+            return [
+                self._convert_table_actual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
+                for table in tables
+            ]
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
             storage_type = self._get_storage_type(table.path)
             fs = self._get_filesystem(pvfs_identifier, storage_type)
             virtual_location = f'{PROTOCOL_NAME}://{pvfs_identifier.catalog}/{pvfs_identifier.database}/{pvfs_identifier.name}'
-            actual_path = path.replace(virtual_location, table.path)
+            actual_path = table.path
+            if pvfs_identifier.sub_path:
+                actual_path = f'{table.path.rstrip("/")}/{pvfs_identifier.sub_path.lstrip("/")}'
             storage_location = table.path
             entries = fs.ls(actual_path, detail=detail, **kwargs)
             if detail:
@@ -166,6 +177,21 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         }
 
     @staticmethod
+    def _convert_database_actual_path(
+            catalog_name: str,
+            database_name: str
+    ):
+        return f'pvfs://{catalog_name}/{database_name}'
+
+    @staticmethod
+    def _convert_table_actual_path(
+            catalog_name: str,
+            database_name: str,
+            table_name: str
+    ):
+        return f'pvfs://{catalog_name}/{database_name}/{table_name}'
+
+    @staticmethod
     def _convert_actual_path(
             storage_type: StorageType,
             actual_path: str,
@@ -188,20 +214,29 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def _extract_pvfs_identifier(path: str) -> Optional['PVFSIdentifier']:
-        if not isinstance(path, str) or not path.startswith(f'{PROTOCOL_NAME}://'):
+        if not isinstance(path, str) or not path.startswith('pvfs://'):
             return None
 
-        match = PaimonVirtualFileSystem._identifier_pattern.match(path)
-        match_size = len(match.groups())
-        if match and match_size == 3:
-            catalog, database, table = match.groups()
-            return PVFSTableIdentifier(catalog=catalog, database=database, name=table)
-        elif match and match_size == 2:
-            catalog, database = match.groups()
-            return PVFSDatabaseIdentifier(catalog=catalog, database=database)
-        elif match and match_size == 1:
-            catalog = match.group(1)
-            return PVFSCatalogIdentifier(catalog)
+        path_without_protocol = path[7:]
+
+        if not path_without_protocol:
+            return None
+
+        components = path_without_protocol.rstrip('/').split('/')
+
+        components = [comp for comp in components if comp]
+
+        if len(components) == 0:
+            return None
+        elif len(components) == 1:
+            return PVFSCatalogIdentifier(components[0])
+        elif len(components) == 2:
+            return PVFSDatabaseIdentifier(catalog=components[0], name=components[1])
+        elif len(components) == 3:
+            return PVFSTableIdentifier(catalog=components[0], database=components[1], name=components[2])
+        elif len(components) > 3:
+            sub_path = '/'.join(components[3:])
+            return PVFSTableIdentifier(catalog=components[0], database=components[1], name=components[2], sub_path=sub_path)
         return None
 
     def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
