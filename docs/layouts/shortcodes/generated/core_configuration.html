@@ -243,6 +243,24 @@ under the License.
             <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
         </tr>
         <tr>
+            <td><h5>compaction.offpeak-ratio</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>Allows you to set a different (by default, more aggressive) percentage ratio for determining  whether larger sorted run's size are included in compactions during off-peak hours. Works in the  same way as compaction.size-ratio. Only applies if offpeak.start.hour and  offpeak.end.hour are also enabled. <br /> For instance, if your cluster experiences low pressure between 2 AM  and 6 PM ,  you can configure `compaction.offpeak.start.hour=2` and `compaction.offpeak.end.hour=18` to define this period as off-peak hours.  During these hours, you can increase the off-peak compaction ratio (e.g. `compaction.offpeak-ratio=20`) to enable more aggressive data compaction</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak.end.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set to -1 to disable off-peak.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak.start.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive Set to -1 to disable off-peak</td>
+        </tr>
+        <tr>
             <td><h5>compaction.optimization-interval</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
