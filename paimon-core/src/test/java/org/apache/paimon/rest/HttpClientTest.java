@@ -28,6 +28,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
@@ -50,8 +51,8 @@ public class HttpClientTest {
     private static final String MOCK_PATH = "/v1/api/mock";
     private static final String TOKEN = "token";
 
-    private static TestHttpWebServer server;
-    private RESTClient httpClient;
+    private TestHttpWebServer server;
+    private HttpClient httpClient;
     private ErrorHandler errorHandler;
     private MockRESTData mockResponseData;
     private String mockResponseDataStr;
@@ -70,19 +71,15 @@ public class HttpClientTest {
                 server.createResponseBody(
                         new ErrorResponse(
                                 ErrorResponse.RESOURCE_TYPE_DATABASE, "test", "test", 400));
-
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, server.getBaseUrl());
-        HttpClient httpClient = new HttpClient(options);
+        httpClient = new HttpClient(server.getBaseUrl());
         httpClient.setErrorHandler(errorHandler);
-        this.httpClient = httpClient;
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
         headers = new HashMap<>();
         restAuthFunction = new RESTAuthFunction(headers, authProvider);
     }
 
-    @AfterClass
-    public static void tearDown() throws IOException {
+    @After
+    public void tearDown() throws IOException {
         server.stop();
     }
 

@@ -149,7 +149,7 @@ public class RESTApi {
 
     public static final ObjectMapper OBJECT_MAPPER = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE;
 
-    private final RESTClient client;
+    private final HttpClient client;
     private final RESTAuthFunction restAuthFunction;
     private final Options options;
     private final ResourcePaths resourcePaths;
