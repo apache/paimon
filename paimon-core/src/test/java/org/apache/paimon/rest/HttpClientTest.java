@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
@@ -29,7 +28,6 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.jupiter.api.Assertions;

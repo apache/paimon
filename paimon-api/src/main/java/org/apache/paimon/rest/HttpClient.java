@@ -23,6 +23,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
+import org.apache.paimon.rest.interceptor.LoggingInterceptor;
+import org.apache.paimon.rest.interceptor.TimingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
@@ -72,6 +74,9 @@ public class HttpClient implements RESTClient {
                     HttpClientBuilder clientBuilder = HttpClients.custom();
                     clientBuilder.setConnectionManager(configureConnectionManager(options));
                     clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
+                    clientBuilder
+                            .addRequestInterceptorFirst(new TimingInterceptor())
+                            .addResponseInterceptorLast(new LoggingInterceptor());
                     httpClient = clientBuilder.build();
                 }
             }
