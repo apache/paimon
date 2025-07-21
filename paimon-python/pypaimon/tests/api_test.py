@@ -532,7 +532,7 @@ class RESTCatalogServer:
 
             schema = table_metadata.schema.to_schema()
             schema.options.pop(PATH, None)
-            path = schema.options.get(PATH, f'file://{self.data_path}/{identifier.object_name}')
+            path = schema.options.get(PATH, f'file://{self.data_path}/{identifier.database_name}/{identifier.object_name}')
 
             response = self.mock_table(identifier, table_metadata, path, schema)
             return self._mock_response(response, 200)

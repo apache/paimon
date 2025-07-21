@@ -14,10 +14,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-
+import shutil
+import tempfile
 import unittest
 import uuid
+from pathlib import Path
 
 from pypaimon.api import ConfigResponse, RESTApi, Identifier
 from pypaimon.api.api_response import TableSchema, TableMetadata
@@ -27,6 +28,17 @@ from pypaimon.tests.api_test import AUTHORIZATION_HEADER_KEY, RESTCatalogServer
 
 
 class PVFSTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
+        self.temp_path = Path(self.temp_dir)
+        print(f"create: {self.temp_path}")
+
+    def tearDown(self):
+        """测试清理 - 删除临时目录"""
+        if self.temp_path.exists():
+            shutil.rmtree(self.temp_path)
+            print(f"clean: {self.temp_path}")
 
     def test(self):
         # Create config
@@ -38,7 +50,7 @@ class PVFSTestCase(unittest.TestCase):
                 return {AUTHORIZATION_HEADER_KEY: "Bearer test-token"}
 
         # Create server
-        data_path = "/tmp/test_warehouse"
+        data_path = self.temp_dir
         server = RESTCatalogServer(
             data_path=data_path,
             auth_provider=MockAuthProvider(),
@@ -65,6 +77,8 @@ class PVFSTestCase(unittest.TestCase):
             test_tables = {
                 "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
             }
+            nested_dir = self.temp_path / "default" / "user" / "01"
+            nested_dir.mkdir(parents=True)
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
             options = {
