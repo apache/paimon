@@ -18,8 +18,8 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.types.DataField;
@@ -27,7 +27,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,20 +44,13 @@ public class SimpleStatsEvolutions {
     private final List<DataField> tableDataFields;
     private final AtomicReference<List<DataField>> tableFields;
     private final ConcurrentMap<Long, SimpleStatsEvolution> evolutions;
-    private final boolean isKeyStats;
 
     public SimpleStatsEvolutions(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
-        this(schemaFields, tableSchemaId, false);
-    }
-
-    public SimpleStatsEvolutions(
-            Function<Long, List<DataField>> schemaFields, long tableSchemaId, boolean isKeyStats) {
         this.schemaFields = schemaFields;
         this.tableSchemaId = tableSchemaId;
         this.tableDataFields = schemaFields.apply(tableSchemaId);
         this.tableFields = new AtomicReference<>();
         this.evolutions = new ConcurrentHashMap<>();
-        this.isKeyStats = isKeyStats;
     }
 
     public SimpleStatsEvolution getOrCreate(long dataSchemaId) {
@@ -85,26 +77,25 @@ public class SimpleStatsEvolutions {
                 });
     }
 
+    /**
+     * If the file's schema id != current table schema id, convert the filter to evolution safe
+     * filter or null if can't.
+     */
     @Nullable
-    public Predicate tryDevolveFilter(long dataSchemaId, Predicate filter, boolean nullSafe) {
-        if (tableSchemaId == dataSchemaId) {
+    public Predicate toEvolutionSafeFilter(long dataSchemaId, @Nullable Predicate filter) {
+        if (filter == null || dataSchemaId == tableSchemaId) {
             return filter;
         }
+
+        // Filter p1 && p2, if only p1 is safe, we can return only p1 to try best filter and let the
+        // compute engine to perform p2.
+        List<Predicate> filters = PredicateBuilder.splitAnd(filter);
         List<Predicate> devolved =
                 Objects.requireNonNull(
                         SchemaEvolutionUtil.devolveDataFilters(
-                                tableDataFields,
-                                schemaFields.apply(dataSchemaId),
-                                Collections.singletonList(filter),
-                                isKeyStats,
-                                nullSafe));
-        return devolved.isEmpty() ? null : devolved.get(0);
-    }
+                                tableDataFields, schemaFields.apply(dataSchemaId), filters));
 
-    // Stats filter is unsafe if it should be devolved and the devolving is unsafe
-    // null safe: it's safe if the predicate field is added later and filter it on the old schema
-    public boolean statsFilterUnsafe(ManifestEntry entry, Predicate statsFilter) {
-        return tryDevolveFilter(entry.file().schemaId(), statsFilter, true) == null;
+        return devolved.isEmpty() ? null : PredicateBuilder.and(devolved);
     }
 
     public List<DataField> tableDataFields() {

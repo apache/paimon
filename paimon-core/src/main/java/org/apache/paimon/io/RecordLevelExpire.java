@@ -112,7 +112,7 @@ public class RecordLevelExpire {
 
         fieldValueStatsConverters =
                 new SimpleStatsEvolutions(
-                        sid -> extractor.valueFields(scanTableSchema(sid)), schema.id(), false);
+                        sid -> extractor.valueFields(scanTableSchema(sid)), schema.id());
     }
 
     public boolean isExpireFile(DataFileMeta file) {

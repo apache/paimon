@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -34,6 +35,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -56,6 +58,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -405,6 +408,59 @@ public class SchemaEvolutionTest {
                                         "_VALUE_KIND", SYSTEM_FIELD_NAMES)));
     }
 
+    @Test
+    public void testPushDownEvolutionSafeFilter() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap("write-only", "true"),
+                        "");
+        schemaManager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            // file 1
+            write.write(GenericRow.of(1, 1L));
+            commit.commit(1, write.prepareCommit(false, 1));
+
+            // file 2
+            write.write(GenericRow.of(2, 2L));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.STRING())));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            // file 3
+            write.write(GenericRow.of(BinaryString.fromString("0"), 3L));
+            commit.commit(3, write.prepareCommit(false, 3));
+
+            // file 4
+            write.write(GenericRow.of(BinaryString.fromString("3"), 3L));
+            commit.commit(4, write.prepareCommit(false, 4));
+        }
+
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
+        // p: f0 >= '3' && f1 >= 2L
+        Predicate p =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, BinaryString.fromString("3")),
+                        builder.greaterOrEqual(1, 2L));
+        // file 1 will be filtered by f1 >= 2L
+        // file 2 won't be filtered because f0 >= '3' is not safe
+        // file 3 will be filtered by f0 >= '3'
+        // file 4 won't be filtered
+        List<String> rows = readRecords(table, p);
+        assertThat(rows).containsExactlyInAnyOrder("2, 2", "3, 3");
+    }
+
     private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {
         List<String> results = new ArrayList<>();
         forEachRemaining(
@@ -423,7 +479,9 @@ public class SchemaEvolutionTest {
         if (filter != null) {
             snapshotReader.withFilter(filter);
         }
-        for (Split split : snapshotReader.read().dataSplits()) {
+        List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
+
+        for (Split split : dataSplits) {
             InnerTableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);

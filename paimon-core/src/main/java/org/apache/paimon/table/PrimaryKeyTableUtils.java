@@ -46,12 +46,8 @@ public class PrimaryKeyTableUtils {
 
     public static List<DataField> addKeyNamePrefix(List<DataField> keyFields) {
         return keyFields.stream()
-                .map(f -> f.newName(addKeyNamePrefix(f.name())).newId(f.id() + KEY_FIELD_ID_START))
+                .map(f -> f.newName(KEY_FIELD_PREFIX + f.name()).newId(f.id() + KEY_FIELD_ID_START))
                 .collect(Collectors.toList());
-    }
-
-    public static String addKeyNamePrefix(String keyName) {
-        return KEY_FIELD_PREFIX + keyName;
     }
 
     public static MergeFunctionFactory<KeyValue> createMergeFunctionFactory(

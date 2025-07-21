@@ -132,17 +132,11 @@ public class SchemaEvolutionUtil {
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
      * @param filters the filters
-     * @param isKeyFilter whether the filter is for system _KEY_ fields
-     * @param nullSafe whether to return predicate if the predicate field name isn't in dataFields
      * @return the data filters
      */
     @Nullable
     public static List<Predicate> devolveDataFilters(
-            List<DataField> tableFields,
-            List<DataField> dataFields,
-            List<Predicate> filters,
-            boolean isKeyFilter,
-            boolean nullSafe) {
+            List<DataField> tableFields, List<DataField> dataFields, List<Predicate> filters) {
         if (filters == null) {
             return null;
         }
@@ -155,17 +149,16 @@ public class SchemaEvolutionUtil {
 
         PredicateReplaceVisitor visitor =
                 predicate -> {
-                    String fieldName = predicate.fieldName();
-                    if (isKeyFilter) {
-                        fieldName = PrimaryKeyTableUtils.addKeyNamePrefix(fieldName);
-                    }
                     DataField tableField =
                             checkNotNull(
-                                    nameToTableFields.get(fieldName),
+                                    nameToTableFields.get(predicate.fieldName()),
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
+
+                    // For example, add field b and filter b, the filter is safe for old file
+                    // without field b
                     if (dataField == null) {
-                        return nullSafe ? Optional.of(predicate) : Optional.empty();
+                        return Optional.of(predicate);
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(
