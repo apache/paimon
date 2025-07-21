@@ -237,6 +237,18 @@ under the License.
             <td>Allows you to set a different (by default, more aggressive) percentage ratio for determining  whether larger sorted run's size are included in compactions during off-peak hours. Works in the  same way as compaction.size-ratio. Only applies if offpeak.start.hour and  offpeak.end.hour are also enabled.</td>
         </tr>
         <tr>
+            <td><h5>compaction.offpeak.end.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set to -1 to disable off-peak.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak.start.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive Set to -1 to disable off-peak</td>
+        </tr>
+        <tr>
             <td><h5>compaction.optimization-interval</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
@@ -694,18 +706,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
-        </tr>
-        <tr>
-            <td><h5>offpeak.end.hour</h5></td>
-            <td style="word-wrap: break-word;">-1</td>
-            <td>Integer</td>
-            <td>The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set to -1 to disable off-peak.</td>
-        </tr>
-        <tr>
-            <td><h5>offpeak.start.hour</h5></td>
-            <td style="word-wrap: break-word;">-1</td>
-            <td>Integer</td>
-            <td>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive Set to -1 to disable off-peak</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>

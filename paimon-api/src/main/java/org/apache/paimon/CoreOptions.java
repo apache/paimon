@@ -680,16 +680,16 @@ public class CoreOptions implements Serializable {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
-    public static final ConfigOption<Integer> OFFPEAK_START_HOUR =
-            key("offpeak.start.hour")
+    public static final ConfigOption<Integer> COMPACT_OFFPEAK_START_HOUR =
+            key("compaction.offpeak.start.hour")
                     .intType()
                     .defaultValue(-1)
                     .withDescription(
                             "The start of off-peak hours, expressed as an integer between 0 and 23, inclusive"
                                     + " Set to -1 to disable off-peak");
 
-    public static final ConfigOption<Integer> OFFPEAK_END_HOUR =
-            key("offpeak.end.hour")
+    public static final ConfigOption<Integer> COMPACT_OFFPEAK_END_HOUR =
+            key("compaction.offpeak.end.hour")
                     .intType()
                     .defaultValue(-1)
                     .withDescription(
@@ -2347,7 +2347,7 @@ public class CoreOptions implements Serializable {
 
     public OffPeakHours offPeakHours() {
         return OffPeakHours.getInstance(
-                options.get(OFFPEAK_START_HOUR), options.get(OFFPEAK_END_HOUR));
+                options.get(COMPACT_OFFPEAK_START_HOUR), options.get(COMPACT_OFFPEAK_END_HOUR));
     }
 
     public int compactOffPeakRatio() {
