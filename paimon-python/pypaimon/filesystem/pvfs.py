@@ -15,6 +15,8 @@
 #  specific language governing permissions and limitations
 #  under the License.
 import re
+from abc import ABC
+from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
 
 import fsspec
@@ -22,6 +24,28 @@ import fsspec
 from pypaimon.api import RESTApi, RESTCatalogOptions
 
 PROTOCOL_NAME = "pvfs"
+
+
+class PVFSIdentifier(ABC):
+    name: str
+
+
+@dataclass
+class PVFSCatalogIdentifier(PVFSIdentifier):
+    name: str
+
+
+@dataclass
+class PVFSDatabaseIdentifier(PVFSIdentifier):
+    catalog: str
+    name: str
+
+
+@dataclass
+class PVFSTableIdentifier(PVFSIdentifier):
+    catalog: str
+    database: str
+    name: str
 
 
 class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
@@ -32,11 +56,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     _DATABASE_PATTERN = re.compile(r'^pvfs://([^/]+)//([^/]+)/?$')
     _TABLE_PATTERN = re.compile(r'^pvfs://([^/]+)//([^/]+)//([^/]+)/?$')
 
-    def __init__(self, server_uri: str = None, warehouse: str = None, options: Dict = None, **kwargs):
-        if server_uri is not None:
-            options.update({RESTCatalogOptions.URI: server_uri})
-        if warehouse is not None:
-            options.update({RESTCatalogOptions.WAREHOUSE: server_uri})
+    def __init__(self, options: Dict = None, **kwargs):
         self.rest_api = RESTApi(options)
         self.options = options
         super().__init__(**kwargs)
@@ -52,22 +72,22 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
 
     @staticmethod
-    def extract_identifier(path: str) -> Optional[Tuple[str, Optional[str], Optional[str]]]:
+    def extract_pvfs_identifier(path: str) -> Optional['PVFSIdentifier']:
         if not isinstance(path, str) or not path.startswith('pvfs://'):
             return None
 
         match = PaimonVirtualFileSystem._TABLE_PATTERN.match(path)
         if match:
-            return match.groups()
+            catalog, database, table = match.groups()
+            return PVFSTableIdentifier(catalog=catalog, database=database, table=table)
 
         match = PaimonVirtualFileSystem._DATABASE_PATTERN.match(path)
         if match:
             catalog, database = match.groups()
-            return (catalog, database, None)
+            return PVFSDatabaseIdentifier(catalog=catalog, database=database)
 
         match = PaimonVirtualFileSystem._CATALOG_PATTERN.match(path)
         if match:
             catalog = match.group(1)
-            return (catalog, None, None)
+            return PVFSCatalogIdentifier(catalog)
         return None
-
