@@ -28,6 +28,38 @@ from .auth import DLFAuthProvider, RESTAuthFunction
 from .token_loader import DLFToken, DLFTokenLoaderFactory
 from .typedef import T
 
+from .split import Split
+from .table_read import TableRead
+from .table_scan import TableScan, Plan
+from .predicate import Predicate, PredicateBuilder
+from .read_builder import ReadBuilder
+from .commit_message import CommitMessage
+from .table_commit import BatchTableCommit
+from .table_write import BatchTableWrite
+from .write_builder import BatchWriteBuilder
+from .schema import Schema
+from .table import Table
+from .database import Database
+from .catalog import Catalog
+
+__all__ = [
+    'Split',
+    'TableRead',
+    'TableScan',
+    'Plan',
+    'ReadBuilder',
+    'CommitMessage',
+    'BatchTableCommit',
+    'BatchTableWrite',
+    'BatchWriteBuilder',
+    'Table',
+    'Schema',
+    'Database',
+    'Catalog',
+    'Predicate',
+    'PredicateBuilder'
+]
+
 
 class RESTException(Exception):
     pass
