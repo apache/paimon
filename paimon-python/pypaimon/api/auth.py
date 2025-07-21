@@ -32,18 +32,26 @@ from .typedef import RESTAuthParameter
 class AuthProvider(ABC):
 
     @abstractmethod
-    def merge_auth_header(self, base_header: Dict[str, str], parammeter: RESTAuthParameter) -> Dict[str, str]:
+    def merge_auth_header(
+        self, base_header: Dict[str, str], parammeter: RESTAuthParameter
+    ) -> Dict[str, str]:
         """Merge authorization header into header."""
 
 
 class RESTAuthFunction:
 
-    def __init__(self, init_header: Dict[str, str], auth_provider: AuthProvider):
+    def __init__(self,
+                 init_header: Dict[str,
+                                   str],
+                 auth_provider: AuthProvider):
         self.init_header = init_header.copy() if init_header else {}
         self.auth_provider = auth_provider
 
-    def __call__(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
-        return self.auth_provider.merge_auth_header(self.init_header, rest_auth_parameter)
+    def __call__(
+            self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
+        return self.auth_provider.merge_auth_header(
+            self.init_header, rest_auth_parameter
+        )
 
     def apply(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
         return self.__call__(rest_auth_parameter)
@@ -90,14 +98,14 @@ class DLFAuthProvider(AuthProvider):
             raise ValueError("Either token or token_loader must be provided")
         return self.token
 
-    def merge_auth_header(self,
-                          base_header: Dict[str, str],
-                          rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
+    def merge_auth_header(
+        self, base_header: Dict[str, str], rest_auth_parameter: RESTAuthParameter
+    ) -> Dict[str, str]:
         try:
             date_time = base_header.get(
-                self.DLF_DATE_HEADER_KEY.lower(),
-                datetime.now(timezone.utc).strftime(self.AUTH_DATE_TIME_FORMAT)
-            )
+                self.DLF_DATE_HEADER_KEY.lower(), datetime.now(
+                    timezone.utc).strftime(
+                    self.AUTH_DATE_TIME_FORMAT), )
             date = date_time[:8]
 
             sign_headers = self.generate_sign_headers(
@@ -112,7 +120,7 @@ class DLFAuthProvider(AuthProvider):
                 region=self.region,
                 headers=sign_headers,
                 date_time=date_time,
-                date=date
+                date=date,
             )
 
             headers_with_auth = base_header.copy()
@@ -125,19 +133,20 @@ class DLFAuthProvider(AuthProvider):
             raise RuntimeError(f"Failed to merge auth header: {e}")
 
     @classmethod
-    def generate_sign_headers(cls,
-                              data: Optional[str],
-                              date_time: str,
-                              security_token: Optional[str]) -> Dict[str, str]:
+    def generate_sign_headers(
+        cls, data: Optional[str], date_time: str, security_token: Optional[str]
+    ) -> Dict[str, str]:
         sign_headers = {}
 
         sign_headers[cls.DLF_DATE_HEADER_KEY] = date_time
         sign_headers[cls.DLF_CONTENT_SHA56_HEADER_KEY] = cls.DLF_CONTENT_SHA56_VALUE
-        sign_headers[cls.DLF_AUTH_VERSION_HEADER_KEY] = "v1"  # DLFAuthSignature.VERSION
+        # DLFAuthSignature.VERSION
+        sign_headers[cls.DLF_AUTH_VERSION_HEADER_KEY] = "v1"
 
         if data is not None and data != "":
             sign_headers[cls.DLF_CONTENT_TYPE_KEY] = cls.MEDIA_TYPE
-            sign_headers[cls.DLF_CONTENT_MD5_HEADER_KEY] = DLFAuthSignature.md5(data)
+            sign_headers[cls.DLF_CONTENT_MD5_HEADER_KEY] = DLFAuthSignature.md5(
+                data)
 
         if security_token is not None:
             sign_headers[cls.DLF_SECURITY_TOKEN_HEADER_KEY] = security_token
@@ -158,31 +167,40 @@ class DLFAuthSignature:
         DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY.lower(),
         DLFAuthProvider.DLF_DATE_HEADER_KEY.lower(),
         DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY.lower(),
-        DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY.lower()
+        DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY.lower(),
     ]
 
     @classmethod
-    def get_authorization(cls,
-                          rest_auth_parameter: RESTAuthParameter,
-                          dlf_token: DLFToken,
-                          region: str,
-                          headers: Dict[str, str],
-                          date_time: str,
-                          date: str) -> str:
+    def get_authorization(
+        cls,
+        rest_auth_parameter: RESTAuthParameter,
+        dlf_token: DLFToken,
+        region: str,
+        headers: Dict[str, str],
+        date_time: str,
+        date: str,
+    ) -> str:
         try:
-            canonical_request = cls.get_canonical_request(rest_auth_parameter, headers)
+            canonical_request = cls.get_canonical_request(
+                rest_auth_parameter, headers)
 
-            string_to_sign = cls.NEW_LINE.join([
-                cls.SIGNATURE_ALGORITHM,
-                date_time,
-                f"{date}/{region}/{cls.PRODUCT}/{cls.REQUEST_TYPE}",
-                cls._sha256_hex(canonical_request)
-            ])
+            string_to_sign = cls.NEW_LINE.join(
+                [
+                    cls.SIGNATURE_ALGORITHM,
+                    date_time,
+                    f"{date}/{region}/{cls.PRODUCT}/{cls.REQUEST_TYPE}",
+                    cls._sha256_hex(canonical_request),
+                ]
+            )
 
-            date_key = cls._hmac_sha256(f"aliyun_v4{dlf_token.access_key_secret}".encode('utf-8'), date)
+            date_key = cls._hmac_sha256(
+                f"aliyun_v4{dlf_token.access_key_secret}".encode("utf-8"), date
+            )
             date_region_key = cls._hmac_sha256(date_key, region)
-            date_region_service_key = cls._hmac_sha256(date_region_key, cls.PRODUCT)
-            signing_key = cls._hmac_sha256(date_region_service_key, cls.REQUEST_TYPE)
+            date_region_service_key = cls._hmac_sha256(
+                date_region_key, cls.PRODUCT)
+            signing_key = cls._hmac_sha256(
+                date_region_service_key, cls.REQUEST_TYPE)
 
             result = cls._hmac_sha256(signing_key, string_to_sign)
             signature = cls._hex_encode(result)
@@ -199,46 +217,49 @@ class DLFAuthSignature:
     @classmethod
     def md5(cls, raw: str) -> str:
         try:
-            md5_hash = hashlib.md5(raw.encode('utf-8')).digest()
-            return base64.b64encode(md5_hash).decode('utf-8')
+            md5_hash = hashlib.md5(raw.encode("utf-8")).digest()
+            return base64.b64encode(md5_hash).decode("utf-8")
         except Exception as e:
             raise RuntimeError(f"Failed to calculate MD5: {e}")
 
     @classmethod
     def _hmac_sha256(cls, key: bytes, data: str) -> bytes:
         try:
-            return hmac.new(key, data.encode('utf-8'), hashlib.sha256).digest()
+            return hmac.new(key, data.encode("utf-8"), hashlib.sha256).digest()
         except Exception as e:
             raise RuntimeError(f"Failed to calculate HMAC-SHA256: {e}")
 
     @classmethod
-    def get_canonical_request(cls,
-                              rest_auth_parameter: RESTAuthParameter,
-                              headers: Dict[str, str]) -> str:
-        canonical_request = cls.NEW_LINE.join([
-            rest_auth_parameter.method,
-            rest_auth_parameter.path
-        ])
+    def get_canonical_request(
+        cls, rest_auth_parameter: RESTAuthParameter, headers: Dict[str, str]
+    ) -> str:
+        canonical_request = cls.NEW_LINE.join(
+            [rest_auth_parameter.method, rest_auth_parameter.path]
+        )
 
-        canonical_query_string = cls._build_canonical_query_string(rest_auth_parameter.parameters)
-        canonical_request = cls.NEW_LINE.join([canonical_request, canonical_query_string])
+        canonical_query_string = cls._build_canonical_query_string(
+            rest_auth_parameter.parameters
+        )
+        canonical_request = cls.NEW_LINE.join(
+            [canonical_request, canonical_query_string]
+        )
 
-        sorted_signed_headers_map = cls._build_sorted_signed_headers_map(headers)
+        sorted_signed_headers_map = cls._build_sorted_signed_headers_map(
+            headers)
         for key, value in sorted_signed_headers_map.items():
-            canonical_request = cls.NEW_LINE.join([
-                canonical_request,
-                f"{key}:{value}"
-            ])
+            canonical_request = cls.NEW_LINE.join(
+                [canonical_request, f"{key}:{value}"])
 
         content_sha256 = headers.get(
             DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY,
-            DLFAuthProvider.DLF_CONTENT_SHA56_VALUE
+            DLFAuthProvider.DLF_CONTENT_SHA56_VALUE,
         )
 
         return cls.NEW_LINE.join([canonical_request, content_sha256])
 
     @classmethod
-    def _build_canonical_query_string(cls, parameters: Optional[Dict[str, str]]) -> str:
+    def _build_canonical_query_string(
+            cls, parameters: Optional[Dict[str, str]]) -> str:
         if not parameters:
             return ""
 
@@ -256,7 +277,9 @@ class DLFAuthSignature:
         return "&".join(query_parts)
 
     @classmethod
-    def _build_sorted_signed_headers_map(cls, headers: Optional[Dict[str, str]]) -> OrderedDict:
+    def _build_sorted_signed_headers_map(
+        cls, headers: Optional[Dict[str, str]]
+    ) -> OrderedDict:
         sorted_headers = OrderedDict()
 
         if headers:
@@ -270,7 +293,7 @@ class DLFAuthSignature:
     @classmethod
     def _sha256_hex(cls, raw: str) -> str:
         try:
-            sha256_hash = hashlib.sha256(raw.encode('utf-8')).digest()
+            sha256_hash = hashlib.sha256(raw.encode("utf-8")).digest()
             return cls._hex_encode(sha256_hash)
         except Exception as e:
             raise RuntimeError(f"Failed to calculate SHA256: {e}")

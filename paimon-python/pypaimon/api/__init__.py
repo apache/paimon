@@ -28,7 +28,6 @@ from .auth import DLFAuthProvider, RESTAuthFunction
 from .token_loader import DLFToken, DLFTokenLoaderFactory
 from .typedef import T
 
-
 class RESTException(Exception):
     pass
 
@@ -49,6 +48,7 @@ class RESTUtil:
     @staticmethod
     def encode_string(value: str) -> str:
         import urllib.parse
+
         return urllib.parse.quote(value)
 
     @staticmethod
@@ -57,7 +57,8 @@ class RESTUtil:
         return unquote(encoded)
 
     @staticmethod
-    def extract_prefix_map(options: Dict[str, str], prefix: str) -> Dict[str, str]:
+    def extract_prefix_map(
+            options: Dict[str, str], prefix: str) -> Dict[str, str]:
         result = {}
         config = options
         for key, value in config.items():
@@ -74,10 +75,11 @@ class ResourcePaths:
     TABLE_DETAILS = "table-details"
 
     def __init__(self, base_path: str = ""):
-        self.base_path = base_path.rstrip('/')
+        self.base_path = base_path.rstrip("/")
 
     @classmethod
-    def for_catalog_properties(cls, options: dict[str, str]) -> 'ResourcePaths':
+    def for_catalog_properties(
+            cls, options: dict[str, str]) -> "ResourcePaths":
         prefix = options.get(RESTCatalogOptions.PREFIX, "")
         return cls(f"/{cls.V1}/{prefix}" if prefix else f"/{cls.V1}")
 
@@ -123,24 +125,29 @@ class RESTApi:
             warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
             query_params = {}
             if warehouse:
-                query_params[RESTCatalogOptions.WAREHOUSE] = RESTUtil.encode_string(warehouse)
+                query_params[RESTCatalogOptions.WAREHOUSE] = RESTUtil.encode_string(
+                    warehouse)
 
             config_response = self.client.get_with_params(
                 ResourcePaths().config(),
                 query_params,
                 ConfigResponse,
-                RESTAuthFunction({}, auth_provider)
+                RESTAuthFunction({}, auth_provider),
             )
             options = config_response.merge(options)
-            base_headers.update(RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX))
+            base_headers.update(
+                RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+            )
 
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
-    def __build_paged_query_params(max_results: Optional[int],
-                                   page_token: Optional[str],
-                                   name_patterns: Dict[str, str]) -> Dict[str, str]:
+    def __build_paged_query_params(
+        max_results: Optional[int],
+        page_token: Optional[str],
+        name_patterns: Dict[str, str],
+    ) -> Dict[str, str]:
         query_params = {}
         if max_results is not None and max_results > 0:
             query_params[RESTApi.MAX_RESULTS] = str(max_results)
@@ -148,13 +155,15 @@ class RESTApi:
         if page_token is not None and page_token.strip():
             query_params[RESTApi.PAGE_TOKEN] = page_token
 
-        for (key, value) in name_patterns:
+        for key, value in name_patterns:
             if key and value and key.strip() and value.strip():
                 query_params[key] = value
 
         return query_params
 
-    def __list_data_from_page_api(self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]) -> List[T]:
+    def __list_data_from_page_api(
+        self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]
+    ) -> List[T]:
         results = []
         query_params = {}
         page_token = None
@@ -186,24 +195,26 @@ class RESTApi:
                 self.resource_paths.databases(),
                 query_params,
                 ListDatabasesResponse,
-                self.rest_auth_function
+                self.rest_auth_function,
             )
         )
 
-    def list_databases_paged(self,
-                             max_results: Optional[int] = None,
-                             page_token: Optional[str] = None,
-                             database_name_pattern: Optional[str] = None) -> PagedList[str]:
+    def list_databases_paged(
+        self,
+        max_results: Optional[int] = None,
+        page_token: Optional[str] = None,
+        database_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
 
         response = self.client.get_with_params(
             self.resource_paths.databases(),
             self.__build_paged_query_params(
                 max_results,
                 page_token,
-                {self.DATABASE_NAME_PATTERN: database_name_pattern}
+                {self.DATABASE_NAME_PATTERN: database_name_pattern},
             ),
             ListDatabasesResponse,
-            self.rest_auth_function
+            self.rest_auth_function,
         )
 
         databases = response.data() or []
@@ -211,20 +222,28 @@ class RESTApi:
 
     def create_database(self, name: str, options: Dict[str, str]) -> None:
         request = CreateDatabaseRequest(name, options)
-        self.client.post(self.resource_paths.databases(), request, self.rest_auth_function)
+        self.client.post(
+            self.resource_paths.databases(), request, self.rest_auth_function
+        )
 
     def get_database(self, name: str) -> GetDatabaseResponse:
         return self.client.get(
             self.resource_paths.database(name),
             GetDatabaseResponse,
-            self.rest_auth_function
+            self.rest_auth_function,
         )
 
     def drop_database(self, name: str) -> None:
-        self.client.delete(self.resource_paths.database(name), self.rest_auth_function)
+        self.client.delete(
+            self.resource_paths.database(name),
+            self.rest_auth_function)
 
-    def alter_database(self, name: str, removals: Optional[List[str]] = None,
-                       updates: Optional[Dict[str, str]] = None):
+    def alter_database(
+        self,
+        name: str,
+        removals: Optional[List[str]] = None,
+        updates: Optional[Dict[str, str]] = None,
+    ):
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
         removals = removals or []
@@ -234,8 +253,7 @@ class RESTApi:
         return self.client.post(
             self.resource_paths.database(name),
             request,
-            self.rest_auth_function
-        )
+            self.rest_auth_function)
 
     def list_tables(self, database_name: str) -> List[str]:
         return self.__list_data_from_page_api(
@@ -243,24 +261,24 @@ class RESTApi:
                 self.resource_paths.tables(database_name),
                 query_params,
                 ListTablesResponse,
-                self.rest_auth_function
+                self.rest_auth_function,
             )
         )
 
-    def list_tables_paged(self,
-                          database_name: str,
-                          max_results: Optional[int] = None,
-                          page_token: Optional[str] = None,
-                          table_name_pattern: Optional[str] = None) -> PagedList[str]:
+    def list_tables_paged(
+        self,
+        database_name: str,
+        max_results: Optional[int] = None,
+        page_token: Optional[str] = None,
+        table_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),
             self.__build_paged_query_params(
-                max_results,
-                page_token,
-                {self.TABLE_NAME_PATTERN: table_name_pattern}
+                max_results, page_token, {self.TABLE_NAME_PATTERN: table_name_pattern}
             ),
             ListTablesResponse,
-            self.rest_auth_function
+            self.rest_auth_function,
         )
 
         tables = response.data() or []
@@ -268,7 +286,9 @@ class RESTApi:
 
     def get_table(self, identifier: Identifier) -> GetTableResponse:
         return self.client.get(
-            self.resource_paths.table(identifier.database_name, identifier.object_name),
+            self.resource_paths.table(
+                identifier.database_name,
+                identifier.object_name),
             GetTableResponse,
-            self.rest_auth_function
+            self.rest_auth_function,
         )

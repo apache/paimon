@@ -224,6 +224,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createAutoTag() {
+        wrapped.createAutoTag();
+    }
+
+    @Override
     public void renameTag(String tagName, String targetTagName) {
         wrapped.renameTag(tagName, targetTagName);
     }

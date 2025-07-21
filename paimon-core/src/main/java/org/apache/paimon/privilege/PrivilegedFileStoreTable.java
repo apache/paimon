@@ -150,6 +150,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public void createAutoTag() {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createAutoTag();
+    }
+
+    @Override
     public void deleteTag(String tagName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.deleteTag(tagName);

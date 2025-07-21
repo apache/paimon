@@ -61,6 +61,10 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "excluded_tables",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_from",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -73,7 +77,8 @@ public class CloneProcedure extends ProcedureBase {
             String targetCatalogConfigStr,
             Integer parallelism,
             String where,
-            String excludedTablesStr)
+            String excludedTablesStr,
+            String cloneFrom)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
@@ -96,7 +101,8 @@ public class CloneProcedure extends ProcedureBase {
                         targetCatalogConfig,
                         parallelism,
                         where,
-                        excludedTables);
+                        excludedTables,
+                        cloneFrom);
         return execute(procedureContext, action, "Clone Job");
     }
 

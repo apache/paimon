@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.files;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -37,7 +37,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Clone files for table. */
-public class CloneFilesFunction extends CloneProcessFunction<CloneFileInfo, DataFileInfo> {
+public class CloneFilesFunction extends CloneFilesProcessFunction<CloneFileInfo, DataFileInfo> {
 
     private static final long serialVersionUID = 1L;
 

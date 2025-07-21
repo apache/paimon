@@ -133,6 +133,8 @@ public interface FileStoreTable extends DataTable {
     @Override
     FileStoreTable switchToBranch(String branchName);
 
+    void createAutoTag();
+
     /** Purge all files in this table. */
     default void purgeFiles() throws Exception {
         // clear branches

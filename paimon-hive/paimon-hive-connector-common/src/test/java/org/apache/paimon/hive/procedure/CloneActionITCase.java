@@ -34,6 +34,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
@@ -68,6 +69,91 @@ public class CloneActionITCase extends ActionITCaseBase {
     @AfterAll
     public static void afterAll() throws Exception {
         TEST_HIVE_METASTORE.stop();
+    }
+
+    @Test
+    public void testClonePKTableFromPaimon() throws Exception {
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+        String warehouse1 = getTempDirPath();
+        String warehouse2 = getTempDirPath();
+        sql(tEnv, "CREATE CATALOG catalog1 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse1);
+        sql(tEnv, "CREATE CATALOG catalog2 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse2);
+
+        sql(
+                tEnv,
+                "CREATE TABLE catalog1.`default`.src (a INT, b INT, PRIMARY KEY (a) NOT ENFORCED)");
+        sql(tEnv, "INSERT INTO catalog1.`default`.src VALUES (1, 1), (2, 2)");
+        createAction(
+                        CloneAction.class,
+                        "clone",
+                        "--database",
+                        "default",
+                        "--table",
+                        "src",
+                        "--catalog_conf",
+                        "warehouse=" + warehouse1,
+                        "--target_database",
+                        "default",
+                        "--target_table",
+                        "target",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse2,
+                        "--clone_from",
+                        "paimon")
+                .run();
+
+        sql(tEnv, "CALL catalog2.sys.compact(`table` => 'default.target')");
+        List<Row> result = sql(tEnv, "SELECT * FROM catalog2.`default`.target");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog2.`default`.target");
+        assertThat(show.toString()).contains("PRIMARY KEY");
+    }
+
+    @Test
+    public void testCloneBucketedAppendFromPaimon() throws Exception {
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+        String warehouse1 = getTempDirPath();
+        String warehouse2 = getTempDirPath();
+        sql(tEnv, "CREATE CATALOG catalog1 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse1);
+        sql(tEnv, "CREATE CATALOG catalog2 WITH ('type'='paimon', 'warehouse' = '%s')", warehouse2);
+
+        sql(
+                tEnv,
+                "CREATE TABLE catalog1.`default`.src (a INT, b INT) WITH ('bucket' = '2', 'bucket-key' = 'b')");
+        sql(tEnv, "INSERT INTO catalog1.`default`.src VALUES (1, 1), (2, 2)");
+        createAction(
+                        CloneAction.class,
+                        "clone",
+                        "--database",
+                        "default",
+                        "--table",
+                        "src",
+                        "--catalog_conf",
+                        "warehouse=" + warehouse1,
+                        "--target_database",
+                        "default",
+                        "--target_table",
+                        "target",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse2,
+                        "--clone_from",
+                        "paimon")
+                .run();
+
+        sql(tEnv, "CALL catalog2.sys.compact(`table` => 'default.target')");
+        List<Row> result = sql(tEnv, "SELECT * FROM catalog2.`default`.target");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog2.`default`.target");
+        assertThat(show.toString()).contains("'bucket' = '2'");
+        assertThat(show.toString()).contains("'bucket-key' = 'b'");
     }
 
     @Test

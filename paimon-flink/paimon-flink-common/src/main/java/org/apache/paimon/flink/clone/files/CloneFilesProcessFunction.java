@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.files;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -35,12 +35,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
-import static org.apache.paimon.flink.clone.CloneUtils.getRootHiveCatalog;
+import static org.apache.paimon.flink.clone.CloneHiveTableUtils.getRootHiveCatalog;
 
 /** Abstract function for copying tables. */
-public abstract class CloneProcessFunction<I, O> extends ProcessFunction<I, O> {
+public abstract class CloneFilesProcessFunction<I, O> extends ProcessFunction<I, O> {
 
-    protected static final Logger LOG = LoggerFactory.getLogger(CloneProcessFunction.class);
+    protected static final Logger LOG = LoggerFactory.getLogger(CloneFilesProcessFunction.class);
 
     protected final Map<String, String> sourceCatalogConfig;
     protected final Map<String, String> targetCatalogConfig;
@@ -51,7 +51,7 @@ public abstract class CloneProcessFunction<I, O> extends ProcessFunction<I, O> {
     protected transient Map<Identifier, Table> tableCache;
     protected transient DataFileMetaSerializer dataFileSerializer;
 
-    public CloneProcessFunction(
+    public CloneFilesProcessFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;

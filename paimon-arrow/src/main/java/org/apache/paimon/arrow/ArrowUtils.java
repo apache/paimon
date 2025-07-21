@@ -145,11 +145,7 @@ public class ArrowUtils {
                             keyField.getChildren());
 
             Field valueField =
-                    toArrowField(
-                            MapVector.VALUE_NAME,
-                            fieldId,
-                            mapType.getValueType().notNull(),
-                            depth + 1);
+                    toArrowField(MapVector.VALUE_NAME, fieldId, mapType.getValueType(), depth + 1);
             FieldType valueType = valueField.getFieldType();
             valueField =
                     new Field(
