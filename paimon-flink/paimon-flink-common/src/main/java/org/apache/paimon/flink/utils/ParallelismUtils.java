@@ -36,6 +36,13 @@ public class ParallelismUtils {
                 sourceStream.getTransformation().isParallelismConfigured());
     }
 
+    public static void forwardParallelism(
+            Transformation<?> targetTransformation, DataStream<?> sourceStream) {
+        targetTransformation.setParallelism(
+                sourceStream.getParallelism(),
+                sourceStream.getTransformation().isParallelismConfigured());
+    }
+
     public static void setParallelism(
             SingleOutputStreamOperator<?> targetStream,
             int parallelism,

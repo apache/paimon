@@ -1934,7 +1934,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         boolean hasPartitionTransformation = isFixedBucket || hasPrimaryKey;
         boolean expectedIsParallelismConfigured =
-                (configParallelism != null) || hasPartitionTransformation;
+                (configParallelism != null) || (!isFixedBucket && hasPrimaryKey);
 
         Transformation<?> transformation = sink.getTransformation();
         boolean isPartitionTransformationFound = true;
