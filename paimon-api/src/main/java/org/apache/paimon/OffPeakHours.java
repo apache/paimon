@@ -21,7 +21,7 @@ package org.apache.paimon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 /** OffPeakHours. */
@@ -94,7 +94,7 @@ public abstract class OffPeakHours {
 
         @Override
         public boolean isOffPeak() {
-            return isOffPeak(ZonedDateTime.now(ZoneOffset.UTC).getHour());
+            return isOffPeak(ZonedDateTime.now(ZoneId.systemDefault()).getHour());
         }
 
         @Override
