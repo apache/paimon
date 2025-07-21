@@ -31,7 +31,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
-import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
