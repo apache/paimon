@@ -43,10 +43,6 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.vfs.hadoop.PaimonVirtualFileSystemConfiguration.FS_TOKEN;
-import static org.apache.paimon.vfs.hadoop.PaimonVirtualFileSystemConfiguration.FS_TOKEN_PROVIDER;
-import static org.apache.paimon.vfs.hadoop.PaimonVirtualFileSystemConfiguration.FS_URI;
-
 /** Test for {@link PaimonVirtualFileSystem} with Mock Rest Server. */
 public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
     private RESTCatalogServer restCatalogServer;
@@ -115,11 +111,11 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
 
     private void initFs() throws Exception {
         Configuration conf = new Configuration();
-        conf.set(FS_URI, restCatalogServer.getUrl());
-        conf.set(FS_TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        conf.set(FS_TOKEN, initToken);
+        conf.set("fs.pvfs.uri", restCatalogServer.getUrl());
+        conf.set("fs.pvfs.token.provider", AuthProviderEnum.BEAR.identifier());
+        conf.set("fs.pvfs.token", initToken);
         this.vfs = new PaimonVirtualFileSystem();
-        this.vfsRoot = new Path("pas://" + restWarehouse + "/");
+        this.vfsRoot = new Path("pvfs://" + restWarehouse + "/");
         this.vfs.initialize(vfsRoot.toUri(), conf);
     }
 }

@@ -49,6 +49,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Sche
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
@@ -153,7 +154,7 @@ public class VFSOperations {
         }
     }
 
-    public Database getDatabase(String databaseName) throws TableNotFoundException {
+    public Database getDatabase(String databaseName) throws FileNotFoundException {
         try {
             GetDatabaseResponse response = api.getDatabase(databaseName);
             Map<String, String> options = new HashMap<>(response.getOptions());
@@ -161,7 +162,7 @@ public class VFSOperations {
             response.putAuditOptionsTo(options);
             return new Database.DatabaseImpl(databaseName, options, options.get(COMMENT_PROP));
         } catch (NoSuchResourceException e) {
-            throw new TableNotFoundException("Database " + databaseName + " not found", e);
+            throw new FileNotFoundException("Database " + databaseName + " not found");
         } catch (ForbiddenException e) {
             throw new Catalog.DatabaseNoPermissionException(databaseName, e);
         }
@@ -183,18 +184,18 @@ public class VFSOperations {
         }
     }
 
-    public List<String> listTables(String databaseName) throws TableNotFoundException {
+    public List<String> listTables(String databaseName) throws FileNotFoundException {
         try {
             return api.listTables(databaseName);
         } catch (NoSuchResourceException e) {
-            throw new TableNotFoundException("Database " + databaseName + " not found", e);
+            throw new FileNotFoundException("Database " + databaseName + " not found");
         } catch (ForbiddenException e) {
             throw new Catalog.DatabaseNoPermissionException(databaseName, e);
         }
     }
 
     public void createObjectTable(String databaseName, String tableName)
-            throws TableNotFoundException {
+            throws FileNotFoundException {
         Identifier identifier = Identifier.create(databaseName, tableName);
         Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
         try {
@@ -205,7 +206,7 @@ public class VFSOperations {
             try {
                 tryCreateObjectTable(identifier, schema);
             } catch (Catalog.DatabaseNotExistException e1) {
-                throw new TableNotFoundException("Database " + databaseName + " not found", e1);
+                throw new FileNotFoundException("Database " + databaseName + " not found");
             }
         }
     }
@@ -230,7 +231,7 @@ public class VFSOperations {
     }
 
     private FileIO getFileIO(Identifier identifier, TableMetadata table, String path)
-            throws TableNotFoundException {
+            throws FileNotFoundException {
         RESTToken token = TOKEN_CACHE.getIfPresent(table.uuid());
         if (shouldRefresh(token)) {
             synchronized (TOKEN_CACHE) {
@@ -274,13 +275,13 @@ public class VFSOperations {
                         < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
     }
 
-    private RESTToken refreshToken(Identifier identifier) throws TableNotFoundException {
+    private RESTToken refreshToken(Identifier identifier) throws FileNotFoundException {
         LOG.info("begin refresh data token for identifier [{}]", identifier);
         GetTableTokenResponse response;
         try {
             response = api.loadTableToken(identifier);
         } catch (NoSuchResourceException e) {
-            throw new TableNotFoundException("Table " + identifier + " not found", e);
+            throw new FileNotFoundException("Table " + identifier + " not found");
         } catch (ForbiddenException e) {
             throw new Catalog.TableNoPermissionException(identifier, e);
         }

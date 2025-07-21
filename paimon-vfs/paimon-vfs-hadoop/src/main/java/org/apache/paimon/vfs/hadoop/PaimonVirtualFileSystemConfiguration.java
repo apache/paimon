@@ -18,16 +18,24 @@
 
 package org.apache.paimon.vfs.hadoop;
 
+import org.apache.paimon.options.Options;
+
+import org.apache.hadoop.conf.Configuration;
+
+import java.util.Map;
+
 /** Paimon virtual file system configuration. */
 public class PaimonVirtualFileSystemConfiguration {
-    public static final String PAIMON_VFS_PREFIX = "fs.pas.";
+    public static final String PAIMON_VFS_PREFIX = "fs.pvfs.";
 
-    public static final String FS_URI = PAIMON_VFS_PREFIX + "uri";
-    public static final String FS_TOKEN_PROVIDER = PAIMON_VFS_PREFIX + "token.provider";
-    public static final String FS_TOKEN = PAIMON_VFS_PREFIX + "token";
-    public static final String FS_DLF_ACCESS_KEY_ID = PAIMON_VFS_PREFIX + "dlf.access-key-id";
-    public static final String FS_DLF_ACCESS_KEY_SECRET =
-            PAIMON_VFS_PREFIX + "dlf.access-key-secret";
-    public static final String FS_DLF_TOKEN_LOADER = PAIMON_VFS_PREFIX + "dlf.token-loader";
-    public static final String FS_DLF_REGION = PAIMON_VFS_PREFIX + "dlf.region";
+    public static Options convertToCatalogOptions(Configuration conf) {
+        Options options = new Options();
+        for (Map.Entry<String, String> entry : conf) {
+            if (entry.getKey().startsWith(PAIMON_VFS_PREFIX)) {
+                String key = entry.getKey().substring(PAIMON_VFS_PREFIX.length());
+                options.set(key, entry.getValue());
+            }
+        }
+        return options;
+    }
 }

@@ -39,22 +39,27 @@ public class VFSInputStream extends FSInputStream {
         this.in = in;
     }
 
+    @Override
     public void seek(long pos) throws IOException {
         in.seek(pos);
     }
 
+    @Override
     public long getPos() throws IOException {
         return in.getPos();
     }
 
+    @Override
     public boolean seekToNewSource(long var1) throws IOException {
         return false;
     }
 
+    @Override
     public int read(byte[] b, int off, int len) throws IOException {
         return in.read(b, off, len);
     }
 
+    @Override
     public int read() throws IOException {
         int n;
         while ((n = read(oneByteBuf, 0, 1)) == 0) {

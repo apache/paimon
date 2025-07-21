@@ -24,8 +24,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTCatalogOptions;
-import org.apache.paimon.vfs.TableNotFoundException;
 import org.apache.paimon.vfs.VFSCatalogIdentifier;
 import org.apache.paimon.vfs.VFSDatabaseIdentifier;
 import org.apache.paimon.vfs.VFSIdentifier;
@@ -68,41 +66,8 @@ public class PaimonVirtualFileSystem extends FileSystem {
     }
 
     private void initVFSOperations() {
-        Options options = new Options();
-        String fsUri = getConf().get(PaimonVirtualFileSystemConfiguration.FS_URI);
-        if (fsUri == null) {
-            throw new IllegalArgumentException("fs.pas.uri is not configured");
-        } else {
-            options.set(RESTCatalogOptions.URI, fsUri);
-        }
-        String tokenProvider =
-                getConf().get(PaimonVirtualFileSystemConfiguration.FS_TOKEN_PROVIDER);
-        if (tokenProvider == null) {
-            throw new IllegalArgumentException("fs.pas.token.provider is not configured");
-        } else {
-            options.set(RESTCatalogOptions.TOKEN_PROVIDER, tokenProvider);
-        }
-        String token = getConf().get(PaimonVirtualFileSystemConfiguration.FS_TOKEN);
-        if (token != null) {
-            options.set(RESTCatalogOptions.TOKEN, token);
-        }
-        String accessKeyId =
-                getConf().get(PaimonVirtualFileSystemConfiguration.FS_DLF_ACCESS_KEY_ID);
-        String accessKeySecret =
-                getConf().get(PaimonVirtualFileSystemConfiguration.FS_DLF_ACCESS_KEY_SECRET);
-        String tokenLoader =
-                getConf().get(PaimonVirtualFileSystemConfiguration.FS_DLF_TOKEN_LOADER);
-        if (tokenLoader != null) {
-            options.set(RESTCatalogOptions.DLF_TOKEN_LOADER, tokenLoader);
-        } else if (accessKeyId != null && accessKeySecret != null) {
-            options.set(RESTCatalogOptions.DLF_ACCESS_KEY_ID, accessKeyId);
-            options.set(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET, accessKeySecret);
-        }
-        String regionId = getConf().get(PaimonVirtualFileSystemConfiguration.FS_DLF_REGION);
-        if (regionId != null) {
-            options.set(RESTCatalogOptions.DLF_REGION, regionId);
-        }
-        // pas://catalog_name/database_name/table_name/file, so uri authority is catalog name
+        Options options = PaimonVirtualFileSystemConfiguration.convertToCatalogOptions(conf);
+        // pvfs://catalog_name/database_name/table_name/file, so uri authority is catalog name
         options.set(CatalogOptions.WAREHOUSE, uri.getAuthority());
 
         CatalogContext catalogContext = CatalogContext.create(options);
@@ -267,7 +232,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         } else {
             VFSTableIdentifier vfsTableIdentifier = (VFSTableIdentifier) vfsIdentifier;
             if (!vfsTableIdentifier.isTableExist()) {
-                throw new TableNotFoundException("Table not found for path " + f);
+                throw new FileNotFoundException("Table not found for path " + f);
             }
             org.apache.paimon.fs.FileStatus fileStatus =
                     vfsTableIdentifier.fileIO().getFileStatus(vfsTableIdentifier.getRealPath());
@@ -322,7 +287,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         } else {
             VFSTableIdentifier vfsTableIdentifier = (VFSTableIdentifier) vfsIdentifier;
             if (!vfsTableIdentifier.isTableExist()) {
-                throw new TableNotFoundException("Table not found for path " + f);
+                throw new FileNotFoundException("Table not found for path " + f);
             }
             org.apache.paimon.fs.FileStatus[] paimonFileStatuses =
                     vfsTableIdentifier.fileIO().listStatus(vfsTableIdentifier.getRealPath());
@@ -395,7 +360,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
 
     @Override
     public String getScheme() {
-        return "pas";
+        return "pvfs";
     }
 
     @Override

@@ -21,10 +21,10 @@ package org.apache.paimon.vfs;
 /** Identifier for virtual path. */
 public abstract class VFSIdentifier {
     enum VFSFileType {
-        CATALOG, // pas://catalog/
-        DATABASE, // pas://catalog/database/
-        TABLE, // pas://catalog/database/table/
-        TABLE_OBJECT // pas://catalog/database/table/file.txt
+        CATALOG, // pvfs://catalog/
+        DATABASE, // pvfs://catalog/database/
+        TABLE, // pvfs://catalog/database/table/
+        TABLE_OBJECT // pvfs://catalog/database/table/file.txt
     }
 
     protected VFSFileType vfsFileType;

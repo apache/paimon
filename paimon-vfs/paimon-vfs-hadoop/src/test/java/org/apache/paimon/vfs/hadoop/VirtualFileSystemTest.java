@@ -31,13 +31,13 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.paimon.types.DataTypes;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,10 +99,11 @@ public abstract class VirtualFileSystemTest {
     protected void createNormalTable(String databaseName, String tableName) throws Exception {
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, tableName);
-        Schema schema = Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column("name", DataTypes.STRING())
-                .build();
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .build();
         catalog.createTable(identifier, schema, false);
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(FileStoreTable.class);
@@ -428,6 +429,7 @@ public abstract class VirtualFileSystemTest {
         FileStatus[] fileStatuses = vfs.listStatus(vfsPath);
         Assert.assertEquals(1, fileStatuses.length);
         Assert.assertTrue(fileStatuses[0].isDirectory());
-        Assert.assertEquals(new Path(vfsPath, "schema").toString(), fileStatuses[0].getPath().toString());
+        Assert.assertEquals(
+                new Path(vfsPath, "schema").toString(), fileStatuses[0].getPath().toString());
     }
 }
