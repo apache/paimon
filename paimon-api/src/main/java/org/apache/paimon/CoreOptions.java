@@ -701,10 +701,18 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(0)
                     .withDescription(
-                            "Allows you to set a different (by default, more aggressive) percentage ratio for determining "
-                                    + " whether larger sorted run's size are included in compactions during off-peak hours. Works in the "
-                                    + " same way as compaction.size-ratio. Only applies if offpeak.start.hour and "
-                                    + " offpeak.end.hour are also enabled.");
+                            Description.builder()
+                                    .text(
+                                            "Allows you to set a different (by default, more aggressive) percentage ratio for determining "
+                                                    + " whether larger sorted run's size are included in compactions during off-peak hours. Works in the "
+                                                    + " same way as compaction.size-ratio. Only applies if offpeak.start.hour and "
+                                                    + " offpeak.end.hour are also enabled. ")
+                                    .linebreak()
+                                    .text(
+                                            " For instance, if your cluster experiences low pressure between 2 AM  and 6 PM , "
+                                                    + " you can configure `compaction.offpeak.start.hour=2` and `compaction.offpeak.end.hour=18` to define this period as off-peak hours. "
+                                                    + " During these hours, you can increase the off-peak compaction ratio (e.g. `compaction.offpeak-ratio=20`) to enable more aggressive data compaction")
+                                    .build());
 
     public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
             key("compaction.optimization-interval")
