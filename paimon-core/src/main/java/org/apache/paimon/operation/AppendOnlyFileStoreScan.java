@@ -54,9 +54,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     // cache evolved filter by schema id
     private final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
 
-    private FileIO fileIO;
+    private final FileIO fileIO;
 
-    private FileStorePathFactory pathFactory;
+    private final FileStorePathFactory pathFactory;
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
@@ -139,9 +139,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         id ->
                                 simpleStatsEvolutions.tryDevolveFilter(
                                         entry.file().schemaId(), inputFilter));
-
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(entry.partition(), entry.bucket());
+
         try {
             return FileIndexEvaluator.evaluate(
                             fileIO, tableSchema, dataPredicate, dataFilePathFactory, entry.file())

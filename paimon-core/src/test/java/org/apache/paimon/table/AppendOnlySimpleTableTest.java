@@ -577,7 +577,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 plan.splits().stream()
                         .flatMap(split -> ((DataSplit) split).dataFiles().stream())
                         .collect(Collectors.toList());
-        assertThat(metas.size()).isEqualTo(2);
+        assertThat(metas.size()).isEqualTo(1);
 
         RecordReader<InternalRow> reader =
                 table.newRead()
@@ -717,7 +717,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 plan.splits().stream()
                         .flatMap(split -> ((DataSplit) split).dataFiles().stream())
                         .collect(Collectors.toList());
-        assertThat(metas.size()).isEqualTo(2);
+        assertThat(metas.size()).isEqualTo(1);
 
         RecordReader<InternalRow> reader =
                 table.newRead().withFilter(predicate).createReader(plan.splits());
@@ -967,7 +967,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 plan.splits().stream()
                         .flatMap(split -> ((DataSplit) split).dataFiles().stream())
                         .collect(Collectors.toList());
-        assertThat(metas.size()).isEqualTo(2);
+        assertThat(metas.size()).isEqualTo(1);
 
         RecordReader<InternalRow> reader =
                 table.newRead().withFilter(predicate).createReader(plan.splits());
