@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vfs.hadoop;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -44,7 +45,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.List;
 
@@ -109,8 +109,18 @@ public abstract class VirtualFileSystemTest {
         assertThat(table).isInstanceOf(FileStoreTable.class);
     }
 
-    private void createDatabase(String databaseName) throws Exception {
+    protected void createDatabase(String databaseName) throws Exception {
         catalog.createDatabase(databaseName, true);
+    }
+
+    protected void checkTableExist(String databaseName, String tableName, boolean expect)
+            throws Exception {
+        try {
+            Table table = catalog.getTable(Identifier.create(databaseName, tableName));
+            Assert.assertEquals(expect, true);
+        } catch (Catalog.TableNotExistException e) {
+            Assert.assertEquals(expect, false);
+        }
     }
 
     @Test
@@ -295,13 +305,8 @@ public abstract class VirtualFileSystemTest {
         Path vfsPath2 = new Path(vfsRoot, databaseName + "/" + tableName + "/test_dir/file2.txt");
         Assert.assertTrue(vfs.rename(vfsPath, vfsPath2));
 
-        FileStatus fileStatus;
-        try {
-            fileStatus = vfs.getFileStatus(vfsPath);
-            Assert.fail();
-        } catch (FileNotFoundException e) {
-        }
-        fileStatus = vfs.getFileStatus(vfsPath2);
+        Assert.assertFalse(vfs.exists(vfsPath));
+        FileStatus fileStatus = vfs.getFileStatus(vfsPath2);
         Assert.assertEquals(vfsPath2.toString(), fileStatus.getPath().toString());
         Assert.assertTrue(fileStatus.isFile());
         Assert.assertEquals(5, fileStatus.getLen());
@@ -331,15 +336,14 @@ public abstract class VirtualFileSystemTest {
     public void testVirtualRename() throws Exception {
         String databaseName = "test_db";
         String tableName = "object_table";
-        createObjectTable(databaseName, tableName);
-        // Rename root is not supported
+        createNormalTable(databaseName, tableName);
+        Assert.assertTrue(vfs.exists(new Path(vfsRoot, databaseName + "/" + tableName)));
+        // Rename root
         Path vfsPath = vfsRoot;
         Path vfsPath2 = new Path(vfsRoot, databaseName + "/" + tableName + "/test_dir/file2.txt");
-        try {
-            vfs.rename(vfsPath, vfsPath2);
-            Assert.fail();
-        } catch (IOException e) {
-        }
+        Assert.assertFalse(vfs.rename(vfsPath, vfsPath2));
+        Assert.assertTrue(vfs.exists(new Path(vfsRoot, databaseName + "/" + tableName)));
+
         // Rename database is not supported
         vfsPath = new Path(vfsRoot, databaseName);
         vfsPath2 = new Path(vfsRoot, databaseName + "_2");
@@ -348,11 +352,23 @@ public abstract class VirtualFileSystemTest {
             Assert.fail();
         } catch (IOException e) {
         }
-        // Rename table is not supported
+        Assert.assertTrue(vfs.exists(new Path(vfsRoot, databaseName + "/" + tableName)));
+
+        // Rename table
+        // 1. table -> table_2
         vfsPath = new Path(vfsRoot, databaseName + "/" + tableName);
         vfsPath2 = new Path(vfsRoot, databaseName + "/" + tableName + "_2");
+        Assert.assertTrue(vfs.rename(vfsPath, vfsPath2));
+        checkTableExist(databaseName, tableName, false);
+        checkTableExist(databaseName, tableName + "_2", true);
+        // 2. table not exists
+        Assert.assertFalse(vfs.rename(vfsPath, vfsPath2));
+        Assert.assertFalse(vfs.rename(vfsPath, vfsPath));
+        // 3. src = dst
+        Assert.assertTrue(vfs.rename(vfsPath2, vfsPath2));
+        // 4. rename across database
         try {
-            vfs.rename(vfsPath, vfsPath2);
+            vfs.rename(vfsPath2, new Path(vfsRoot, databaseName + "_2/" + tableName));
             Assert.fail();
         } catch (IOException e) {
         }
@@ -369,12 +385,7 @@ public abstract class VirtualFileSystemTest {
         out.write("hello".getBytes());
         out.close();
         Assert.assertTrue(vfs.delete(vfsPath, false));
-        FileStatus fileStatus;
-        try {
-            fileStatus = vfs.getFileStatus(vfsPath);
-            Assert.fail();
-        } catch (FileNotFoundException e) {
-        }
+        Assert.assertFalse(vfs.exists(vfsPath));
 
         // Delete in non-existing table
         tableName = "object_table2";
@@ -399,21 +410,32 @@ public abstract class VirtualFileSystemTest {
         } catch (IOException e) {
         }
 
-        // Delete database is not supported
+        // Delete database
+        // 1. recursive = false
         vfsPath = new Path(vfsRoot, databaseName);
         try {
             vfs.delete(vfsPath, false);
             Assert.fail();
         } catch (IOException e) {
         }
+        // 2. recursive = true
+        Assert.assertTrue(vfs.delete(vfsPath, true));
+        Assert.assertFalse(vfs.exists(vfsPath));
+        // 3. non-exist database, return false
+        Assert.assertFalse(vfs.delete(new Path(vfsRoot, databaseName + "_2"), true));
 
-        // Delete table is not supported
+        // Delete table
+        // 1. existing table
+        createObjectTable(databaseName, tableName);
         vfsPath = new Path(vfsRoot, databaseName + "/" + tableName);
-        try {
-            vfs.delete(vfsPath, false);
-            Assert.fail();
-        } catch (IOException e) {
-        }
+        Assert.assertTrue(vfs.delete(vfsPath, false));
+        Assert.assertFalse(vfs.exists(vfsPath));
+
+        // 2. non-exist table, return false
+        Assert.assertFalse(
+                vfs.delete(new Path(vfsRoot, databaseName + "/" + tableName + "_2"), true));
+        Assert.assertFalse(
+                vfs.delete(new Path(vfsRoot, databaseName + "_2/" + tableName + "_2"), true));
     }
 
     @Test

@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -166,6 +167,22 @@ public class VFSOperations {
         }
     }
 
+    public void dropDatabase(String databaseName, boolean recursive) throws IOException {
+        try {
+            if (!recursive && !api.listTables(databaseName).isEmpty()) {
+                throw new IOException(
+                        "Database "
+                                + databaseName
+                                + " is not empty, set recursive to true to drop it");
+            }
+            api.dropDatabase(databaseName);
+        } catch (NoSuchResourceException e) {
+            throw new FileNotFoundException("Database " + databaseName + " not found");
+        } catch (ForbiddenException e) {
+            throw new IOException("No permission to drop database " + databaseName);
+        }
+    }
+
     public List<String> listTables(String databaseName) throws IOException {
         try {
             return api.listTables(databaseName);
@@ -185,6 +202,37 @@ public class VFSOperations {
             // Database not exist, try to create database and then create table again
             createDatabase(databaseName);
             tryCreateObjectTable(identifier, schema);
+        }
+    }
+
+    public void dropTable(String databaseName, String tableName) throws IOException {
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        try {
+            api.dropTable(identifier);
+        } catch (NoSuchResourceException e) {
+            throw new FileNotFoundException("Table " + identifier + " not found");
+        } catch (ForbiddenException e) {
+            throw new IOException("No permission to drop table " + identifier);
+        }
+    }
+
+    public void renameTable(String databaseName, String srcTableName, String dstTableName)
+            throws IOException {
+        Identifier srcIdentifier = Identifier.create(databaseName, srcTableName);
+        Identifier dstIdentifier = Identifier.create(databaseName, dstTableName);
+        try {
+            api.renameTable(srcIdentifier, dstIdentifier);
+        } catch (NoSuchResourceException e) {
+            throw new FileNotFoundException("Source table " + srcIdentifier + " not found");
+        } catch (ForbiddenException e) {
+            throw new IOException(
+                    "No permission to rename table " + srcIdentifier + " to " + dstIdentifier);
+        } catch (AlreadyExistsException e) {
+            throw new FileAlreadyExistsException(
+                    "Target table " + dstIdentifier + " already exist");
+        } catch (BadRequestException e) {
+            throw new IOException(
+                    "Bad request when renaming table " + srcIdentifier + " to " + dstIdentifier, e);
         }
     }
 

@@ -40,6 +40,8 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -48,6 +50,8 @@ import java.util.List;
 
 /** Paimon virtual file system. */
 public class PaimonVirtualFileSystem extends FileSystem {
+    private static final Logger LOG = LoggerFactory.getLogger(PaimonVirtualFileSystem.class);
+
     private Path workingDirectory;
     private URI uri;
     private VFSOperations vfsOperations;
@@ -158,12 +162,19 @@ public class PaimonVirtualFileSystem extends FileSystem {
         VFSIdentifier srcVfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(src));
         VFSIdentifier dstVfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(dst));
         if (srcVfsIdentifier instanceof VFSCatalogIdentifier) {
-            throw new IOException("Cannot rename from virtual path " + src + " which is a catalog");
+            LOG.debug("Rename root path is ignored");
+            return false;
         } else if (srcVfsIdentifier instanceof VFSDatabaseIdentifier) {
             throw new IOException(
                     "Cannot rename from virtual path " + src + " which is a database");
         } else if (srcVfsIdentifier instanceof VFSTableRootIdentifier) {
-            throw new IOException("Cannot rename from virtual path " + src + " which is a table");
+            if (!(dstVfsIdentifier instanceof VFSTableRootIdentifier)) {
+                throw new IOException(
+                        "Cannot rename from table path " + src + " to non-table path " + dst);
+            }
+            return renameTable(
+                    (VFSTableRootIdentifier) srcVfsIdentifier,
+                    (VFSTableRootIdentifier) dstVfsIdentifier);
         } else {
             if (!(dstVfsIdentifier instanceof VFSTableIdentifier)) {
                 throw new IOException(
@@ -199,15 +210,65 @@ public class PaimonVirtualFileSystem extends FileSystem {
         }
     }
 
+    private boolean renameTable(
+            VFSTableRootIdentifier srcIdentifier, VFSTableRootIdentifier dstIdentifier)
+            throws IOException {
+        if (!srcIdentifier.getDatabaseName().equals(dstIdentifier.getDatabaseName())) {
+            throw new IOException("Do not support rename table with different database");
+        }
+        if (!srcIdentifier.isTableExist()) {
+            // return false if src does not exist
+            LOG.debug(
+                    "Source table not found "
+                            + srcIdentifier.getDatabaseName()
+                            + "."
+                            + srcIdentifier.getTableName());
+            return false;
+        }
+        if (srcIdentifier.getTableName().equals(dstIdentifier.getTableName())) {
+            // src equals to dst, return true
+            return true;
+        }
+        try {
+            vfsOperations.renameTable(
+                    srcIdentifier.getDatabaseName(),
+                    srcIdentifier.getTableName(),
+                    dstIdentifier.getTableName());
+            return true;
+        } catch (FileNotFoundException e) {
+            LOG.debug(
+                    "Source table not found "
+                            + srcIdentifier.getDatabaseName()
+                            + "."
+                            + srcIdentifier.getTableName());
+            return false;
+        }
+    }
+
     @Override
     public boolean delete(Path f, boolean recursive) throws IOException {
         VFSIdentifier vfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(f));
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             throw new IOException("Cannot delete virtual path " + f + " which is a catalog");
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            throw new IOException("Cannot delete virtual path " + f + " which is a database");
+            try {
+                vfsOperations.dropDatabase(vfsIdentifier.getDatabaseName(), recursive);
+            } catch (FileNotFoundException e) {
+                LOG.debug("Database not found for deleting path " + f);
+                return false;
+            }
+            return true;
         } else if (vfsIdentifier instanceof VFSTableRootIdentifier) {
-            throw new IOException("Cannot delete virtual path " + f + " which is a table");
+            VFSTableRootIdentifier vfsTableRootIdentifier = (VFSTableRootIdentifier) vfsIdentifier;
+            try {
+                vfsOperations.dropTable(
+                        vfsTableRootIdentifier.getDatabaseName(),
+                        vfsTableRootIdentifier.getTableName());
+            } catch (FileNotFoundException e) {
+                LOG.debug("Table not found for deleting path " + f);
+                return false;
+            }
+            return true;
         } else {
             VFSTableObjectIdentifier vfsTableObjectIdentifier =
                     (VFSTableObjectIdentifier) vfsIdentifier;
