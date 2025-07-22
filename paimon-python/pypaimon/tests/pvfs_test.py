@@ -120,6 +120,12 @@ class PVFSTestCase(unittest.TestCase):
             [self.table]
         ))
         self.assertSetEqual(set(table_dirs), expect_table_dirs)
+        database_virtual_path = f"pvfs://{self.catalog}/{self.database}"
+        self.assertEqual(database_virtual_path, self.pvfs.info(database_virtual_path).get('name'))
+        self.assertEqual(True, self.pvfs.exists(database_virtual_path))
+        table_virtual_path = f"pvfs://{self.catalog}/{self.database}/{self.table}"
+        self.assertEqual(table_virtual_path, self.pvfs.info(table_virtual_path).get('name'))
+        self.assertEqual(True, self.pvfs.exists(database_virtual_path))
         user_dirs = self.pvfs.ls(f"pvfs://{self.catalog}/{self.database}/{self.table}", detail=False)
         self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'})
 
@@ -128,9 +134,18 @@ class PVFSTestCase(unittest.TestCase):
         data_file_path.touch()
         content = 'Hello World'
         date_file_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
-        with self.pvfs.open(date_file_virtual_path, 'w') as w:
+        data_file_name = 'data_2.txt'
+        date_file_new_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
+        self.pvfs.cp(date_file_virtual_path, date_file_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(date_file_new_virtual_path))
+        with self.pvfs.open(date_file_new_virtual_path, 'w') as w:
             w.write(content)
 
-        with self.pvfs.open(date_file_virtual_path, 'r', encoding='utf-8') as file:
+        with self.pvfs.open(date_file_new_virtual_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
             self.assertListEqual([content], lines)
+
+        table_new_virtual_path = f"pvfs://{self.catalog}/{self.database}/new_table"
+        self.pvfs.mkdir(table_virtual_path, table_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(table_new_virtual_path))
+        self.assertEqual(True, self.pvfs.exists(table_new_virtual_path))

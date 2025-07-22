@@ -83,17 +83,18 @@ class ResourcePaths:
     TABLES = "tables"
     TABLE_DETAILS = "table-details"
 
-    def __init__(self, base_path: str = ""):
-        self.base_path = base_path.rstrip("/")
+    def __init__(self, prefix: str):
+        self.base_path = f"/{self.V1}/{prefix}".rstrip("/")
 
     @classmethod
     def for_catalog_properties(
             cls, options: dict[str, str]) -> "ResourcePaths":
         prefix = options.get(RESTCatalogOptions.PREFIX, "")
-        return cls(f"/{cls.V1}/{prefix}" if prefix else f"/{cls.V1}")
+        return cls(prefix)
 
-    def config(self) -> str:
-        return f"/{self.V1}/config"
+    @staticmethod
+    def config() -> str:
+        return f"/{ResourcePaths.V1}/config"
 
     def databases(self) -> str:
         return f"{self.base_path}/{self.DATABASES}"
@@ -145,7 +146,7 @@ class RESTApi:
                     warehouse)
 
             config_response = self.client.get_with_params(
-                ResourcePaths().config(),
+                ResourcePaths.config(),
                 query_params,
                 ConfigResponse,
                 RESTAuthFunction({}, auth_provider),

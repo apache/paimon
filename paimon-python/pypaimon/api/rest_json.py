@@ -38,6 +38,7 @@ class JSON:
     def from_json(json_str: str, target_class: Type[T]) -> T:
         """Create instance from JSON string"""
         data = json.loads(json_str)
+        print(json_str)
         return JSON.__from_dict(data, target_class)
 
     @staticmethod
@@ -70,15 +71,21 @@ class JSON:
         """Create instance from dictionary"""
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
+        type_mapping = {}
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
+            if is_dataclass(field_info.type):
+                type_mapping[json_name] = field_info.type
 
         # Map JSON data to field names
         kwargs = {}
         for json_name, value in data.items():
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
-                kwargs[field_name] = value
+                if field_name in type_mapping:
+                    kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
+                else:
+                    kwargs[field_name] = value
 
         return target_class(**kwargs)

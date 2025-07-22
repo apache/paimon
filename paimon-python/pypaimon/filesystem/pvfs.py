@@ -603,7 +603,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         storage_location = PaimonVirtualFileSystem._get_path_without_schema(storage_type, storage_location)
         normalized_pvfs = virtual_location.rstrip('/')
         sub_location = actual_path[len(storage_location):].lstrip("/")
-        return f'{normalized_pvfs}/{sub_location}'
+        if len(sub_location) == 0:
+            return normalized_pvfs
+        else:
+            return f'{normalized_pvfs}/{sub_location}'
 
     @staticmethod
     def _get_path_without_schema(storage_type: StorageType, path: str) -> str:

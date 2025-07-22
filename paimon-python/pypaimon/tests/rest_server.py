@@ -26,6 +26,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 import pypaimon.api as api
+from ..api import RenameTableRequest, CreateTableRequest, CreateDatabaseRequest
 from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse,
                                 TableMetadata, Schema, GetTableResponse, ListTablesResponse,
                                 TableSchema, RESTResponse, PagedList)
@@ -51,28 +52,6 @@ class ErrorResponse(RESTResponse):
     resource_name: Optional[str]
     message: str
     code: int
-
-
-class ResourcePaths:
-    """Resource path constants"""
-
-    TABLES = "tables"
-    VIEWS = "views"
-    FUNCTIONS = "functions"
-    SNAPSHOTS = "snapshots"
-    ROLLBACK = "rollback"
-
-    def __init__(self, prefix: str = ""):
-        self.prefix = prefix.rstrip('/')
-
-    def config(self) -> str:
-        return "/v1/config"
-
-    def databases(self) -> str:
-        return f"/v1/{self.prefix}/databases"
-
-    def tables(self) -> str:
-        return f"{self.prefix}/tables"
 
 
 # Exception classes
@@ -247,7 +226,7 @@ class RESTCatalogServer:
 
         # Initialize resource paths
         prefix = config.defaults.get("prefix")
-        self.resource_paths = ResourcePaths(prefix)
+        self.resource_paths = api.ResourcePaths(prefix=prefix)
         self.database_uri = self.resource_paths.databases()
 
         # Initialize storage
@@ -372,6 +351,7 @@ class RESTCatalogServer:
         """Route HTTP request to appropriate handler"""
         try:
             # Config endpoint
+            print(f'method: {method}, resource_path: {resource_path}')
             if resource_path.startswith(self.resource_paths.config()):
                 warehouse_param = parameters.get(WAREHOUSE)
                 if warehouse_param == self.warehouse:
@@ -385,15 +365,20 @@ class RESTCatalogServer:
                 return self._mock_response(self.token_json, 200)
 
             # Databases endpoint
-            if resource_path == self.database_uri or resource_path.startswith(self.database_uri + "?"):
+            if resource_path == self.resource_paths.databases() or resource_path.startswith(self.database_uri + "?"):
                 return self._databases_api_handler(method, data, parameters)
 
+            if resource_path == self.resource_paths.rename_table():
+                rename_request = JSON.from_json(data, RenameTableRequest)
+                source = self.table_metadata_store.get(rename_request.source.get_full_name())
+                self.table_metadata_store.update({rename_request.destination.get_full_name(): source})
             # Global tables endpoint
-            if resource_path.startswith(self.resource_paths.tables()):
-                return self._tables_handle(parameters)
+            database = resource_path.split("/")[4]
+            if resource_path == self.resource_paths.tables(database):
+                return self._tables_handle(method=method, parameters=parameters, database_name=database, data=data)
 
             # Database-specific endpoints
-            if resource_path.startswith(self.database_uri + "/"):
+            if resource_path.startswith(self.resource_paths.database(database)):
                 return self._handle_database_resource(method, resource_path, parameters, data)
 
             return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -446,7 +431,7 @@ class RESTCatalogServer:
             # Collection operations (tables, views, functions)
             resource_type = path_parts[1]
 
-            if resource_type.startswith(ResourcePaths.TABLES):
+            if resource_type.startswith(api.ResourcePaths.TABLES):
                 return self._tables_handle(method, data, database_name, parameters)
 
         elif len(path_parts) >= 3:
@@ -455,7 +440,7 @@ class RESTCatalogServer:
             resource_name = api.RESTUtil.decode_string(path_parts[2])
             identifier = Identifier.create(database_name, resource_name)
 
-            if resource_type == ResourcePaths.TABLES:
+            if resource_type == api.ResourcePaths.TABLES:
                 return self._handle_table_resource(method, path_parts, identifier, data, parameters)
 
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -483,7 +468,10 @@ class RESTCatalogServer:
                 if not database_name_pattern or self._match_name_pattern(db_name, database_name_pattern)
             ]
             return self._generate_final_list_databases_response(parameters, databases)
-
+        if method == "POST":
+            create_database = JSON.from_json(data, CreateDatabaseRequest)
+            self.database_store.update({create_database.name: self.mock_database(create_database.name, create_database.options)})
+            return None
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _database_handle(self, method: str, data: str, database_name: str) -> Tuple[str, int]:
@@ -513,6 +501,11 @@ class RESTCatalogServer:
             if method == "GET":
                 tables = self._list_tables(database_name, parameters)
                 return self._generate_final_list_tables_response(parameters, tables)
+            elif method == "POST":
+                create_table = JSON.from_json(data, CreateTableRequest)
+                table_identifier = Identifier.create(create_table.identifier.database_name, create_table.identifier.object_name)
+                self.table_metadata_store.update({table_identifier.get_full_name(): TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=create_table.schema)})
+                return None
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
