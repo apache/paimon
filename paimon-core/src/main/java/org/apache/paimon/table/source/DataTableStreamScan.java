@@ -211,7 +211,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
-            if (shouldDelaySnapshot(nextSnapshotId)) {
+            if (shouldDelaySnapshot(snapshot)) {
                 return SnapshotNotExistPlan.INSTANCE;
             }
 
@@ -236,17 +236,13 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
     }
 
-    private boolean shouldDelaySnapshot(long snapshotId) {
+    private boolean shouldDelaySnapshot(Snapshot snapshot) {
         if (scanDelayMillis == null) {
             return false;
         }
 
         long snapshotMills = System.currentTimeMillis() - scanDelayMillis;
-        if (snapshotManager.snapshotExists(snapshotId)
-                && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
-            return true;
-        }
-        return false;
+        return snapshot.timeMillis() > snapshotMills;
     }
 
     @Nullable
