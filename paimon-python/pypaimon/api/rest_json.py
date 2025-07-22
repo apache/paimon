@@ -17,9 +17,9 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Type, Dict
+from typing import Any, Type, Dict, TypeVar
 
-from .typedef import T
+T = TypeVar("T")
 
 
 def json_field(json_name: str, **kwargs):

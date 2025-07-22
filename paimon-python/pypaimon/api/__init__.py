@@ -29,7 +29,7 @@ from pypaimon.api.api_response import (
     PagedResponse,
     GetTableTokenResponse,
 )
-from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
+from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.api.client import HttpClient
 from pypaimon.api.auth import DLFAuthProvider, DLFToken
@@ -98,15 +98,16 @@ class ResourcePaths:
         return f"{self.base_path}/{self.DATABASES}"
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{name}"
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(name)}"
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
+            return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}"
         return f"{self.base_path}/{self.TABLES}"
 
     def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
+        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
+                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}")
 
     def table_details(self, database_name: str) -> str:
         return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
@@ -114,6 +115,9 @@ class ResourcePaths:
     def table_token(self, database_name: str, table_name: str) -> str:
         return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
                 f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token")
+
+    def rename_table(self) -> str:
+        return f"{self.base_path}/{self.TABLES}/rename"
 
 
 class RESTApi:
@@ -303,6 +307,13 @@ class RESTApi:
             GetTableResponse,
             self.rest_auth_function,
         )
+
+    def rename_table(self, source_identifier: Identifier, target_identifier: Identifier) -> None:
+        request = RenameTableRequest(source_identifier, target_identifier)
+        return self.client.post(
+            self.resource_paths.rename_table(),
+            request,
+            self.rest_auth_function)
 
     def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
         return self.client.get(

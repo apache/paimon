@@ -18,6 +18,8 @@
 from dataclasses import dataclass
 from typing import Optional, TypeVar, Dict
 
+from pypaimon.api.rest_json import json_field
+
 T = TypeVar("T")
 
 
@@ -25,9 +27,9 @@ T = TypeVar("T")
 class Identifier:
     """Table/View/Function identifier"""
 
-    database_name: str
-    object_name: str
-    branch_name: Optional[str] = None
+    database_name: str = json_field("database", default=None)
+    object_name: str = json_field("object", default=None)
+    branch_name: Optional[str] = json_field("branch", default=None)
 
     @classmethod
     def create(cls, database_name: str, object_name: str) -> "Identifier":

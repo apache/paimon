@@ -205,8 +205,17 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
 
     def mv(self, path1, path2, recursive=False, maxdepth=None, **kwargs):
+        source_pvfs_identifier = self._extract_pvfs_identifier(path1)
+        if isinstance(source_pvfs_identifier, PVFSTableIdentifier):
+            target_pvfs_identifier = self._extract_pvfs_identifier(path2)
+            if isinstance(target_pvfs_identifier, PVFSTableIdentifier):
+                if target_pvfs_identifier.sub_path is None and source_pvfs_identifier.sub_path is None:
+                    source_identifier = Identifier.create(source_pvfs_identifier.database, source_pvfs_identifier.name)
+                    target_identifier = Identifier.create(target_pvfs_identifier.database, target_pvfs_identifier.name)
+                    self.rest_api.rename_table(source_identifier, target_identifier)
+                    return None
         raise Exception(
-            "Mv is not implemented for Paimon Virtual FileSystem."
+            f"Mv is not implemented for path: {path1}"
         )
 
     def rm(self, path, recursive=False, maxdepth=None):
