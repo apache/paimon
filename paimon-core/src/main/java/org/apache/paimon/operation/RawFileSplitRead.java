@@ -199,17 +199,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
-            Predicate dataPredicate =
-                    PredicateBuilder.and(
-                            formatReaderMapping.getDataFilters().toArray(new Predicate[0]));
-            fileIndexResult =
-                    FileIndexEvaluator.evaluate(
-                            fileIO,
-                            formatReaderMapping.getDataSchema(),
-                            dataPredicate,
-                            dataFilePathFactory,
-                            file);
-            if (!fileIndexResult.remain()) {
+            List<Predicate> dataFilters = formatReaderMapping.getDataFilters();
+            if (dataFilters != null && !dataFilters.isEmpty()) {
+                Predicate dataPredicate =
+                        PredicateBuilder.and(
+                                formatReaderMapping.getDataFilters().toArray(new Predicate[0]));
+                fileIndexResult =
+                        FileIndexEvaluator.evaluate(
+                                fileIO,
+                                formatReaderMapping.getDataSchema(),
+                                dataPredicate,
+                                dataFilePathFactory,
+                                file);
+            }
+            if (fileIndexResult != null && !fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
         }
