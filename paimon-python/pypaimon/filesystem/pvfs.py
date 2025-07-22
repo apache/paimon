@@ -30,6 +30,7 @@ from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 
 from pypaimon.api import RESTApi, GetTableTokenResponse
+from pypaimon.api.client import NoSuchResourceException
 from pypaimon.api.typedef import Identifier
 from pypaimon.filesystem.pvfs_config import PVFSConfig
 
@@ -65,6 +66,15 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
     def __hash__(self) -> int:
         return hash((self.catalog, self.database, self.name))
+
+    def get_actual_path(self, storage_location: str):
+        if self.sub_path:
+            return f'{storage_location.rstrip("/")}/{self.sub_path.lstrip("/")}'
+        return storage_location
+
+    def get_virtual_location(self):
+        return (f'{PROTOCOL_NAME}://{self.catalog}'
+                f'/{self.database}/{self.name}')
 
 
 @dataclass
@@ -108,38 +118,35 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             databases = self.rest_api.list_databases()
             if detail:
                 return [
-                    self._create_database_or_table_file_detail(
-                        self._convert_database_actual_path(pvfs_identifier.name, database)
+                    self._create_dir_detail(
+                        self._convert_database_virtual_path(pvfs_identifier.name, database)
                     )
                     for database in databases
                 ]
             return [
-                self._convert_database_actual_path(pvfs_identifier.name, database)
+                self._convert_database_virtual_path(pvfs_identifier.name, database)
                 for database in databases
             ]
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             tables = self.rest_api.list_tables(pvfs_identifier.name)
             if detail:
                 return [
-                    self._create_database_or_table_file_detail(
-                        self._convert_table_actual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
+                    self._create_dir_detail(
+                        self._convert_table_virtual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
                     )
                     for table in tables
                 ]
             return [
-                self._convert_table_actual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
+                self._convert_table_virtual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
                 for table in tables
             ]
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
             storage_type = self._get_storage_type(table.path)
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
-            virtual_location = (f'{PROTOCOL_NAME}://{pvfs_identifier.catalog}'
-                                f'/{pvfs_identifier.database}/{pvfs_identifier.name}')
-            actual_path = table.path
-            if pvfs_identifier.sub_path:
-                actual_path = f'{table.path.rstrip("/")}/{pvfs_identifier.sub_path.lstrip("/")}'
             storage_location = table.path
+            actual_path = pvfs_identifier.get_actual_path(storage_location)
+            virtual_location = pvfs_identifier.get_virtual_location()
+            fs = self._get_filesystem(pvfs_identifier, storage_type)
             entries = fs.ls(actual_path, detail=detail, **kwargs)
             if detail:
                 virtual_entities = [
@@ -156,6 +163,103 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 ]
                 return virtual_entry_paths
 
+    def info(self, path, **kwargs):
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            return self._create_dir_detail(f'{PROTOCOL_NAME}://{pvfs_identifier.name}')
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            return self._create_dir_detail(
+                self._convert_database_virtual_path(pvfs_identifier.catalog, pvfs_identifier.name)
+            )
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
+            storage_type = self._get_storage_type(table.path)
+            storage_location = table.path
+            actual_path = pvfs_identifier.get_actual_path(storage_location)
+            virtual_location = pvfs_identifier.get_virtual_location()
+            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            entry = fs.info(actual_path)
+            return self._convert_actual_info(entry, storage_type, storage_location, virtual_location)
+
+    def exists(self, path, **kwargs):
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            return True
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            try:
+                self.rest_api.get_database(pvfs_identifier.name)
+                return True
+            except NoSuchResourceException:
+                return False
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
+            storage_type = self._get_storage_type(table.path)
+            storage_location = table.path
+            actual_path = pvfs_identifier.get_actual_path(storage_location)
+            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            return fs.exists(actual_path)
+
+    def cp_file(self, path1, path2, **kwargs):
+        raise Exception(
+            "Cp is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def mv(self, path1, path2, recursive=False, maxdepth=None, **kwargs):
+        raise Exception(
+            "Mv is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def rm(self, path, recursive=False, maxdepth=None):
+        raise Exception(
+            "Rm is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def rm_file(self, path):
+        raise Exception(
+            "Rm_file is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def rmdir(self, path):
+        raise Exception(
+            "Rmdir is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def open(
+            self,
+            path,
+            mode="rb",
+            block_size=None,
+            cache_options=None,
+            compression=None,
+            **kwargs,
+    ):
+        raise Exception(
+            "open is not implemented for Paimon Virtual FileSystem."
+        )
+
+    def mkdir(self, path, create_parents=True, **kwargs):
+        raise Exception('Mkdir is not implemented for Paimon Virtual FileSystem.')
+
+    def makedirs(self, path, exist_ok=True):
+        raise Exception('makedirs is not implemented for Paimon Virtual FileSystem.')
+
+    def created(self, path):
+        raise Exception('created is not implemented for Paimon Virtual FileSystem.')
+
+    def modified(self, path):
+        raise Exception('modified is not implemented for Paimon Virtual FileSystem.')
+
+    def cat_file(self, path, start=None, end=None, **kwargs):
+        raise Exception('cat_file is not implemented for Paimon Virtual FileSystem.')
+
+    def get_file(self, rpath, lpath, callback=None, outfile=None, **kwargs):
+        raise Exception('get_file is not implemented for Paimon Virtual FileSystem.')
+
+    def _rm(self, path):
+        raise Exception(
+            "_rm is not implemented for Paimon Virtual FileSystem."
+        )
+
     @staticmethod
     def _convert_actual_info(
             entry: Dict,
@@ -163,19 +267,21 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             storage_location: str,
             virtual_location: str,
     ):
-        path = PaimonVirtualFileSystem._convert_actual_path(storage_type, entry["name"], storage_location, virtual_location)
+        path = PaimonVirtualFileSystem._convert_actual_path(storage_type, entry["name"], storage_location,
+                                                            virtual_location)
 
         if "mtime" in entry:
             # HDFS and GCS
             return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"], entry["mtime"])
         elif "LastModified" in entry:
             # S3 and OSS
-            return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"], entry["LastModified"])
+            return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"],
+                                                               entry["LastModified"])
         # Unknown
         return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"])
 
     @staticmethod
-    def _create_database_or_table_file_detail(path: str) -> Dict[str, Any]:
+    def _create_dir_detail(path: str) -> Dict[str, Any]:
         return PaimonVirtualFileSystem._create_file_detail(path, 0, 'directory', None)
 
     @staticmethod
@@ -188,14 +294,14 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         }
 
     @staticmethod
-    def _convert_database_actual_path(
+    def _convert_database_virtual_path(
             catalog_name: str,
             database_name: str
     ):
         return f'{PROTOCOL_NAME}://{catalog_name}/{database_name}'
 
     @staticmethod
-    def _convert_table_actual_path(
+    def _convert_table_virtual_path(
             catalog_name: str,
             database_name: str,
             table_name: str

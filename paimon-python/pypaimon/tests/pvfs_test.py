@@ -109,13 +109,13 @@ class PVFSTestCase(unittest.TestCase):
             pvfs = PaimonVirtualFileSystem(options)
             database_dirs = pvfs.ls("pvfs://test_warehouse", detail=False)
             expect_database_dirs = set(map(
-                lambda x: pvfs._convert_database_actual_path(catalog, x),
+                lambda x: pvfs._convert_database_virtual_path(catalog, x),
                 list(test_databases.keys())
             ))
             self.assertSetEqual(set(database_dirs), expect_database_dirs)
             table_dirs = pvfs.ls("pvfs://test_warehouse/default", detail=False)
             expect_table_dirs = set(map(
-                lambda x: pvfs._convert_table_actual_path(catalog, 'default', x),
+                lambda x: pvfs._convert_table_virtual_path(catalog, 'default', x),
                 ['user']
             ))
             self.assertSetEqual(set(table_dirs), expect_table_dirs)
