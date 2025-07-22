@@ -120,7 +120,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
             storage_type = self._get_storage_type(table.path)
             fs = self._get_filesystem(pvfs_identifier, storage_type)
-            virtual_location = f'{PROTOCOL_NAME}://{pvfs_identifier.catalog}/{pvfs_identifier.database}/{pvfs_identifier.name}'
+            virtual_location = (f'{PROTOCOL_NAME}://{pvfs_identifier.catalog}'
+                                f'/{pvfs_identifier.database}/{pvfs_identifier.name}')
             actual_path = table.path
             if pvfs_identifier.sub_path:
                 actual_path = f'{table.path.rstrip("/")}/{pvfs_identifier.sub_path.lstrip("/")}'
@@ -236,7 +237,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return PVFSTableIdentifier(catalog=components[0], database=components[1], name=components[2])
         elif len(components) > 3:
             sub_path = '/'.join(components[3:])
-            return PVFSTableIdentifier(catalog=components[0], database=components[1], name=components[2], sub_path=sub_path)
+            return PVFSTableIdentifier(
+                catalog=components[0], database=components[1],
+                name=components[2], sub_path=sub_path
+            )
         return None
 
     def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
@@ -265,9 +269,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 load_token_response: GetTableTokenResponse = self.rest_api.load_table_token(
                     Identifier.create(pvfs_table_identifier.database, pvfs_table_identifier.name))
                 fs = self._get_oss_filesystem(load_token_response.token)
-                self._cache[pvfs_table_identifier] = PaimonRealStorage(load_token_response.token,
-                                                                       expires_at_millis=load_token_response.expires_at_millis,
-                                                                       file_system=fs)
+                paimon_real_storage = PaimonRealStorage(
+                    token=load_token_response.token,
+                    expires_at_millis=load_token_response.expires_at_millis,
+                    file_system=fs
+                )
+                self._cache[pvfs_table_identifier] = paimon_real_storage
             else:
                 raise Exception(
                     f"Storage type: `{storage_type}` doesn't support now."

@@ -18,8 +18,6 @@
 class PVFSConfig:
     DEFAULT_CACHE_SIZE = 20
     CACHE_SIZE = "cache_size"
-    CACHE_EXPIRED_TIME = "cache_expired_time"
-    DEFAULT_CACHE_EXPIRED_TIME = 3600
     OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId"
     OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret"
     OSS_SECURITY_TOKEN = "fs.oss.securityToken"

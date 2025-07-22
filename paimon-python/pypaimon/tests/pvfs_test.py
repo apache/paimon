@@ -20,7 +20,7 @@ import unittest
 import uuid
 from pathlib import Path
 
-from pypaimon.api import ConfigResponse, RESTApi, Identifier
+from pypaimon.api import ConfigResponse
 from pypaimon.api.api_response import TableSchema, TableMetadata
 from pypaimon.api.data_types import DataField, AtomicType, ArrayType, MapType
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem

@@ -26,7 +26,8 @@ from pypaimon.api.api_response import (
     ListTablesResponse,
     GetDatabaseResponse,
     ConfigResponse,
-    PagedResponse, GetTableTokenResponse,
+    PagedResponse,
+    GetTableTokenResponse,
 )
 from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
@@ -110,6 +111,10 @@ class ResourcePaths:
     def table_details(self, database_name: str) -> str:
         return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
 
+    def table_token(self, database_name: str, table_name: str) -> str:
+        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
+                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token")
+
 
 class RESTApi:
     HEADER_PREFIX = "header."
@@ -150,9 +155,9 @@ class RESTApi:
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
     def __build_paged_query_params(
-        max_results: Optional[int],
-        page_token: Optional[str],
-        name_patterns: Dict[str, str],
+            max_results: Optional[int],
+            page_token: Optional[str],
+            name_patterns: Dict[str, str],
     ) -> Dict[str, str]:
         query_params = {}
         if max_results is not None and max_results > 0:
@@ -168,7 +173,7 @@ class RESTApi:
         return query_params
 
     def __list_data_from_page_api(
-        self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]
+            self, page_api: Callable[[Dict[str, str]], PagedResponse[T]]
     ) -> List[T]:
         results = []
         query_params = {}
@@ -206,10 +211,10 @@ class RESTApi:
         )
 
     def list_databases_paged(
-        self,
-        max_results: Optional[int] = None,
-        page_token: Optional[str] = None,
-        database_name_pattern: Optional[str] = None,
+            self,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            database_name_pattern: Optional[str] = None,
     ) -> PagedList[str]:
 
         response = self.client.get_with_params(
@@ -245,10 +250,10 @@ class RESTApi:
             self.rest_auth_function)
 
     def alter_database(
-        self,
-        name: str,
-        removals: Optional[List[str]] = None,
-        updates: Optional[Dict[str, str]] = None,
+            self,
+            name: str,
+            removals: Optional[List[str]] = None,
+            updates: Optional[Dict[str, str]] = None,
     ):
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
@@ -272,11 +277,11 @@ class RESTApi:
         )
 
     def list_tables_paged(
-        self,
-        database_name: str,
-        max_results: Optional[int] = None,
-        page_token: Optional[str] = None,
-        table_name_pattern: Optional[str] = None,
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            table_name_pattern: Optional[str] = None,
     ) -> PagedList[str]:
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),
@@ -296,5 +301,14 @@ class RESTApi:
                 identifier.database_name,
                 identifier.object_name),
             GetTableResponse,
+            self.rest_auth_function,
+        )
+
+    def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
+        return self.client.get(
+            self.resource_paths.table_token(
+                identifier.database_name,
+                identifier.object_name),
+            GetTableTokenResponse,
             self.rest_auth_function,
         )
