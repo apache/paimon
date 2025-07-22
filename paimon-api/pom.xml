@@ -105,6 +105,10 @@ under the License.
                                     <include>com.squareup.okhttp3:okhttp</include>
                                     <include>com.squareup.okio:okio-jvm</include>
                                     <include>org.jetbrains.kotlin:kotlin-stdlib</include>
+
+                                    <!-- apache httpcomponents 5 -->
+                                    <include>org.apache.httpcomponents.core5:httpcore5</include>
+                                    <include>org.apache.httpcomponents.client5:httpclient5</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
@@ -119,6 +123,14 @@ under the License.
                                 <relocation>
                                     <pattern>okio</pattern>
                                     <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hc.core5</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.httpcore5</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hc.client5</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.httpclient5</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>
