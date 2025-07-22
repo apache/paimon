@@ -2379,7 +2379,7 @@ public class CoreOptions implements Serializable {
     }
 
     public OffPeakHours offPeakHours() {
-        return OffPeakHours.getInstance(
+        return OffPeakHours.create(
                 options.get(COMPACT_OFFPEAK_START_HOUR), options.get(COMPACT_OFFPEAK_END_HOUR));
     }
 

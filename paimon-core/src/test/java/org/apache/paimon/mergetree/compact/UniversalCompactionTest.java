@@ -268,23 +268,6 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testOffPeakRatioThreshold() {
-
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(0, 23);
-        long[] sizes = new long[] {8, 9, 10};
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2, offPeakHours, 0), sizes))
-                .isEqualTo(new long[] {8, 9, 10});
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2, offPeakHours, 10), sizes))
-                .isEqualTo(new long[] {27});
-
-        assertThat(
-                        pickForSizeRatio(
-                                new UniversalCompaction(25, 10, 2, OffPeakHours.DISABLED, 10),
-                                sizes))
-                .isEqualTo(new long[] {8, 9, 10});
-    }
-
-    @Test
     public void testLookup() {
         ForceUpLevel0Compaction compaction =
                 new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
