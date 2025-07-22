@@ -220,6 +220,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 SnapshotReader.Plan overwritePlan = handleOverwriteSnapshot(snapshot);
                 if (overwritePlan != null) {
                     nextSnapshotId++;
+                    if (overwritePlan.splits().isEmpty()) {
+                        continue;
+                    }
                     return overwritePlan;
                 }
             }
@@ -229,6 +232,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
                 nextSnapshotId++;
+                if (plan.splits().isEmpty()) {
+                    continue;
+                }
                 return plan;
             } else {
                 nextSnapshotId++;

@@ -265,20 +265,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     private void doRefresh() throws Exception {
-        Long latestSnapshotId = context.table.snapshotManager().latestSnapshotId();
-        if (latestSnapshotId == null) {
-            return;
-        }
-
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
                     new RecordReaderIterator<>(reader.nextBatch(false))) {
                 if (!batch.hasNext()) {
-                    if (reader.nextSnapshotId() > latestSnapshotId) {
-                        return;
-                    } else {
-                        continue;
-                    }
+                    return;
                 }
                 refresh(batch);
             }
