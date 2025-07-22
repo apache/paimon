@@ -26,8 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
-
 /** Fetcher for getting the next snapshot by snapshot id. */
 public class NextSnapshotFetcher {
 
@@ -48,27 +46,21 @@ public class NextSnapshotFetcher {
 
     @Nullable
     public Snapshot getNextSnapshot(long nextSnapshotId) {
-        Snapshot latest = snapshotManager.latestSnapshot();
-
-        if (latest != null && latest.id() == nextSnapshotId) {
-            return latest;
-        }
-
-        try {
-            return snapshotManager.tryGetSnapshot(nextSnapshotId);
-        } catch (FileNotFoundException ignored) {
+        if (snapshotManager.snapshotExists(nextSnapshotId)) {
+            return snapshotManager.snapshot(nextSnapshotId);
         }
 
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotIdFromFileSystem();
         // No snapshot now
         if (earliestSnapshotId == null || earliestSnapshotId <= nextSnapshotId) {
             if ((earliestSnapshotId == null && nextSnapshotId > 1)
-                    || (latest != null && nextSnapshotId > latest.id() + 1)) {
+                    || (latestSnapshotId != null && nextSnapshotId > latestSnapshotId + 1)) {
                 throw new OutOfRangeException(
                         String.format(
                                 "The next expected snapshot is too big! Most possible cause might be the table had been recreated."
                                         + "The next snapshot id is %d, while the latest snapshot id is %s",
-                                nextSnapshotId, latest == null ? "none" : latest.id()));
+                                nextSnapshotId, latestSnapshotId));
             }
 
             LOG.debug(
