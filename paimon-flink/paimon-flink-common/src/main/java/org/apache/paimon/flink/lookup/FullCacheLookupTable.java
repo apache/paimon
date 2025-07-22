@@ -35,6 +35,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
@@ -189,7 +190,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
         Predicate predicate = projectedPredicate();
         try (RecordReaderIterator<InternalRow> batch =
-                new RecordReaderIterator<>(reader.nextBatch(true))) {
+                new RecordReaderIterator<>(reader.toRecordReader(reader.nextSplits(), true))) {
             while (batch.hasNext()) {
                 InternalRow row = batch.next();
                 if (predicate == null || predicate.test(row)) {
@@ -266,11 +267,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     private void doRefresh() throws Exception {
         while (true) {
+            List<Split> splits = reader.nextSplits();
+            if (splits.isEmpty()) {
+                return;
+            }
             try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(reader.nextBatch(false))) {
-                if (!batch.hasNext()) {
-                    return;
-                }
+                    new RecordReaderIterator<>(reader.toRecordReader(splits, false))) {
                 refresh(batch);
             }
         }
