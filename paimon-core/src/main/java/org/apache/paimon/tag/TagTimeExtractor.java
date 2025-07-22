@@ -86,7 +86,7 @@ public interface TagTimeExtractor {
             case BATCH:
                 return null;
             case PROCESS_TIME:
-                return new ProcessTimeExtractor(options.tagProcessTimeZone());
+                return new ProcessTimeExtractor(options.sinkProcessTimeZone());
             case WATERMARK:
                 return new WatermarkExtractor(ZoneId.of(options.sinkWatermarkTimeZone()));
             default:
