@@ -107,8 +107,12 @@ public class LookupStreamingReader {
         }
     }
 
-    public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
-        List<Split> splits = scan.plan().splits();
+    public List<Split> nextSplits() {
+        return scan.plan().splits();
+    }
+
+    public RecordReader<InternalRow> toRecordReader(List<Split> splits, boolean useParallelism)
+            throws Exception {
         log(splits);
         CoreOptions options = CoreOptions.fromMap(table.options());
         FunctionWithIOException<Split, RecordReader<InternalRow>> readerSupplier =
