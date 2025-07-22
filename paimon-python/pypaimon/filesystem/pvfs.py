@@ -200,8 +200,26 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return fs.exists(actual_path)
 
     def cp_file(self, path1, path2, **kwargs):
+        source_pvfs_identifier = self._extract_pvfs_identifier(path1)
+        target_pvfs_identifier = self._extract_pvfs_identifier(path2)
+        if ((isinstance(source_pvfs_identifier, PVFSTableIdentifier)
+                and isinstance(target_pvfs_identifier, PVFSTableIdentifier))
+                and target_pvfs_identifier.sub_path is not None
+                and source_pvfs_identifier.sub_path is not None):
+            table_identifier = Identifier.create(source_pvfs_identifier.database, source_pvfs_identifier.name)
+            table = self.rest_api.get_table(table_identifier)
+            storage_type = self._get_storage_type(table.path)
+            storage_location = table.path
+            source_actual_path = source_pvfs_identifier.get_actual_path(storage_location)
+            target_actual_path = target_pvfs_identifier.get_actual_path(storage_location)
+            fs = self._get_filesystem(source_pvfs_identifier, storage_type)
+            fs.cp_file(
+                self._strip_storage_protocol(storage_type, source_actual_path),
+                self._strip_storage_protocol(storage_type, target_actual_path),
+            )
+            return None
         raise Exception(
-            "Cp is not implemented for Paimon Virtual FileSystem."
+            f"cp is not supported for path: {path1}"
         )
 
     def mv(self, path1, path2, recursive=False, maxdepth=None, **kwargs):
@@ -215,7 +233,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     self.rest_api.rename_table(source_identifier, target_identifier)
                     return None
         raise Exception(
-            f"Mv is not implemented for path: {path1}"
+            f"Mv is not supported for path: {path1}"
         )
 
     def lazy_load_class(self, module_name, class_name):
