@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1579,6 +1580,16 @@ public class CoreOptions implements Serializable {
                                     + " the value should be the user configured local time zone. The option value is either a full name"
                                     + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
 
+    public static final ConfigOption<String> SINK_PROCESS_TIME_ZONE =
+            key("sink.process-time-zone")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The time zone to parse the long process time to TIMESTAMP value. The default value is JVM's "
+                                    + "default time zone. If you want to specify a time zone, you should either set a "
+                                    + "full name such as 'America/Los_Angeles' or a custom zone id such as 'GMT-08:00'. "
+                                    + "This option currently is used for extract tag name.");
+
     public static final ConfigOption<MemorySize> LOCAL_MERGE_BUFFER_SIZE =
             key("local-merge-buffer-size")
                     .memoryType()
@@ -2728,6 +2739,11 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
+    }
+
+    public ZoneId sinkProcessTimeZone() {
+        String zoneId = options.get(SINK_PROCESS_TIME_ZONE);
+        return zoneId == null ? ZoneId.systemDefault() : ZoneId.of(zoneId);
     }
 
     public boolean forceCreatingSnapshot() {

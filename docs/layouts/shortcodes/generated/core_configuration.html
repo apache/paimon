@@ -972,6 +972,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>sink.process-time-zone</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The time zone to parse the long process time to TIMESTAMP value. The default value is JVM's default time zone. If you want to specify a time zone, you should either set a full name such as 'America/Los_Angeles' or a custom zone id such as 'GMT-08:00'. This option currently is used for extract tag name.</td>
+        </tr>
+        <tr>
             <td><h5>sink.watermark-time-zone</h5></td>
             <td style="word-wrap: break-word;">"UTC"</td>
             <td>String</td>
