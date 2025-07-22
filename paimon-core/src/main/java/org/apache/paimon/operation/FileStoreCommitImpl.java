@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -92,6 +93,7 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -147,6 +149,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int commitMaxRetries;
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
+    private final boolean rowTrackingEnabled;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -182,7 +185,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitTimeout,
             long commitMinRetryWait,
             long commitMaxRetryWait,
-            @Nullable Long strictModeLastSafeSnapshot) {
+            @Nullable Long strictModeLastSafeSnapshot,
+            boolean rowTrackingEnabled) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -225,6 +229,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
+        this.rowTrackingEnabled = rowTrackingEnabled;
     }
 
     @Override
@@ -247,7 +252,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         for (int i = 1; i < committables.size(); i++) {
-            Preconditions.checkArgument(
+            checkArgument(
                     committables.get(i).identifier() > committables.get(i - 1).identifier(),
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
@@ -549,7 +554,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
-        Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
+        checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -917,6 +922,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
+        long newRowIdStart =
+                latestSnapshot == null
+                        ? 0L
+                        : latestSnapshot.nextRowId() == null ? 0L : latestSnapshot.nextRowId();
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
@@ -989,6 +998,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        long nextRowId = newRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1023,6 +1033,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType,
                             manifestReadParallelism);
             baseManifestList = manifestList.write(mergeAfterManifests);
+
+            if (rowTrackingEnabled) {
+                deltaFiles = assignSnapshotId(newSnapshotId, deltaFiles);
+                nextRowId = assignRowMeta(newRowIdStart, deltaFiles);
+            }
 
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
@@ -1083,7 +1098,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             currentWatermark,
                             statsFileName,
                             // if empty properties, just set to null
-                            properties.isEmpty() ? null : properties);
+                            properties.isEmpty() ? null : properties,
+                            nextRowId);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpReuseTmpManifests(
@@ -1133,8 +1149,37 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeLastSafeSnapshot != null) {
             strictModeLastSafeSnapshot = newSnapshot.id();
         }
-        commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
+        final List<ManifestEntry> finalDeltaFiels = deltaFiles;
+        commitCallbacks.forEach(
+                callback -> callback.call(finalDeltaFiels, indexFiles, newSnapshot));
         return new SuccessResult();
+    }
+
+    private long assignRowMeta(long startRowId, List<ManifestEntry> deltaFiles) {
+        if (deltaFiles.isEmpty()) {
+            return startRowId;
+        }
+        // assign row id for new files
+        long start = startRowId;
+        for (ManifestEntry entry : deltaFiles) {
+            checkArgument(
+                    entry.file().fileSource().isPresent(),
+                    "This is a bug, file source field for row-tracking table must present.");
+            if (entry.file().fileSource().get().equals(FileSource.APPEND)) {
+                long rowCount = entry.file().rowCount();
+                entry.file().setFirstRowId(start);
+                start += rowCount;
+            }
+        }
+        return start;
+    }
+
+    private List<ManifestEntry> assignSnapshotId(long snapshotId, List<ManifestEntry> deltaFiles) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (ManifestEntry entry : deltaFiles) {
+            entries.add(entry.copyWithMaxSequenceNumber(snapshotId));
+        }
+        return entries;
     }
 
     public void compactManifest() {
@@ -1211,7 +1256,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         0L,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        latestSnapshot.properties());
+                        latestSnapshot.properties(),
+                        latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }

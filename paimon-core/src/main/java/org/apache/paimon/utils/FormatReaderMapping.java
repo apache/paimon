@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -36,6 +37,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -43,6 +45,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
+import static org.apache.paimon.schema.SchemaEvolutionUtil.createIndexMapping;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 
 /** Class with index mapping and format reader. */
@@ -59,6 +62,7 @@ public class FormatReaderMapping {
     private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
+    private final int[] metaMappings;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -67,13 +71,15 @@ public class FormatReaderMapping {
             @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
-            List<Predicate> dataFilters) {
+            List<Predicate> dataFilters,
+            int[] metaMappings) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
+        this.metaMappings = metaMappings;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -109,6 +115,10 @@ public class FormatReaderMapping {
     @Nullable
     public Pair<int[], RowType> getPartitionPair() {
         return partitionPair;
+    }
+
+    public int[] getMeta() {
+        return metaMappings;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -165,6 +175,14 @@ public class FormatReaderMapping {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
+            if (CoreOptions.fromMap(dataSchema.options()).rowTrackingEnabled()) {
+                allDataFields.add(SpecialFields.ROW_ID);
+                allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
+            }
+            List<DataField> metaDataFields =
+                    Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
+            int[] metaMappings = createIndexMapping(readTableFields, metaDataFields);
+
             List<DataField> readDataFields = readDataFields(allDataFields);
             // build index cast mapping
             IndexCastMapping indexCastMapping =
@@ -196,7 +214,8 @@ public class FormatReaderMapping {
                             .discover(formatIdentifier)
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
-                    readFilters);
+                    readFilters,
+                    metaMappings);
         }
 
         static Pair<int[], RowType> trimKeyFields(

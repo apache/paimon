@@ -140,6 +140,15 @@ public class ManifestEntry implements FileEntry {
         return new ManifestEntry(kind, partition, bucket, totalBuckets, file.copyWithoutStats());
     }
 
+    public ManifestEntry copyWithMaxSequenceNumber(long maxSequenceNumber) {
+        return new ManifestEntry(
+                kind,
+                partition,
+                bucket,
+                totalBuckets,
+                file.copyWithMaxSequenceNumber(maxSequenceNumber));
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestEntry)) {

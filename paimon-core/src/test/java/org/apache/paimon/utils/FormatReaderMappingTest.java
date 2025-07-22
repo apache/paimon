@@ -133,7 +133,8 @@ public class FormatReaderMappingTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        new int[0]);
 
         Assertions.assertThat(formatReaderMapping.getIndexMapping())
                 .containsExactly(0, 1, 0, -1, 2);

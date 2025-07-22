@@ -21,12 +21,14 @@ package org.apache.paimon.io;
 import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.rowlineage.RowWithLineage;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
@@ -41,13 +43,21 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
+    private final int[] metaMappings;
+    private final boolean rowLineageEnabled;
+    @Nullable private final Long firstRowId;
+    @Nullable private final long snapshotId;
 
     public DataFileRecordReader(
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            boolean rowLineageEnabled,
+            @Nullable Long firstRowId,
+            long snapshotId,
+            @Nullable int[] metaMappings)
             throws IOException {
         try {
             this.reader = readerFactory.createReader(context);
@@ -58,6 +68,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
+        this.rowLineageEnabled = rowLineageEnabled;
+        this.firstRowId = firstRowId;
+        this.snapshotId = snapshotId;
+        this.metaMappings = metaMappings;
     }
 
     @Nullable
@@ -70,6 +84,11 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
         if (iterator instanceof ColumnarRowIterator) {
             iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+            if (rowLineageEnabled) {
+                iterator =
+                        ((ColumnarRowIterator) iterator)
+                                .assignRowLineage(firstRowId, snapshotId, metaMappings);
+            }
         } else {
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
@@ -80,6 +99,20 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             if (indexMapping != null) {
                 final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
+            }
+
+            if (rowLineageEnabled && metaMappings != null) {
+                GenericRow rowLineageRow = new GenericRow(2);
+                RowWithLineage rowWithLineage = new RowWithLineage(metaMappings);
+                final FileRecordIterator<InternalRow> iteratorInner = iterator;
+                iterator =
+                        iterator.transform(
+                                row -> {
+                                    rowLineageRow.setField(
+                                            0, iteratorInner.returnedPosition() + firstRowId);
+                                    rowLineageRow.setField(1, snapshotId);
+                                    return rowWithLineage.replace(row, rowLineageRow);
+                                });
             }
         }
 

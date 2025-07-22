@@ -95,6 +95,19 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadWriteWithLineage() {
+        batchSql("INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA", 0L, 1L), Row.of(2, "BBB", 1L, 1L));
+
+        rows = batchSql("SELECT * FROM append_table_lineage");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+    }
+
+    @Test
     public void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
@@ -551,6 +564,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS append_table_lineage (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS index_table (id INT, indexc STRING, data STRING) WITH ('bucket' = '-1', 'file-index.bloom-filter.columns'='indexc', 'file-index.bloom-filter.indexc.items' = '500')");
@@ -584,19 +598,40 @@ public class AppendTableITCase extends CatalogITCaseBase {
 
     private void assertExecuteExpected(
             String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
+        assertExecuteExpected(sql, expectedSnapshotId, expectedCommitKind, "append_table");
+    }
+
+    private void assertExecuteExpected(
+            String sql,
+            long expectedSnapshotId,
+            Snapshot.CommitKind expectedCommitKind,
+            String tableName) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot("append_table");
+        Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 
+    private void assertBatchHasCompact(String sql, long timeout) throws Exception {
+        batchSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
     private void assertStreamingHasCompact(String sql, long timeout) throws Exception {
+        sEnv.executeSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
+    private void waitCompactSnapshot(long timeout) throws Exception {
+        waitCompactSnapshot(timeout, "append_table");
+    }
+
+    private void waitCompactSnapshot(long timeout, String tableName) throws Exception {
         long start = System.currentTimeMillis();
         long currentId = 1;
-        sEnv.executeSql(sql);
         Snapshot snapshot;
         while (true) {
-            snapshot = findSnapshot("append_table", currentId);
+            snapshot = findSnapshot(tableName, currentId);
             if (snapshot != null) {
                 if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                     break;

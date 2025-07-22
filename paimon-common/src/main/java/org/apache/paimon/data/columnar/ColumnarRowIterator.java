@@ -120,4 +120,55 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         }
         return this;
     }
+
+    public ColumnarRowIterator assignRowLineage(
+            Long firstRowId, Long snapshotId, int[] metaMappings) {
+        VectorizedColumnBatch vectorizedColumnBatch = row.batch();
+        ColumnVector[] vectors = vectorizedColumnBatch.columns;
+
+        for (int index = 0; index < metaMappings.length; index++) {
+            if (metaMappings[index] == 0) {
+                final ColumnVector rowIdVector = vectors[index];
+                vectors[index] =
+                        new LongColumnVector() {
+                            @Override
+                            public long getLong(int i) {
+                                if (rowIdVector.isNullAt(i)) {
+                                    return firstRowId + returnedPosition();
+                                } else {
+                                    return ((LongColumnVector) rowIdVector).getLong(i);
+                                }
+                            }
+
+                            @Override
+                            public boolean isNullAt(int i) {
+                                return false;
+                            }
+                        };
+            }
+
+            if (metaMappings[index] == 1) {
+                final ColumnVector versionVector = vectors[index];
+                vectors[index] =
+                        new LongColumnVector() {
+                            @Override
+                            public long getLong(int i) {
+                                if (versionVector.isNullAt(i)) {
+                                    return snapshotId;
+                                } else {
+                                    return ((LongColumnVector) versionVector).getLong(i);
+                                }
+                            }
+
+                            @Override
+                            public boolean isNullAt(int i) {
+                                return false;
+                            }
+                        };
+            }
+        }
+
+        copy(vectors);
+        return this;
+    }
 }
