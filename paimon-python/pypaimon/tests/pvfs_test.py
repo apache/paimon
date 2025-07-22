@@ -121,6 +121,17 @@ class PVFSTestCase(unittest.TestCase):
             self.assertSetEqual(set(table_dirs), expect_table_dirs)
             user_dirs = pvfs.ls("pvfs://test_warehouse/default/user", detail=False)
             self.assertSetEqual(set(user_dirs), {f'pvfs://test_warehouse/default/user/{data_file_name}'})
+
+            data_file_name = self.temp_path / "default" / "user" / 'data.txt'
+            data_file_name.touch()
+            content = 'Hello World'
+            with pvfs.open('pvfs://test_warehouse/default/user/data.txt', 'w') as w:
+                w.write(content)
+
+            with pvfs.open('pvfs://test_warehouse/default/user/data.txt', 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+                self.assertListEqual([content], lines)
+
         finally:
             # Shutdown server
             server.shutdown()

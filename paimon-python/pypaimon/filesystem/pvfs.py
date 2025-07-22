@@ -29,8 +29,8 @@ import fsspec
 from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 
-from pypaimon.api import RESTApi, GetTableTokenResponse
-from pypaimon.api.client import NoSuchResourceException
+from pypaimon.api import RESTApi, GetTableTokenResponse, Schema
+from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
 from pypaimon.api.typedef import Identifier
 from pypaimon.filesystem.pvfs_config import PVFSConfig
 
@@ -218,19 +218,78 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             f"Mv is not implemented for path: {path1}"
         )
 
+    def lazy_load_class(self, module_name, class_name):
+        module = importlib.import_module(module_name)
+        return getattr(module, class_name)
+
     def rm(self, path, recursive=False, maxdepth=None):
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            database_name = pvfs_identifier.name
+            if recursive:
+                for table_name in self.rest_api.list_tables(database_name):
+                    self.rest_api.drop_table(Identifier.create(database_name, table_name))
+            self.rest_api.drop_database(database_name)
+            return True
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table = self.rest_api.get_table(table_identifier)
+            if pvfs_identifier.sub_path is None:
+                self.rest_api.drop_table(table_identifier)
+                return True
+            storage_type = self._get_storage_type(table.path)
+            storage_location = table.path
+            actual_path = pvfs_identifier.get_actual_path(storage_location)
+            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            return fs.rm(
+                self._strip_storage_protocol(storage_type, actual_path),
+                recursive,
+                maxdepth,
+            )
         raise Exception(
-            "Rm is not implemented for Paimon Virtual FileSystem."
+            f"Rm is not supported for path: {path}."
         )
 
     def rm_file(self, path):
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table = self.rest_api.get_table(table_identifier)
+            if pvfs_identifier.sub_path is not None:
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.rm_file(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                )
         raise Exception(
-            "Rm_file is not implemented for Paimon Virtual FileSystem."
+            f"Rm file is not supported for path: {path}."
         )
 
     def rmdir(self, path):
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            database_name = pvfs_identifier.name
+            for table_name in self.rest_api.list_tables(database_name):
+                self.rest_api.drop_table(Identifier.create(database_name, table_name))
+            self.rest_api.drop_database(database_name)
+            return True
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table = self.rest_api.get_table(table_identifier)
+            if pvfs_identifier.sub_path is None:
+                self.rest_api.drop_table(table_identifier)
+                return True
+            storage_type = self._get_storage_type(table.path)
+            storage_location = table.path
+            actual_path = pvfs_identifier.get_actual_path(storage_location)
+            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            return fs.rmdir(
+                self._strip_storage_protocol(storage_type, actual_path)
+            )
         raise Exception(
-            "Rmdir is not implemented for Paimon Virtual FileSystem."
+            f"Rm dir is not supported for path: {path}."
         )
 
     def open(
@@ -240,33 +299,231 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             block_size=None,
             cache_options=None,
             compression=None,
-            **kwargs,
+            **kwargs
     ):
-        raise Exception(
-            "open is not implemented for Paimon Virtual FileSystem."
-        )
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"open is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            raise Exception(
+                f"open is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table = self.rest_api.get_table(table_identifier)
+            if pvfs_identifier.sub_path is None:
+                raise Exception(
+                    f"open is not supported for path: {path}"
+                )
+            else:
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.open(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                    mode,
+                    block_size,
+                    cache_options,
+                    compression,
+                    **kwargs
+                )
 
     def mkdir(self, path, create_parents=True, **kwargs):
-        raise Exception('Mkdir is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"mkdir is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            self.rest_api.create_database(pvfs_identifier.name, {})
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                self._create_object_table(pvfs_identifier)
+            else:
+                if create_parents:
+                    try:
+                        self._create_object_table(pvfs_identifier)
+                    except AlreadyExistsException:
+                        pass
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.mkdir(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                    create_parents,
+                    **kwargs
+                )
+
+    def _create_object_table(self, pvfs_identifier: PVFSTableIdentifier):
+        schema = Schema(options={'type': 'object-table'})
+        table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+        self.rest_api.create_table(table_identifier, schema)
 
     def makedirs(self, path, exist_ok=True):
-        raise Exception('makedirs is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"makedirs is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            try:
+                self.rest_api.create_database(pvfs_identifier.name, {})
+            except AlreadyExistsException as e:
+                if exist_ok:
+                    pass
+                raise e
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                try:
+                    self._create_object_table(pvfs_identifier)
+                except AlreadyExistsException as e:
+                    if exist_ok:
+                        pass
+                    raise e
+            else:
+                try:
+                    self._create_object_table(pvfs_identifier)
+                except AlreadyExistsException as e:
+                    if exist_ok:
+                        pass
+                    raise e
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.makedirs(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                    exist_ok
+                )
 
     def created(self, path):
-        raise Exception('created is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"created is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            return self.rest_api.get_database(pvfs_identifier.name).created_at
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                return self.rest_api.get_table(table_identifier).created_at
+            else:
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.created(
+                    self._strip_storage_protocol(storage_type, actual_path)
+                )
 
     def modified(self, path):
-        raise Exception('modified is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"modified is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            return self.rest_api.get_database(pvfs_identifier.name).updated_at
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                return self.rest_api.get_table(table_identifier).updated_at
+            else:
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.modified(
+                    self._strip_storage_protocol(storage_type, actual_path)
+                )
 
     def cat_file(self, path, start=None, end=None, **kwargs):
-        raise Exception('cat_file is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(path)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"cat file is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            raise Exception(
+                f"cat file is not supported for path: {path}"
+            )
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                raise Exception(
+                    f"cat file is not supported for path: {path}"
+                )
+            else:
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.cat_file(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                    start,
+                    end,
+                    **kwargs,
+                )
 
     def get_file(self, rpath, lpath, callback=None, outfile=None, **kwargs):
-        raise Exception('get_file is not implemented for Paimon Virtual FileSystem.')
+        pvfs_identifier = self._extract_pvfs_identifier(rpath)
+        if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
+            raise Exception(
+                f"get file is not supported for path: {rpath}"
+            )
+        elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+            raise Exception(
+                f"get file is not supported for path: {rpath}"
+            )
+        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            if pvfs_identifier.sub_path is None:
+                raise Exception(
+                    f"get file is not supported for path: {rpath}"
+                )
+            else:
+                table = self.rest_api.get_table(table_identifier)
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.get_file(
+                    self._strip_storage_protocol(storage_type, actual_path),
+                    lpath,
+                    **kwargs
+                )
 
     def _rm(self, path):
         raise Exception(
             "_rm is not implemented for Paimon Virtual FileSystem."
+        )
+
+    @staticmethod
+    def _strip_storage_protocol(storage_type: StorageType, path: str):
+        if storage_type == StorageType.LOCAL:
+            return path[len(f"{StorageType.LOCAL.value}:") :]
+
+        # OSS has different behavior than S3 and GCS, if we do not remove the
+        # protocol, it will always return an empty array.
+        if storage_type == StorageType.OSS:
+            if path.startswith(f"{StorageType.OSS.value}://"):
+                return path[len(f"{StorageType.OSS.value}://") :]
+            return path
+
+        raise Exception(
+            f"Storage type:{storage_type} doesn't support now."
         )
 
     @staticmethod

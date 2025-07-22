@@ -27,9 +27,10 @@ from pypaimon.api.api_response import (
     GetDatabaseResponse,
     ConfigResponse,
     PagedResponse,
-    GetTableTokenResponse,
+    GetTableTokenResponse, Schema,
 )
-from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest
+from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest, \
+    CreateTableRequest
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.api.client import HttpClient
 from pypaimon.api.auth import DLFAuthProvider, DLFToken
@@ -299,12 +300,27 @@ class RESTApi:
         tables = response.data() or []
         return PagedList(tables, response.get_next_page_token())
 
+    def create_table(self, identifier: Identifier, schema: Schema) -> None:
+        request = CreateTableRequest(identifier, schema)
+        return self.client.post(
+            self.resource_paths.tables(identifier.database_name),
+            request,
+            self.rest_auth_function)
+
     def get_table(self, identifier: Identifier) -> GetTableResponse:
         return self.client.get(
             self.resource_paths.table(
                 identifier.database_name,
                 identifier.object_name),
             GetTableResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_table(self, identifier: Identifier) -> GetTableResponse:
+        return self.client.delete(
+            self.resource_paths.table(
+                identifier.database_name,
+                identifier.object_name),
             self.rest_auth_function,
         )
 

@@ -20,6 +20,7 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
 
+from .api_response import Schema
 from .typedef import Identifier
 from .rest_json import json_field
 
@@ -53,3 +54,12 @@ class RenameTableRequest(RESTRequest):
 
     source: Identifier = json_field(FIELD_SOURCE)
     destination: Identifier = json_field(FIELD_DESTINATION)
+
+
+@dataclass
+class CreateTableRequest(RESTRequest):
+    FIELD_IDENTIFIER = "identifier"
+    FIELD_SCHEMA = "schema"
+
+    identifier: Identifier = json_field(FIELD_IDENTIFIER)
+    schema: Schema = json_field(FIELD_SCHEMA)
