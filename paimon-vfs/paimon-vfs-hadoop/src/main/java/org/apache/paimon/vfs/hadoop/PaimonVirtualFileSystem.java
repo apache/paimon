@@ -146,7 +146,8 @@ public class PaimonVirtualFileSystem extends FileSystem {
                     new VFSInputStream(
                             vfsTableObjectIdentifier
                                     .fileIO()
-                                    .newInputStream(vfsTableObjectIdentifier.getRealPath()));
+                                    .newInputStream(vfsTableObjectIdentifier.getRealPath()),
+                            statistics);
             return new FSDataInputStream(in);
         }
     }

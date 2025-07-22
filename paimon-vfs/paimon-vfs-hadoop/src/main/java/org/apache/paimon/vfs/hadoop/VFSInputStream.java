@@ -21,6 +21,7 @@ package org.apache.paimon.vfs.hadoop;
 import org.apache.paimon.fs.SeekableInputStream;
 
 import org.apache.hadoop.fs.FSInputStream;
+import org.apache.hadoop.fs.FileSystem;
 
 import java.io.IOException;
 
@@ -34,9 +35,11 @@ import java.io.IOException;
 public class VFSInputStream extends FSInputStream {
     private SeekableInputStream in;
     private byte[] oneByteBuf = new byte[1];
+    private FileSystem.Statistics statistics;
 
-    public VFSInputStream(SeekableInputStream in) {
+    public VFSInputStream(SeekableInputStream in, FileSystem.Statistics statistics) {
         this.in = in;
+        this.statistics = statistics;
     }
 
     @Override
@@ -56,7 +59,11 @@ public class VFSInputStream extends FSInputStream {
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
-        return in.read(b, off, len);
+        int byteRead = in.read(b, off, len);
+        if (statistics != null && byteRead >= 0) {
+            statistics.incrementBytesRead(byteRead);
+        }
+        return byteRead;
     }
 
     @Override
@@ -64,6 +71,9 @@ public class VFSInputStream extends FSInputStream {
         int n;
         while ((n = read(oneByteBuf, 0, 1)) == 0) {
             /* no op */
+        }
+        if (statistics != null && n >= 0) {
+            statistics.incrementBytesRead(n);
         }
         return (n == -1) ? -1 : oneByteBuf[0] & 0xff;
     }
