@@ -513,13 +513,13 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     @staticmethod
     def _strip_storage_protocol(storage_type: StorageType, path: str):
         if storage_type == StorageType.LOCAL:
-            return path[len(f"{StorageType.LOCAL.value}:") :]
+            return path[len(f"{StorageType.LOCAL.value}:"):]
 
         # OSS has different behavior than S3 and GCS, if we do not remove the
         # protocol, it will always return an empty array.
         if storage_type == StorageType.OSS:
             if path.startswith(f"{StorageType.OSS.value}://"):
-                return path[len(f"{StorageType.OSS.value}://") :]
+                return path[len(f"{StorageType.OSS.value}://"):]
             return path
 
         raise Exception(

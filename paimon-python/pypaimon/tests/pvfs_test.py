@@ -24,7 +24,7 @@ from pathlib import Path
 
 from pypaimon.api import ConfigResponse
 from pypaimon.api.api_response import TableSchema, TableMetadata
-from pypaimon.api.data_types import DataField, AtomicType, ArrayType, MapType
+from pypaimon.api.data_types import DataField, AtomicType
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.tests.api_test import AUTHORIZATION_HEADER_KEY, RESTCatalogServer
 
