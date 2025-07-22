@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.interceptor;
 
-import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
@@ -42,7 +41,7 @@ public class LoggingInterceptor implements HttpResponseInterceptor {
     public void process(
             HttpResponse httpResponse, EntityDetails entityDetails, HttpContext httpContext) {
         HttpCoreContext coreContext = HttpCoreContext.adapt(httpContext);
-        HttpRequest request =  coreContext.getRequest();
+        HttpRequest request = coreContext.getRequest();
         Long startTime = (Long) coreContext.getAttribute(REQUEST_START_TIME_KEY);
         long durationMs = System.currentTimeMillis() - startTime;
 
