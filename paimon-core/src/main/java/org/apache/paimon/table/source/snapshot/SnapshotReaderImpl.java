@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -435,14 +436,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
-        Snapshot beforeSnapshot = snapshotManager.snapshot(plan.snapshot().id() - 1);
+        LazyField<Snapshot> beforeSnapshot =
+                new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
         return toChangesPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
     }
 
     private Plan toChangesPlan(
             boolean isStreaming,
             FileStoreScan.Plan plan,
-            Snapshot beforeSnapshot,
+            LazyField<Snapshot> beforeSnapshot,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles) {
         Snapshot snapshot = plan.snapshot();
@@ -463,7 +465,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
             beforDeletionIndexFilesMap =
                     deletionVectors
                             ? indexFileHandler.scan(
-                                    beforeSnapshot, DELETION_VECTORS_INDEX, beforeFiles.keySet())
+                                    beforeSnapshot.get(),
+                                    DELETION_VECTORS_INDEX,
+                                    beforeFiles.keySet())
                             : Collections.emptyMap();
             deletionIndexFilesMap =
                     deletionVectors
@@ -541,7 +545,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
-        return toChangesPlan(false, plan, before, beforeFiles, dataFiles);
+        return toChangesPlan(false, plan, new LazyField<>(() -> before), beforeFiles, dataFiles);
     }
 
     private RecordComparator partitionComparator() {
