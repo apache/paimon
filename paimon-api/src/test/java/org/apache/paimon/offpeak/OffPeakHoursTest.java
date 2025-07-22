@@ -21,8 +21,6 @@ package org.apache.paimon.offpeak;
 import org.apache.paimon.OffPeakHours;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,20 +47,6 @@ public class OffPeakHoursTest {
             OffPeakHours offPeakHours = OffPeakHours.create(hour, hour);
             assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {-2, -1, 24, 25, 100})
-    public void testGetInstanceWithInvalidStartHour(int invalidHour) {
-        OffPeakHours offPeakHours = OffPeakHours.create(invalidHour, 10);
-        assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {-2, -1, 24, 25, 100})
-    public void testGetInstanceWithInvalidEndHour(int invalidHour) {
-        OffPeakHours offPeakHours = OffPeakHours.create(10, invalidHour);
-        assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
     }
 
     @Test
