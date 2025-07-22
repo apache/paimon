@@ -99,19 +99,33 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def sign(self, path, expiration=None, **kwargs):
         """We do not support to create a signed URL representing the given path in gvfs."""
         raise Exception(
-            "Sign is not implemented for Gravitino Virtual FileSystem."
+            "Sign is not implemented for Paimon Virtual FileSystem."
         )
 
     def ls(self, path, detail=True, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
-            databases = self.rest_api.list_databases(pvfs_identifier.name)
+            databases = self.rest_api.list_databases()
+            if detail:
+                return [
+                    self._create_database_or_table_file_detail(
+                        self._convert_database_actual_path(pvfs_identifier.name, database)
+                    )
+                    for database in databases
+                ]
             return [
                 self._convert_database_actual_path(pvfs_identifier.name, database)
                 for database in databases
             ]
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             tables = self.rest_api.list_tables(pvfs_identifier.name)
+            if detail:
+                return [
+                    self._create_database_or_table_file_detail(
+                        self._convert_table_actual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
+                    )
+                    for table in tables
+                ]
             return [
                 self._convert_table_actual_path(pvfs_identifier.catalog, pvfs_identifier.name, table)
                 for table in tables
@@ -142,39 +156,35 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 ]
                 return virtual_entry_paths
 
+    @staticmethod
     def _convert_actual_info(
-            self,
             entry: Dict,
             storage_type: StorageType,
             storage_location: str,
             virtual_location: str,
     ):
-        path = self._convert_actual_path(storage_type, entry["name"], storage_location, virtual_location)
+        path = PaimonVirtualFileSystem._convert_actual_path(storage_type, entry["name"], storage_location, virtual_location)
 
         if "mtime" in entry:
             # HDFS and GCS
-            return {
-                "name": path,
-                "size": entry["size"],
-                "type": entry["type"],
-                "mtime": entry["mtime"],
-            }
-
-        if "LastModified" in entry:
+            return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"], entry["mtime"])
+        elif "LastModified" in entry:
             # S3 and OSS
-            return {
-                "name": path,
-                "size": entry["size"],
-                "type": entry["type"],
-                "mtime": entry["LastModified"],
-            }
-
+            return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"], entry["LastModified"])
         # Unknown
+        return PaimonVirtualFileSystem._create_file_detail(path, entry["size"], entry["type"])
+
+    @staticmethod
+    def _create_database_or_table_file_detail(path: str) -> Dict[str, Any]:
+        return PaimonVirtualFileSystem._create_file_detail(path, 0, 'directory', None)
+
+    @staticmethod
+    def _create_file_detail(name: str, size: int, type: str, mtime: int = None) -> Dict[str, Any]:
         return {
-            "name": path,
-            "size": entry["size"],
-            "type": entry["type"],
-            "mtime": None,
+            "name": name,
+            "size": size,
+            "type": type,
+            "mtime": mtime,
         }
 
     @staticmethod
@@ -182,7 +192,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             catalog_name: str,
             database_name: str
     ):
-        return f'pvfs://{catalog_name}/{database_name}'
+        return f'{PROTOCOL_NAME}://{catalog_name}/{database_name}'
 
     @staticmethod
     def _convert_table_actual_path(
@@ -190,7 +200,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             database_name: str,
             table_name: str
     ):
-        return f'pvfs://{catalog_name}/{database_name}/{table_name}'
+        return f'{PROTOCOL_NAME}://{catalog_name}/{database_name}/{table_name}'
 
     @staticmethod
     def _convert_actual_path(
@@ -215,7 +225,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def _extract_pvfs_identifier(path: str) -> Optional['PVFSIdentifier']:
-        if not isinstance(path, str) or not path.startswith('pvfs://'):
+        if not isinstance(path, str) or not path.startswith(f'{PROTOCOL_NAME}://'):
             return None
 
         path_without_protocol = path[7:]

@@ -25,7 +25,8 @@ install_requires = [
     'readerwriterlock==1.0.9',
     'fsspec==2024.3.1',
     'cachetools==5.3.3',
-    'ossfs==2023.12.0'
+    'ossfs==2023.12.0',
+    'pandas==2.0.3'
 ]
 
 long_description = "See Apache Paimon Python API \

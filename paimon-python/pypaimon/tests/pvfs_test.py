@@ -14,10 +14,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import shutil
 import tempfile
 import unittest
 import uuid
+import pandas
 from pathlib import Path
 
 from pypaimon.api import ConfigResponse
@@ -35,10 +37,25 @@ class PVFSTestCase(unittest.TestCase):
         print(f"create: {self.temp_path}")
 
     def tearDown(self):
-        """测试清理 - 删除临时目录"""
         if self.temp_path.exists():
             shutil.rmtree(self.temp_path)
             print(f"clean: {self.temp_path}")
+
+    @staticmethod
+    def _create_parquet_file(path: str):
+        data = {
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'],
+        }
+
+        df = pandas.DataFrame(data)
+
+        df.to_parquet(path, engine='pyarrow', index=False)
+        #
+        # df_read = pandas.read_parquet(path)
+        # print(f"row: {len(df_read)}")
+        # print(f"column: {len(df_read.columns)}")
+        # print(df_read.head())
 
     def test(self):
         # Create config
@@ -51,11 +68,12 @@ class PVFSTestCase(unittest.TestCase):
 
         # Create server
         data_path = self.temp_dir
+        catalog = 'test_warehouse'
         server = RESTCatalogServer(
             data_path=data_path,
             auth_provider=MockAuthProvider(),
             config=config,
-            warehouse="test_warehouse")
+            warehouse=catalog)
         try:
             # Start server
             server.start()
@@ -67,18 +85,17 @@ class PVFSTestCase(unittest.TestCase):
                 "prod_db": server.mock_database("prod_db", {"env": "prod"})
             }
             data_fields = [
-                DataField(0, "name", AtomicType('INT'), 'desc  name'),
-                DataField(1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
-                DataField(2, "map11", MapType(False, AtomicType('INT'),
-                                              MapType(False, AtomicType('INT'), AtomicType('INT'))),
-                          'desc  arr11'),
+                DataField(0, "id", AtomicType('INT'), 'id'),
+                DataField(1, "name", AtomicType('STRING'), 'name')
             ]
             schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
             test_tables = {
                 "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
             }
-            nested_dir = self.temp_path / "default" / "user" / "01"
+            nested_dir = self.temp_path / "default" / "user"
             nested_dir.mkdir(parents=True)
+            data_file_name = 'a.parquet'
+            self._create_parquet_file(f"{nested_dir}/{data_file_name}")
             server.table_metadata_store.update(test_tables)
             server.database_store.update(test_databases)
             options = {
@@ -90,8 +107,20 @@ class PVFSTestCase(unittest.TestCase):
                 'dlf.access-key-secret': 'xxxx'
             }
             pvfs = PaimonVirtualFileSystem(options)
-            print(pvfs.ls("pvfs://test_warehouse/default/user", detail=True))
-
+            database_dirs = pvfs.ls("pvfs://test_warehouse", detail=False)
+            expect_database_dirs = set(map(
+                lambda x: pvfs._convert_database_actual_path(catalog, x),
+                list(test_databases.keys())
+            ))
+            self.assertSetEqual(set(database_dirs), expect_database_dirs)
+            table_dirs = pvfs.ls("pvfs://test_warehouse/default", detail=False)
+            expect_table_dirs = set(map(
+                lambda x: pvfs._convert_table_actual_path(catalog, 'default', x),
+                ['user']
+            ))
+            self.assertSetEqual(set(table_dirs), expect_table_dirs)
+            user_dirs = pvfs.ls("pvfs://test_warehouse/default/user", detail=False)
+            self.assertSetEqual(set(user_dirs), {f'pvfs://test_warehouse/default/user/{data_file_name}'})
         finally:
             # Shutdown server
             server.shutdown()
