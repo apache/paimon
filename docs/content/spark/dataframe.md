@@ -1,5 +1,5 @@
 ---
-title: "Dataframe"
+title: "DataFrame"
 weight: 9
 type: docs
 aliases:
