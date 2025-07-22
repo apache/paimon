@@ -21,20 +21,21 @@ package org.apache.paimon.stats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.IndexCastMapping;
-import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.schema.SchemaEvolutionUtil.createIndexCastMapping;
+import static org.apache.paimon.schema.SchemaEvolutionUtil.devolveFilters;
 
 /** Converters to create col stats array serializer. */
 public class SimpleStatsEvolutions {
@@ -82,7 +83,7 @@ public class SimpleStatsEvolutions {
      * filter or null if can't.
      */
     @Nullable
-    public Predicate toEvolutionSafeStatsFilter(long dataSchemaId, @Nullable Predicate filter) {
+    public Predicate tryDevolveFilter(long dataSchemaId, @Nullable Predicate filter) {
         if (filter == null || dataSchemaId == tableSchemaId) {
             return filter;
         }
@@ -91,11 +92,36 @@ public class SimpleStatsEvolutions {
         // compute engine to perform p2.
         List<Predicate> filters = PredicateBuilder.splitAnd(filter);
         List<Predicate> devolved =
-                Objects.requireNonNull(
-                        SchemaEvolutionUtil.devolveFilters(
-                                tableDataFields, schemaFields.apply(dataSchemaId), filters, false));
+                devolveFilters(tableDataFields, schemaFields.apply(dataSchemaId), filters, false);
 
         return devolved.isEmpty() ? null : PredicateBuilder.and(devolved);
+    }
+
+    /**
+     * Filter unsafe filter, for example, filter is 'a > 9', old type is String, new type is Int, if
+     * records are 9, 10 and 11, the evolved filter is not safe.
+     */
+    @Nullable
+    public Predicate filterUnsafeFilter(
+            long dataSchemaId, @Nullable Predicate filter, boolean keepNewFieldFilter) {
+        if (filter == null || dataSchemaId == tableSchemaId) {
+            return filter;
+        }
+
+        List<Predicate> filters = PredicateBuilder.splitAnd(filter);
+        List<DataField> oldSchema = schemaFields.apply(dataSchemaId);
+        List<Predicate> result = new ArrayList<>();
+        for (Predicate predicate : filters) {
+            if (!devolveFilters(
+                            tableDataFields,
+                            oldSchema,
+                            singletonList(predicate),
+                            keepNewFieldFilter)
+                    .isEmpty()) {
+                result.add(predicate);
+            }
+        }
+        return result.isEmpty() ? null : PredicateBuilder.and(result);
     }
 
     public List<DataField> tableDataFields() {
