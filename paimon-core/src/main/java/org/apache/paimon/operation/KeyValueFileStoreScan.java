@@ -64,10 +64,13 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private boolean valueFilterForceEnabled = false;
 
     // cache not evolved filter by schema id
-    private final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
+    private final Map<Long, Predicate> notEvolvedKeyFilterMapping = new ConcurrentHashMap<>();
+
+    // cache not evolved filter by schema id
+    private final Map<Long, Predicate> notEvolvedValueFilterMapping = new ConcurrentHashMap<>();
 
     // cache evolved filter by schema id
-    private final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
+    private final Map<Long, Predicate> evolvedValueFilterMapping = new ConcurrentHashMap<>();
 
     public KeyValueFileStoreScan(
             ManifestsReader manifestsReader,
@@ -129,9 +132,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             return false;
         }
 
-        Predicate safeKeyFilter =
-                fieldKeyStatsConverters.tryDevolveFilter(entry.file().schemaId(), keyFilter);
-        if (safeKeyFilter == null) {
+        Predicate notEvolvedFilter =
+                notEvolvedKeyFilterMapping.computeIfAbsent(
+                        entry.file().schemaId(),
+                        id ->
+                                // keepNewFieldFilter to handle add field
+                                // for example, add field 'c', 'c > 3': old files can be filtered
+                                fieldKeyStatsConverters.filterUnsafeFilter(
+                                        entry.file().schemaId(), keyFilter, true));
+        if (notEvolvedFilter == null) {
             return true;
         }
 
@@ -140,7 +149,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 fieldKeyStatsConverters
                         .getOrCreate(file.schemaId())
                         .evolution(file.keyStats(), file.rowCount(), null);
-        return safeKeyFilter.test(
+        return notEvolvedFilter.test(
                 file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
@@ -161,7 +170,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
             Predicate dataPredicate =
-                    evolvedFilterMapping.computeIfAbsent(
+                    evolvedValueFilterMapping.computeIfAbsent(
                             entry.file().schemaId(),
                             id ->
                                     fieldValueStatsConverters.tryDevolveFilter(
@@ -234,7 +243,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         Predicate notEvolvedFilter =
-                notEvolvedFilterMapping.computeIfAbsent(
+                notEvolvedValueFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),
                         id ->
                                 // keepNewFieldFilter to handle add field
