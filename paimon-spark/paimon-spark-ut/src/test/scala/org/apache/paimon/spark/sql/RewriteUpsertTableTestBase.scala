@@ -24,6 +24,15 @@ import org.apache.spark.sql.Row
 
 abstract class RewriteUpsertTableTestBase extends PaimonSparkTestBase {
 
+  test("Rewrite Upsert Table: cannot define with primary key") {
+    assert(intercept[Exception] {
+      sql("""
+            |CREATE TABLE T (k INT, a INT, b STRING)
+            |TBLPROPERTIES ('upsert-key' = 'k', 'primary-key' = 'k')
+            |""".stripMargin)
+    }.getMessage.contains("Cannot define 'upsert-key' [k] with 'primary-key' [k]."))
+  }
+
   test("Rewrite Upsert Table: rewrite insert without sequence field") {
     sql("""
           |CREATE TABLE T (k INT, a INT, b STRING)

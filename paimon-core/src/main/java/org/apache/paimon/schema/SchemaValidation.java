@@ -97,10 +97,18 @@ public class SchemaValidation {
      * @param schema the schema to be validated
      */
     public static void validateTableSchema(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
+        validateOnlyContainPrimitiveType(schema.fields(), options.upsertKey(), "upsert key");
 
-        CoreOptions options = new CoreOptions(schema.options());
+        if (!options.upsertKey().isEmpty() && !schema.primaryKeys().isEmpty()) {
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot define 'upsert-key' %s with 'primary-key' %s.",
+                            options.upsertKey(), schema.primaryKeys()));
+        }
 
         validateBucket(schema, options);
 
@@ -251,6 +259,9 @@ public class SchemaValidation {
             }
             for (String fieldName : fieldNames) {
                 DataField rowField = rowFields.get(fieldName);
+                if (rowField == null) {
+                    throw new IllegalArgumentException("Cannot find field: " + fieldName);
+                }
                 DataType dataType = rowField.type();
                 if (PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
                         .anyMatch(c -> c.isInstance(dataType))) {
