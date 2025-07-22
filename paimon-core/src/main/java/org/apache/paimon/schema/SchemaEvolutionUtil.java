@@ -42,6 +42,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -131,18 +132,17 @@ public class SchemaEvolutionUtil {
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
      * @param filters the filters
-     * @param forData true if devolve the filters for filtering data file, otherwise, for filtering
-     *     manifest entry
+     * @param keepNewFieldFilter true if keep new field filter, the new field filter needs to be
+     *     properly handled
      * @return the data filters
      */
-    @Nullable
     public static List<Predicate> devolveFilters(
             List<DataField> tableFields,
             List<DataField> dataFields,
             List<Predicate> filters,
-            boolean forData) {
+            boolean keepNewFieldFilter) {
         if (filters == null) {
-            return null;
+            return Collections.emptyList();
         }
 
         Map<String, DataField> nameToTableFields =
@@ -159,36 +159,19 @@ public class SchemaEvolutionUtil {
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
-                        // For example, add field b and filter b, the filter is safe for old file
-                        // meta without field b because the index mapping array can handle null
-                        return forData ? Optional.empty() : Optional.of(predicate);
+                        return keepNewFieldFilter ? Optional.of(predicate) : Optional.empty();
                     }
 
-                    Optional<List<Object>> castedLiterals =
-                            CastExecutors.castLiteralsWithEvolution(
-                                    predicate.literals(), predicate.type(), dataField.type());
-
-                    // unsafe
-                    if (!castedLiterals.isPresent()) {
-                        return Optional.empty();
-                    }
-
-                    if (forData) {
-                        // For data, the filter will be pushdown to data file, so must use the index
-                        // and literal type of data file
-                        return Optional.of(
-                                new LeafPredicate(
-                                        predicate.function(),
-                                        dataField.type(),
-                                        indexOf(dataField, idToDataFields),
-                                        dataField.name(),
-                                        castedLiterals.get()));
-                    } else {
-                        // For meta, the index mapping array will map the index the cast the
-                        // literals, so just return self
-                        // In other words, return it if it's safe
-                        return Optional.of(predicate);
-                    }
+                    return CastExecutors.castLiteralsWithEvolution(
+                                    predicate.literals(), predicate.type(), dataField.type())
+                            .map(
+                                    literals ->
+                                            new LeafPredicate(
+                                                    predicate.function(),
+                                                    dataField.type(),
+                                                    indexOf(dataField, idToDataFields),
+                                                    dataField.name(),
+                                                    literals));
                 };
 
         for (Predicate predicate : filters) {
