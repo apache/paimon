@@ -18,16 +18,12 @@
 
 package org.apache.paimon.vfs;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTApi;
-import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.rest.RESTUtil;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
@@ -38,7 +34,6 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
@@ -51,20 +46,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.CoreOptions.BRANCH;
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
-import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
-import static org.apache.paimon.catalog.Catalog.DB_LOCATION_PROP;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 
@@ -76,7 +64,7 @@ public class VFSOperations {
     private final CatalogContext context;
 
     // table id -> fileIO
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<VFSDataToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .expireAfterAccess(30, TimeUnit.MINUTES)
                     .maximumSize(1000)
@@ -89,7 +77,7 @@ public class VFSOperations {
                                                     "rest-token-file-io-scheduler"))))
                     .build();
 
-    private static final Cache<String, RESTToken> TOKEN_CACHE =
+    private static final Cache<String, VFSDataToken> TOKEN_CACHE =
             Caffeine.newBuilder().expireAfterAccess(30, TimeUnit.MINUTES).maximumSize(1000).build();
 
     public VFSOperations(CatalogContext context) {
@@ -112,10 +100,10 @@ public class VFSOperations {
         String tableName = parts[1];
         Identifier identifier = new Identifier(databaseName, tableName);
         // Get table from REST server
-        TableMetadata table;
+        GetTableResponse table;
         try {
             table = loadTableMetadata(identifier);
-        } catch (Catalog.TableNotExistException e) {
+        } catch (FileNotFoundException e) {
             if (parts.length == 2) {
                 return new VFSTableRootIdentifier(databaseName, tableName);
             } else {
@@ -125,13 +113,12 @@ public class VFSOperations {
         if (table.isExternal()) {
             throw new IOException("Do not support visiting external table " + identifier);
         }
-        Options options = new Options(table.schema().options());
         // Get real path
-        StringBuilder realPath = new StringBuilder(options.get(PATH));
+        StringBuilder realPath = new StringBuilder(table.getPath());
         boolean isTableRoot = true;
         if (parts.length > 2) {
             isTableRoot = false;
-            if (!options.get(PATH).endsWith("/")) {
+            if (!table.getPath().endsWith("/")) {
                 realPath.append("/");
             }
             for (int i = 2; i < parts.length; i++) {
@@ -142,8 +129,7 @@ public class VFSOperations {
             }
         }
         // Get REST token
-        FileIO fileIO =
-                getFileIO(new Identifier(databaseName, tableName), table, options.get(PATH));
+        FileIO fileIO = getFileIO(new Identifier(databaseName, tableName), table);
 
         if (parts.length == 2) {
             return new VFSTableRootIdentifier(
@@ -154,17 +140,13 @@ public class VFSOperations {
         }
     }
 
-    public Database getDatabase(String databaseName) throws FileNotFoundException {
+    public GetDatabaseResponse getDatabase(String databaseName) throws IOException {
         try {
-            GetDatabaseResponse response = api.getDatabase(databaseName);
-            Map<String, String> options = new HashMap<>(response.getOptions());
-            options.put(DB_LOCATION_PROP, response.getLocation());
-            response.putAuditOptionsTo(options);
-            return new Database.DatabaseImpl(databaseName, options, options.get(COMMENT_PROP));
+            return api.getDatabase(databaseName);
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Database " + databaseName + " not found");
         } catch (ForbiddenException e) {
-            throw new Catalog.DatabaseNoPermissionException(databaseName, e);
+            throw new IOException("No permission to access database " + databaseName);
         }
     }
 
@@ -172,73 +154,66 @@ public class VFSOperations {
         return api.listDatabases();
     }
 
-    public void createDatabase(String databaseName) {
+    public void createDatabase(String databaseName) throws IOException {
         try {
             api.createDatabase(databaseName, Collections.emptyMap());
         } catch (AlreadyExistsException e) {
             LOG.info("Database {} already exist, no need to create", databaseName);
         } catch (ForbiddenException e) {
-            throw new Catalog.DatabaseNoPermissionException(databaseName, e);
+            throw new IOException("No permission to create database " + databaseName);
         } catch (BadRequestException e) {
-            throw new IllegalArgumentException(e.getMessage());
+            throw new IOException("Bad request when creating database " + databaseName, e);
         }
     }
 
-    public List<String> listTables(String databaseName) throws FileNotFoundException {
+    public List<String> listTables(String databaseName) throws IOException {
         try {
             return api.listTables(databaseName);
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Database " + databaseName + " not found");
         } catch (ForbiddenException e) {
-            throw new Catalog.DatabaseNoPermissionException(databaseName, e);
+            throw new IOException("No permission to access database " + databaseName);
         }
     }
 
-    public void createObjectTable(String databaseName, String tableName)
-            throws FileNotFoundException {
+    public void createObjectTable(String databaseName, String tableName) throws IOException {
         Identifier identifier = Identifier.create(databaseName, tableName);
         Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
         try {
             tryCreateObjectTable(identifier, schema);
-        } catch (Catalog.DatabaseNotExistException e) {
+        } catch (FileNotFoundException e) {
             // Database not exist, try to create database and then create table again
             createDatabase(databaseName);
-            try {
-                tryCreateObjectTable(identifier, schema);
-            } catch (Catalog.DatabaseNotExistException e1) {
-                throw new FileNotFoundException("Database " + databaseName + " not found");
-            }
+            tryCreateObjectTable(identifier, schema);
         }
     }
 
-    private void tryCreateObjectTable(Identifier identifier, Schema schema)
-            throws Catalog.DatabaseNotExistException {
+    private void tryCreateObjectTable(Identifier identifier, Schema schema) throws IOException {
         try {
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             LOG.info("Table {} already exist, no need to create", identifier);
         } catch (NotImplementedException e) {
-            throw new RuntimeException(new UnsupportedOperationException(e.getMessage()));
+            throw new IOException("Create object table not implemented");
         } catch (NoSuchResourceException e) {
-            throw new Catalog.DatabaseNotExistException(identifier.getDatabaseName());
+            throw new FileNotFoundException("Database not found");
         } catch (BadRequestException e) {
-            throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+            throw new IOException("Bad request when creating table " + identifier, e);
         } catch (IllegalArgumentException e) {
-            throw e;
+            throw new IOException("Illegal argument when creating table " + identifier, e);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new IOException(e);
         }
     }
 
-    private FileIO getFileIO(Identifier identifier, TableMetadata table, String path)
-            throws FileNotFoundException {
-        RESTToken token = TOKEN_CACHE.getIfPresent(table.uuid());
+    private FileIO getFileIO(Identifier identifier, GetTableResponse table) throws IOException {
+        VFSDataToken token = TOKEN_CACHE.getIfPresent(table.getId());
         if (shouldRefresh(token)) {
             synchronized (TOKEN_CACHE) {
-                token = TOKEN_CACHE.getIfPresent(table.uuid());
+                token = TOKEN_CACHE.getIfPresent(table.getId());
                 if (shouldRefresh(token)) {
                     token = refreshToken(identifier);
-                    TOKEN_CACHE.put(table.uuid(), token);
+                    TOKEN_CACHE.put(table.getId(), token);
                 }
             }
         }
@@ -259,23 +234,19 @@ public class VFSOperations {
             options = new Options(RESTUtil.merge(token.token(), options.toMap()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext fileIOContext = CatalogContext.create(options);
-            try {
-                fileIO = FileIO.get(new Path(path), fileIOContext);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+            fileIO = FileIO.get(new Path(table.getPath()), fileIOContext);
             FILE_IO_CACHE.put(token, fileIO);
             return fileIO;
         }
     }
 
-    private boolean shouldRefresh(RESTToken token) {
+    private boolean shouldRefresh(VFSDataToken token) {
         return token == null
                 || token.expireAtMillis() - System.currentTimeMillis()
                         < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
     }
 
-    private RESTToken refreshToken(Identifier identifier) throws FileNotFoundException {
+    private VFSDataToken refreshToken(Identifier identifier) throws IOException {
         LOG.info("begin refresh data token for identifier [{}]", identifier);
         GetTableTokenResponse response;
         try {
@@ -283,7 +254,7 @@ public class VFSOperations {
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Table " + identifier + " not found");
         } catch (ForbiddenException e) {
-            throw new Catalog.TableNoPermissionException(identifier, e);
+            throw new IOException("No permission to access table " + identifier);
         }
 
         LOG.info(
@@ -291,12 +262,11 @@ public class VFSOperations {
                 identifier,
                 response.getExpiresAtMillis());
 
-        RESTToken token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
+        VFSDataToken token = new VFSDataToken(response.getToken(), response.getExpiresAtMillis());
         return token;
     }
 
-    private TableMetadata loadTableMetadata(Identifier identifier)
-            throws Catalog.TableNotExistException {
+    private GetTableResponse loadTableMetadata(Identifier identifier) throws IOException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table
         Identifier loadTableIdentifier =
@@ -311,23 +281,11 @@ public class VFSOperations {
         try {
             response = api.getTable(loadTableIdentifier);
         } catch (NoSuchResourceException e) {
-            throw new Catalog.TableNotExistException(identifier);
+            throw new FileNotFoundException("Table not found");
         } catch (ForbiddenException e) {
-            throw new Catalog.TableNoPermissionException(identifier, e);
+            throw new IOException("No permission to access table " + identifier);
         }
 
-        return toTableMetadata(identifier.getDatabaseName(), response);
-    }
-
-    private TableMetadata toTableMetadata(String db, GetTableResponse response) {
-        TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
-        Map<String, String> options = new HashMap<>(schema.options());
-        options.put(PATH.key(), response.getPath());
-        response.putAuditOptionsTo(options);
-        Identifier identifier = Identifier.create(db, response.getName());
-        if (identifier.getBranchName() != null) {
-            options.put(BRANCH.key(), identifier.getBranchName());
-        }
-        return new TableMetadata(schema.copy(options), response.isExternal(), response.getId());
+        return response;
     }
 }

@@ -18,15 +18,12 @@
 
 package org.apache.paimon.vfs;
 
-import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.responses.GetTableResponse;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-
-import static org.apache.paimon.CoreOptions.PATH;
 
 /** Identifier for table. */
 public abstract class VFSTableIdentifier extends VFSIdentifier {
@@ -34,7 +31,7 @@ public abstract class VFSTableIdentifier extends VFSIdentifier {
     protected String scheme;
     protected URI realUri;
     protected String tableName;
-    protected TableMetadata table;
+    protected GetTableResponse table;
     protected FileIO fileIO;
     protected String tableLocation;
 
@@ -47,7 +44,7 @@ public abstract class VFSTableIdentifier extends VFSIdentifier {
     // Constructor for existing table
     public VFSTableIdentifier(
             VFSFileType vfsFileType,
-            TableMetadata table,
+            GetTableResponse table,
             String realPath,
             FileIO fileIO,
             String databaseName,
@@ -64,8 +61,7 @@ public abstract class VFSTableIdentifier extends VFSIdentifier {
         this.table = table;
         this.fileIO = fileIO;
         if (table != null) {
-            Options options = new Options(table.schema().options());
-            this.tableLocation = options.get(PATH);
+            this.tableLocation = table.getPath();
         }
     }
 
@@ -85,7 +81,7 @@ public abstract class VFSTableIdentifier extends VFSIdentifier {
         return tableName;
     }
 
-    public TableMetadata getTable() {
+    public GetTableResponse getTable() {
         return table;
     }
 

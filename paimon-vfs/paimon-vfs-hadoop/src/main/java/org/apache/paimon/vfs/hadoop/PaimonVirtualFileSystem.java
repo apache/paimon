@@ -19,11 +19,11 @@
 package org.apache.paimon.vfs.hadoop;
 
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.vfs.VFSCatalogIdentifier;
 import org.apache.paimon.vfs.VFSDatabaseIdentifier;
 import org.apache.paimon.vfs.VFSIdentifier;
@@ -121,14 +121,14 @@ public class PaimonVirtualFileSystem extends FileSystem {
     public FSDataInputStream open(Path path, int bufferSize) throws IOException {
         VFSIdentifier vfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(path));
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
-            throw new IOException(
+            throw new FileNotFoundException(
                     "Cannot open file for virtual path " + path + " which is a catalog");
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            throw new IOException(
+            throw new FileNotFoundException(
                     "Cannot open file for virtual path " + path + " which is a database");
         } else if (vfsIdentifier instanceof VFSTableRootIdentifier) {
-            throw new IOException(
-                    "Cannot open file for table level virtual path " + path + " which is a table");
+            throw new FileNotFoundException(
+                    "Cannot open file for virtual path " + path + " which is a table");
         } else {
             VFSTableObjectIdentifier vfsTableObjectIdentifier =
                     (VFSTableObjectIdentifier) vfsIdentifier;
@@ -183,9 +183,9 @@ public class PaimonVirtualFileSystem extends FileSystem {
                                 + dst
                                 + " which is not in an existing table");
             }
-            TableMetadata srcTable = srcTableIdentifier.getTable();
-            TableMetadata dstTable = dstTableIdentifier.getTable();
-            if (!srcTable.uuid().equals(dstTable.uuid())) {
+            GetTableResponse srcTable = srcTableIdentifier.getTable();
+            GetTableResponse dstTable = dstTableIdentifier.getTable();
+            if (!srcTable.getId().equals(dstTable.getId())) {
                 throw new IOException(
                         "Cannot rename from virtual path "
                                 + src
@@ -227,7 +227,8 @@ public class PaimonVirtualFileSystem extends FileSystem {
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             return new FileStatus(0, true, 1, 1, 0, new Path(this.uri));
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            Database database = vfsOperations.getDatabase(vfsIdentifier.getDatabaseName());
+            GetDatabaseResponse database =
+                    vfsOperations.getDatabase(vfsIdentifier.getDatabaseName());
             return convertDatabase(database);
         } else {
             VFSTableIdentifier vfsTableIdentifier = (VFSTableIdentifier) vfsIdentifier;
@@ -240,8 +241,8 @@ public class PaimonVirtualFileSystem extends FileSystem {
         }
     }
 
-    private FileStatus convertDatabase(Database database) {
-        return new FileStatus(0, true, 1, 1, 0, new Path(new Path(this.uri), database.name()));
+    private FileStatus convertDatabase(GetDatabaseResponse database) {
+        return new FileStatus(0, true, 1, 1, 0, new Path(new Path(this.uri), database.getName()));
     }
 
     private FileStatus convertFileStatus(

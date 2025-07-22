@@ -18,8 +18,8 @@
 
 package org.apache.paimon.vfs;
 
-import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.rest.responses.GetTableResponse;
 
 /** Identifier for objects under a table. */
 public class VFSTableRootIdentifier extends VFSTableIdentifier {
@@ -28,7 +28,7 @@ public class VFSTableRootIdentifier extends VFSTableIdentifier {
     }
 
     public VFSTableRootIdentifier(
-            TableMetadata table,
+            GetTableResponse table,
             String realPath,
             FileIO fileIO,
             String databaseName,
