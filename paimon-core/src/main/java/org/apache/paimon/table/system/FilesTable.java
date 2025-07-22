@@ -464,7 +464,7 @@ public class FilesTable implements ReadonlyTable {
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();
-            for (int i = 0; i < min.getFieldCount(); i++) {
+            for (int i = 0; i < simpleStatsEvolutions.tableDataFields().size(); i++) {
                 DataField field = simpleStatsEvolutions.tableDataFields().get(i);
                 String name = field.name();
                 DataType type = field.type();

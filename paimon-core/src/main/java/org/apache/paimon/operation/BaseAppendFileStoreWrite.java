@@ -35,6 +35,8 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -52,6 +54,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -137,6 +140,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.statsDenseStore());
     }
 
+    public void withReadType(RowType readType) {
+        this.read.withReadType(readType);
+    }
+
     protected abstract CompactManager getCompactManager(
             BinaryRow partition,
             int bucket,
@@ -155,7 +162,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         }
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
-                createRollingFileWriter(
+                createRollingFileWriterForCompact(
                         partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
         List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
@@ -181,18 +188,41 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         return rewriter.result();
     }
 
-    private RowDataRollingFileWriter createRollingFileWriter(
+    private RowDataRollingFileWriter createRollingFileWriterForCompact(
             BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+        RowType writeRowType = rowType;
+        SimpleColStatsCollector.Factory[] writeStatsCollectors = statsCollectors;
+        if (options.rowTrackingEnabled()) {
+            List<DataField> fields = new ArrayList<>(rowType.getFields());
+            fields.add(SpecialFields.ROW_ID);
+            fields.add(SpecialFields.SEQUENCE_NUMBER);
+            writeRowType = new RowType(fields);
+
+            writeStatsCollectors = new SimpleColStatsCollector.Factory[fields.size()];
+            System.arraycopy(statsCollectors, 0, writeStatsCollectors, 0, statsCollectors.length);
+            System.arraycopy(
+                    StatsCollectorFactories.createStatsFactories(
+                            options.statsMode(),
+                            options,
+                            Arrays.asList(
+                                    SpecialFields.ROW_ID.name(),
+                                    SpecialFields.SEQUENCE_NUMBER.name())),
+                    0,
+                    writeStatsCollectors,
+                    statsCollectors.length,
+                    2);
+        }
+
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
-                rowType,
+                writeRowType,
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 seqNumCounter,
                 options.fileCompression(),
-                statsCollectors,
+                writeStatsCollectors,
                 fileIndexOptions,
                 FileSource.COMPACT,
                 options.asyncFileWrite(),

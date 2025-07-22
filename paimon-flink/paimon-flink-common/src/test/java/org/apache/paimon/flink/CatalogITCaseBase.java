@@ -144,6 +144,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     }
 
     protected List<Row> sql(String query, Object... args) {
+        tEnv.getConfig()
+                .set("table.column-expansion-strategy", "EXCLUDE_DEFAULT_VIRTUAL_METADATA_COLUMNS");
         try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
             return ImmutableList.copyOf(iter);
         } catch (Exception e) {

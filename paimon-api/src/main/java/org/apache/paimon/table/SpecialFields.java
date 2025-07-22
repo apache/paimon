@@ -22,6 +22,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -74,7 +76,7 @@ public class SpecialFields {
     public static final int KEY_FIELD_ID_START = SYSTEM_FIELD_ID_START;
 
     public static final DataField SEQUENCE_NUMBER =
-            new DataField(Integer.MAX_VALUE - 1, "_SEQUENCE_NUMBER", DataTypes.BIGINT().notNull());
+            new DataField(Integer.MAX_VALUE - 1, "_SEQUENCE_NUMBER", DataTypes.BIGINT());
 
     public static final DataField VALUE_KIND =
             new DataField(Integer.MAX_VALUE - 2, "_VALUE_KIND", DataTypes.TINYINT().notNull());
@@ -87,9 +89,25 @@ public class SpecialFields {
             new DataField(
                     Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
 
+    public static final DataField ROW_ID =
+            new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
-            Stream.of(SEQUENCE_NUMBER.name(), VALUE_KIND.name(), LEVEL.name(), ROW_KIND.name())
+            Stream.of(
+                            SEQUENCE_NUMBER.name(),
+                            VALUE_KIND.name(),
+                            LEVEL.name(),
+                            ROW_KIND.name(),
+                            ROW_ID.name())
                     .collect(Collectors.toSet());
+
+    public static final Map<String, DataField> META_COLUMNS =
+            new HashMap<String, DataField>() {
+                {
+                    put(ROW_ID.name(), ROW_ID);
+                    put(SEQUENCE_NUMBER.name(), SEQUENCE_NUMBER);
+                }
+            };
 
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;

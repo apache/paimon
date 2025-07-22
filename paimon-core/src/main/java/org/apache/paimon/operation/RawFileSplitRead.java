@@ -79,6 +79,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
+    private final boolean rowLineageEnabled;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -90,7 +91,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean rowLineageEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -98,6 +100,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.rowLineageEnabled = rowLineageEnabled;
         this.readRowType = rowType;
     }
 
@@ -239,7 +242,11 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        rowLineageEnabled,
+                        file.rowIdStart(),
+                        file.minSequenceNumber(),
+                        formatReaderMapping.getMeta());
 
         if (fileIndexResult instanceof BitmapIndexResult) {
             fileRecordReader =

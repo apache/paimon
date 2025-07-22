@@ -30,14 +30,19 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
@@ -52,6 +57,10 @@ public class AppendCompactTask {
     public AppendCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         Preconditions.checkArgument(files != null);
         this.partition = partition;
+        files.sort(
+                Comparator.comparing(
+                        file -> Optional.ofNullable(file.rowIdStart()).orElse(0L),
+                        Long::compareTo));
         compactBefore = new ArrayList<>(files);
         compactAfter = new ArrayList<>();
     }
@@ -74,6 +83,12 @@ public class AppendCompactTask {
         Preconditions.checkArgument(
                 dvEnabled || compactBefore.size() > 1,
                 "AppendOnlyCompactionTask need more than one file input.");
+        if (table.coreOptions().rowTrackingEnabled()) {
+            List<DataField> fields = new ArrayList<>(table.rowType().getFields());
+            fields.add(SpecialFields.ROW_ID);
+            fields.add(SpecialFields.SEQUENCE_NUMBER);
+            write.withReadType(new RowType(fields));
+        }
         IndexIncrement indexIncrement;
         if (dvEnabled) {
             AppendDeleteFileMaintainer dvIndexFileMaintainer =
