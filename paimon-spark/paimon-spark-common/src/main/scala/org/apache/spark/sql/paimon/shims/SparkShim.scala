@@ -27,7 +27,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
@@ -73,6 +73,15 @@ trait SparkShim {
   def supportsObjectHashAggregate(
       aggregateExpressions: Seq[AggregateExpression],
       groupByExpressions: Seq[Expression]): Boolean
+
+  def createMergeIntoTable(
+      targetTable: LogicalPlan,
+      sourceTable: LogicalPlan,
+      mergeCondition: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction],
+      withSchemaEvolution: Boolean): MergeIntoTable
 
   // for variant
   def toPaimonVariant(o: Object): Variant

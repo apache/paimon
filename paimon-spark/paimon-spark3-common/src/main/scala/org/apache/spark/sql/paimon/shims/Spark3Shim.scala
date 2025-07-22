@@ -24,17 +24,16 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensi
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -85,6 +84,23 @@ class Spark3Shim extends SparkShim {
       groupByExpressions: Seq[Expression]): Boolean =
     Aggregate.supportsObjectHashAggregate(aggregateExpressions)
 
+  override def createMergeIntoTable(
+      targetTable: LogicalPlan,
+      sourceTable: LogicalPlan,
+      mergeCondition: Expression,
+      matchedActions: Seq[MergeAction],
+      notMatchedActions: Seq[MergeAction],
+      notMatchedBySourceActions: Seq[MergeAction],
+      withSchemaEvolution: Boolean): MergeIntoTable = {
+    MinorVersionShim.createMergeIntoTable(
+      targetTable,
+      sourceTable,
+      mergeCondition,
+      matchedActions,
+      notMatchedActions,
+      notMatchedBySourceActions)
+  }
+
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
 
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean =
@@ -98,5 +114,4 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
-
 }
