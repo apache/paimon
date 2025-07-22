@@ -35,8 +35,8 @@ import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, Metadata, StructField, StructType}
 
-import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 case class Spark3ResolutionRules(session: SparkSession)
   extends Rule[LogicalPlan]
@@ -70,7 +70,8 @@ case class Spark3ResolutionRules(session: SparkSession)
           _,
           _)
         if t.table
-          .options().asScala
+          .options()
+          .asScala
           .get(CoreOptions.MERGE_ENGINE.key())
           .contains(MergeEngine.PARTIAL_UPDATE.toString)
           && userSpecifiedCols.nonEmpty =>
