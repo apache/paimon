@@ -85,10 +85,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestFileFactory,
                 scanManifestParallelism);
         this.bucketSelectConverter = bucketSelectConverter;
+        // NOTE: don't add key prefix to field names because fieldKeyStatsConverters is used for
+        // filter conversion
         this.fieldKeyStatsConverters =
                 new SimpleStatsEvolutions(
-                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
-                        schema.id());
+                        sid -> scanTableSchema(sid).trimmedPrimaryKeysFields(), schema.id());
         this.fieldValueStatsConverters =
                 new SimpleStatsEvolutions(
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
@@ -119,21 +120,24 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        DataFileMeta file = entry.file();
         if (isValueFilterEnabled() && !filterByValueFilter(entry)) {
             return false;
         }
 
-        if (keyFilter != null) {
-            SimpleStatsEvolution.Result stats =
-                    fieldKeyStatsConverters
-                            .getOrCreate(file.schemaId())
-                            .evolution(file.keyStats(), file.rowCount(), null);
-            return keyFilter.test(
-                    file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+        Predicate safeKeyFilter =
+                fieldKeyStatsConverters.toEvolutionSafeStatsFilter(
+                        entry.file().schemaId(), keyFilter);
+        if (safeKeyFilter == null) {
+            return true;
         }
 
-        return true;
+        DataFileMeta file = entry.file();
+        SimpleStatsEvolution.Result stats =
+                fieldKeyStatsConverters
+                        .getOrCreate(file.schemaId())
+                        .evolution(file.keyStats(), file.rowCount(), null);
+        return safeKeyFilter.test(
+                file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
     @Override
@@ -156,7 +160,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                     schemaId2DataFilter.computeIfAbsent(
                             entry.file().schemaId(),
                             id ->
-                                    fieldValueStatsConverters.tryDevolveFilter(
+                                    fieldValueStatsConverters.toEvolutionSafeStatsFilter(
                                             entry.file().schemaId(), valueFilter));
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
@@ -225,12 +229,19 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             return ((FilteredManifestEntry) entry).selected();
         }
 
+        Predicate safeValueFilter =
+                fieldValueStatsConverters.toEvolutionSafeStatsFilter(
+                        entry.file().schemaId(), valueFilter);
+        if (safeValueFilter == null) {
+            return true;
+        }
+
         DataFileMeta file = entry.file();
         SimpleStatsEvolution.Result result =
                 fieldValueStatsConverters
                         .getOrCreate(file.schemaId())
                         .evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
-        return valueFilter.test(
+        return safeValueFilter.test(
                         file.rowCount(),
                         result.minValues(),
                         result.maxValues(),

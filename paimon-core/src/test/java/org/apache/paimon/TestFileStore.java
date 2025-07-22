@@ -53,6 +53,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.ExpireChangelogImpl;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -126,7 +127,7 @@ public class TestFileStore extends KeyValueFileStore {
                                 valueType.getFields(),
                                 valueType.getFieldCount(),
                                 partitionType.getFieldNames(),
-                                keyType.getFieldNames(),
+                                cleanPrimaryKeys(keyType.getFieldNames()),
                                 Collections.emptyMap(),
                                 null),
                 false,
@@ -146,6 +147,12 @@ public class TestFileStore extends KeyValueFileStore {
         this.commitUser = UUID.randomUUID().toString();
 
         this.commitIdentifier = 0L;
+    }
+
+    private static List<String> cleanPrimaryKeys(List<String> primaryKeys) {
+        return primaryKeys.stream()
+                .map(k -> k.substring(SpecialFields.KEY_FIELD_PREFIX.length()))
+                .collect(Collectors.toList());
     }
 
     private static SchemaManager schemaManager(String root, CoreOptions options) {

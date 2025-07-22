@@ -80,7 +80,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        if (filter == null) {
+        Predicate safeFilter =
+                simpleStatsEvolutions.toEvolutionSafeStatsFilter(entry.file().schemaId(), filter);
+        if (safeFilter == null) {
             return true;
         }
 
@@ -91,7 +93,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().rowCount(),
                         entry.file().valueStatsCols());
 
-        return filter.test(
+        return safeFilter.test(
                         entry.file().rowCount(),
                         stats.minValues(),
                         stats.maxValues(),
@@ -110,7 +112,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 dataFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),
                         id ->
-                                simpleStatsEvolutions.tryDevolveFilter(
+                                simpleStatsEvolutions.toEvolutionSafeStatsFilter(
                                         entry.file().schemaId(), filter));
 
         try (FileIndexPredicate predicate =
