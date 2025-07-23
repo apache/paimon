@@ -167,7 +167,14 @@ class PVFSTestCase(unittest.TestCase):
         data_file_name = 'data_2.txt'
         date_file_new_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
         self.pvfs.cp(date_file_virtual_path, date_file_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(date_file_virtual_path))
         self.assertEqual(True, self.pvfs.exists(date_file_new_virtual_path))
+
+        date_file_mv_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/mv.txt'
+        self.pvfs.mv(date_file_virtual_path, date_file_mv_virtual_path)
+        self.assertEqual(False, self.pvfs.exists(date_file_virtual_path))
+        self.assertEqual(True, self.pvfs.exists(date_file_mv_virtual_path))
+
         with self.pvfs.open(date_file_new_virtual_path, 'w') as w:
             w.write(content)
 
