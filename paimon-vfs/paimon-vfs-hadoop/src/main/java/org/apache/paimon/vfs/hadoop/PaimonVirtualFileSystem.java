@@ -56,6 +56,10 @@ public class PaimonVirtualFileSystem extends FileSystem {
     private VFSOperations vfsOperations;
     private Configuration conf;
 
+    private static final String DLF_USER_AGENT_KEY = "header.User-Agent";
+    private static final String OSS_USER_AGENT_KEY = "fs.oss.user.agent.extended";
+    private static final String USER_AGENT = "HadoopPVFS";
+
     @Override
     public void initialize(URI uri, Configuration conf) throws IOException {
         setConf(conf);
@@ -72,6 +76,11 @@ public class PaimonVirtualFileSystem extends FileSystem {
         Options options = PaimonVirtualFileSystemConfiguration.convertToCatalogOptions(conf);
         // pvfs://catalog_name/database_name/table_name/file, so uri authority is catalog name
         options.set(CatalogOptions.WAREHOUSE, uri.getAuthority());
+
+        // Set user agent
+        options.set(DLF_USER_AGENT_KEY, USER_AGENT);
+        options.set(OSS_USER_AGENT_KEY, USER_AGENT);
+
         vfsOperations = new VFSOperations(options);
     }
 
