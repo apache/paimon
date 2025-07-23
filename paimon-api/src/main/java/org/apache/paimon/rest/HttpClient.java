@@ -142,7 +142,7 @@ public class HttpClient implements RESTClient {
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
+            Header[] authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
             HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
             httpDelete.setHeaders(authHeaders);
             String encodedBody = RESTUtil.encodedBody(body);
