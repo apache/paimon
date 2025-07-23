@@ -431,7 +431,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 except AlreadyExistsException as e:
                     if exist_ok:
                         pass
-                    raise e
+                    else:
+                        raise e
                 table = self.rest_api.get_table(table_identifier)
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path

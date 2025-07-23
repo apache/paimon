@@ -19,6 +19,7 @@
 import logging
 import re
 import uuid
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass
 import threading
@@ -505,27 +506,21 @@ class RESTCatalogServer:
                     create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
+                table_dir = Path(self.data_path) / self.warehouse / database_name / create_table.identifier.object_name
+                if not table_dir.exists():
+                    table_dir.mkdir(parents=True)
                 return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
         """Handle individual table operations"""
         if method == "GET":
-            if identifier.is_system_table():
-                # Handle system table
-                schema = Schema(fields=[], options={PATH: f"/tmp/{identifier.get_full_name()}"})
-                table_metadata = self._create_table_metadata(identifier, 1, schema, None, False)
-            else:
-                if identifier.get_full_name() not in self.table_metadata_store:
-                    raise TableNotExistException(identifier)
-                table_metadata = self.table_metadata_store[identifier.get_full_name()]
-
+            if identifier.get_full_name() not in self.table_metadata_store:
+                raise TableNotExistException(identifier)
+            table_metadata = self.table_metadata_store[identifier.get_full_name()]
+            table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
             schema = table_metadata.schema.to_schema()
-            schema.options.pop(PATH, None)
-            default_path = f'file://{self.data_path}/{identifier.database_name}/{identifier.object_name}'
-            path = schema.options.get(PATH, default_path)
-
-            response = self.mock_table(identifier, table_metadata, path, schema)
+            response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
         #
         # elif method == "POST":
@@ -636,9 +631,6 @@ class RESTCatalogServer:
                                schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:
         """Create table metadata"""
         options = schema.options.copy()
-        path = f"/tmp/{identifier.get_full_name()}"
-        options[PATH] = path
-
         table_schema = TableSchema(
             id=schema_id,
             fields=schema.fields,

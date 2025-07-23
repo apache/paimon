@@ -39,7 +39,6 @@ class PVFSTestCase(unittest.TestCase):
         config = ConfigResponse(defaults={"prefix": "mock-test"})
 
         # Create server
-        self.catalog = 'test_catalog'
         self.data_path = self.temp_dir
         self.catalog = 'test_warehouse'
         self.token = str(uuid.uuid4())
@@ -84,8 +83,15 @@ class PVFSTestCase(unittest.TestCase):
             self.server.shutdown()
             print("Server stopped")
 
-    @staticmethod
-    def _create_parquet_file(path: str):
+    def _create_parquet_file(self, database: str, table: str, data_file_name: str):
+        fs = self.pvfs
+        path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
+        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
+        print(fs.ls(f'pvfs://{self.catalog}/{database}/{table}'))
+        fs.touch(path)
+        print(fs.ls(path))
+        self.assertEqual(fs.exists(f'pvfs://{self.catalog}/{database}/{table}'), True)
+        self.assertEqual(fs.exists(path), True)
         data = {
             'id': [1, 2, 3, 4, 5],
             'name': ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'],
@@ -93,20 +99,19 @@ class PVFSTestCase(unittest.TestCase):
 
         df = pandas.DataFrame(data)
 
-        df.to_parquet(path, engine='pyarrow', index=False)
+        df.to_parquet(
+            f'{self.data_path}/{self.catalog}/{database}/{table}/{data_file_name}',
+            engine='pyarrow', index=False
+        )
 
     def test_arrow(self):
         import pyarrow.parquet as pq
         fs = self.pvfs
         database = 'arrow_db'
         table = 'test_table'
-        nested_dir = self.temp_path / database / table
-        nested_dir.mkdir(parents=True)
         data_file_name = 'a.parquet'
-        self._create_parquet_file(f"{nested_dir}/{data_file_name}")
+        self._create_parquet_file(database, table, data_file_name)
         path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
-        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
-        self.assertEqual(fs.exists(path), True)
         dataset = pq.ParquetDataset(path, filesystem=fs)
         table = dataset.read()
         first_row = table.slice(0, 1).to_pydict()
@@ -121,13 +126,9 @@ class PVFSTestCase(unittest.TestCase):
         fs = self.pvfs
         database = 'ray_db'
         table = 'test_table'
-        nested_dir = self.temp_path / database / table
-        nested_dir.mkdir(parents=True)
         data_file_name = 'a.parquet'
-        self._create_parquet_file(f"{nested_dir}/{data_file_name}")
+        self._create_parquet_file(database, table, data_file_name)
         path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
-        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
-        self.assertEqual(fs.exists(path), True)
         ds = ray.data.read_parquet(filesystem=fs, paths=path)
         print(ds.count())
         self.assertEqual(ds.count(), 5)
@@ -136,7 +137,7 @@ class PVFSTestCase(unittest.TestCase):
         nested_dir = self.temp_path / self.database / self.table
         nested_dir.mkdir(parents=True)
         data_file_name = 'a.parquet'
-        self._create_parquet_file(f"{nested_dir}/{data_file_name}")
+        self._create_parquet_file(self.database, self.table, data_file_name)
         database_dirs = self.pvfs.ls(f"pvfs://{self.catalog}", detail=False)
         expect_database_dirs = set(map(
             lambda x: self.pvfs._convert_database_virtual_path(self.catalog, x),
@@ -159,8 +160,8 @@ class PVFSTestCase(unittest.TestCase):
         self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'})
 
         data_file_name = 'data.txt'
-        data_file_path = self.temp_path / self.database / self.table / 'data.txt'
-        data_file_path.touch()
+        data_file_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
+        self.pvfs.touch(data_file_path)
         content = 'Hello World'
         date_file_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
         data_file_name = 'data_2.txt'
