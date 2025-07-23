@@ -21,6 +21,7 @@ package org.apache.paimon.vfs.hadoop;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.vfs.VFSCatalogIdentifier;
 import org.apache.paimon.vfs.VFSDatabaseIdentifier;
@@ -56,7 +57,6 @@ public class PaimonVirtualFileSystem extends FileSystem {
     private VFSOperations vfsOperations;
     private Configuration conf;
 
-    private static final String DLF_USER_AGENT_KEY = "header.User-Agent";
     private static final String USER_AGENT = "HadoopPVFS";
 
     @Override
@@ -77,7 +77,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         options.set(CatalogOptions.WAREHOUSE, uri.getAuthority());
 
         // Set user agent
-        options.set(DLF_USER_AGENT_KEY, USER_AGENT);
+        options.set(RESTCatalogOptions.HTTP_USER_AGENT, USER_AGENT);
 
         vfsOperations = new VFSOperations(options);
     }
