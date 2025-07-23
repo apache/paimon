@@ -24,9 +24,10 @@ from pathlib import Path
 
 from pypaimon.api import ConfigResponse
 from pypaimon.api.api_response import TableSchema, TableMetadata
+from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.data_types import DataField, AtomicType
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
-from pypaimon.tests.api_test import AUTHORIZATION_HEADER_KEY, RESTCatalogServer
+from pypaimon.tests.api_test import RESTCatalogServer
 
 
 class PVFSTestCase(unittest.TestCase):
@@ -37,18 +38,15 @@ class PVFSTestCase(unittest.TestCase):
         # Create config
         config = ConfigResponse(defaults={"prefix": "mock-test"})
 
-        # Create mock auth provider
-        class MockAuthProvider:
-            def merge_auth_header(self, headers, auth_param):
-                return {AUTHORIZATION_HEADER_KEY: "Bearer test-token"}
-
         # Create server
         self.catalog = 'test_catalog'
         self.data_path = self.temp_dir
         self.catalog = 'test_warehouse'
+        self.token = str(uuid.uuid4())
+        # Create server
         self.server = RESTCatalogServer(
             data_path=self.data_path,
-            auth_provider=MockAuthProvider(),
+            auth_provider=BearTokenAuthProvider(self.token),
             config=config,
             warehouse=self.catalog)
         self.server.start()
@@ -58,9 +56,8 @@ class PVFSTestCase(unittest.TestCase):
             'uri': f"http://localhost:{self.server.port}",
             'warehouse': 'test_warehouse',
             'dlf.region': 'cn-hangzhou',
-            "token.provider": "dlf",
-            'dlf.access-key-id': 'xxxx',
-            'dlf.access-key-secret': 'xxxx'
+            "token.provider": "bear",
+            'token': self.token
         }
         self.pvfs = PaimonVirtualFileSystem(options)
         self.database = 'test_database'
