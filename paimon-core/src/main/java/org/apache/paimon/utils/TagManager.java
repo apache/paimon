@@ -96,7 +96,7 @@ public class TagManager {
             @Nullable TagPeriodHandler tagPeriodHandler) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = branch;
+        this.branch = BranchManager.normalizeBranch(branch);
         this.tagPeriodHandler = tagPeriodHandler;
     }
 
