@@ -20,9 +20,10 @@ import uuid
 import unittest
 
 import pypaimon.api as api
-from .rest_server import AUTHORIZATION_HEADER_KEY, RESTCatalogServer
+from .rest_server import RESTCatalogServer
 from ..api.api_response import (ConfigResponse, TableMetadata, TableSchema, DataField)
 from ..api import RESTApi
+from ..api.auth import BearTokenAuthProvider
 from ..api.rest_json import JSON
 from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 from ..api.typedef import Identifier
@@ -125,16 +126,11 @@ class ApiTestCase(unittest.TestCase):
 
         # Create config
         config = ConfigResponse(defaults={"prefix": "mock-test"})
-
-        # Create mock auth provider
-        class MockAuthProvider:
-            def merge_auth_header(self, headers, auth_param):
-                return {AUTHORIZATION_HEADER_KEY: "Bearer test-token"}
-
+        token = str(uuid.uuid4())
         # Create server
         server = RESTCatalogServer(
             data_path="/tmp/test_warehouse",
-            auth_provider=MockAuthProvider(),
+            auth_provider=BearTokenAuthProvider(token),
             config=config,
             warehouse="test_warehouse"
         )
@@ -165,9 +161,8 @@ class ApiTestCase(unittest.TestCase):
                 'uri': f"http://localhost:{server.port}",
                 'warehouse': 'test_warehouse',
                 'dlf.region': 'cn-hangzhou',
-                "token.provider": "xxxx",
-                'dlf.access-key-id': 'xxxx',
-                'dlf.access-key-secret': 'xxxx'
+                "token.provider": "bear",
+                'token': token
             }
             api = RESTApi(options)
             self.assertSetEqual(set(api.list_databases()), {*test_databases})

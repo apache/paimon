@@ -18,7 +18,7 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-from pypaimon.api.auth import RESTAuthFunction
+from pypaimon.api.auth import RESTAuthFunction, AuthProviderFactory
 from pypaimon.api.api_response import (
     PagedList,
     GetTableResponse,
@@ -33,7 +33,6 @@ from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseReques
     CreateTableRequest
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.api.client import HttpClient
-from pypaimon.api.auth import DLFAuthProvider, DLFToken
 from pypaimon.api.typedef import T
 
 
@@ -132,10 +131,7 @@ class RESTApi:
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(options.get(RESTCatalogOptions.URI))
-        auth_provider = DLFAuthProvider(
-            options.get(RESTCatalogOptions.DLF_REGION),
-            DLFToken.from_options(options)
-        )
+        auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
         if config_required:

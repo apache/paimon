@@ -78,6 +78,7 @@ class RESTCatalogOptions:
     URI = "uri"
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
+    TOKEN = "token"
     DLF_REGION = "dlf.region"
     DLF_ACCESS_KEY_ID = "dlf.access-key-id"
     DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"

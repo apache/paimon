@@ -58,7 +58,7 @@ class PVFSTestCase(unittest.TestCase):
             'uri': f"http://localhost:{self.server.port}",
             'warehouse': 'test_warehouse',
             'dlf.region': 'cn-hangzhou',
-            "token.provider": "xxxx",
+            "token.provider": "dlf",
             'dlf.access-key-id': 'xxxx',
             'dlf.access-key-secret': 'xxxx'
         }
