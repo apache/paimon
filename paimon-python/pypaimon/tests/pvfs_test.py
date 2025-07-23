@@ -146,6 +146,5 @@ class PVFSTestCase(unittest.TestCase):
             self.assertListEqual([content], lines)
 
         table_new_virtual_path = f"pvfs://{self.catalog}/{self.database}/new_table"
-        self.pvfs.mkdir(table_virtual_path, table_new_virtual_path)
-        self.assertEqual(True, self.pvfs.exists(table_new_virtual_path))
+        self.pvfs.mkdir(table_new_virtual_path)
         self.assertEqual(True, self.pvfs.exists(table_new_virtual_path))

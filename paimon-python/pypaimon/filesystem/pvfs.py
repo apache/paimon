@@ -193,11 +193,16 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return False
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
-            actual_path = pvfs_identifier.get_actual_path(storage_location)
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
-            return fs.exists(actual_path)
+            if table:
+                if pvfs_identifier.sub_path is None:
+                    return True
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.exists(actual_path)
+            else:
+                return False
 
     def cp_file(self, path1, path2, **kwargs):
         source_pvfs_identifier = self._extract_pvfs_identifier(path1)

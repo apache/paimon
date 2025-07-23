@@ -372,11 +372,8 @@ class RESTCatalogServer:
                 rename_request = JSON.from_json(data, RenameTableRequest)
                 source = self.table_metadata_store.get(rename_request.source.get_full_name())
                 self.table_metadata_store.update({rename_request.destination.get_full_name(): source})
-            # Global tables endpoint
-            database = resource_path.split("/")[4]
-            if resource_path == self.resource_paths.tables(database):
-                return self._tables_handle(method=method, parameters=parameters, database_name=database, data=data)
 
+            database = resource_path.split("/")[4]
             # Database-specific endpoints
             if resource_path.startswith(self.resource_paths.database(database)):
                 return self._handle_database_resource(method, resource_path, parameters, data)
@@ -470,7 +467,9 @@ class RESTCatalogServer:
             return self._generate_final_list_databases_response(parameters, databases)
         if method == "POST":
             create_database = JSON.from_json(data, CreateDatabaseRequest)
-            self.database_store.update({create_database.name: self.mock_database(create_database.name, create_database.options)})
+            self.database_store.update({
+                create_database.name: self.mock_database(create_database.name, create_database.options)
+            })
             return None
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
@@ -503,9 +502,11 @@ class RESTCatalogServer:
                 return self._generate_final_list_tables_response(parameters, tables)
             elif method == "POST":
                 create_table = JSON.from_json(data, CreateTableRequest)
-                table_identifier = Identifier.create(create_table.identifier.database_name, create_table.identifier.object_name)
-                self.table_metadata_store.update({table_identifier.get_full_name(): TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=create_table.schema)})
-                return None
+                table_metadata = self._create_table_metadata(
+                    create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
+                )
+                self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
+                return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _table_handle(self, method: str, data: str, identifier: Identifier) -> Tuple[str, int]:
