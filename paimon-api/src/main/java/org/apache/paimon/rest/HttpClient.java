@@ -41,6 +41,8 @@ import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.io.HttpClientConnectionManager;
+import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.apache.hc.client5.http.ssl.HttpsSupport;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.ParseException;
@@ -48,6 +50,8 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.hc.core5.net.URIBuilder;
+import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
+import org.apache.hc.core5.ssl.SSLContexts;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -242,6 +246,17 @@ public class HttpClient implements RESTClient {
         connectionManagerBuilder
                 .useSystemProperties()
                 .setMaxConnTotal(options.get(RESTCatalogOptions.REST_CLIENT_MAX_CONNECTIONS));
+
+        // support TLS
+        String[] tlsProtocols = {"TLSv1.2", "TLSv1.3"};
+        connectionManagerBuilder.setTlsSocketStrategy(
+                new DefaultClientTlsStrategy(
+                        SSLContexts.createDefault(),
+                        tlsProtocols,
+                        null,
+                        SSLBufferMode.STATIC,
+                        HttpsSupport.getDefaultHostnameVerifier()));
+
         return connectionManagerBuilder.build();
     }
 
