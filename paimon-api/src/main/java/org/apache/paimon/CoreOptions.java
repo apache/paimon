@@ -1912,6 +1912,12 @@ public class CoreOptions implements Serializable {
                                     + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
+    public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
+            key("snapshot.ignore-empty-commit")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription("Whether ignore empty commit.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {

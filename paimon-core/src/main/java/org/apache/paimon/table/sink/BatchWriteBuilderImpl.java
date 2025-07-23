@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
@@ -73,7 +74,10 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     @Override
     public BatchTableCommit newCommit() {
         InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
-        commit.ignoreEmptyCommit(true);
+        commit.ignoreEmptyCommit(
+                Options.fromMap(table.options())
+                        .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
+                        .orElse(true));
         return commit;
     }
 }

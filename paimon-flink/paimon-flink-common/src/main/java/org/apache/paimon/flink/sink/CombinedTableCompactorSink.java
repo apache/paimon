@@ -199,7 +199,10 @@ public class CombinedTableCompactorSink implements Serializable {
             dynamicOptions.put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
             dynamicOptions.put(CoreOptions.LOOKUP_WAIT.key(), "false");
         }
-        return context -> new StoreMultiCommitter(catalogLoader, context, true, dynamicOptions);
+        boolean ignoreEmptyCommit =
+                options.getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT).orElse(true);
+        return context ->
+                new StoreMultiCommitter(catalogLoader, context, ignoreEmptyCommit, dynamicOptions);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
