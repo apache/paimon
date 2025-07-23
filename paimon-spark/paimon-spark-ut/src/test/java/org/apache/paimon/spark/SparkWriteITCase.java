@@ -516,13 +516,13 @@ public class SparkWriteITCase {
                 -1, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
 
         // set false to allow commit empty snapshot
-        spark.conf().set("spark.paimon.ignore.empty.commit", "false");
+        spark.conf().set("spark.paimon.snapshot.ignore-empty-commit", "false");
         spark.sql("delete from T where id = 1");
         Assertions.assertEquals(3, snapshotManager.latestSnapshotId());
         Assertions.assertEquals(
                 0, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
 
-        spark.conf().unset("spark.paimon.ignore.empty.commit");
+        spark.conf().unset("spark.paimon.snapshot.ignore-empty-commit");
     }
 
     protected static FileStoreTable getTable(String tableName) {
