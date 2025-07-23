@@ -18,5 +18,31 @@
 
 package org.apache.paimon.vfs;
 
-/** Identifier for virtual path. */
-public interface VFSIdentifier {}
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+
+/** Information for an existing table. */
+public class VFSTableInfo {
+
+    private final String tableId;
+    private final Path tablePath;
+    private final FileIO fileIO;
+
+    public VFSTableInfo(String tableId, Path tablePath, FileIO fileIO) {
+        this.tableId = tableId;
+        this.tablePath = tablePath;
+        this.fileIO = fileIO;
+    }
+
+    public String tableId() {
+        return tableId;
+    }
+
+    public Path tablePath() {
+        return tablePath;
+    }
+
+    public FileIO fileIO() {
+        return fileIO;
+    }
+}

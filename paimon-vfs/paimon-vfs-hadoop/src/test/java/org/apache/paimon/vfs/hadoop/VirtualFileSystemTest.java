@@ -54,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link PaimonVirtualFileSystem}. */
 public abstract class VirtualFileSystemTest {
+
     @TempDir java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;

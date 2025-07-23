@@ -18,21 +18,27 @@
 
 package org.apache.paimon.vfs;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.fs.Path;
+
+import javax.annotation.Nullable;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Identifier for objects under a table. */
 public class VFSTableRootIdentifier extends VFSTableIdentifier {
+
     public VFSTableRootIdentifier(String databaseName, String tableName) {
-        super(VFSFileType.TABLE, databaseName, tableName);
+        super(databaseName, tableName);
     }
 
     public VFSTableRootIdentifier(
-            GetTableResponse table,
-            String realPath,
-            FileIO fileIO,
-            String databaseName,
-            String tableName) {
-        super(VFSFileType.TABLE, table, realPath, fileIO, databaseName, tableName);
+            String databaseName, String tableName, @Nullable VFSTableInfo tableInfo) {
+        super(databaseName, tableName, tableInfo);
+    }
+
+    @Override
+    public Path filePath() {
+        checkNotNull(tableInfo);
+        return tableInfo.tablePath();
     }
 }

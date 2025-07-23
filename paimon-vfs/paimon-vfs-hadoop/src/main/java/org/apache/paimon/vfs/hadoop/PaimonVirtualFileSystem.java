@@ -22,12 +22,12 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.vfs.VFSCatalogIdentifier;
 import org.apache.paimon.vfs.VFSDatabaseIdentifier;
 import org.apache.paimon.vfs.VFSIdentifier;
 import org.apache.paimon.vfs.VFSOperations;
 import org.apache.paimon.vfs.VFSTableIdentifier;
+import org.apache.paimon.vfs.VFSTableInfo;
 import org.apache.paimon.vfs.VFSTableObjectIdentifier;
 import org.apache.paimon.vfs.VFSTableRootIdentifier;
 
@@ -102,18 +102,16 @@ public class PaimonVirtualFileSystem extends FileSystem {
             throw new IOException(
                     "Cannot create file for table level virtual path " + f + " which is a table");
         } else {
-            VFSTableObjectIdentifier vfsTableObjectIdentifier =
-                    (VFSTableObjectIdentifier) vfsIdentifier;
-            if (!vfsTableObjectIdentifier.isTableExist()) {
+            VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new IOException(
                         "Cannot create a file for virtual path "
                                 + f
                                 + " which is not in an existing table");
             }
             PositionOutputStream out =
-                    vfsTableObjectIdentifier
-                            .fileIO()
-                            .newOutputStream(vfsTableObjectIdentifier.getRealPath(), overwrite);
+                    tableInfo.fileIO().newOutputStream(identifier.filePath(), overwrite);
             return new FSDataOutputStream(out, statistics);
         }
     }
@@ -131,9 +129,9 @@ public class PaimonVirtualFileSystem extends FileSystem {
             throw new FileNotFoundException(
                     "Cannot open file for virtual path " + path + " which is a table");
         } else {
-            VFSTableObjectIdentifier vfsTableObjectIdentifier =
-                    (VFSTableObjectIdentifier) vfsIdentifier;
-            if (!vfsTableObjectIdentifier.isTableExist()) {
+            VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new IOException(
                         "Cannot open file for virtual path "
                                 + path
@@ -141,10 +139,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
             }
             VFSInputStream in =
                     new VFSInputStream(
-                            vfsTableObjectIdentifier
-                                    .fileIO()
-                                    .newInputStream(vfsTableObjectIdentifier.getRealPath()),
-                            statistics);
+                            tableInfo.fileIO().newInputStream(identifier.filePath()), statistics);
             return new FSDataInputStream(in);
         }
     }
@@ -174,27 +169,27 @@ public class PaimonVirtualFileSystem extends FileSystem {
                     (VFSTableRootIdentifier) srcVfsIdentifier,
                     (VFSTableRootIdentifier) dstVfsIdentifier);
         } else {
-            if (!(dstVfsIdentifier instanceof VFSTableIdentifier)) {
+            if (!(dstVfsIdentifier instanceof VFSTableObjectIdentifier)) {
                 throw new IOException(
                         "Cannot rename to virtual path " + dst + " which is not a table");
             }
-            VFSTableIdentifier srcTableIdentifier = (VFSTableIdentifier) srcVfsIdentifier;
-            VFSTableIdentifier dstTableIdentifier = (VFSTableIdentifier) dstVfsIdentifier;
-            if (!srcTableIdentifier.isTableExist()) {
+            VFSTableObjectIdentifier srcIdentifier = (VFSTableObjectIdentifier) srcVfsIdentifier;
+            VFSTableObjectIdentifier dstIdentifier = (VFSTableObjectIdentifier) dstVfsIdentifier;
+            VFSTableInfo srcTableInfo = srcIdentifier.tableInfo();
+            VFSTableInfo dstTableInfo = dstIdentifier.tableInfo();
+            if (srcTableInfo == null) {
                 throw new IOException(
                         "Cannot rename from virtual path "
                                 + src
                                 + " which is not in an existing table");
             }
-            if (!dstTableIdentifier.isTableExist()) {
+            if (dstTableInfo == null) {
                 throw new IOException(
                         "Cannot rename to virtual path "
                                 + dst
                                 + " which is not in an existing table");
             }
-            GetTableResponse srcTable = srcTableIdentifier.getTable();
-            GetTableResponse dstTable = dstTableIdentifier.getTable();
-            if (!srcTable.getId().equals(dstTable.getId())) {
+            if (!srcTableInfo.tableId().equals(dstTableInfo.tableId())) {
                 throw new IOException(
                         "Cannot rename from virtual path "
                                 + src
@@ -202,43 +197,39 @@ public class PaimonVirtualFileSystem extends FileSystem {
                                 + dst
                                 + " which is not in the same table");
             }
-            return srcTableIdentifier
-                    .fileIO()
-                    .rename(srcTableIdentifier.getRealPath(), dstTableIdentifier.getRealPath());
+            return srcTableInfo.fileIO().rename(srcIdentifier.filePath(), dstIdentifier.filePath());
         }
     }
 
     private boolean renameTable(
             VFSTableRootIdentifier srcIdentifier, VFSTableRootIdentifier dstIdentifier)
             throws IOException {
-        if (!srcIdentifier.getDatabaseName().equals(dstIdentifier.getDatabaseName())) {
+        if (!srcIdentifier.databaseName().equals(dstIdentifier.databaseName())) {
             throw new IOException("Do not support rename table with different database");
         }
-        if (!srcIdentifier.isTableExist()) {
+        if (srcIdentifier.tableInfo() == null) {
             // return false if src does not exist
             LOG.debug(
-                    "Source table not found "
-                            + srcIdentifier.getDatabaseName()
-                            + "."
-                            + srcIdentifier.getTableName());
+                    "Source table not found {}.{}",
+                    srcIdentifier.databaseName(),
+                    srcIdentifier.tableName());
             return false;
         }
-        if (srcIdentifier.getTableName().equals(dstIdentifier.getTableName())) {
+        if (srcIdentifier.tableName().equals(dstIdentifier.tableName())) {
             // src equals to dst, return true
             return true;
         }
         try {
             vfsOperations.renameTable(
-                    srcIdentifier.getDatabaseName(),
-                    srcIdentifier.getTableName(),
-                    dstIdentifier.getTableName());
+                    srcIdentifier.databaseName(),
+                    srcIdentifier.tableName(),
+                    dstIdentifier.tableName());
             return true;
         } catch (FileNotFoundException e) {
             LOG.debug(
-                    "Source table not found "
-                            + srcIdentifier.getDatabaseName()
-                            + "."
-                            + srcIdentifier.getTableName());
+                    "Source table not found {}.{}",
+                    srcIdentifier.databaseName(),
+                    srcIdentifier.tableName());
             return false;
         }
     }
@@ -249,8 +240,9 @@ public class PaimonVirtualFileSystem extends FileSystem {
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             throw new IOException("Cannot delete virtual path " + f + " which is a catalog");
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
+            String databaseName = ((VFSDatabaseIdentifier) vfsIdentifier).databaseName();
             try {
-                vfsOperations.dropDatabase(vfsIdentifier.getDatabaseName(), recursive);
+                vfsOperations.dropDatabase(databaseName, recursive);
             } catch (FileNotFoundException e) {
                 LOG.debug("Database not found for deleting path " + f);
                 return false;
@@ -260,23 +252,20 @@ public class PaimonVirtualFileSystem extends FileSystem {
             VFSTableRootIdentifier vfsTableRootIdentifier = (VFSTableRootIdentifier) vfsIdentifier;
             try {
                 vfsOperations.dropTable(
-                        vfsTableRootIdentifier.getDatabaseName(),
-                        vfsTableRootIdentifier.getTableName());
+                        vfsTableRootIdentifier.databaseName(), vfsTableRootIdentifier.tableName());
             } catch (FileNotFoundException e) {
                 LOG.debug("Table not found for deleting path " + f);
                 return false;
             }
             return true;
         } else {
-            VFSTableObjectIdentifier vfsTableObjectIdentifier =
-                    (VFSTableObjectIdentifier) vfsIdentifier;
-            if (!vfsTableObjectIdentifier.isTableExist()) {
+            VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new IOException(
                         "Cannot delete virtual path " + f + " which is not in an existing table");
             }
-            return vfsTableObjectIdentifier
-                    .fileIO()
-                    .delete(vfsTableObjectIdentifier.getRealPath(), recursive);
+            return tableInfo.fileIO().delete(identifier.filePath(), recursive);
         }
     }
 
@@ -286,17 +275,19 @@ public class PaimonVirtualFileSystem extends FileSystem {
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             return new FileStatus(0, true, 1, 1, 0, new Path(this.uri));
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            GetDatabaseResponse database =
-                    vfsOperations.getDatabase(vfsIdentifier.getDatabaseName());
+            String databaseName = ((VFSDatabaseIdentifier) vfsIdentifier).databaseName();
+            GetDatabaseResponse database = vfsOperations.getDatabase(databaseName);
             return convertDatabase(database);
         } else {
-            VFSTableIdentifier vfsTableIdentifier = (VFSTableIdentifier) vfsIdentifier;
-            if (!vfsTableIdentifier.isTableExist()) {
+            VFSTableIdentifier identifier = (VFSTableIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new FileNotFoundException("Table not found for path " + f);
             }
             org.apache.paimon.fs.FileStatus fileStatus =
-                    vfsTableIdentifier.fileIO().getFileStatus(vfsTableIdentifier.getRealPath());
-            return convertFileStatus(vfsTableIdentifier, fileStatus);
+                    tableInfo.fileIO().getFileStatus(identifier.filePath());
+            return convertFileStatus(
+                    identifier.databaseName(), identifier.tableName(), tableInfo, fileStatus);
         }
     }
 
@@ -305,33 +296,28 @@ public class PaimonVirtualFileSystem extends FileSystem {
     }
 
     private FileStatus convertFileStatus(
-            VFSTableIdentifier vfsIdentifier, org.apache.paimon.fs.FileStatus paimonFileStatus)
+            String databaseName,
+            String tableName,
+            VFSTableInfo tableInfo,
+            org.apache.paimon.fs.FileStatus fileStatus)
             throws IOException {
-        String realPath = paimonFileStatus.getPath().toString();
-        if (!realPath.startsWith(vfsIdentifier.getTableLocation())) {
+        String tablePath = tableInfo.tablePath().toString();
+        String filePath = fileStatus.getPath().toString();
+        if (!filePath.startsWith(tablePath)) {
             throw new IOException(
-                    "Result path "
-                            + realPath
-                            + " does not start with table location "
-                            + vfsIdentifier.getTableLocation());
+                    "Result path " + filePath + " does not start with table location " + tablePath);
         }
-        String childPath = realPath.substring(vfsIdentifier.getTableLocation().length());
+        String childPath = filePath.substring(tablePath.length());
         if (!childPath.startsWith("/")) {
             childPath = "/" + childPath;
         }
-        Path virtualPath =
-                new Path(
-                        new Path(this.uri),
-                        vfsIdentifier.getDatabaseName()
-                                + "/"
-                                + vfsIdentifier.getTableName()
-                                + childPath);
+        Path virtualPath = new Path(new Path(this.uri), databaseName + "/" + tableName + childPath);
         return new FileStatus(
-                paimonFileStatus.getLen(),
-                paimonFileStatus.isDir(),
+                fileStatus.getLen(),
+                fileStatus.isDir(),
                 1,
                 1,
-                paimonFileStatus.getModificationTime(),
+                fileStatus.getModificationTime(),
                 virtualPath);
     }
 
@@ -342,16 +328,19 @@ public class PaimonVirtualFileSystem extends FileSystem {
             List<String> databases = vfsOperations.listDatabases();
             return convertDatabases(databases);
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            List<String> tables = vfsOperations.listTables(vfsIdentifier.getDatabaseName());
-            return convertTables(vfsIdentifier.getDatabaseName(), tables);
+            String databaseName = ((VFSDatabaseIdentifier) vfsIdentifier).databaseName();
+            List<String> tables = vfsOperations.listTables(databaseName);
+            return convertTables(databaseName, tables);
         } else {
-            VFSTableIdentifier vfsTableIdentifier = (VFSTableIdentifier) vfsIdentifier;
-            if (!vfsTableIdentifier.isTableExist()) {
+            VFSTableIdentifier identifier = (VFSTableIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new FileNotFoundException("Table not found for path " + f);
             }
-            org.apache.paimon.fs.FileStatus[] paimonFileStatuses =
-                    vfsTableIdentifier.fileIO().listStatus(vfsTableIdentifier.getRealPath());
-            return convertFileStatuses(vfsTableIdentifier, paimonFileStatuses);
+            org.apache.paimon.fs.FileStatus[] fileStatuses =
+                    tableInfo.fileIO().listStatus(identifier.filePath());
+            return convertFileStatuses(
+                    identifier.databaseName(), identifier.tableName(), tableInfo, fileStatuses);
         }
     }
 
@@ -379,13 +368,17 @@ public class PaimonVirtualFileSystem extends FileSystem {
     }
 
     private FileStatus[] convertFileStatuses(
-            VFSTableIdentifier vfsIdentifier, org.apache.paimon.fs.FileStatus[] paimonFileStatuses)
+            String databaseName,
+            String tableName,
+            VFSTableInfo tableInfo,
+            org.apache.paimon.fs.FileStatus[] fileStatuses)
             throws IOException {
-        FileStatus[] fileStatuses = new FileStatus[paimonFileStatuses.length];
-        for (int i = 0; i < paimonFileStatuses.length; i++) {
-            fileStatuses[i] = convertFileStatus(vfsIdentifier, paimonFileStatuses[i]);
+        FileStatus[] virtualStatues = new FileStatus[fileStatuses.length];
+        for (int i = 0; i < fileStatuses.length; i++) {
+            virtualStatues[i] =
+                    convertFileStatus(databaseName, tableName, tableInfo, fileStatuses[i]);
         }
-        return fileStatuses;
+        return virtualStatues;
     }
 
     @Override
@@ -394,27 +387,27 @@ public class PaimonVirtualFileSystem extends FileSystem {
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             throw new IOException("Cannot mkdirs for virtual path " + f + " which is a catalog");
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
-            vfsOperations.createDatabase(vfsIdentifier.getDatabaseName());
+            String databaseName = ((VFSDatabaseIdentifier) vfsIdentifier).databaseName();
+            vfsOperations.createDatabase(databaseName);
             return true;
         } else if (vfsIdentifier instanceof VFSTableRootIdentifier) {
-            VFSTableRootIdentifier vfsTableRootIdentifier = (VFSTableRootIdentifier) vfsIdentifier;
-            if (vfsTableRootIdentifier.isTableExist()) {
+            VFSTableRootIdentifier identifier = (VFSTableRootIdentifier) vfsIdentifier;
+            if (identifier.tableInfo() != null) {
                 // Table already exists, no need to execute
                 return true;
             }
-            vfsOperations.createObjectTable(
-                    vfsIdentifier.getDatabaseName(), vfsTableRootIdentifier.getTableName());
+            vfsOperations.createObjectTable(identifier.databaseName(), identifier.tableName());
             return true;
         } else {
-            VFSTableObjectIdentifier vfsTableObjectIdentifier =
-                    (VFSTableObjectIdentifier) vfsIdentifier;
-            if (!vfsTableObjectIdentifier.isTableExist()) {
+            VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
+            VFSTableInfo tableInfo = identifier.tableInfo();
+            if (tableInfo == null) {
                 throw new IOException(
                         "Cannot mkdirs for virtual path "
                                 + f
                                 + " which is not in an existing table");
             }
-            return vfsTableObjectIdentifier.fileIO().mkdirs(vfsTableObjectIdentifier.getRealPath());
+            return tableInfo.fileIO().mkdirs(identifier.filePath());
         }
     }
 

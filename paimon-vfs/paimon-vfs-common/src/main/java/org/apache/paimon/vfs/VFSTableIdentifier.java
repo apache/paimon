@@ -18,82 +18,43 @@
 
 package org.apache.paimon.vfs;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.rest.responses.GetTableResponse;
 
-import java.net.URI;
-import java.net.URISyntaxException;
+import javax.annotation.Nullable;
 
 /** Identifier for table. */
-public abstract class VFSTableIdentifier extends VFSIdentifier {
-    protected Path realPath;
-    protected String scheme;
-    protected URI realUri;
-    protected String tableName;
-    protected GetTableResponse table;
-    protected FileIO fileIO;
-    protected String tableLocation;
+public abstract class VFSTableIdentifier implements VFSIdentifier {
+
+    protected final String databaseName;
+    protected final String tableName;
+
+    protected final @Nullable VFSTableInfo tableInfo;
 
     // Constructor for non-exist table
-    public VFSTableIdentifier(VFSFileType vfsFileType, String databaseName, String tableName) {
-        super(vfsFileType, databaseName);
-        this.tableName = tableName;
+    public VFSTableIdentifier(String databaseName, String tableName) {
+        this(databaseName, tableName, null);
     }
 
     // Constructor for existing table
     public VFSTableIdentifier(
-            VFSFileType vfsFileType,
-            GetTableResponse table,
-            String realPath,
-            FileIO fileIO,
-            String databaseName,
-            String tableName) {
-        super(vfsFileType, databaseName);
-        this.realPath = new Path(realPath);
-        try {
-            this.realUri = new URI(realPath);
-        } catch (URISyntaxException e) {
-            throw new RuntimeException(e);
-        }
-        this.scheme = realUri.getScheme();
+            String databaseName, String tableName, @Nullable VFSTableInfo tableInfo) {
+        this.databaseName = databaseName;
         this.tableName = tableName;
-        this.table = table;
-        this.fileIO = fileIO;
-        if (table != null) {
-            this.tableLocation = table.getPath();
-        }
+        this.tableInfo = tableInfo;
     }
 
-    public Path getRealPath() {
-        return realPath;
+    public String databaseName() {
+        return databaseName;
     }
 
-    public URI getRealUri() {
-        return realUri;
-    }
-
-    public String getScheme() {
-        return scheme;
-    }
-
-    public String getTableName() {
+    public String tableName() {
         return tableName;
     }
 
-    public GetTableResponse getTable() {
-        return table;
+    @Nullable
+    public VFSTableInfo tableInfo() {
+        return tableInfo;
     }
 
-    public FileIO fileIO() {
-        return fileIO;
-    }
-
-    public String getTableLocation() {
-        return tableLocation;
-    }
-
-    public boolean isTableExist() {
-        return table != null;
-    }
+    public abstract Path filePath();
 }

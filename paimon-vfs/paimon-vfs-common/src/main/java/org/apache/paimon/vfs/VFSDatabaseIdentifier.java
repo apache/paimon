@@ -19,9 +19,15 @@
 package org.apache.paimon.vfs;
 
 /** Identifier for database. */
-public class VFSDatabaseIdentifier extends VFSIdentifier {
+public class VFSDatabaseIdentifier implements VFSIdentifier {
+
+    protected String databaseName;
 
     public VFSDatabaseIdentifier(String databaseName) {
-        super(VFSFileType.DATABASE, databaseName);
+        this.databaseName = databaseName;
+    }
+
+    public String databaseName() {
+        return databaseName;
     }
 }

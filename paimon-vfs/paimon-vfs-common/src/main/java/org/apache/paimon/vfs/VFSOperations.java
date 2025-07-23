@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -73,42 +74,32 @@ public class VFSOperations {
         // parts.length >= 2: table or table object
         String databaseName = parts[0];
         String tableName = parts[1];
+        String relativePath = null;
+        if (parts.length > 2) {
+            relativePath = String.join("/", Arrays.copyOfRange(parts, 2, parts.length));
+        }
         Identifier identifier = new Identifier(databaseName, tableName);
         // Get table from REST server
         GetTableResponse table;
         try {
             table = loadTableMetadata(identifier);
         } catch (FileNotFoundException e) {
-            if (parts.length == 2) {
+            if (relativePath == null) {
                 return new VFSTableRootIdentifier(databaseName, tableName);
             } else {
-                return new VFSTableObjectIdentifier(databaseName, tableName);
+                return new VFSTableObjectIdentifier(databaseName, tableName, relativePath);
             }
         }
         if (table.isExternal()) {
             throw new IOException("Do not support visiting external table " + identifier);
         }
-        // Get real path
-        StringBuilder realPath = new StringBuilder(table.getPath());
-        if (parts.length > 2) {
-            if (!table.getPath().endsWith("/")) {
-                realPath.append("/");
-            }
-            for (int i = 2; i < parts.length; i++) {
-                realPath.append(parts[i]);
-                if (i < parts.length - 1) {
-                    realPath.append("/");
-                }
-            }
-        }
-
-        FileIO fileIO = new RESTTokenFileIO(context, api, identifier, new Path(table.getPath()));
-        if (parts.length == 2) {
-            return new VFSTableRootIdentifier(
-                    table, realPath.toString(), fileIO, databaseName, tableName);
+        Path tablePath = new Path(table.getPath());
+        FileIO fileIO = new RESTTokenFileIO(context, api, identifier, tablePath);
+        VFSTableInfo tableInfo = new VFSTableInfo(table.getId(), tablePath, fileIO);
+        if (relativePath == null) {
+            return new VFSTableRootIdentifier(databaseName, tableName, tableInfo);
         } else {
-            return new VFSTableObjectIdentifier(
-                    table, realPath.toString(), fileIO, databaseName, tableName);
+            return new VFSTableObjectIdentifier(databaseName, tableName, relativePath, tableInfo);
         }
     }
 

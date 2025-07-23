@@ -19,9 +19,4 @@
 package org.apache.paimon.vfs;
 
 /** Identifier for catalog. */
-public class VFSCatalogIdentifier extends VFSIdentifier {
-
-    public VFSCatalogIdentifier() {
-        super(VFSFileType.CATALOG, null);
-    }
-}
+public class VFSCatalogIdentifier implements VFSIdentifier {}
