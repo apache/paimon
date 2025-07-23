@@ -203,11 +203,14 @@ public abstract class VirtualFileSystemTest {
         // Create file in non-existing table
         tableName = "object_table2";
         vfsPath = new Path(vfsRoot, databaseName + "/" + tableName + "/test_dir/file.txt");
-        try {
-            vfs.create(vfsPath);
-            Assert.fail();
-        } catch (IOException e) {
-        }
+        out = vfs.create(vfsPath);
+        out.write("hello".getBytes());
+        out.close();
+        in = vfs.open(vfsPath);
+        buffer = new byte[5];
+        in.read(buffer);
+        in.close();
+        Assert.assertArrayEquals("hello".getBytes(), buffer);
     }
 
     @Test
