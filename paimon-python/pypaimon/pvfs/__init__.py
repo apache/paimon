@@ -32,7 +32,7 @@ from fsspec.implementations.local import LocalFileSystem
 from pypaimon.api import RESTApi, GetTableTokenResponse, Schema
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
-from pypaimon.filesystem.pvfs_config import PVFSConfig
+from pypaimon.pvfs.pvfs_config import PVFSConfig
 
 PROTOCOL_NAME = "pvfs"
 
@@ -89,6 +89,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     warehouse: str
     options: Dict[str, Any]
 
+    protocol = PROTOCOL_NAME
     _identifier_pattern = re.compile("^pvfs://([^/]+)/([^/]+)/([^/]+)(?:/[^/]+)*/?$")
 
     def __init__(self, options: Dict = None, **kwargs):
@@ -210,7 +211,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         source_pvfs_identifier = self._extract_pvfs_identifier(path1)
         target_pvfs_identifier = self._extract_pvfs_identifier(path2)
         if ((isinstance(source_pvfs_identifier, PVFSTableIdentifier)
-                and isinstance(target_pvfs_identifier, PVFSTableIdentifier))
+             and isinstance(target_pvfs_identifier, PVFSTableIdentifier))
                 and target_pvfs_identifier.sub_path is not None
                 and source_pvfs_identifier.sub_path is not None):
             table_identifier = Identifier.create(source_pvfs_identifier.database, source_pvfs_identifier.name)

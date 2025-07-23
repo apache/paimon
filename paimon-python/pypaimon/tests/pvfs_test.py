@@ -26,7 +26,7 @@ from pypaimon.api import ConfigResponse
 from pypaimon.api.api_response import TableSchema, TableMetadata
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.data_types import DataField, AtomicType
-from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+from pypaimon.pvfs import PaimonVirtualFileSystem
 from pypaimon.tests.api_test import RESTCatalogServer
 
 
@@ -185,7 +185,6 @@ class PVFSTestCase(unittest.TestCase):
         self.assertEqual(True, self.pvfs.exists(table_data_new_virtual_path))
         self.pvfs.makedirs(table_data_new_virtual_path)
         self.assertEqual(True, self.pvfs.exists(table_data_new_virtual_path))
-
-        print(self.pvfs.created(table_data_new_virtual_path))
-        print(self.pvfs.modified(table_data_new_virtual_path))
-        print(self.pvfs.cat_file(date_file_new_virtual_path))
+        self.assertTrue(self.pvfs.created(table_data_new_virtual_path) is not None)
+        self.assertTrue(self.pvfs.modified(table_data_new_virtual_path) is not None)
+        self.assertEqual('Hello World', self.pvfs.cat_file(date_file_new_virtual_path).decode('utf-8'))

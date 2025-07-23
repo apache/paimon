@@ -351,7 +351,6 @@ class RESTCatalogServer:
         """Route HTTP request to appropriate handler"""
         try:
             # Config endpoint
-            print(f'method: {method}, resource_path: {resource_path}')
             if resource_path.startswith(self.resource_paths.config()):
                 warehouse_param = parameters.get(WAREHOUSE)
                 if warehouse_param == self.warehouse:
