@@ -15,57 +15,51 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from dataclasses import dataclass
+from typing import Optional
 
-from pypaimon.pynative.common.exception import PyNativeNotImplementedError
 
 SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch-'
 
 
-class TableIdentifier:
+@dataclass
+class Identifier:
 
-    def __init__(self, full_name: str):
-        self._full_name = full_name
-        self._system_table = None
-        self._branch = None
+    database_name: str
+    object_name: str
+    branch_name: Optional[str] = None
 
-        parts = full_name.split('.')
+    @classmethod
+    def create(cls, database_name: str, object_name: str) -> "Identifier":
+        return cls(database_name, object_name)
+
+    @classmethod
+    def from_string(cls, full_name: str) -> "Identifier":
+        parts = full_name.split(".")
         if len(parts) == 2:
-            self._database = parts[0]
-            self._object = parts[1]
+            return cls(parts[0], parts[1])
+        elif len(parts) == 3:
+            return cls(parts[0], parts[1], parts[2])
         else:
-            raise ValueError(f"Cannot get splits from '{full_name}' to get database and object")
+            raise ValueError(f"Invalid identifier format: {full_name}")
 
-        splits = self._object.split(SYSTEM_TABLE_SPLITTER)
-        if len(splits) == 1:
-            self._table = self._object
-        elif len(splits) == 2:
-            self._table = splits[0]
-            if splits[1].startswith(SYSTEM_BRANCH_PREFIX):
-                self._branch = splits[1][len(SYSTEM_BRANCH_PREFIX):]
-            else:
-                self._system_table = splits[1]
-        elif len(splits) == 3:
-            if not splits[1].startswith(SYSTEM_BRANCH_PREFIX):
-                raise ValueError(f"System table can only contain one '{SYSTEM_TABLE_SPLITTER}' separator, "
-                                 f"but this is: {self._object}")
-            self._table = splits[0]
-            self._branch = splits[1][len(SYSTEM_BRANCH_PREFIX):]
-            self._system_table = splits[2]
-        else:
-            raise ValueError(f"Invalid object name: {self._object}")
+    def get_full_name(self) -> str:
+        if self.branch_name:
+            return f"{self.database_name}.{self.object_name}.{self.branch_name}"
+        return f"{self.database_name}.{self.object_name}"
 
-        if self._system_table is not None:
-            raise PyNativeNotImplementedError("SystemTable")
+    def get_database_name(self) -> str:
+        return self.database_name
 
-        elif self._branch is not None:
-            raise PyNativeNotImplementedError("BranchTable")
+    def get_table_name(self) -> str:
+        return self.object_name
 
-    def get_database_name(self):
-        return self._database
+    def get_object_name(self) -> str:
+        return self.object_name
 
-    def get_table_name(self):
-        return self._table
+    def get_branch_name(self) -> Optional[str]:
+        return self.branch_name
 
-    def get_full_name(self):
-        return self._full_name
+    def is_system_table(self) -> bool:
+        return self.object_name.startswith('$')

@@ -23,7 +23,9 @@ from .typedef import T
 
 
 def json_field(json_name: str, **kwargs):
-    """Create a field with custom JSON name"""
+    """Create a field with custom JSON name
+    :rtype: object
+    """
     return field(metadata={"json_name": json_name}, **kwargs)
 
 

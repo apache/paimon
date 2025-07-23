@@ -22,43 +22,14 @@ from urllib.parse import unquote
 from .api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
     GetDatabaseResponse, ConfigResponse, PagedResponse
 from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from .typedef import Identifier, RESTCatalogOptions
+from .resource_paths import ResourcePaths
+from .typedef import RESTCatalogOptions
 from .client import HttpClient
 from .auth import DLFAuthProvider, RESTAuthFunction
 from .token_loader import DLFToken, DLFTokenLoaderFactory
 from .typedef import T
 
-from .split import Split
-from .table_read import TableRead
-from .table_scan import TableScan, Plan
-from .predicate import Predicate, PredicateBuilder
-from .read_builder import ReadBuilder
-from .commit_message import CommitMessage
-from .table_commit import BatchTableCommit
-from .table_write import BatchTableWrite
-from .write_builder import BatchWriteBuilder
-from .schema import Schema
-from .table import Table
-from .database import Database
-from .catalog import Catalog
-
-__all__ = [
-    'Split',
-    'TableRead',
-    'TableScan',
-    'Plan',
-    'ReadBuilder',
-    'CommitMessage',
-    'BatchTableCommit',
-    'BatchTableWrite',
-    'BatchWriteBuilder',
-    'Table',
-    'Schema',
-    'Database',
-    'Catalog',
-    'Predicate',
-    'PredicateBuilder'
-]
+from ..pynative.common.identifier import Identifier
 
 
 class RESTException(Exception):
@@ -99,42 +70,6 @@ class RESTUtil:
                 new_key = key[len(prefix):]
                 result[new_key] = str(value)
         return result
-
-
-class ResourcePaths:
-    V1 = "v1"
-    DATABASES = "databases"
-    TABLES = "tables"
-    TABLE_DETAILS = "table-details"
-
-    def __init__(self, base_path: str = ""):
-        self.base_path = base_path.rstrip("/")
-
-    @classmethod
-    def for_catalog_properties(
-            cls, options: dict[str, str]) -> "ResourcePaths":
-        prefix = options.get(RESTCatalogOptions.PREFIX, "")
-        return cls(f"/{cls.V1}/{prefix}" if prefix else f"/{cls.V1}")
-
-    def config(self) -> str:
-        return f"/{self.V1}/config"
-
-    def databases(self) -> str:
-        return f"{self.base_path}/{self.DATABASES}"
-
-    def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{name}"
-
-    def tables(self, database_name: Optional[str] = None) -> str:
-        if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
-        return f"{self.base_path}/{self.TABLES}"
-
-    def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
-
-    def table_details(self, database_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
 
 
 class RESTApi:

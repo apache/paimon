@@ -15,23 +15,38 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 #################################################################################
+from dataclasses import dataclass
+from typing import Optional, List, Dict
 
 import pyarrow as pa
+from pypaimon.api.data_types import DataField
+from pypaimon.api.rest_json import json_field
 
-from typing import Optional, List
 
-
+@dataclass
 class Schema:
-    """Schema of a table."""
+    FIELD_FIELDS = "fields"
+    FIELD_PARTITION_KEYS = "partitionKeys"
+    FIELD_PRIMARY_KEYS = "primaryKeys"
+    FIELD_OPTIONS = "options"
+    FIELD_COMMENT = "comment"
 
-    def __init__(self,
-                 pa_schema: pa.Schema,
-                 partition_keys: Optional[List[str]] = None,
-                 primary_keys: Optional[List[str]] = None,
-                 options: Optional[dict] = None,
-                 comment: Optional[str] = None):
-        self.pa_schema = pa_schema
-        self.partition_keys = partition_keys
-        self.primary_keys = primary_keys
-        self.options = options
-        self.comment = comment
+    pa_schema: Optional[pa.Schema] = None
+    fields: List[DataField] = json_field(FIELD_FIELDS, default_factory=list)
+    partition_keys: List[str] = json_field(
+        FIELD_PARTITION_KEYS, default_factory=list)
+    primary_keys: List[str] = json_field(
+        FIELD_PRIMARY_KEYS, default_factory=list)
+    options: Dict[str, str] = json_field(FIELD_OPTIONS, default_factory=dict)
+    comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
+
+    @staticmethod
+    def from_dict(data: dict):
+        fields = [DataField.from_dict(field) for field in data["fields"]]
+        return Schema(
+            fields=fields,
+            partition_keys=data["partitionKeys"],
+            primary_keys=data["primaryKeys"],
+            options=data["options"],
+            comment=data.get("comment"),
+        )

@@ -19,7 +19,7 @@
 import pyarrow as pa
 import re
 
-from pypaimon.api import Schema
+from pypaimon.api.schema import Schema
 from pypaimon.pynative.common.data_field import DataType, DataField
 
 

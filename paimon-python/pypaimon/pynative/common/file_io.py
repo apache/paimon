@@ -21,14 +21,14 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from urllib.parse import urlparse, splitport
+from urllib.parse import urlparse
 
 import pyarrow.fs
 import pyarrow as pa
 from pyarrow._fs import FileSystem
 
 from pypaimon.pynative.common.exception import PyNativeNotImplementedError
-from pypaimon.pynative.common.core_option import CoreOptions
+from pypaimon.pynative.common.core_options import CoreOptions
 
 S3_ENDPOINT = "s3.endpoint"
 S3_ACCESS_KEY_ID = "s3.access-key"
@@ -142,7 +142,7 @@ class FileIO:
         )
         os.environ['CLASSPATH'] = class_paths.stdout.strip()
 
-        host, port_str = splitport(netloc)
+        host, port_str = urlparse(netloc)
         return HadoopFileSystem(
             host=host,
             port=int(port_str),
@@ -247,6 +247,10 @@ class FileIO:
         if file_info.size is None:
             raise ValueError(f"File size not available for {path}")
         return file_info.size
+
+    @staticmethod
+    def get():
+        return None
 
     def is_dir(self, path: Path) -> bool:
         file_info = self.get_file_status(path)

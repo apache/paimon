@@ -16,13 +16,14 @@
 # limitations under the License.
 ################################################################################
 
-from pathlib import Path
+
 from typing import Optional
 
-from pypaimon.api import Schema
+from pypaimon.api.schema import Schema
+from pypaimon.api.path import Path
+from pypaimon.api.table_schema import TableSchema
 from pypaimon.pynative.common.file_io import FileIO
 from pypaimon.pynative.table import schema_util
-from pypaimon.pynative.table.schema import TableSchema
 
 
 class SchemaManager:
@@ -31,7 +32,7 @@ class SchemaManager:
         self.schema_prefix = "schema-"
         self.file_io = file_io
         self.table_path = table_path
-        self.schema_path = table_path / "schema"
+        self.schema_path = table_path.uri.geturl() + "/schema"
 
     def latest(self) -> Optional['TableSchema']:
         try:
