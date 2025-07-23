@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
@@ -28,34 +27,24 @@ import org.apache.paimon.rest.interceptor.TimingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
+import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.io.HttpClientConnectionManager;
-import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
-import org.apache.hc.client5.http.ssl.HttpsSupport;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
-import org.apache.hc.core5.net.URIBuilder;
-import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
-import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.util.Timeout;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.Function;
@@ -63,34 +52,35 @@ import java.util.function.Function;
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static volatile CloseableHttpClient httpClient;
+    private static final CloseableHttpClient httpClient;
+
+    static {
+        httpClient = buildHttpClient();
+    }
 
     private final String uri;
 
     private ErrorHandler errorHandler;
 
-    public HttpClient(Options options) {
-        String rawUri = options.get(RESTCatalogOptions.URI);
-        this.uri = normalizeUri(rawUri);
-        if (httpClient == null) {
-            synchronized (HttpClient.class) {
-                if (httpClient == null) {
-                    HttpClientBuilder clientBuilder = HttpClients.custom();
-                    clientBuilder.setConnectionManager(configureConnectionManager(options));
-                    clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
-                    clientBuilder
-                            .addRequestInterceptorFirst(new TimingInterceptor())
-                            .addResponseInterceptorLast(new LoggingInterceptor());
-                    httpClient = clientBuilder.build();
-                }
-            }
-        }
-
-        this.errorHandler = DefaultErrorHandler.getInstance();
+    public HttpClient(String uri) {
+        this.uri = normalizeUri(uri);
     }
 
-    public HttpClient(String uri) {
-        this(new Options(ImmutableMap.of(RESTCatalogOptions.URI.key(), uri)));
+    public static CloseableHttpClient buildHttpClient() {
+        HttpClientBuilder clientBuilder = HttpClients.custom();
+        RequestConfig requestConfig =
+                RequestConfig.custom()
+                        .setConnectionRequestTimeout(Timeout.ofMinutes(3))
+                        .setResponseTimeout(Timeout.ofMinutes(3))
+                        .build();
+        clientBuilder.setDefaultRequestConfig(requestConfig);
+
+        clientBuilder.setConnectionManager(RESTUtil.configureConnectionManager());
+        clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
+        clientBuilder
+                .addRequestInterceptorFirst(new TimingInterceptor())
+                .addResponseInterceptorLast(new LoggingInterceptor());
+        return clientBuilder.build();
     }
 
     @Override
@@ -131,7 +121,7 @@ public class HttpClient implements RESTClient {
             Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
             HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
             httpPost.setHeaders(authHeaders);
-            String encodedBody = encodedBody(body);
+            String encodedBody = RESTUtil.encodedBody(body);
             if (encodedBody != null) {
                 httpPost.setEntity(new StringEntity(encodedBody));
             }
@@ -154,7 +144,7 @@ public class HttpClient implements RESTClient {
             Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
             HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
             httpDelete.setHeaders(authHeaders);
-            String encodedBody = encodedBody(body);
+            String encodedBody = RESTUtil.encodedBody(body);
             if (encodedBody != null) {
                 httpDelete.setEntity(new StringEntity(encodedBody));
             }
@@ -171,8 +161,8 @@ public class HttpClient implements RESTClient {
 
     private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
         try (CloseableHttpResponse response = httpClient.execute(request)) {
-            String responseBodyStr = extractResponseBodyAsString(response);
-            if (!isSuccessful(response)) {
+            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+            if (!RESTUtil.isSuccessful(response)) {
                 ErrorResponse error;
                 try {
                     error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
@@ -195,7 +185,7 @@ public class HttpClient implements RESTClient {
             } else {
                 throw new RESTException("response body is null.");
             }
-        } catch (IOException e) {
+        } catch (IOException | ParseException e) {
             throw new RESTException(
                     e, "Error occurred while processing %s request", request.getMethod());
         }
@@ -219,64 +209,12 @@ public class HttpClient implements RESTClient {
     @VisibleForTesting
     protected String getRequestUrl(String path, Map<String, String> queryParams) {
         String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
-
-        try {
-            if (queryParams != null && !queryParams.isEmpty()) {
-                URIBuilder builder = new URIBuilder(fullPath);
-                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-                    builder.addParameter(entry.getKey(), entry.getValue());
-                }
-                fullPath = builder.build().toString();
-            }
-        } catch (URISyntaxException e) {
-            throw new RESTException(e, "build request URL failed.");
-        }
-
-        return fullPath;
+        return RESTUtil.buildRequestUrl(fullPath, queryParams);
     }
 
     @VisibleForTesting
     public String uri() {
         return uri;
-    }
-
-    private static HttpClientConnectionManager configureConnectionManager(Options options) {
-        PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder =
-                PoolingHttpClientConnectionManagerBuilder.create();
-        connectionManagerBuilder
-                .useSystemProperties()
-                .setMaxConnTotal(options.get(RESTCatalogOptions.REST_CLIENT_MAX_CONNECTIONS));
-
-        // support TLS
-        String[] tlsProtocols = {"TLSv1.2", "TLSv1.3"};
-        connectionManagerBuilder.setTlsSocketStrategy(
-                new DefaultClientTlsStrategy(
-                        SSLContexts.createDefault(),
-                        tlsProtocols,
-                        null,
-                        SSLBufferMode.STATIC,
-                        HttpsSupport.getDefaultHostnameVerifier()));
-
-        return connectionManagerBuilder.build();
-    }
-
-    private static String extractResponseBodyAsString(CloseableHttpResponse response) {
-        try {
-            if (response.getEntity() == null) {
-                return null;
-            }
-
-            return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-        } catch (IOException | ParseException e) {
-            throw new RESTException(e, "Failed to convert HTTP response body to string");
-        }
-    }
-
-    private static boolean isSuccessful(CloseableHttpResponse response) {
-        int code = response.getCode();
-        return code == HttpStatus.SC_OK
-                || code == HttpStatus.SC_ACCEPTED
-                || code == HttpStatus.SC_NO_CONTENT;
     }
 
     private static String getRequestId(CloseableHttpResponse response) {
@@ -307,18 +245,5 @@ public class HttpClient implements RESTClient {
         return headers.entrySet().stream()
                 .map(entry -> new BasicHeader(entry.getKey(), entry.getValue()))
                 .toArray(Header[]::new);
-    }
-
-    private String encodedBody(Object body) {
-        if (body instanceof Map) {
-            return RESTUtil.encodeFormData((Map<?, ?>) body);
-        } else if (body != null) {
-            try {
-                return RESTApi.toJson(body);
-            } catch (JsonProcessingException e) {
-                throw new RESTException(e, "Failed to encode request body: %s", body);
-            }
-        }
-        return null;
     }
 }

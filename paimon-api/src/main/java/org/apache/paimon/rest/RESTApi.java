@@ -176,7 +176,7 @@ public class RESTApi {
      * @param configRequired is there one REST request to merge configurations during initialization
      */
     public RESTApi(Options options, boolean configRequired) {
-        this.client = new HttpClient(options);
+        this.client = new HttpClient(options.get(RESTCatalogOptions.URI));
         AuthProvider authProvider = createAuthProvider(options);
         Map<String, String> baseHeaders = extractPrefixMap(options, HEADER_PREFIX);
         if (configRequired) {
