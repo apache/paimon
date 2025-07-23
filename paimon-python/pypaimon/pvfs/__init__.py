@@ -729,7 +729,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             raise Exception(
                 "OSS access key secret is not found in the options."
             )
-        oss_endpoint_url = 'oss-cn-hangzhou.aliyuncs.com'
+        oss_endpoint_url = options.get(
+            PVFSConfig.OSS_ENDPOINT
+        )
         if oss_endpoint_url is None:
             raise Exception(
                 "OSS endpoint url is not found in the options."
