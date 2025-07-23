@@ -83,7 +83,7 @@ public class RESTTokenFileIO implements FileIO {
 
     // the latest token from REST Server, serializable in order to avoid loading token from the REST
     // Server again after serialization
-    private transient volatile RESTToken token;
+    private volatile RESTToken token;
 
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
