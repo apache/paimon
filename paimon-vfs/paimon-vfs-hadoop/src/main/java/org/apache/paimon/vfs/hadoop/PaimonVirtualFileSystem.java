@@ -57,7 +57,6 @@ public class PaimonVirtualFileSystem extends FileSystem {
     private Configuration conf;
 
     private static final String DLF_USER_AGENT_KEY = "header.User-Agent";
-    private static final String OSS_USER_AGENT_KEY = "fs.oss.user.agent.extended";
     private static final String USER_AGENT = "HadoopPVFS";
 
     @Override
@@ -79,7 +78,6 @@ public class PaimonVirtualFileSystem extends FileSystem {
 
         // Set user agent
         options.set(DLF_USER_AGENT_KEY, USER_AGENT);
-        options.set(OSS_USER_AGENT_KEY, USER_AGENT);
 
         vfsOperations = new VFSOperations(options);
     }
