@@ -470,7 +470,7 @@ class RESTCatalogServer:
             self.database_store.update({
                 create_database.name: self.mock_database(create_database.name, create_database.options)
             })
-            return None
+            return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
     def _database_handle(self, method: str, data: str, database_name: str) -> Tuple[str, int]:

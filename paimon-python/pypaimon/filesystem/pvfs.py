@@ -192,8 +192,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             except NoSuchResourceException:
                 return False
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
-            if table:
+            try:
+                table = self.rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.name))
                 if pvfs_identifier.sub_path is None:
                     return True
                 storage_type = self._get_storage_type(table.path)
@@ -201,7 +201,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.exists(actual_path)
-            else:
+            except NoSuchResourceException:
                 return False
 
     def cp_file(self, path1, path2, **kwargs):
@@ -383,11 +383,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     **kwargs
                 )
 
-    def _create_object_table(self, pvfs_identifier: PVFSTableIdentifier):
-        schema = Schema(options={'type': 'object-table'})
-        table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
-        self.rest_api.create_table(table_identifier, schema)
-
     def makedirs(self, path, exist_ok=True):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
@@ -532,6 +527,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         raise Exception(
             "_rm is not implemented for Paimon Virtual FileSystem."
         )
+
+    def _create_object_table(self, pvfs_identifier: PVFSTableIdentifier):
+        schema = Schema(options={'type': 'object-table'})
+        table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+        self.rest_api.create_table(table_identifier, schema)
 
     @staticmethod
     def _strip_storage_protocol(storage_type: StorageType, path: str):

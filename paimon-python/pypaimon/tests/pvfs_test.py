@@ -70,10 +70,10 @@ class PVFSTestCase(unittest.TestCase):
             DataField(1, "name", AtomicType('STRING'), 'name')
         ]
         schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
+        self.server.database_store.update(self.test_databases)
         self.test_tables = {
             f"{self.database}.{self.table}": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
         }
-        self.server.database_store.update(self.test_databases)
         self.server.table_metadata_store.update(self.test_tables)
 
     def tearDown(self):
@@ -100,7 +100,7 @@ class PVFSTestCase(unittest.TestCase):
         # print(f"column: {len(df_read.columns)}")
         # print(df_read.head())
 
-    def test(self):
+    def test_api(self):
         nested_dir = self.temp_path / self.database / self.table
         nested_dir.mkdir(parents=True)
         data_file_name = 'a.parquet'
@@ -142,6 +142,19 @@ class PVFSTestCase(unittest.TestCase):
             lines = file.readlines()
             self.assertListEqual([content], lines)
 
-        table_new_virtual_path = f"pvfs://{self.catalog}/{self.database}/new_table"
-        self.pvfs.mkdir(table_new_virtual_path)
-        self.assertEqual(True, self.pvfs.exists(table_new_virtual_path))
+        database_new_virtual_path = f"pvfs://{self.catalog}/new_db"
+        self.assertEqual(False, self.pvfs.exists(database_new_virtual_path))
+        self.pvfs.mkdir(database_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(database_new_virtual_path))
+
+        table_data_new_virtual_path = f"pvfs://{self.catalog}/{self.database}/new_table/data.txt"
+        self.assertEqual(False, self.pvfs.exists(table_data_new_virtual_path))
+        self.pvfs.mkdir(table_data_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(table_data_new_virtual_path))
+        self.pvfs.makedirs(table_data_new_virtual_path)
+        self.assertEqual(True, self.pvfs.exists(table_data_new_virtual_path))
+
+        print(self.pvfs.created(table_data_new_virtual_path))
+        print(self.pvfs.modified(table_data_new_virtual_path))
+        print(self.pvfs.cat_file(date_file_new_virtual_path))
+        print(self.pvfs.get_file(date_file_new_virtual_path, '/Users/jerry/Downloads/a.txt'))
