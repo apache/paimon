@@ -157,4 +157,3 @@ class PVFSTestCase(unittest.TestCase):
         print(self.pvfs.created(table_data_new_virtual_path))
         print(self.pvfs.modified(table_data_new_virtual_path))
         print(self.pvfs.cat_file(date_file_new_virtual_path))
-        print(self.pvfs.get_file(date_file_new_virtual_path, '/Users/jerry/Downloads/a.txt'))
