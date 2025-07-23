@@ -370,8 +370,19 @@ class RESTCatalogServer:
 
             if resource_path == self.resource_paths.rename_table():
                 rename_request = JSON.from_json(data, RenameTableRequest)
-                source = self.table_metadata_store.get(rename_request.source.get_full_name())
-                self.table_metadata_store.update({rename_request.destination.get_full_name(): source})
+                source_table = rename_request.source
+                destination_table = rename_request.destination
+                source = self.table_metadata_store.get(source_table.get_full_name())
+                self.table_metadata_store.update({destination_table.get_full_name(): source})
+                source_table_dir = (Path(self.data_path) / self.warehouse
+                                    / source_table.database_name / source_table.object_name)
+                destination_table_dir = (Path(self.data_path) / self.warehouse
+                                         / destination_table.database_name / destination_table.object_name)
+                if not source_table_dir.exists():
+                    destination_table_dir.mkdir(parents=True)
+                else:
+                    source_table_dir.rename(destination_table_dir)
+                return self._mock_response("", 200)
 
             database = resource_path.split("/")[4]
             # Database-specific endpoints

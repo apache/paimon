@@ -170,10 +170,18 @@ class PVFSTestCase(unittest.TestCase):
         self.assertEqual(True, self.pvfs.exists(date_file_virtual_path))
         self.assertEqual(True, self.pvfs.exists(date_file_new_virtual_path))
 
-        date_file_mv_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/mv.txt'
-        self.pvfs.mv(date_file_virtual_path, date_file_mv_virtual_path)
+        data_file_mv_virtual_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/mv.txt'
+        self.pvfs.mv(date_file_virtual_path, data_file_mv_virtual_path)
         self.assertEqual(False, self.pvfs.exists(date_file_virtual_path))
-        self.assertEqual(True, self.pvfs.exists(date_file_mv_virtual_path))
+        self.assertEqual(True, self.pvfs.exists(data_file_mv_virtual_path))
+
+        mv_source_table_path = f'pvfs://{self.catalog}/{self.database}/mv_table1'
+        mv_des_table_path = f'pvfs://{self.catalog}/{self.database}/des_table1'
+        self.pvfs.mkdir(mv_source_table_path)
+        self.assertTrue(self.pvfs.exists(mv_source_table_path))
+        self.assertFalse(self.pvfs.exists(mv_des_table_path))
+        self.pvfs.mv(mv_source_table_path, mv_des_table_path)
+        self.assertTrue(self.pvfs.exists(mv_des_table_path))
 
         with self.pvfs.open(date_file_new_virtual_path, 'w') as w:
             w.write(content)
