@@ -24,7 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTApi;
-import org.apache.paimon.rest.RESTUtil;
+import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -32,14 +32,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.ThreadUtils;
-
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,41 +42,22 @@ import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
-import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
-import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 
 /** Wrap over RESTCatalog to provide basic operations for virtual path. */
 public class VFSOperations {
+
     private static final Logger LOG = LoggerFactory.getLogger(VFSOperations.class);
 
     private final RESTApi api;
     private final CatalogContext context;
 
-    // table id -> fileIO
-    private static final Cache<VFSDataToken, FileIO> FILE_IO_CACHE =
-            Caffeine.newBuilder()
-                    .expireAfterAccess(30, TimeUnit.MINUTES)
-                    .maximumSize(1000)
-                    .removalListener(
-                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
-                    .scheduler(
-                            Scheduler.forScheduledExecutorService(
-                                    Executors.newSingleThreadScheduledExecutor(
-                                            ThreadUtils.newDaemonThreadFactory(
-                                                    "rest-token-file-io-scheduler"))))
-                    .build();
-
-    private static final Cache<String, VFSDataToken> TOKEN_CACHE =
-            Caffeine.newBuilder().expireAfterAccess(30, TimeUnit.MINUTES).maximumSize(1000).build();
-
-    public VFSOperations(CatalogContext context) {
-        this.context = context;
-        this.api = new RESTApi(context.options());
+    public VFSOperations(Options options) {
+        this.api = new RESTApi(options);
+        // Get the configured options which has been merged from REST Server
+        this.context = CatalogContext.create(api.options());
     }
 
     public VFSIdentifier getVFSIdentifier(String virtualPath) throws IOException {
@@ -116,9 +90,7 @@ public class VFSOperations {
         }
         // Get real path
         StringBuilder realPath = new StringBuilder(table.getPath());
-        boolean isTableRoot = true;
         if (parts.length > 2) {
-            isTableRoot = false;
             if (!table.getPath().endsWith("/")) {
                 realPath.append("/");
             }
@@ -129,9 +101,8 @@ public class VFSOperations {
                 }
             }
         }
-        // Get REST token
-        FileIO fileIO = getFileIO(new Identifier(databaseName, tableName), table);
 
+        FileIO fileIO = new RESTTokenFileIO(context, api, identifier, new Path(table.getPath()));
         if (parts.length == 2) {
             return new VFSTableRootIdentifier(
                     table, realPath.toString(), fileIO, databaseName, tableName);
@@ -252,66 +223,6 @@ public class VFSOperations {
         } catch (Exception e) {
             throw new IOException(e);
         }
-    }
-
-    private FileIO getFileIO(Identifier identifier, GetTableResponse table) throws IOException {
-        VFSDataToken token = TOKEN_CACHE.getIfPresent(table.getId());
-        if (shouldRefresh(token)) {
-            synchronized (TOKEN_CACHE) {
-                token = TOKEN_CACHE.getIfPresent(table.getId());
-                if (shouldRefresh(token)) {
-                    token = refreshToken(identifier);
-                    TOKEN_CACHE.put(table.getId(), token);
-                }
-            }
-        }
-
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
-        if (fileIO != null) {
-            return fileIO;
-        }
-
-        synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(token);
-            if (fileIO != null) {
-                return fileIO;
-            }
-
-            Options options = context.options();
-            // the original options are not overwritten
-            options = new Options(RESTUtil.merge(token.token(), options.toMap()));
-            options.set(FILE_IO_ALLOW_CACHE, false);
-            CatalogContext fileIOContext = CatalogContext.create(options);
-            fileIO = FileIO.get(new Path(table.getPath()), fileIOContext);
-            FILE_IO_CACHE.put(token, fileIO);
-            return fileIO;
-        }
-    }
-
-    private boolean shouldRefresh(VFSDataToken token) {
-        return token == null
-                || token.expireAtMillis() - System.currentTimeMillis()
-                        < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
-    }
-
-    private VFSDataToken refreshToken(Identifier identifier) throws IOException {
-        LOG.info("begin refresh data token for identifier [{}]", identifier);
-        GetTableTokenResponse response;
-        try {
-            response = api.loadTableToken(identifier);
-        } catch (NoSuchResourceException e) {
-            throw new FileNotFoundException("Table " + identifier + " not found");
-        } catch (ForbiddenException e) {
-            throw new IOException("No permission to access table " + identifier);
-        }
-
-        LOG.info(
-                "end refresh data token for identifier [{}] expiresAtMillis [{}]",
-                identifier,
-                response.getExpiresAtMillis());
-
-        VFSDataToken token = new VFSDataToken(response.getToken(), response.getExpiresAtMillis());
-        return token;
     }
 
     private GetTableResponse loadTableMetadata(Identifier identifier) throws IOException {

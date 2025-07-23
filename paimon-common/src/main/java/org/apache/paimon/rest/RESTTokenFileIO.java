@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -51,7 +50,7 @@ import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")
@@ -74,25 +73,22 @@ public class RESTTokenFileIO implements FileIO {
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
 
-    private final RESTCatalogLoader catalogLoader;
+    private final CatalogContext catalogContext;
     private final Identifier identifier;
     private final Path path;
 
-    // catalog instance before serialization, it will become null after serialization, then we
-    // should create catalog from catalog loader
-    private final transient RESTCatalog catalogInstance;
+    // Api instance before serialization, it will become null after serialization, then we should
+    // create RESTApi from catalogContext
+    private transient volatile RESTApi apiInstance;
 
     // the latest token from REST Server, serializable in order to avoid loading token from the REST
     // Server again after serialization
     private volatile RESTToken token;
 
     public RESTTokenFileIO(
-            RESTCatalogLoader catalogLoader,
-            RESTCatalog catalogInstance,
-            Identifier identifier,
-            Path path) {
-        this.catalogLoader = catalogLoader;
-        this.catalogInstance = catalogInstance;
+            CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
+        this.catalogContext = catalogContext;
+        this.apiInstance = apiInstance;
         this.identifier = identifier;
         this.path = path;
     }
@@ -165,12 +161,13 @@ public class RESTTokenFileIO implements FileIO {
                 return fileIO;
             }
 
-            CatalogContext context = catalogLoader.context();
-            Options options = context.options();
+            Options options = catalogContext.options();
             // the original options are not overwritten
             options = new Options(RESTUtil.merge(token.token(), options.toMap()));
             options.set(FILE_IO_ALLOW_CACHE, false);
-            context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+            CatalogContext context =
+                    CatalogContext.create(
+                            options, catalogContext.preferIO(), catalogContext.fallbackIO());
             try {
                 fileIO = FileIO.get(path, context);
             } catch (IOException e) {
@@ -199,20 +196,10 @@ public class RESTTokenFileIO implements FileIO {
 
     private void refreshToken() {
         LOG.info("begin refresh data token for identifier [{}]", identifier);
-        GetTableTokenResponse response;
-        if (catalogInstance != null) {
-            try {
-                response = catalogInstance.loadTableToken(identifier);
-            } catch (Catalog.TableNotExistException e) {
-                throw new RuntimeException(e);
-            }
-        } else {
-            try (RESTCatalog catalog = catalogLoader.load()) {
-                response = catalog.loadTableToken(identifier);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+        if (apiInstance == null) {
+            apiInstance = new RESTApi(catalogContext.options(), false);
         }
+        GetTableTokenResponse response = apiInstance.loadTableToken(identifier);
         LOG.info(
                 "end refresh data token for identifier [{}] expiresAtMillis [{}]",
                 identifier,

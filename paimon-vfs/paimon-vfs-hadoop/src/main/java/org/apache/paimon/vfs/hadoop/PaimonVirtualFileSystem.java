@@ -18,7 +18,6 @@
 
 package org.apache.paimon.vfs.hadoop;
 
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -73,9 +72,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         Options options = PaimonVirtualFileSystemConfiguration.convertToCatalogOptions(conf);
         // pvfs://catalog_name/database_name/table_name/file, so uri authority is catalog name
         options.set(CatalogOptions.WAREHOUSE, uri.getAuthority());
-
-        CatalogContext catalogContext = CatalogContext.create(options);
-        vfsOperations = new VFSOperations(catalogContext);
+        vfsOperations = new VFSOperations(options);
     }
 
     private String getVirtualPath(Path path) {
