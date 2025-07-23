@@ -103,15 +103,17 @@ public class PaimonVirtualFileSystem extends FileSystem {
                     "Cannot create file for table level virtual path " + f + " which is a table");
         } else {
             VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
-            VFSTableInfo tableInfo = identifier.tableInfo();
-            if (tableInfo == null) {
-                throw new IOException(
-                        "Cannot create a file for virtual path "
-                                + f
-                                + " which is not in an existing table");
+            if (identifier.tableInfo() == null) {
+                vfsOperations.createObjectTable(identifier.databaseName(), identifier.tableName());
+                identifier =
+                        (VFSTableObjectIdentifier)
+                                vfsOperations.getVFSIdentifier(getVirtualPath(f));
             }
             PositionOutputStream out =
-                    tableInfo.fileIO().newOutputStream(identifier.filePath(), overwrite);
+                    identifier
+                            .tableInfo()
+                            .fileIO()
+                            .newOutputStream(identifier.filePath(), overwrite);
             return new FSDataOutputStream(out, statistics);
         }
     }
@@ -400,14 +402,13 @@ public class PaimonVirtualFileSystem extends FileSystem {
             return true;
         } else {
             VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
-            VFSTableInfo tableInfo = identifier.tableInfo();
-            if (tableInfo == null) {
-                throw new IOException(
-                        "Cannot mkdirs for virtual path "
-                                + f
-                                + " which is not in an existing table");
+            if (identifier.tableInfo() == null) {
+                vfsOperations.createObjectTable(identifier.databaseName(), identifier.tableName());
+                identifier =
+                        (VFSTableObjectIdentifier)
+                                vfsOperations.getVFSIdentifier(getVirtualPath(f));
             }
-            return tableInfo.fileIO().mkdirs(identifier.filePath());
+            return identifier.tableInfo().fileIO().mkdirs(identifier.filePath());
         }
     }
 
