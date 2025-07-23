@@ -108,6 +108,7 @@ under the License.
 
                                     <!-- apache httpcomponents 5 -->
                                     <include>org.apache.httpcomponents.core5:httpcore5</include>
+                                    <include>org.apache.httpcomponents.core5:httpcore5-h2</include>
                                     <include>org.apache.httpcomponents.client5:httpclient5</include>
                                 </includes>
                             </artifactSet>
