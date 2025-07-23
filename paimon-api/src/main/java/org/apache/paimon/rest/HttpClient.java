@@ -64,6 +64,7 @@ public class HttpClient implements RESTClient {
 
     public HttpClient(String uri) {
         this.uri = normalizeUri(uri);
+        this.errorHandler = DefaultErrorHandler.getInstance();
     }
 
     public static CloseableHttpClient buildHttpClient() {
