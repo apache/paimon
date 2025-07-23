@@ -25,6 +25,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -42,6 +43,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -485,6 +487,42 @@ public class SparkWriteITCase {
 
         // reset config
         spark.conf().unset("spark.paimon.file.suffix.include.compression");
+    }
+
+    @Test
+    public void testIgnoreEmptyCommitConfigurable() {
+        spark.sql(
+                "CREATE TABLE T (id INT, name STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'bucket-key'='id', "
+                        + "'bucket' = '1', "
+                        + "'file.format' = 'avro')");
+
+        FileStoreTable table = getTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        spark.sql("insert into T values (1, 'aa')");
+        Assertions.assertEquals(1, snapshotManager.latestSnapshotId());
+
+        spark.sql("delete from T where id = 1");
+        Assertions.assertEquals(2, snapshotManager.latestSnapshotId());
+        Assertions.assertEquals(
+                -1, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
+
+        // in batch write, ignore.empty.commit default is true
+        spark.sql("delete from T where id = 1");
+        Assertions.assertEquals(2, snapshotManager.latestSnapshotId());
+        Assertions.assertEquals(
+                -1, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
+
+        // set false to allow commit empty snapshot
+        spark.conf().set("spark.paimon.ignore.empty.commit", "false");
+        spark.sql("delete from T where id = 1");
+        Assertions.assertEquals(3, snapshotManager.latestSnapshotId());
+        Assertions.assertEquals(
+                0, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
+
+        spark.conf().unset("spark.paimon.ignore.empty.commit");
     }
 
     protected static FileStoreTable getTable(String tableName) {
