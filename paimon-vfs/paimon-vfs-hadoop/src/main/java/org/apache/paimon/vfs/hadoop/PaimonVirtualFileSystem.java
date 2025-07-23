@@ -402,10 +402,11 @@ public class PaimonVirtualFileSystem extends FileSystem {
             VFSTableObjectIdentifier identifier = (VFSTableObjectIdentifier) vfsIdentifier;
             VFSTableInfo tableInfo = identifier.tableInfo();
             if (tableInfo == null) {
-                throw new IOException(
-                        "Cannot mkdirs for virtual path "
-                                + f
-                                + " which is not in an existing table");
+                vfsOperations.createObjectTable(identifier.databaseName(), identifier.tableName());
+                identifier =
+                        (VFSTableObjectIdentifier)
+                                vfsOperations.getVFSIdentifier(getVirtualPath(f));
+                tableInfo = identifier.tableInfo();
             }
             return tableInfo.fileIO().mkdirs(identifier.filePath());
         }
