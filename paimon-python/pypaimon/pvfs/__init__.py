@@ -17,6 +17,7 @@
 
 import importlib
 import re
+import time
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
@@ -79,9 +80,16 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
 @dataclass
 class PaimonRealStorage:
+    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
+
     token: Dict[str, str]
     expires_at_millis: Optional[int]
     file_system: AbstractFileSystem
+
+    def need_refresh(self) -> bool:
+        if self.expires_at_millis is not None:
+            return self.expires_at_millis - int(time.time() * 1000) < self.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        return False
 
 
 class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
@@ -679,12 +687,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         write_lock = self._cache_lock.gen_wlock()
         try:
             write_lock.acquire()
-            cache_value: Tuple[PVFSTableIdentifier, AbstractFileSystem] = self._cache.get(
-                pvfs_table_identifier
-            )
-            if cache_value is not None:
-                return cache_value
-            elif storage_type == StorageType.LOCAL:
+            cache_value: PaimonRealStorage = self._cache.get(pvfs_table_identifier)
+            if cache_value is not None and cache_value.need_refresh() is False:
+                return cache_value.file_system
+            if storage_type == StorageType.LOCAL:
                 fs = LocalFileSystem()
             elif storage_type == StorageType.OSS:
                 load_token_response: GetTableTokenResponse = self.rest_api.load_table_token(
