@@ -94,11 +94,43 @@ class PVFSTestCase(unittest.TestCase):
         df = pandas.DataFrame(data)
 
         df.to_parquet(path, engine='pyarrow', index=False)
-        #
-        # df_read = pandas.read_parquet(path)
-        # print(f"row: {len(df_read)}")
-        # print(f"column: {len(df_read.columns)}")
-        # print(df_read.head())
+
+    def test_arrow(self):
+        import pyarrow.parquet as pq
+        fs = self.pvfs
+        database = 'arrow_db'
+        table = 'test_table'
+        nested_dir = self.temp_path / database / table
+        nested_dir.mkdir(parents=True)
+        data_file_name = 'a.parquet'
+        self._create_parquet_file(f"{nested_dir}/{data_file_name}")
+        path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
+        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
+        self.assertEqual(fs.exists(path), True)
+        dataset = pq.ParquetDataset(path, filesystem=fs)
+        table = dataset.read()
+        first_row = table.slice(0, 1).to_pydict()
+        print(f"first_row: {first_row}")
+        df = table.to_pandas()
+        self.assertEqual(len(df), 5)
+
+    def test_ray(self):
+        import ray
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True)
+        fs = self.pvfs
+        database = 'ray_db'
+        table = 'test_table'
+        nested_dir = self.temp_path / database / table
+        nested_dir.mkdir(parents=True)
+        data_file_name = 'a.parquet'
+        self._create_parquet_file(f"{nested_dir}/{data_file_name}")
+        path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
+        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
+        self.assertEqual(fs.exists(path), True)
+        ds = ray.data.read_parquet(filesystem=fs, paths=path)
+        print(ds.count())
+        self.assertEqual(ds.count(), 5)
 
     def test_api(self):
         nested_dir = self.temp_path / self.database / self.table

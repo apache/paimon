@@ -62,7 +62,7 @@ class AuthProviderFactory:
     def create_auth_provider(options: Dict[str, str]) -> AuthProvider:
         provider = options.get(RESTCatalogOptions.TOKEN_PROVIDER)
         if provider == 'bear':
-            token = options.pop(RESTCatalogOptions.TOKEN)
+            token = options.get(RESTCatalogOptions.TOKEN)
             return BearTokenAuthProvider(token)
         elif provider == 'dlf':
             return DLFAuthProvider(

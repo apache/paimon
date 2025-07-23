@@ -31,7 +31,7 @@ from fsspec.implementations.local import LocalFileSystem
 
 from pypaimon.api import RESTApi, GetTableTokenResponse, Schema
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
-from pypaimon.api.typedef import Identifier
+from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.filesystem.pvfs_config import PVFSConfig
 
 PROTOCOL_NAME = "pvfs"
@@ -86,6 +86,7 @@ class PaimonRealStorage:
 
 class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     rest_api: RESTApi
+    warehouse: str
     options: Dict[str, Any]
 
     _identifier_pattern = re.compile("^pvfs://([^/]+)/([^/]+)/([^/]+)(?:/[^/]+)*/?$")
@@ -93,6 +94,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Dict = None, **kwargs):
         self.rest_api = RESTApi(options)
         self.options = options
+        self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
         cache_size = (
             PVFSConfig.DEFAULT_CACHE_SIZE
             if options is None
@@ -365,9 +367,18 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
             if pvfs_identifier.sub_path is None:
+                if create_parents:
+                    try:
+                        self.rest_api.create_database(pvfs_identifier.database, {})
+                    except AlreadyExistsException:
+                        pass
                 self._create_object_table(pvfs_identifier)
             else:
                 if create_parents:
+                    try:
+                        self.rest_api.create_database(pvfs_identifier.database, {})
+                    except AlreadyExistsException:
+                        pass
                     try:
                         self._create_object_table(pvfs_identifier)
                     except AlreadyExistsException:
@@ -623,10 +634,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def _extract_pvfs_identifier(path: str) -> Optional['PVFSIdentifier']:
-        if not isinstance(path, str) or not path.startswith(f'{PROTOCOL_NAME}://'):
-            return None
-
-        path_without_protocol = path[7:]
+        if not isinstance(path, str):
+            raise Exception("path is not a string")
+        path_without_protocol = path
+        if path.startswith(f'{PROTOCOL_NAME}://'):
+            path_without_protocol = path[7:]
 
         if not path_without_protocol:
             return None
