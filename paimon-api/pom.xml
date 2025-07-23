@@ -125,8 +125,8 @@ under the License.
                                     <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>org.apache.http</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.httpclient5</shadedPattern>
+                                    <pattern>org.apache.hc</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.hc</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>
