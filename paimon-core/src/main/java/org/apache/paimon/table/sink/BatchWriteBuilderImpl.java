@@ -76,7 +76,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
         InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(
                 Options.fromMap(table.options())
-                        .getOptional(CoreOptions.IGNORE_EMPTY_COMMIT)
+                        .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true));
         return commit;
     }

@@ -200,7 +200,7 @@ public class CombinedTableCompactorSink implements Serializable {
             dynamicOptions.put(CoreOptions.LOOKUP_WAIT.key(), "false");
         }
         boolean ignoreEmptyCommit =
-                options.getOptional(CoreOptions.IGNORE_EMPTY_COMMIT).orElse(true);
+                options.getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT).orElse(true);
         return context ->
                 new StoreMultiCommitter(catalogLoader, context, ignoreEmptyCommit, dynamicOptions);
     }
