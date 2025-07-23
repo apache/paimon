@@ -19,11 +19,14 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -51,14 +54,17 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final ChangelogDeletion changelogDeletion;
     private final TagManager tagManager;
+    private final SchemaManager schemaManager;
 
     private ExpireConfig expireConfig;
+    private long latestSchemaId;
 
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             TagManager tagManager,
-            ChangelogDeletion changelogDeletion) {
+            ChangelogDeletion changelogDeletion,
+            SchemaManager schemaManager) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.tagManager = tagManager;
@@ -69,6 +75,8 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                         snapshotManager.branch());
         this.changelogDeletion = changelogDeletion;
         this.expireConfig = ExpireConfig.builder().build();
+        this.schemaManager = schemaManager;
+        this.latestSchemaId = this.schemaManager.latest().get().id();
     }
 
     @Override
@@ -79,6 +87,12 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     @Override
     public int expire() {
+        TableSchema latestTableSchema = this.schemaManager.latest().get();
+        if (this.latestSchemaId != latestTableSchema.id()) {
+            this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
+            this.latestSchemaId = latestTableSchema.id();
+        }
+
         int retainMax = expireConfig.getChangelogRetainMax();
         int retainMin = expireConfig.getChangelogRetainMin();
         int maxDeletes = expireConfig.getChangelogMaxDeletes();
