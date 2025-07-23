@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -53,9 +54,10 @@ public class VFSOperations {
     private final RESTApi api;
     private final CatalogContext context;
 
-    public VFSOperations(CatalogContext context) {
-        this.context = context;
-        this.api = new RESTApi(context.options());
+    public VFSOperations(Options options) {
+        this.api = new RESTApi(options);
+        // Get the configured options which has been merged from REST Server
+        this.context = CatalogContext.create(api.options());
     }
 
     public VFSIdentifier getVFSIdentifier(String virtualPath) throws IOException {
