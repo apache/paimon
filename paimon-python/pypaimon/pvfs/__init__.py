@@ -78,6 +78,9 @@ class PVFSTableIdentifier(PVFSIdentifier):
         return (f'{PROTOCOL_NAME}://{self.catalog}'
                 f'/{self.database}/{self.name}')
 
+    def get_identifier(self):
+        return Identifier.create(self.database, self.name)
+
 
 @dataclass
 class PaimonRealStorage:
@@ -223,7 +226,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
              and isinstance(target_pvfs_identifier, PVFSTableIdentifier))
                 and target_pvfs_identifier.sub_path is not None
                 and source_pvfs_identifier.sub_path is not None):
-            table_identifier = Identifier.create(source_pvfs_identifier.database, source_pvfs_identifier.name)
+            table_identifier = source_pvfs_identifier.get_identifier()
             table = self.rest_api.get_table(table_identifier)
             storage_type = self._get_storage_type(table.path)
             storage_location = table.path
@@ -253,7 +256,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                       target_pvfs_identifier.catalog == source_pvfs_identifier.catalog and
                       target_pvfs_identifier.database == source_pvfs_identifier.database and
                       target_pvfs_identifier.name == source_pvfs_identifier.name):
-                    table_identifier = Identifier.create(source_pvfs_identifier.database, source_pvfs_identifier.name)
+                    table_identifier = source_pvfs_identifier.get_identifier()
                     table = self.rest_api.get_table(table_identifier)
                     storage_type = self._get_storage_type(table.path)
                     storage_location = table.path
@@ -277,16 +280,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             database_name = pvfs_identifier.name
-            table_names = self.rest_api.list_tables(database_name)
-            if recursive:
-                for table_name in table_names:
-                    self.rest_api.drop_table(Identifier.create(database_name, table_name))
-            elif len(table_names) > 0:
+            if not recursive and len(self.rest_api.list_tables(database_name)) > 0:
                 raise Exception('Recursive is False but database is not empty')
             self.rest_api.drop_database(database_name)
             return True
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             table = self.rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is None:
                 self.rest_api.drop_table(table_identifier)
@@ -308,7 +307,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def rm_file(self, path):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             table = self.rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is not None:
                 storage_type = self._get_storage_type(table.path)
@@ -331,7 +330,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 self.rest_api.drop_database(database_name)
                 return True
             elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-                table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+                table_identifier = pvfs_identifier.get_identifier()
                 table = self.rest_api.get_table(table_identifier)
                 if pvfs_identifier.sub_path is None:
                     self.rest_api.drop_table(table_identifier)
@@ -371,7 +370,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"open is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             table = self.rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is None:
                 raise Exception(
@@ -400,7 +399,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             self.rest_api.create_database(pvfs_identifier.name, {})
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 if create_parents:
                     try:
@@ -448,7 +447,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     pass
                 raise e
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 try:
                     self._create_object_table(pvfs_identifier)
@@ -483,7 +482,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self.__converse_ts_to_datatime(self.rest_api.get_database(pvfs_identifier.name).created_at)
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 return self.__converse_ts_to_datatime(self.rest_api.get_table(table_identifier).created_at)
             else:
@@ -505,7 +504,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self.__converse_ts_to_datatime(self.rest_api.get_database(pvfs_identifier.name).updated_at)
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 return self.__converse_ts_to_datatime(self.rest_api.get_table(table_identifier).updated_at)
             else:
@@ -518,10 +517,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
 
-    @staticmethod
-    def __converse_ts_to_datatime(ts: int):
-        return datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc)
-
     def cat_file(self, path, start=None, end=None, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
@@ -533,7 +528,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"cat file is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 raise Exception(
                     f"cat file is not supported for path: {path}"
@@ -562,7 +557,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"get file is not supported for path: {rpath}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 raise Exception(
                     f"get file is not supported for path: {rpath}"
@@ -586,8 +581,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     def _create_object_table(self, pvfs_identifier: PVFSTableIdentifier):
         schema = Schema(options={'type': 'object-table'})
-        table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+        table_identifier = pvfs_identifier.get_identifier()
         self.rest_api.create_table(table_identifier, schema)
+
+    @staticmethod
+    def __converse_ts_to_datatime(ts: int):
+        return datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc)
 
     @staticmethod
     def _strip_storage_protocol(storage_type: StorageType, path: str):
