@@ -45,7 +45,7 @@ class PaimonV2Write(
   with Logging {
 
   assert(
-    !(overwriteDynamic && overwritePartitions.nonEmpty),
+    !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
   private val table =
