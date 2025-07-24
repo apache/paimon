@@ -50,14 +50,6 @@ under the License.
             <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
         </dependency>
 
-        <!-- REST Catalog dependencies -->
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>${okhttp.version}</version>
-            <scope>test</scope>
-        </dependency>
-
         <dependency>
             <groupId>org.apache.httpcomponents.core5</groupId>
             <artifactId>httpcore5</artifactId>
@@ -102,11 +94,6 @@ under the License.
                                     <include>org.apache.paimon:paimon-shade-guava-30</include>
                                     <include>org.apache.paimon:paimon-shade-caffeine-2</include>
 
-                                    <!-- okhttp3 -->
-                                    <include>com.squareup.okhttp3:okhttp</include>
-                                    <include>com.squareup.okio:okio-jvm</include>
-                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
-
                                     <!-- apache httpcomponents 5 -->
                                     <include>org.apache.httpcomponents.core5:httpcore5</include>
                                     <include>org.apache.httpcomponents.core5:httpcore5-h2</include>
@@ -114,10 +101,6 @@ under the License.
                                 </includes>
                             </artifactSet>
                             <relocations>
-                                <relocation>
-                                    <pattern>okhttp3</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
-                                </relocation>
                                 <relocation>
                                     <pattern>kotlin</pattern>
                                     <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
@@ -137,14 +120,6 @@ under the License.
                                     <artifact>*</artifact>
                                     <excludes>
                                         <exclude>META-INF/LICENSE.txt</exclude>
-                                    </excludes>
-                                </filter>
-
-                                <!-- Exclude okhttp NOTICE. -->
-                                <filter>
-                                    <artifact>*</artifact>
-                                    <excludes>
-                                        <exclude>okhttp3/internal/publicsuffix/NOTICE</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
