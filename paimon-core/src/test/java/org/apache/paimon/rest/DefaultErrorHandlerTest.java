@@ -34,7 +34,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 
-import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
+import static org.apache.paimon.rest.interceptor.LoggingInterceptor.DEFAULT_REQUEST_ID;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DefaultErrorHandler}. */

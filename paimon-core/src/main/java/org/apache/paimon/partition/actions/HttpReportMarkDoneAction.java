@@ -20,9 +20,9 @@ package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.rest.SimpleHttpClient;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SimpleHttpClient;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -73,7 +73,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
-        this.client = new SimpleHttpClient(THREAD_NAME);
+        this.client = new SimpleHttpClient();
     }
 
     @Override
@@ -175,7 +175,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     public HttpReportMarkDoneResponse post(
             HttpReportMarkDoneRequest body, Map<String, String> headers) throws IOException {
-        String responseBodyStr = this.client.post(url, mapper.writeValueAsBytes(body), headers);
+        String responseBodyStr = this.client.post(url, body, headers);
         return mapper.readValue(responseBodyStr, HttpReportMarkDoneResponse.class);
     }
 }
