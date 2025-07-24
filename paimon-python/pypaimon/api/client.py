@@ -18,6 +18,7 @@ limitations under the License.
 
 import json
 import logging
+import time
 import traceback
 import urllib.parse
 from abc import ABC, abstractmethod
@@ -175,7 +176,7 @@ class DefaultErrorHandler(ErrorHandler):
         code = error.code
 
         # Format message with request ID if not default
-        if LoggingInterceptor.DEFAULT_REQUEST_ID == request_id:
+        if HttpClient.DEFAULT_REQUEST_ID == request_id:
             message = error.message
         else:
             # If we have a requestId, append it to the message
@@ -254,22 +255,6 @@ class ExponentialRetry:
         else:
             retry_kwargs['method_whitelist'] = retry_methods
         return Retry(**retry_kwargs)
-
-
-class LoggingInterceptor:
-    REQUEST_ID_KEY = "x-request-id"
-    DEFAULT_REQUEST_ID = "unknown"
-
-    def __init__(self):
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-    def log_request(self, method: str, url: str, headers: Dict[str, str]) -> None:
-        request_id = headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
-        self.logger.debug(f"Request [{request_id}]: {method} {url}")
-
-    def log_response(self, status_code: int, headers: Dict[str, str]) -> None:
-        request_id = headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
-        self.logger.debug(f"Response [{request_id}]: {status_code}")
 
 
 class RESTClient(ABC):
@@ -360,19 +345,19 @@ def _get_headers(path: str, method: str, query_params: Dict[str, str], data: str
 
 class HttpClient(RESTClient):
 
+    REQUEST_ID_KEY = "x-request-id"
+    DEFAULT_REQUEST_ID = "unknown"
+
     def __init__(self, uri: str):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.uri = _normalize_uri(uri)
         self.error_handler = DefaultErrorHandler.get_instance()
-        self.logging_interceptor = LoggingInterceptor()
-
         self.session = requests.Session()
 
         retry_interceptor = ExponentialRetry(max_retries=3)
-        adapter = HTTPAdapter(max_retries=retry_interceptor.adapter)
 
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.session.mount("http://", retry_interceptor.adapter)
+        self.session.mount("https://", retry_interceptor.adapter)
 
         self.session.timeout = (180, 180)
 
@@ -455,27 +440,29 @@ class HttpClient(RESTClient):
                          headers: Optional[Dict[str, str]] = None,
                          response_type: Optional[Type[T]] = None) -> T:
         try:
-            if headers:
-                self.logging_interceptor.log_request(method, url, headers)
-
+            start_time = time.time_ns()
             response = self.session.request(
                 method=method,
                 url=url,
                 data=data.encode('utf-8') if data else None,
                 headers=headers
             )
+            duration_ms = (time.time_ns() - start_time) // 1_000_000
+            response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
 
-            response_headers = dict(response.headers)
-            self.logging_interceptor.log_response(response.status_code, response_headers)
-
+            self.logger.info(
+                "[rest] requestId:%s method:%s url:%s status:%d duration:%dms",
+                response_request_id,
+                response.request.method,
+                response.url,
+                response.status_code,
+                duration_ms
+            )
             response_body_str = response.text if response.text else None
 
             if not response.ok:
                 error = _parse_error_response(response_body_str, response.status_code)
-                request_id = response.headers.get(
-                    LoggingInterceptor.REQUEST_ID_KEY,
-                    LoggingInterceptor.DEFAULT_REQUEST_ID
-                )
+                request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
                 self.error_handler.accept(error, request_id)
 
             if response_type is not None and response_body_str is not None:

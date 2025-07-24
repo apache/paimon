@@ -21,7 +21,12 @@ VERSION = "0.3.dev"  # noqa
 
 PACKAGES = find_packages(include=["pypaimon*"])
 
-install_requires = []
+install_requires = [
+    'readerwriterlock==1.0.9',
+    'fsspec==2024.3.1',
+    'cachetools==5.3.3',
+    'ossfs==2023.12.0'
+]
 
 long_description = "See Apache Paimon Python API \
 [Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage."
