@@ -90,4 +90,11 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF token ecs role name.");
+
+    public static final ConfigOption<String> HTTP_USER_AGENT =
+            ConfigOptions.key("header.User-Agent")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The user agent of http client connecting to REST Catalog server.");
 }
