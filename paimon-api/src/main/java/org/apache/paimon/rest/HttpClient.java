@@ -23,7 +23,6 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
-import org.apache.paimon.rest.interceptor.TimingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
@@ -33,30 +32,24 @@ import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
-import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
-import org.apache.hc.core5.util.Timeout;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.apache.paimon.rest.HttpClientUtils.createLoggingBuilder;
+
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static final CloseableHttpClient httpClient;
-
-    static {
-        httpClient = buildHttpClient();
-    }
+    private static final CloseableHttpClient HTTP_CLIENT = createLoggingBuilder().build();
 
     private final String uri;
 
@@ -65,23 +58,6 @@ public class HttpClient implements RESTClient {
     public HttpClient(String uri) {
         this.uri = normalizeUri(uri);
         this.errorHandler = DefaultErrorHandler.getInstance();
-    }
-
-    public static CloseableHttpClient buildHttpClient() {
-        HttpClientBuilder clientBuilder = HttpClients.custom();
-        RequestConfig requestConfig =
-                RequestConfig.custom()
-                        .setConnectionRequestTimeout(Timeout.ofMinutes(3))
-                        .setResponseTimeout(Timeout.ofMinutes(3))
-                        .build();
-        clientBuilder.setDefaultRequestConfig(requestConfig);
-
-        clientBuilder.setConnectionManager(RESTUtil.configureConnectionManager());
-        clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
-        clientBuilder
-                .addRequestInterceptorFirst(new TimingInterceptor())
-                .addResponseInterceptorLast(new LoggingInterceptor());
-        return clientBuilder.build();
     }
 
     @Override
@@ -161,7 +137,7 @@ public class HttpClient implements RESTClient {
     }
 
     private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
+        try (CloseableHttpResponse response = HTTP_CLIENT.execute(request)) {
             String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
             if (!RESTUtil.isSuccessful(response)) {
                 ErrorResponse error;

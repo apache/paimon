@@ -28,16 +28,10 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.io.HttpClientConnectionManager;
-import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
-import org.apache.hc.client5.http.ssl.HttpsSupport;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.net.URIBuilder;
-import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
-import org.apache.hc.core5.ssl.SSLContexts;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -181,24 +175,6 @@ public class RESTUtil {
         return code == HttpStatus.SC_OK
                 || code == HttpStatus.SC_ACCEPTED
                 || code == HttpStatus.SC_NO_CONTENT;
-    }
-
-    public static HttpClientConnectionManager configureConnectionManager() {
-        PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder =
-                PoolingHttpClientConnectionManagerBuilder.create();
-        connectionManagerBuilder.useSystemProperties().setMaxConnTotal(100).setMaxConnPerRoute(100);
-
-        // support TLS
-        String[] tlsProtocols = {"TLSv1.2", "TLSv1.3"};
-        connectionManagerBuilder.setTlsSocketStrategy(
-                new DefaultClientTlsStrategy(
-                        SSLContexts.createDefault(),
-                        tlsProtocols,
-                        null,
-                        SSLBufferMode.STATIC,
-                        HttpsSupport.getDefaultHostnameVerifier()));
-
-        return connectionManagerBuilder.build();
     }
 
     public static String buildRequestUrl(String url, Map<String, String> queryParams) {

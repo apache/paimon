@@ -35,12 +35,6 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DLFECSTokenLoader.class);
 
-    private static final SimpleHttpClient client;
-
-    static {
-        client = new SimpleHttpClient();
-    }
-
     private final String ecsMetadataURL;
 
     private String roleName;
@@ -73,7 +67,7 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
 
     private static DLFToken getToken(String url) {
         try {
-            String token = client.get(url);
+            String token = SimpleHttpClient.INSTANCE.get(url);
             return RESTApi.fromJson(token, DLFToken.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -86,7 +80,7 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
     protected static String getResponseBody(String url) {
         long startTime = System.currentTimeMillis();
         try {
-            String responseBodyStr = client.get(url);
+            String responseBodyStr = SimpleHttpClient.INSTANCE.get(url);
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
                         "get response success, url : {}, cost : {} ms",

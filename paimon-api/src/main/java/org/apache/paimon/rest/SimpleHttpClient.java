@@ -23,28 +23,28 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
-import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
-import org.apache.hc.core5.util.Timeout;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map;
 
-/** A simple client to wrap apache httpcompents client. */
+import static org.apache.paimon.rest.HttpClientUtils.createBuilder;
+
+/** A simple client to wrap {@link CloseableHttpClient}. */
 public class SimpleHttpClient implements Closeable {
+
+    public static final SimpleHttpClient INSTANCE = new SimpleHttpClient();
 
     private final CloseableHttpClient client;
 
-    public SimpleHttpClient() {
-        this.client = buildHttpClient();
+    private SimpleHttpClient() {
+        this.client = createBuilder().build();
     }
 
     public String post(String url, Object body, Map<String, String> headers) throws IOException {
@@ -105,19 +105,5 @@ public class SimpleHttpClient implements Closeable {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private static CloseableHttpClient buildHttpClient() {
-        HttpClientBuilder clientBuilder = HttpClients.custom();
-        RequestConfig requestConfig =
-                RequestConfig.custom()
-                        .setConnectionRequestTimeout(Timeout.ofMinutes(3))
-                        .setResponseTimeout(Timeout.ofMinutes(3))
-                        .build();
-        clientBuilder.setDefaultRequestConfig(requestConfig);
-
-        clientBuilder.setConnectionManager(RESTUtil.configureConnectionManager());
-        clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
-        return clientBuilder.build();
     }
 }
