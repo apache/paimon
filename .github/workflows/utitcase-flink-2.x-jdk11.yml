@@ -44,7 +44,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run: |
+        run:  |
           mvn -T 2C -B clean install -DskipTests -Pflink2,spark3
 
       - name: Test Flink

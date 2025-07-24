@@ -46,7 +46,7 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build Spark
-        run: mvn -T 2C -B clean install -DskipTests
+        run:  mvn -T 2C -B clean install -DskipTests
       - name: Test Spark
         timeout-minutes: 60
         run: |
