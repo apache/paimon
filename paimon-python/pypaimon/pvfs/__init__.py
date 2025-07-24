@@ -258,7 +258,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             )
             return None
         raise Exception(
-            f"cp is not supported for path: {path1}"
+            f"cp is not supported for path: {path1} to path: {path2}"
         )
 
     def mv(self, path1, path2, recursive=False, maxdepth=None, **kwargs):
