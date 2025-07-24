@@ -24,7 +24,7 @@ import org.apache.spark.sql.QueryTest.checkAnswer
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
 
-import scala.jdk.CollectionConverters.asScalaBufferConverter
+import scala.collection.JavaConverters._
 
 /**
  * A utility class for facilitating the comparison of Spark Row objects in Java unit tests, which
