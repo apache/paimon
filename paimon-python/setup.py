@@ -17,7 +17,6 @@
 ##########################################################################
 from setuptools import setup, find_packages
 
-# hello world1
 VERSION = "0.3.dev"  # noqa
 
 PACKAGES = find_packages(include=["pypaimon*"])
