@@ -207,6 +207,10 @@ public class FlinkCalciteClasses {
         public Object not() throws NoSuchFieldException, IllegalAccessException {
             return clazz.getField("NOT").get(null);
         }
+
+        public Object notIn() throws NoSuchFieldException, IllegalAccessException {
+            return clazz.getField("NOT_IN").get(null);
+        }
     }
 
     /** Accessing org.apache.calcite.sql.parser.SqlParser$Config by Reflection. */

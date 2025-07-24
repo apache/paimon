@@ -163,6 +163,19 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
+    public void testNotIn() throws Exception {
+        Predicate predicate =
+                simpleSqlPredicateConvertor.convertSqlToPredicate("a not in ('1','2')");
+        List<Object> elements = Lists.newArrayList(1, 2);
+        Assertions.assertThat(predicate)
+                .isEqualTo(
+                        predicateBuilder
+                                .in(predicateBuilder.indexOf("a"), elements)
+                                .negate()
+                                .get());
+    }
+
+    @Test
     public void testIsNull() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a is null ");
         Assertions.assertThat(predicate)
