@@ -73,11 +73,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        if (readType != null) {
-            return readType;
-        } else {
-            return table.rowType();
-        }
+        return readType != null ? readType : table.rowType();
     }
 
     @Override
@@ -93,11 +89,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            this.partitionFilter =
-                    fromPredicate(
-                            partitionType,
-                            createPartitionPredicate(
-                                    partitionSpec, partitionType, defaultPartitionName));
+            PartitionPredicate partitionPredicate = fromPredicate(
+                    partitionType,
+                    createPartitionPredicate(
+                            partitionSpec, partitionType, defaultPartitionName));
+            withPartitionFilter(partitionPredicate);
         }
         return this;
     }

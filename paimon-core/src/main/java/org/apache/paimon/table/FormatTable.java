@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
  * operations on this table allow for reading or writing to these files, facilitating the retrieval
@@ -151,6 +153,8 @@ public interface FormatTable extends Table {
     /** An implementation for {@link FormatTable}. */
     class FormatTableImpl implements FormatTable {
 
+        private static final long serialVersionUID = 1L;
+
         private final FileIO fileIO;
         private final Identifier identifier;
         private final RowType rowType;
@@ -243,6 +247,24 @@ public interface FormatTable extends Table {
                     newOptions,
                     comment);
         }
+    }
+
+    @Override
+    default ReadBuilder newReadBuilder() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default BatchWriteBuilder newBatchWriteBuilder() {
+        throw new UnsupportedOperationException();
+    }
+
+    default RowType partitionType() {
+        return rowType().project(partitionKeys());
+    }
+
+    default String defaultPartName() {
+        return options().getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
     }
 
     // ===================== Unsupported ===============================
@@ -349,16 +371,6 @@ public interface FormatTable extends Table {
 
     @Override
     default ExpireSnapshots newExpireChangelog() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default ReadBuilder newReadBuilder() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException();
     }
 
