@@ -24,6 +24,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - 'paimon-python/**'
 
 env:
   JDK_VERSION: 11
@@ -41,7 +42,7 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build
-        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3
+        run: mvn -T 1C -B clean install -DskipTests -Pflink1,spark3
       - name: Test
         run: |
           # run tests with random timezone to find out timezone related bugs

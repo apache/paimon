@@ -24,6 +24,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - 'paimon-python/**'
 
 env:
   JDK_VERSION: 11
@@ -48,7 +49,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run:  |
+        run: |
           mvn -T 2C -B clean install -DskipTests -Pflink2,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
 
       - name: Test Flink
