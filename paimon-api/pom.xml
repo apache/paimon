@@ -102,10 +102,6 @@ under the License.
                             </artifactSet>
                             <relocations>
                                 <relocation>
-                                    <pattern>kotlin</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>org.apache.hc</pattern>
                                     <shadedPattern>org.apache.paimon.shade.hc</shadedPattern>
                                 </relocation>
