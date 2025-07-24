@@ -34,7 +34,7 @@ from fsspec.implementations.local import LocalFileSystem
 from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, GetTableResponse
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
 from pypaimon.api.typedef import Identifier
-from pypaimon.api.paimon_options import RESTCatalogOptions, OssOptions, PVFSOptions
+from pypaimon.api.config import RESTCatalogOptions, OssOptions, PVFSOptions
 
 PROTOCOL_NAME = "pvfs"
 
