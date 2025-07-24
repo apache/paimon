@@ -18,9 +18,9 @@
 import importlib
 import re
 import time
+import datetime
 from abc import ABC
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional, Tuple
 
@@ -520,7 +520,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def __converse_ts_to_datatime(ts: int):
-        return datetime.fromtimestamp(ts / 1000)
+        return datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc)
 
     def cat_file(self, path, start=None, end=None, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)

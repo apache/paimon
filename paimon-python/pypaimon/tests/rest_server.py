@@ -18,6 +18,7 @@
 
 import logging
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
@@ -352,6 +353,7 @@ class RESTCatalogServer:
         """Route HTTP request to appropriate handler"""
         try:
             # Config endpoint
+            # Config endpoint
             if resource_path.startswith(self.resource_paths.config()):
                 warehouse_param = parameters.get(WAREHOUSE)
                 if warehouse_param == self.warehouse:
@@ -387,7 +389,40 @@ class RESTCatalogServer:
             database = resource_path.split("/")[4]
             # Database-specific endpoints
             if resource_path.startswith(self.resource_paths.database(database)):
-                return self._handle_database_resource(method, resource_path, parameters, data)
+                """Handle database-specific resource requests"""
+                # Extract database name and resource path
+                path_parts = resource_path[len(self.database_uri) + 1:].split('/')
+                database_name = api.RESTUtil.decode_string(path_parts[0])
+
+                # Check database permissions
+                if database_name in self.no_permission_databases:
+                    raise DatabaseNoPermissionException(database_name)
+
+                if database_name not in self.database_store:
+                    raise DatabaseNotExistException(database_name)
+
+                # Handle different resource types
+                if len(path_parts) == 1:
+                    # Database operations
+                    return self._database_handle(method, data, database_name)
+
+                elif len(path_parts) == 2:
+                    # Collection operations (tables, views, functions)
+                    resource_type = path_parts[1]
+
+                    if resource_type.startswith(api.ResourcePaths.TABLES):
+                        return self._tables_handle(method, data, database_name, parameters)
+
+                elif len(path_parts) >= 3:
+                    # Individual resource operations
+                    resource_type = path_parts[1]
+                    resource_name = api.RESTUtil.decode_string(path_parts[2])
+                    identifier = Identifier.create(database_name, resource_name)
+
+                    if resource_type == api.ResourcePaths.TABLES:
+                        return self._handle_table_resource(method, path_parts, identifier, data, parameters)
+
+                return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
             return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
@@ -415,43 +450,6 @@ class RESTCatalogServer:
             self.logger.error(f"Unexpected error: {e}")
             response = ErrorResponse(None, None, str(e), 500)
             return self._mock_response(response, 500)
-
-    def _handle_database_resource(self, method: str, resource_path: str,
-                                  parameters: Dict[str, str], data: str) -> Tuple[str, int]:
-        """Handle database-specific resource requests"""
-        # Extract database name and resource path
-        path_parts = resource_path[len(self.database_uri) + 1:].split('/')
-        database_name = api.RESTUtil.decode_string(path_parts[0])
-
-        # Check database permissions
-        if database_name in self.no_permission_databases:
-            raise DatabaseNoPermissionException(database_name)
-
-        if database_name not in self.database_store:
-            raise DatabaseNotExistException(database_name)
-
-        # Handle different resource types
-        if len(path_parts) == 1:
-            # Database operations
-            return self._database_handle(method, data, database_name)
-
-        elif len(path_parts) == 2:
-            # Collection operations (tables, views, functions)
-            resource_type = path_parts[1]
-
-            if resource_type.startswith(api.ResourcePaths.TABLES):
-                return self._tables_handle(method, data, database_name, parameters)
-
-        elif len(path_parts) >= 3:
-            # Individual resource operations
-            resource_type = path_parts[1]
-            resource_name = api.RESTUtil.decode_string(path_parts[2])
-            identifier = Identifier.create(database_name, resource_name)
-
-            if resource_type == api.ResourcePaths.TABLES:
-                return self._handle_table_resource(method, path_parts, identifier, data, parameters)
-
-        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     def _handle_table_resource(self, method: str, path_parts: List[str],
                                identifier: Identifier, data: str,
@@ -721,9 +719,9 @@ class RESTCatalogServer:
             location=f"{self.data_path}/{name}",
             options=options,
             owner="owner",
-            created_at=1,
+            created_at=int(time.time()) * 1000,
             created_by="created",
-            updated_at=1,
+            updated_at=int(time.time()) * 1000,
             updated_by="updated"
         )
 
