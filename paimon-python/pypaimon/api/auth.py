@@ -82,6 +82,7 @@ class BearTokenAuthProvider(AuthProvider):
     ) -> Dict[str, str]:
         headers_with_auth = base_header.copy()
         headers_with_auth['Authorization'] = f'Bearer {self.token}'
+        return headers_with_auth
 
 
 class DLFAuthProvider(AuthProvider):

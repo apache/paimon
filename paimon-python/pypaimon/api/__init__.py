@@ -145,7 +145,7 @@ class RESTApi:
                 ResourcePaths.config(),
                 query_params,
                 ConfigResponse,
-                RESTAuthFunction({}, auth_provider),
+                RESTAuthFunction(base_headers, auth_provider),
             )
             options = config_response.merge(options)
             base_headers.update(

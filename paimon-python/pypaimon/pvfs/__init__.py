@@ -105,6 +105,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     _identifier_pattern = re.compile("^pvfs://([^/]+)/([^/]+)/([^/]+)(?:/[^/]+)*/?$")
 
     def __init__(self, options: Dict = None, **kwargs):
+        options.update({RESTCatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
         self.rest_api = RESTApi(options)
         self.options = options
         self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
@@ -285,8 +286,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             table = self.rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is None:
                 self.rest_api.drop_table(table_identifier)
-                if not recursive:
-                    return True
+                return True
             storage_type = self._get_storage_type(table.path)
             storage_location = table.path
             actual_path = pvfs_identifier.get_actual_path(storage_location)

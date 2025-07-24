@@ -87,3 +87,4 @@ class RESTCatalogOptions:
     DLF_TOKEN_ECS_ROLE_NAME = "dlf.token-ecs-role-name"
     DLF_TOKEN_ECS_METADATA_URL = "dlf.token-ecs-metadata-url"
     PREFIX = 'prefix'
+    HTTP_USER_AGENT_HEADER = 'header.HTTP_USER_AGENT'
