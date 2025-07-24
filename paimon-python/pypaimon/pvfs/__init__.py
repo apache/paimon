@@ -20,6 +20,7 @@ import re
 import time
 from abc import ABC
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional, Tuple
 
@@ -30,7 +31,7 @@ import fsspec
 from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 
-from pypaimon.api import RESTApi, GetTableTokenResponse, Schema
+from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, GetTableResponse
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
 from pypaimon.api.typedef import Identifier, RESTCatalogOptions
 from pypaimon.pvfs.pvfs_config import PVFSConfig
@@ -276,9 +277,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             database_name = pvfs_identifier.name
+            table_names = self.rest_api.list_tables(database_name)
             if recursive:
-                for table_name in self.rest_api.list_tables(database_name):
+                for table_name in table_names:
                     self.rest_api.drop_table(Identifier.create(database_name, table_name))
+            elif len(table_names) > 0:
+                raise Exception('Recursive is False but database is not empty')
             self.rest_api.drop_database(database_name)
             return True
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
@@ -286,7 +290,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             table = self.rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is None:
                 self.rest_api.drop_table(table_identifier)
-                return True
+                if not recursive:
+                    return True
             storage_type = self._get_storage_type(table.path)
             storage_location = table.path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
@@ -318,30 +323,34 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
 
     def rmdir(self, path):
-        pvfs_identifier = self._extract_pvfs_identifier(path)
-        if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
-            database_name = pvfs_identifier.name
-            for table_name in self.rest_api.list_tables(database_name):
-                self.rest_api.drop_table(Identifier.create(database_name, table_name))
-            self.rest_api.drop_database(database_name)
-            return True
-        elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
-            table = self.rest_api.get_table(table_identifier)
-            if pvfs_identifier.sub_path is None:
-                self.rest_api.drop_table(table_identifier)
-                self._cache.pop(pvfs_identifier)
+        files = self.ls(path)
+        if len(files) == 0:
+            pvfs_identifier = self._extract_pvfs_identifier(path)
+            if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
+                database_name = pvfs_identifier.name
+                self.rest_api.drop_database(database_name)
                 return True
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
-            actual_path = pvfs_identifier.get_actual_path(storage_location)
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
-            return fs.rmdir(
-                self._strip_storage_protocol(storage_type, actual_path)
+            elif isinstance(pvfs_identifier, PVFSTableIdentifier):
+                table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
+                table = self.rest_api.get_table(table_identifier)
+                if pvfs_identifier.sub_path is None:
+                    self.rest_api.drop_table(table_identifier)
+                    self._cache.pop(pvfs_identifier)
+                    return True
+                storage_type = self._get_storage_type(table.path)
+                storage_location = table.path
+                actual_path = pvfs_identifier.get_actual_path(storage_location)
+                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                return fs.rmdir(
+                    self._strip_storage_protocol(storage_type, actual_path)
+                )
+            raise Exception(
+                f"Rm dir is not supported for path: {path}."
             )
-        raise Exception(
-            f"Rm dir is not supported for path: {path}."
-        )
+        else:
+            raise Exception(
+                f"Rm dir is not supported for path: {path} as it is not empty."
+            )
 
     def open(
             self,
@@ -400,16 +409,21 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                         pass
                 self._create_object_table(pvfs_identifier)
             else:
+                table: GetTableResponse
                 if create_parents:
                     try:
                         self.rest_api.create_database(pvfs_identifier.database, {})
                     except AlreadyExistsException:
                         pass
                     try:
-                        self._create_object_table(pvfs_identifier)
-                    except AlreadyExistsException:
-                        pass
-                table = self.rest_api.get_table(table_identifier)
+                        table = self.rest_api.get_table(table_identifier)
+                    except NoSuchResourceException:
+                        try:
+                            self._create_object_table(pvfs_identifier)
+                        except AlreadyExistsException:
+                            pass
+                        finally:
+                            table = self.rest_api.get_table(table_identifier)
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
@@ -467,11 +481,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"created is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
-            return self.rest_api.get_database(pvfs_identifier.name).created_at
+            return self.__converse_ts_to_datatime(self.rest_api.get_database(pvfs_identifier.name).created_at)
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
             if pvfs_identifier.sub_path is None:
-                return self.rest_api.get_table(table_identifier).created_at
+                return self.__converse_ts_to_datatime(self.rest_api.get_table(table_identifier).created_at)
             else:
                 table = self.rest_api.get_table(table_identifier)
                 storage_type = self._get_storage_type(table.path)
@@ -489,11 +503,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"modified is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
-            return self.rest_api.get_database(pvfs_identifier.name).updated_at
+            return self.__converse_ts_to_datatime(self.rest_api.get_database(pvfs_identifier.name).updated_at)
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table_identifier = Identifier.create(pvfs_identifier.database, pvfs_identifier.name)
             if pvfs_identifier.sub_path is None:
-                return self.rest_api.get_table(table_identifier).updated_at
+                return self.__converse_ts_to_datatime(self.rest_api.get_table(table_identifier).updated_at)
             else:
                 table = self.rest_api.get_table(table_identifier)
                 storage_type = self._get_storage_type(table.path)
@@ -503,6 +517,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return fs.modified(
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
+
+    @staticmethod
+    def __converse_ts_to_datatime(ts: int):
+        return datetime.fromtimestamp(ts / 1000)
 
     def cat_file(self, path, start=None, end=None, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)
