@@ -272,10 +272,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             f"Mv is not supported for path: {path1} to path: {path2}"
         )
 
-    def lazy_load_class(self, module_name, class_name):
-        module = importlib.import_module(module_name)
-        return getattr(module, class_name)
-
     def rm(self, path, recursive=False, maxdepth=None):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
@@ -687,9 +683,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         if not path_without_protocol:
             return None
 
-        components = path_without_protocol.rstrip('/').split('/')
-
-        components = [comp for comp in components if comp]
+        components = [component for component in path_without_protocol.rstrip('/').split('/') if component]
 
         if len(components) == 0:
             return None
