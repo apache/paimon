@@ -16,6 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-.gitignore
-rat-results.txt
-log/*
+
+class PyNativeNotImplementedError(NotImplementedError):
+    """ Method or property hasn't been implemented by py-native paimon yet. """
+
+    def __init__(self, name):
+        super().__init__(f"Feature '{name}' hasn't been implemented by PyNative Paimon.")

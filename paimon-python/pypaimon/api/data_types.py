@@ -160,12 +160,12 @@ class DataField:
     default_value: Optional[str] = None
 
     def __init__(
-        self,
-        id: int,
-        name: str,
-        type: DataType,
-        description: Optional[str] = None,
-        default_value: Optional[str] = None,
+            self,
+            id: int,
+            name: str,
+            type: DataType,
+            description: Optional[str] = None,
+            default_value: Optional[str] = None,
     ):
         self.id = id
         self.name = name
@@ -207,6 +207,10 @@ class RowType(DataType):
             "fields": [field.to_dict() for field in self.fields],
             "nullable": self.nullable,
         }
+
+    @staticmethod
+    def current_highest_field_id(self) -> int:
+        return -1
 
     def __str__(self) -> str:
         field_strs = [f"{field.name}: {field.type}" for field in self.fields]
@@ -268,7 +272,7 @@ class DataTypeParser:
 
     @staticmethod
     def parse_data_type(
-        json_data: Union[Dict[str, Any], str], field_id: Optional[AtomicInteger] = None
+            json_data: Union[Dict[str, Any], str], field_id: Optional[AtomicInteger] = None
     ) -> DataType:
 
         if isinstance(json_data, str):
@@ -319,12 +323,12 @@ class DataTypeParser:
 
     @staticmethod
     def parse_data_field(
-        json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
+            json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
     ) -> DataField:
 
         if (
-            DataField.FIELD_ID in json_data
-            and json_data[DataField.FIELD_ID] is not None
+                DataField.FIELD_ID in json_data
+                and json_data[DataField.FIELD_ID] is not None
         ):
             if field_id is not None and field_id.get() != -1:
                 raise ValueError("Partial field id is not allowed.")
@@ -359,14 +363,14 @@ class DataTypeParser:
 
 
 def parse_data_type_from_json(
-    json_str: str, field_id: Optional[AtomicInteger] = None
+        json_str: str, field_id: Optional[AtomicInteger] = None
 ) -> DataType:
     json_data = json.loads(json_str)
     return DataTypeParser.parse_data_type(json_data, field_id)
 
 
 def parse_data_field_from_json(
-    json_str: str, field_id: Optional[AtomicInteger] = None
+        json_str: str, field_id: Optional[AtomicInteger] = None
 ) -> DataField:
     json_data = json.loads(json_str)
     return DataTypeParser.parse_data_field(json_data, field_id)

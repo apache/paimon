@@ -14,8 +14,22 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 # limitations under the License.
-################################################################################
+#################################################################################
 
-.gitignore
-rat-results.txt
-log/*
+from typing import Optional
+
+
+class Database:
+    """Structure of a Database."""
+
+    def __init__(self, name: str, options: dict, comment: Optional[str] = None):
+        self.name = name
+        self.options = options
+        self.comment = comment
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Database):
+            return False
+        return (self.name == other.name and
+                self.options == other.options and
+                self.comment == other.comment)
