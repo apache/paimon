@@ -106,10 +106,6 @@ under the License.
                                     <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>okio</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>org.apache.hc</pattern>
                                     <shadedPattern>org.apache.paimon.shade.hc</shadedPattern>
                                 </relocation>
