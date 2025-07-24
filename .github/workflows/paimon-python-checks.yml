@@ -21,8 +21,9 @@ name: Check Code Style and Test
 on:
   push:
   pull_request:
-    paths-ignore:
-      - '**/*.md'
+    paths:
+      - 'paimon-python/**'
+      - '!**/*.md'
 
 env:
   PYTHON_VERSION: "3.10"
