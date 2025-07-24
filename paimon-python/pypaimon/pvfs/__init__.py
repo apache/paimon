@@ -33,8 +33,8 @@ from fsspec.implementations.local import LocalFileSystem
 
 from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, GetTableResponse
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
-from pypaimon.api.typedef import Identifier, RESTCatalogOptions
-from pypaimon.pvfs.pvfs_config import PVFSConfig
+from pypaimon.api.typedef import Identifier
+from pypaimon.api.paimon_options import RESTCatalogOptions, OssOptions, PVFSOptions
 
 PROTOCOL_NAME = "pvfs"
 
@@ -112,9 +112,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         self.options = options
         self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
         cache_size = (
-            PVFSConfig.DEFAULT_CACHE_SIZE
+            PVFSOptions.DEFAULT_CACHE_SIZE
             if options is None
-            else options.get(PVFSConfig.CACHE_SIZE, PVFSConfig.DEFAULT_CACHE_SIZE)
+            else options.get(PVFSOptions.CACHE_SIZE, PVFSOptions.DEFAULT_CACHE_SIZE)
         )
         self._rest_client_cache = LRUCache(cache_size)
         self._cache = LRUCache(maxsize=cache_size)
@@ -311,7 +311,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             table_identifier = pvfs_identifier.get_identifier()
             table = rest_api.get_table(table_identifier)
             if pvfs_identifier.sub_path is None:
-                self.rest_api.drop_table(table_identifier)
+                rest_api.drop_table(table_identifier)
                 return True
             storage_type = self._get_storage_type(table.path)
             storage_location = table.path
@@ -355,7 +355,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return True
             elif isinstance(pvfs_identifier, PVFSTableIdentifier):
                 table_identifier = pvfs_identifier.get_identifier()
-                table = self.rest_api.get_table(table_identifier)
+                table = rest_api.get_table(table_identifier)
                 if pvfs_identifier.sub_path is None:
                     rest_api.drop_table(table_identifier)
                     self._cache.pop(pvfs_identifier)
@@ -758,8 +758,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             if storage_type == StorageType.LOCAL:
                 fs = LocalFileSystem()
             elif storage_type == StorageType.OSS:
-                load_token_response: GetTableTokenResponse = self.rest_api.load_table_token(
-                    Identifier.create(pvfs_table_identifier.database, pvfs_table_identifier.name))
+                rest_api = self.__rest_api(pvfs_table_identifier.catalog)
+                load_token_response: GetTableTokenResponse = rest_api.load_table_token(
+                    Identifier.create(pvfs_table_identifier.database, pvfs_table_identifier.table))
                 fs = self._get_oss_filesystem(load_token_response.token)
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
@@ -787,27 +788,25 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def _get_oss_filesystem(options: Dict[str, str]) -> AbstractFileSystem:
-        access_key_id = options.get(PVFSConfig.OSS_ACCESS_KEY_ID)
+        access_key_id = options.get(OssOptions.OSS_ACCESS_KEY_ID)
         if access_key_id is None:
             raise Exception(
                 "OSS access key id is not found in the options."
             )
 
         access_key_secret = options.get(
-            PVFSConfig.OSS_ACCESS_KEY_SECRET
+            OssOptions.OSS_ACCESS_KEY_SECRET
         )
         if access_key_secret is None:
             raise Exception(
                 "OSS access key secret is not found in the options."
             )
-        oss_endpoint_url = options.get(
-            PVFSConfig.OSS_ENDPOINT
-        )
+        oss_endpoint_url = options.get(OssOptions.OSS_ENDPOINT)
         if oss_endpoint_url is None:
             raise Exception(
                 "OSS endpoint url is not found in the options."
             )
-        token = options.get(PVFSConfig.OSS_SECURITY_TOKEN)
+        token = options.get(OssOptions.OSS_SECURITY_TOKEN)
         return importlib.import_module("ossfs").OSSFileSystem(
             key=access_key_id,
             secret=access_key_secret,

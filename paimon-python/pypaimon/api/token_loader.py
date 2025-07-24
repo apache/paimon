@@ -25,7 +25,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from .rest_json import json_field, JSON
-from .typedef import RESTCatalogOptions
+from .paimon_options import RESTCatalogOptions
 from .client import ExponentialRetry
 
 
@@ -59,7 +59,7 @@ class DLFToken:
 
     @classmethod
     def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from .typedef import RESTCatalogOptions
+        from .paimon_options import RESTCatalogOptions
         if (options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID) is None
                 or options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None

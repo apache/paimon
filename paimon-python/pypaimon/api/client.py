@@ -355,10 +355,9 @@ class HttpClient(RESTClient):
         self.session = requests.Session()
 
         retry_interceptor = ExponentialRetry(max_retries=3)
-        adapter = HTTPAdapter(max_retries=retry_interceptor.adapter)
 
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.session.mount("http://", retry_interceptor.adapter)
+        self.session.mount("https://", retry_interceptor.adapter)
 
         self.session.timeout = (180, 180)
 

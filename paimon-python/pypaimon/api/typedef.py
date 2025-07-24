@@ -72,19 +72,3 @@ class RESTAuthParameter:
     path: str
     data: str
     parameters: Dict[str, str]
-
-
-class RESTCatalogOptions:
-    URI = "uri"
-    WAREHOUSE = "warehouse"
-    TOKEN_PROVIDER = "token.provider"
-    TOKEN = "token"
-    DLF_REGION = "dlf.region"
-    DLF_ACCESS_KEY_ID = "dlf.access-key-id"
-    DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
-    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
-    DLF_TOKEN_LOADER = "dlf.token-loader"
-    DLF_TOKEN_ECS_ROLE_NAME = "dlf.token-ecs-role-name"
-    DLF_TOKEN_ECS_METADATA_URL = "dlf.token-ecs-metadata-url"
-    PREFIX = 'prefix'
-    HTTP_USER_AGENT_HEADER = 'header.HTTP_USER_AGENT'

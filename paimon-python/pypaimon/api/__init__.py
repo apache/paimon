@@ -31,7 +31,8 @@ from pypaimon.api.api_response import (
 )
 from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest, \
     CreateTableRequest
-from pypaimon.api.typedef import Identifier, RESTCatalogOptions
+from pypaimon.api.typedef import Identifier
+from pypaimon.api.paimon_options import RESTCatalogOptions
 from pypaimon.api.client import HttpClient
 from pypaimon.api.typedef import T
 

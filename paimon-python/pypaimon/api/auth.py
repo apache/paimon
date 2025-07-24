@@ -26,7 +26,8 @@ from datetime import datetime, timezone
 from typing import Optional, Dict
 
 from .token_loader import DLFTokenLoader, DLFToken
-from .typedef import RESTAuthParameter, RESTCatalogOptions
+from .typedef import RESTAuthParameter
+from .paimon_options import RESTCatalogOptions
 
 
 class AuthProvider(ABC):
