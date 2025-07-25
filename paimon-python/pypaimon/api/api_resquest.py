@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from .api_response import Schema
-from .typedef import Identifier
+from .identifier import Identifier
 from .rest_json import json_field
 
 

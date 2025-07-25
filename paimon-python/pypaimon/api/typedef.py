@@ -16,54 +16,10 @@
 #  under the License.
 
 from dataclasses import dataclass
-from typing import Optional, TypeVar, Dict
+from typing import TypeVar, Dict
 
-from pypaimon.api.rest_json import json_field
 
 T = TypeVar("T")
-
-
-@dataclass
-class Identifier:
-    """Table/View/Function identifier"""
-
-    database_name: str = json_field("database", default=None)
-    object_name: str = json_field("object", default=None)
-    branch_name: Optional[str] = json_field("branch", default=None)
-
-    @classmethod
-    def create(cls, database_name: str, object_name: str) -> "Identifier":
-        return cls(database_name, object_name)
-
-    @classmethod
-    def from_string(cls, full_name: str) -> "Identifier":
-        parts = full_name.split(".")
-        if len(parts) == 2:
-            return cls(parts[0], parts[1])
-        elif len(parts) == 3:
-            return cls(parts[0], parts[1], parts[2])
-        else:
-            raise ValueError(f"Invalid identifier format: {full_name}")
-
-    def get_full_name(self) -> str:
-        if self.branch_name:
-            return f"{self.database_name}.{self.object_name}.{self.branch_name}"
-        return f"{self.database_name}.{self.object_name}"
-
-    def get_database_name(self) -> str:
-        return self.database_name
-
-    def get_table_name(self) -> str:
-        return self.object_name
-
-    def get_object_name(self) -> str:
-        return self.object_name
-
-    def get_branch_name(self) -> Optional[str]:
-        return self.branch_name
-
-    def is_system_table(self) -> bool:
-        return self.object_name.startswith('$')
 
 
 @dataclass

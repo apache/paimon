@@ -23,9 +23,10 @@ import pandas
 from pathlib import Path
 
 from pypaimon.api import ConfigResponse
-from pypaimon.api.api_response import TableSchema, TableMetadata
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.data_types import DataField, AtomicType
+from pypaimon.api.table_schema import TableSchema
+from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.pvfs import PaimonVirtualFileSystem
 from pypaimon.tests.api_test import RESTCatalogServer
 
