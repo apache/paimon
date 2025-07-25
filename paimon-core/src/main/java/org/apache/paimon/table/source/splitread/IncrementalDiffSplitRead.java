@@ -79,7 +79,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
-        this.mergeRead.withFilter(predicate);
+        mergeRead.withFilter(predicate);
         return this;
     }
 
