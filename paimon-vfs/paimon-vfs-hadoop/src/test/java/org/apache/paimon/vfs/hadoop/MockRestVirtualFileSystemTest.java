@@ -36,6 +36,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -45,14 +46,14 @@ import java.util.UUID;
 
 /** Test for {@link PaimonVirtualFileSystem} with Mock Rest Server. */
 public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
-    private RESTCatalogServer restCatalogServer;
+    protected RESTCatalogServer restCatalogServer;
     private final String serverDefineHeaderName = "test-header";
     private final String serverDefineHeaderValue = "test-value";
-    private String dataPath;
-    private AuthProvider authProvider;
-    private Map<String, String> authMap;
-    private String initToken = "init_token";
-    private String restWarehouse;
+    protected String dataPath;
+    protected AuthProvider authProvider;
+    protected Map<String, String> authMap;
+    protected String initToken = "init_token";
+    protected String restWarehouse;
 
     @BeforeEach
     @Override
@@ -109,7 +110,7 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
         return new RESTCatalog(CatalogContext.create(options));
     }
 
-    private void initFs() throws Exception {
+    protected void initFs() throws Exception {
         Configuration conf = new Configuration();
         conf.set("fs.pvfs.uri", restCatalogServer.getUrl());
         conf.set("fs.pvfs.token.provider", AuthProviderEnum.BEAR.identifier());
@@ -117,5 +118,7 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
         this.vfs = new PaimonVirtualFileSystem();
         this.vfsRoot = new Path("pvfs://" + restWarehouse + "/");
         this.vfs.initialize(vfsRoot.toUri(), conf);
+
+        Assert.assertTrue(((PaimonVirtualFileSystem) vfs).isCacheEnabled());
     }
 }
