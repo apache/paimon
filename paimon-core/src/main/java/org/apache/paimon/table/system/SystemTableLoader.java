@@ -45,12 +45,12 @@ import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
+import static org.apache.paimon.table.system.RowLineageTable.WITH_METADATA;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
 import static org.apache.paimon.table.system.TableIndexesTable.TABLE_INDEXES;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
-import static org.apache.paimon.table.system.WithMetaDataTable.WITH_METADATA;
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
@@ -73,7 +73,7 @@ public class SystemTableLoader {
                     .put(STATISTICS, StatisticTable::new)
                     .put(BINLOG, BinlogTable::new)
                     .put(TABLE_INDEXES, TableIndexesTable::new)
-                    .put(WITH_METADATA, WithMetaDataTable::new)
+                    .put(WITH_METADATA, RowLineageTable::new)
                     .build();
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());

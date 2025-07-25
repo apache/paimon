@@ -53,13 +53,13 @@ import java.util.Optional;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for reading row id of table. */
-public class WithMetaDataTable implements DataTable, ReadonlyTable {
+public class RowLineageTable implements DataTable, ReadonlyTable {
 
-    public static final String WITH_METADATA = "with_metadata";
+    public static final String WITH_METADATA = "row_lineage";
 
     private final FileStoreTable wrapped;
 
-    public WithMetaDataTable(FileStoreTable wrapped) {
+    public RowLineageTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
 
         if (!coreOptions().rowTrackingEnabled()) {
@@ -181,7 +181,7 @@ public class WithMetaDataTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTable switchToBranch(String branchName) {
-        return new WithMetaDataTable(wrapped.switchToBranch(branchName));
+        return new RowLineageTable(wrapped.switchToBranch(branchName));
     }
 
     @Override
@@ -191,7 +191,7 @@ public class WithMetaDataTable implements DataTable, ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new WithMetaDataTable(wrapped.copy(dynamicOptions));
+        return new RowLineageTable(wrapped.copy(dynamicOptions));
     }
 
     @Override

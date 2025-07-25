@@ -97,7 +97,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
     @Test
     public void testReadWriteWithLineage() {
         batchSql("INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')");
-        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$with_metadata");
+        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$row_lineage");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows)
                 .containsExactlyInAnyOrder(Row.of(1, "AAA", 0L, 1L), Row.of(2, "BBB", 1L, 1L));
@@ -152,12 +152,12 @@ public class AppendTableITCase extends CatalogITCaseBase {
                 Snapshot.CommitKind.APPEND,
                 "append_table_lineage");
 
-        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$with_metadata");
+        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
         batchSql("call sys.compact('default.append_table_lineage')");
         waitCompactSnapshot(60000L, "append_table_lineage");
         List<Row> files = batchSql("SELECT * FROM append_table_lineage$files");
         assertThat(files.size()).isEqualTo(1);
-        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$with_metadata");
+        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
         assertThat(originRowsWithId2).containsExactlyInAnyOrderElementsOf(rowsAfter2);
 
         assertThat(rowsAfter2)
