@@ -42,6 +42,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Tick
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -65,14 +67,12 @@ public class VFSOperations {
     private final RESTApi api;
     private final CatalogContext context;
 
-    private Cache<Identifier, VFSTableInfo> tableCache;
-    private final boolean cacheEnabled;
+    @Nullable private Cache<Identifier, VFSTableInfo> tableCache;
 
     public VFSOperations(Options options) {
         this.api = new RESTApi(options);
 
-        this.cacheEnabled = options.get(CACHE_ENABLED);
-        if (cacheEnabled) {
+        if (options.get(CACHE_ENABLED)) {
             Duration expireAfterAccess = options.get(CACHE_EXPIRE_AFTER_ACCESS);
             if (expireAfterAccess.isZero() || expireAfterAccess.isNegative()) {
                 throw new IllegalArgumentException(
@@ -170,7 +170,7 @@ public class VFSOperations {
             }
             api.dropDatabase(databaseName);
             // Remove table cache
-            if (cacheEnabled) {
+            if (isCacheEnabled()) {
                 List<Identifier> tables = new ArrayList<>();
                 for (Identifier identifier : tableCache.asMap().keySet()) {
                     if (identifier.getDatabaseName().equals(databaseName)) {
@@ -213,7 +213,7 @@ public class VFSOperations {
         try {
             api.dropTable(identifier);
             // Remove table cache
-            if (cacheEnabled) {
+            if (isCacheEnabled()) {
                 tableCache.invalidate(identifier);
             }
         } catch (NoSuchResourceException e) {
@@ -230,7 +230,7 @@ public class VFSOperations {
         try {
             api.renameTable(srcIdentifier, dstIdentifier);
             // Remove table cache
-            if (cacheEnabled) {
+            if (isCacheEnabled()) {
                 tableCache.invalidate(srcIdentifier);
                 tableCache.invalidate(dstIdentifier);
             }
@@ -303,7 +303,7 @@ public class VFSOperations {
     }
 
     private VFSTableInfo getTableInfo(Identifier identifier) throws IOException {
-        if (!cacheEnabled) {
+        if (!isCacheEnabled()) {
             return loadTableInfo(identifier);
         }
         VFSTableInfo vfsTableInfo = tableCache.getIfPresent(identifier);
@@ -317,6 +317,6 @@ public class VFSOperations {
 
     @VisibleForTesting
     public boolean isCacheEnabled() {
-        return cacheEnabled;
+        return tableCache != null;
     }
 }
