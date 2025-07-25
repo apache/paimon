@@ -59,7 +59,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
         assertPlanAndResult(
                 sql,
                 "+- Limit(offset=[0], fetch=[1], global=[false])\n"
-                        + "+- TableSourceScan(table=[[PAIMON, default, T, filter=[=(a, 1)], project=[b, c], metadata=[], limit=[1]]], fields=[b, c])",
+                        + "+- TableSourceScan(table=[[PAIMON, default, T, filter=[=(a, 1)], project=[b, c], limit=[1]]], fields=[b, c])",
                 Row.ofKind(RowKind.INSERT, 1, 1, "1"));
     }
 
@@ -132,7 +132,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
         assertPlanAndResult(
                 sql,
                 "+- Limit(offset=[0], fetch=[1], global=[false])\n"
-                        + "+- TableSourceScan(table=[[PAIMON, default, T, filter=[=(a, 1)], project=[b], metadata=[], limit=[1]]], fields=[b])",
+                        + "+- TableSourceScan(table=[[PAIMON, default, T, filter=[=(a, 1)], project=[b], limit=[1]]], fields=[b])",
                 Row.ofKind(RowKind.INSERT, 1, 1));
     }
 

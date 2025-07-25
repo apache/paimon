@@ -62,7 +62,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT a, c FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[a, c], metadata=[]]], fields=[a, c])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[a, c]]], fields=[a, c])",
                 Row.ofKind(RowKind.INSERT, 1, "1"),
                 Row.ofKind(RowKind.INSERT, 1, "2"),
                 Row.ofKind(RowKind.INSERT, 2, "3"),
@@ -74,7 +74,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT c, a FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[c, a], metadata=[]]], fields=[c, a])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[c, a]]], fields=[c, a])",
                 Row.ofKind(RowKind.INSERT, "1", 1),
                 Row.ofKind(RowKind.INSERT, "2", 1),
                 Row.ofKind(RowKind.INSERT, "3", 2),
@@ -86,7 +86,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT a, b.b1 FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[a, b_b1], metadata=[]]], fields=[a, b_b1])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[a, b_b1]]], fields=[a, b_b1])",
                 Row.ofKind(RowKind.INSERT, 1, "value1"),
                 Row.ofKind(RowKind.INSERT, 1, "value2"),
                 Row.ofKind(RowKind.INSERT, 2, "value3"),
@@ -98,7 +98,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT a, d.d0.d00 FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[a, d_d0_d00], metadata=[]]], fields=[a, d_d0_d00])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[a, d_d0_d00]]], fields=[a, d_d0_d00])",
                 Row.ofKind(RowKind.INSERT, 1, "valued1"),
                 Row.ofKind(RowKind.INSERT, 1, "valued2"),
                 Row.ofKind(RowKind.INSERT, 2, "valued3"),
@@ -110,7 +110,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT a, b.b1, d.d2 FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[a, b_b1, d_d2], metadata=[]]], fields=[a, b_b1, d_d2])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[a, b_b1, d_d2]]], fields=[a, b_b1, d_d2])",
                 Row.ofKind(RowKind.INSERT, 1, "value1", 10),
                 Row.ofKind(RowKind.INSERT, 1, "value2", 20),
                 Row.ofKind(RowKind.INSERT, 2, "value3", 30),
@@ -122,7 +122,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String sql = "SELECT c, d.d1, b.b1, a FROM T";
         assertPlanAndResult(
                 sql,
-                "TableSourceScan(table=[[PAIMON, default, T, project=[c, d_d1, b_b1, a], metadata=[]]], fields=[c, d_d1, b_b1, a])",
+                "TableSourceScan(table=[[PAIMON, default, T, project=[c, d_d1, b_b1, a]]], fields=[c, d_d1, b_b1, a])",
                 Row.ofKind(RowKind.INSERT, "1", true, "value1", 1),
                 Row.ofKind(RowKind.INSERT, "2", false, "value2", 1),
                 Row.ofKind(RowKind.INSERT, "3", true, "value3", 2),
