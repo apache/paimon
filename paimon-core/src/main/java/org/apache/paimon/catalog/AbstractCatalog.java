@@ -52,10 +52,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
@@ -318,23 +320,21 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
-        List<Path> externalPaths = new ArrayList<>();
+        Set<Path> externalPaths = new HashSet<>();
         try {
             Table table = getTable(identifier);
             if (table instanceof FileStoreTable) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
-                externalPaths =
-                        fileStoreTable.schemaManager().listAll().stream()
-                                .map(
-                                        schema ->
-                                                schema.toSchema()
-                                                        .options()
-                                                        .get(DATA_FILE_EXTERNAL_PATHS.key()))
-                                .filter(Objects::nonNull)
-                                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
-                                .map(Path::new)
-                                .distinct()
-                                .collect(Collectors.toList());
+                List<Path> schemaExternalPaths =
+                        getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
+                externalPaths.addAll(schemaExternalPaths);
+                // get table branch external path
+                List<String> branches = fileStoreTable.branchManager().branches();
+                for (String branch : branches) {
+                    SchemaManager schemaManager =
+                            fileStoreTable.schemaManager().copyWithBranch(branch);
+                    externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                }
             }
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
@@ -343,7 +343,20 @@ public abstract class AbstractCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         }
 
-        dropTableImpl(identifier, externalPaths);
+        dropTableImpl(identifier, new ArrayList<>(externalPaths));
+    }
+
+    private List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {
+        if (schemas == null) {
+            return Collections.emptyList();
+        }
+        return schemas.stream()
+                .map(schema -> schema.toSchema().options().get(DATA_FILE_EXTERNAL_PATHS.key()))
+                .filter(Objects::nonNull)
+                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
+                .map(Path::new)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     protected abstract void dropTableImpl(Identifier identifier, List<Path> externalPaths);
