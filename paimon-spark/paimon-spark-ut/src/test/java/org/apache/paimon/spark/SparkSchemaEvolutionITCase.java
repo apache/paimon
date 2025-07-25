@@ -184,10 +184,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         Dataset<Row> table = spark.table("testRenameColumn");
         results = table.select("bb", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
+
         assertThatThrownBy(() -> table.select("b", "c"))
                 .isInstanceOf(AnalysisException.class)
+                // Messages vary across different Spark versions, only validating the common parts.
+                // Spark 4: A column, variable, or function parameter with name `b` cannot be
+                // resolved. Did you mean one of the following? [`a`, `bb`, `c`]
+                // Spark 3.5 and earlier versions: A column or function parameter with name `b`
+                // cannot be resolved. Did you mean one of the following? [`a`, `bb`, `c`]
                 .hasMessageContaining(
-                        "A column or function parameter with name `b` cannot be resolved. Did you mean one of the following?");
+                        "name `b` cannot be resolved. Did you mean one of the following? [`a`, `bb`, `c`]");
     }
 
     @Test
@@ -389,13 +395,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 "Cannot move itself for column b"));
 
         // missing column
+        // Messages vary across different Spark versions and there are no common parts, only
+        // validate the exception class
         createTable("tableMissing");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissing ALTER COLUMN d FIRST"))
-                .hasMessageContaining("Missing field d in table paimon.default.tableMissing");
+                .isInstanceOf(AnalysisException.class);
 
         createTable("tableMissingAfter");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissingAfter ALTER COLUMN a AFTER d"))
-                .hasMessageContaining("Missing field d in table paimon.default.tableMissingAfter");
+                .isInstanceOf(AnalysisException.class);
     }
 
     @Test
