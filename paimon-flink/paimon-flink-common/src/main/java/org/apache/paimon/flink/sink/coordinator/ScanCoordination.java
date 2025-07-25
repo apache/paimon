@@ -32,8 +32,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Write response to initial data files for partition and bucket. */
-public class ScanCoordinationResponse implements CoordinationResponse {
+/** Scan coordination to initial data files for partition and bucket. */
+public class ScanCoordination implements CoordinationResponse {
 
     private static final long serialVersionUID = 1L;
 
@@ -43,7 +43,7 @@ public class ScanCoordinationResponse implements CoordinationResponse {
     @Nullable private final byte[] dynamicBucketIndex;
     @Nullable private final List<byte[]> deleteVectorsIndex;
 
-    public ScanCoordinationResponse(
+    public ScanCoordination(
             @Nullable Snapshot snapshot,
             @Nullable Integer totalBuckets,
             @Nullable List<DataFileMeta> dataFiles,
@@ -122,13 +122,5 @@ public class ScanCoordinationResponse implements CoordinationResponse {
             metas.add(serializer.deserializeFromBytes(file));
         }
         return metas;
-    }
-
-    public static ScanCoordinationResponse empty() {
-        try {
-            return new ScanCoordinationResponse(null, null, null, null, null);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 }
