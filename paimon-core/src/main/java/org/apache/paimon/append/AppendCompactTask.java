@@ -30,8 +30,12 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MinSequenceCounter;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -74,6 +78,13 @@ public class AppendCompactTask {
         Preconditions.checkArgument(
                 dvEnabled || compactBefore.size() > 1,
                 "AppendOnlyCompactionTask need more than one file input.");
+        if (table.coreOptions().rowTrackingEnabled()) {
+            List<DataField> fields = new ArrayList<>(table.rowType().getFields());
+            fields.add(SpecialFields.ROW_ID);
+            fields.add(SpecialFields.SEQUENCE_NUMBER);
+            write.withReadType(new RowType(fields));
+            write.withSequenceNumberCounter(new MinSequenceCounter(fields.size() - 1));
+        }
         IndexIncrement indexIncrement;
         if (dvEnabled) {
             AppendDeleteFileMaintainer dvIndexFileMaintainer =

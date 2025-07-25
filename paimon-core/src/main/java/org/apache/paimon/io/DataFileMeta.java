@@ -83,7 +83,8 @@ public class DataFileMeta {
                                     16,
                                     "_VALUE_STATS_COLS",
                                     DataTypes.ARRAY(DataTypes.STRING().notNull())),
-                            new DataField(17, "_EXTERNAL_PATH", newStringType(true))));
+                            new DataField(17, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(18, "_FIRST_ROW_ID", new BigIntType(true))));
 
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -100,8 +101,9 @@ public class DataFileMeta {
     private final SimpleStats keyStats;
     private final SimpleStats valueStats;
 
-    private final long minSequenceNumber;
-    private final long maxSequenceNumber;
+    // As for row-lineage table, this will be reassigned while committing
+    private long minSequenceNumber;
+    private long maxSequenceNumber;
     private final long schemaId;
     private final int level;
 
@@ -124,6 +126,8 @@ public class DataFileMeta {
     /** external path of file, if it is null, it is in the default warehouse path. */
     private final @Nullable String externalPath;
 
+    private @Nullable Long rowIdStart;
+
     public static DataFileMeta forAppend(
             String fileName,
             long fileSize,
@@ -136,7 +140,8 @@ public class DataFileMeta {
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
             @Nullable List<String> valueStatsCols,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            @Nullable Long rowIdStart) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -155,7 +160,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public DataFileMeta(
@@ -175,7 +181,8 @@ public class DataFileMeta {
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
             @Nullable List<String> valueStatsCols,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            @Nullable Long rowIdStart) {
         this(
                 fileName,
                 fileSize,
@@ -194,7 +201,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public DataFileMeta(
@@ -212,7 +220,8 @@ public class DataFileMeta {
             @Nullable Long deleteRowCount,
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
-            @Nullable List<String> valueStatsCols) {
+            @Nullable List<String> valueStatsCols,
+            @Nullable Long rowIdStart) {
         this(
                 fileName,
                 fileSize,
@@ -231,7 +240,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                null);
+                null,
+                rowIdStart);
     }
 
     public DataFileMeta(
@@ -252,7 +262,8 @@ public class DataFileMeta {
             @Nullable byte[] embeddedIndex,
             @Nullable FileSource fileSource,
             @Nullable List<String> valueStatsCols,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            @Nullable Long rowIdStart) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -275,6 +286,18 @@ public class DataFileMeta {
         this.fileSource = fileSource;
         this.valueStatsCols = valueStatsCols;
         this.externalPath = externalPath;
+        this.rowIdStart = rowIdStart;
+    }
+
+    public void setRowIdStart(@Nullable Long rowIdStart) {
+        this.rowIdStart = rowIdStart;
+    }
+
+    public void setSnapshotId(long snapshotId) {
+        // Use min and max sequence number as snapshot id
+        // Please ensure that, this table is a row-tracking-enabled, bucket = -1 append table.
+        this.minSequenceNumber = snapshotId;
+        this.maxSequenceNumber = snapshotId;
     }
 
     public String fileName() {
@@ -387,6 +410,11 @@ public class DataFileMeta {
         return valueStatsCols;
     }
 
+    @Nullable
+    public Long rowIdStart() {
+        return rowIdStart;
+    }
+
     public DataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
         return new DataFileMeta(
@@ -407,7 +435,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public DataFileMeta rename(String newFileName) {
@@ -430,7 +459,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                newExternalPath);
+                newExternalPath,
+                rowIdStart);
     }
 
     public DataFileMeta copyWithoutStats() {
@@ -452,7 +482,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 Collections.emptyList(),
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
@@ -481,7 +512,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public DataFileMeta newExternalPath(String newExternalPath) {
@@ -503,7 +535,8 @@ public class DataFileMeta {
                 embeddedIndex,
                 fileSource,
                 valueStatsCols,
-                newExternalPath);
+                newExternalPath,
+                rowIdStart);
     }
 
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
@@ -525,7 +558,8 @@ public class DataFileMeta {
                 newEmbeddedIndex,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     @Override
@@ -577,7 +611,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     @Override
@@ -587,7 +622,7 @@ public class DataFileMeta {
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
-                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s}",
+                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, rowIdStart: %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -605,7 +640,8 @@ public class DataFileMeta {
                 deleteRowCount,
                 fileSource,
                 valueStatsCols,
-                externalPath);
+                externalPath,
+                rowIdStart);
     }
 
     public static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {

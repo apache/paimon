@@ -29,6 +29,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Test for {@link FormatReaderMapping.Builder}. */
@@ -133,7 +134,8 @@ public class FormatReaderMappingTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        Collections.emptyMap());
 
         Assertions.assertThat(formatReaderMapping.getIndexMapping())
                 .containsExactly(0, 1, 0, -1, 2);

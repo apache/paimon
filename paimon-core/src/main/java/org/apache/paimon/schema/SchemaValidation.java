@@ -63,6 +63,7 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
@@ -236,6 +237,8 @@ public class SchemaValidation {
         }
 
         validateMergeFunctionFactory(schema);
+
+        validateRowLineage(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -628,6 +631,19 @@ public class SchemaValidation {
                         FieldAggregatorFactory.class,
                         aggFuncName);
             }
+        }
+    }
+
+    private static void validateRowLineage(TableSchema schema, CoreOptions options) {
+        if (options.rowTrackingEnabled()) {
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for row lineage table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
+            checkArgument(
+                    schema.primaryKeys().isEmpty(),
+                    "Cannot define %s for row lineage table.",
+                    PRIMARY_KEY.key());
         }
     }
 }

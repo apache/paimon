@@ -80,7 +80,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                options.fileIndexReadEnabled());
+                options.fileIndexReadEnabled(),
+                options.rowTrackingEnabled());
     }
 
     @Override

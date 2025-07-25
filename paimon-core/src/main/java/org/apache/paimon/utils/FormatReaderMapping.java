@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -59,6 +60,7 @@ public class FormatReaderMapping {
     private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
+    private final Map<String, Integer> meta;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -67,13 +69,15 @@ public class FormatReaderMapping {
             @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
-            List<Predicate> dataFilters) {
+            List<Predicate> dataFilters,
+            Map<String, Integer> meta) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
+        this.meta = meta;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -109,6 +113,10 @@ public class FormatReaderMapping {
     @Nullable
     public Pair<int[], RowType> getPartitionPair() {
         return partitionPair;
+    }
+
+    public Map<String, Integer> getMeta() {
+        return meta;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -165,6 +173,12 @@ public class FormatReaderMapping {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
+            if (CoreOptions.fromMap(dataSchema.options()).rowTrackingEnabled()) {
+                allDataFields.add(SpecialFields.ROW_ID);
+                allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
+            }
+            Map<String, Integer> meta = findMeta(readTableFields);
+
             List<DataField> readDataFields = readDataFields(allDataFields);
             // build index cast mapping
             IndexCastMapping indexCastMapping =
@@ -196,7 +210,19 @@ public class FormatReaderMapping {
                             .discover(formatIdentifier)
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
-                    readFilters);
+                    readFilters,
+                    meta);
+        }
+
+        private Map<String, Integer> findMeta(List<DataField> readTableFields) {
+            Map<String, Integer> meta = new HashMap<>();
+            for (int i = 0; i < readTableFields.size(); i++) {
+                DataField field = readTableFields.get(i);
+                if (SpecialFields.isSystemField(field.name())) {
+                    meta.put(field.name(), i);
+                }
+            }
+            return meta;
         }
 
         static Pair<int[], RowType> trimKeyFields(

@@ -26,8 +26,8 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SequenceNumberCounter;
 
 import javax.annotation.Nullable;
 
@@ -45,7 +45,7 @@ import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalRow, DataFileMeta> {
 
     private final long schemaId;
-    private final LongCounter seqNumCounter;
+    private final SequenceNumberCounter seqNumCounter;
     private final boolean isExternalPath;
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
@@ -57,7 +57,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             Path path,
             RowType writeSchema,
             long schemaId,
-            LongCounter seqNumCounter,
+            SequenceNumberCounter seqNumCounter,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
@@ -81,7 +81,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         if (dataFileIndexWriter != null) {
             dataFileIndexWriter.write(row);
         }
-        seqNumCounter.add(1L);
+        seqNumCounter.add(row);
     }
 
     @Override
@@ -107,8 +107,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 fileSize,
                 recordCount(),
                 statsPair.getRight(),
-                seqNumCounter.getValue() - super.recordCount(),
-                seqNumCounter.getValue() - 1,
+                seqNumCounter.minSequenceNumber(super.recordCount()),
+                seqNumCounter.maxSequenceNumber(),
                 schemaId,
                 indexResult.independentIndexFile() == null
                         ? Collections.emptyList()
@@ -116,6 +116,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),
-                externalPath);
+                externalPath,
+                null);
     }
 }

@@ -95,6 +95,94 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadWriteWithLineage() {
+        batchSql("INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA", 0L, 1L), Row.of(2, "BBB", 1L, 1L));
+
+        rows = batchSql("SELECT * FROM append_table_lineage");
+        assertThat(rows.size()).isEqualTo(2);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
+    }
+
+    @Test
+    public void testCompactionWithRowLineage() throws Exception {
+        batchSql("ALTER TABLE append_table_lineage SET ('compaction.max.file-num' = '4')");
+
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (5, 'EEE'), (6, 'FFF')",
+                4L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (7, 'HHH'), (8, 'III')",
+                5L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (9, 'JJJ'), (10, 'KKK')",
+                6L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (11, 'LLL'), (12, 'MMM')",
+                7L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (13, 'NNN'), (14, 'OOO')",
+                8L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+
+        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        batchSql("call sys.compact('default.append_table_lineage')");
+        waitCompactSnapshot(60000L, "append_table_lineage");
+        List<Row> files = batchSql("SELECT * FROM append_table_lineage$files");
+        assertThat(files.size()).isEqualTo(1);
+        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        assertThat(originRowsWithId2).containsExactlyInAnyOrderElementsOf(rowsAfter2);
+
+        assertThat(rowsAfter2)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA", 0L, 1L),
+                        Row.of(2, "BBB", 1L, 1L),
+                        Row.of(3, "CCC", 2L, 2L),
+                        Row.of(4, "DDD", 3L, 2L),
+                        Row.of(1, "AAA", 4L, 3L),
+                        Row.of(2, "BBB", 5L, 3L),
+                        Row.of(3, "CCC", 6L, 3L),
+                        Row.of(4, "DDD", 7L, 3L),
+                        Row.of(5, "EEE", 8L, 4L),
+                        Row.of(6, "FFF", 9L, 4L),
+                        Row.of(7, "HHH", 10L, 5L),
+                        Row.of(8, "III", 11L, 5L),
+                        Row.of(9, "JJJ", 12L, 6L),
+                        Row.of(10, "KKK", 13L, 6L),
+                        Row.of(11, "LLL", 14L, 7L),
+                        Row.of(12, "MMM", 15L, 7L),
+                        Row.of(13, "NNN", 16L, 8L),
+                        Row.of(14, "OOO", 17L, 8L));
+    }
+
+    @Test
     public void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
@@ -551,6 +639,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS append_table_lineage (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS index_table (id INT, indexc STRING, data STRING) WITH ('bucket' = '-1', 'file-index.bloom-filter.columns'='indexc', 'file-index.bloom-filter.indexc.items' = '500')");
@@ -584,19 +673,40 @@ public class AppendTableITCase extends CatalogITCaseBase {
 
     private void assertExecuteExpected(
             String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
+        assertExecuteExpected(sql, expectedSnapshotId, expectedCommitKind, "append_table");
+    }
+
+    private void assertExecuteExpected(
+            String sql,
+            long expectedSnapshotId,
+            Snapshot.CommitKind expectedCommitKind,
+            String tableName) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot("append_table");
+        Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 
+    private void assertBatchHasCompact(String sql, long timeout) throws Exception {
+        batchSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
     private void assertStreamingHasCompact(String sql, long timeout) throws Exception {
+        sEnv.executeSql(sql);
+        waitCompactSnapshot(timeout);
+    }
+
+    private void waitCompactSnapshot(long timeout) throws Exception {
+        waitCompactSnapshot(timeout, "append_table");
+    }
+
+    private void waitCompactSnapshot(long timeout, String tableName) throws Exception {
         long start = System.currentTimeMillis();
         long currentId = 1;
-        sEnv.executeSql(sql);
         Snapshot snapshot;
         while (true) {
-            snapshot = findSnapshot("append_table", currentId);
+            snapshot = findSnapshot(tableName, currentId);
             if (snapshot != null) {
                 if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                     break;

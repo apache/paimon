@@ -21,18 +21,22 @@ package org.apache.paimon.io;
 import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.rowlineage.PartialMappingRow;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Map;
 
 /** Reads {@link InternalRow} from data files. */
 public class DataFileRecordReader implements FileRecordReader<InternalRow> {
@@ -41,13 +45,21 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
+    private final boolean rowLineageEnabled;
+    @Nullable private final Long firstRowId;
+    private final long snapshotId;
+    private final Map<String, Integer> metaColumnIndex;
 
     public DataFileRecordReader(
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            boolean rowLineageEnabled,
+            @Nullable Long firstRowId,
+            long snapshotId,
+            Map<String, Integer> metaColumnIndex)
             throws IOException {
         try {
             this.reader = readerFactory.createReader(context);
@@ -58,6 +70,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
+        this.rowLineageEnabled = rowLineageEnabled;
+        this.firstRowId = firstRowId;
+        this.snapshotId = snapshotId;
+        this.metaColumnIndex = metaColumnIndex;
     }
 
     @Nullable
@@ -70,6 +86,11 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
         if (iterator instanceof ColumnarRowIterator) {
             iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+            if (rowLineageEnabled) {
+                iterator =
+                        ((ColumnarRowIterator) iterator)
+                                .assignRowLineage(firstRowId, snapshotId, metaColumnIndex);
+            }
         } else {
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
@@ -80,6 +101,29 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             if (indexMapping != null) {
                 final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
+            }
+
+            if (rowLineageEnabled && !metaColumnIndex.isEmpty()) {
+                GenericRow genericRow = new GenericRow(metaColumnIndex.size());
+
+                int[] projection = new int[metaColumnIndex.size()];
+                if (metaColumnIndex.containsKey(SpecialFields.ROW_ID.name())) {
+                    projection[0] = metaColumnIndex.get(SpecialFields.ROW_ID.name());
+                }
+                if (metaColumnIndex.containsKey(SpecialFields.SEQUENCE_NUMBER.name())) {
+                    projection[1] = metaColumnIndex.get(SpecialFields.SEQUENCE_NUMBER.name());
+                }
+
+                PartialMappingRow partialMappingRow = new PartialMappingRow(projection);
+                final FileRecordIterator<InternalRow> iteratorInner = iterator;
+                iterator =
+                        iterator.transform(
+                                row -> {
+                                    genericRow.setField(
+                                            0, iteratorInner.returnedPosition() + firstRowId);
+                                    genericRow.setField(1, snapshotId);
+                                    return partialMappingRow.replace(row, genericRow);
+                                });
             }
         }
 

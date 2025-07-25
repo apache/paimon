@@ -20,38 +20,14 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
 
-/** An counter that sums up {@code long} values. */
-public class LongCounter implements SequenceNumberCounter {
+import java.io.Serializable;
 
-    private static final long serialVersionUID = 2L;
+/** To count sequence number. */
+public interface SequenceNumberCounter extends Serializable {
 
-    private long value;
+    void add(InternalRow row);
 
-    public LongCounter(long value) {
-        this.value = value;
-    }
+    long minSequenceNumber(long recordCount);
 
-    public Long getValue() {
-        return this.value;
-    }
-
-    @Override
-    public void add(InternalRow row) {
-        this.value += 1;
-    }
-
-    @Override
-    public long minSequenceNumber(long recordCount) {
-        return this.value - recordCount;
-    }
-
-    @Override
-    public long maxSequenceNumber() {
-        return this.value - 1;
-    }
-
-    @Override
-    public String toString() {
-        return "LongCounter " + this.value;
-    }
+    long maxSequenceNumber();
 }

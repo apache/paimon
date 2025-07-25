@@ -20,38 +20,29 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
 
-/** An counter that sums up {@code long} values. */
-public class LongCounter implements SequenceNumberCounter {
+/** Sequence number counter only generate min sequence. */
+public class MinSequenceCounter implements SequenceNumberCounter {
 
-    private static final long serialVersionUID = 2L;
+    private final int columnIndex;
+    private long minSequenceNumber = Long.MAX_VALUE;
 
-    private long value;
-
-    public LongCounter(long value) {
-        this.value = value;
-    }
-
-    public Long getValue() {
-        return this.value;
+    public MinSequenceCounter(int columnIndex) {
+        this.columnIndex = columnIndex;
     }
 
     @Override
     public void add(InternalRow row) {
-        this.value += 1;
+        long sequenceNumber = row.getLong(columnIndex);
+        this.minSequenceNumber = Math.min(this.minSequenceNumber, sequenceNumber);
     }
 
     @Override
     public long minSequenceNumber(long recordCount) {
-        return this.value - recordCount;
+        return minSequenceNumber;
     }
 
     @Override
     public long maxSequenceNumber() {
-        return this.value - 1;
-    }
-
-    @Override
-    public String toString() {
-        return "LongCounter " + this.value;
+        return -1;
     }
 }
