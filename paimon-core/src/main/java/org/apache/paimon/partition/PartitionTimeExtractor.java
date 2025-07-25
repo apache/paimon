@@ -89,6 +89,11 @@ public class PartitionTimeExtractor {
     }
 
     public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
+        return extract(partitionKeys, partitionValues, LocalTime.MIDNIGHT);
+    }
+
+    public LocalDateTime extract(
+            List<String> partitionKeys, List<?> partitionValues, LocalTime defaultLocalTime) {
         String timestampString;
         if (pattern == null) {
             timestampString = partitionValues.get(0).toString();
@@ -100,14 +105,14 @@ public class PartitionTimeExtractor {
                                 "\\$" + partitionKeys.get(i), partitionValues.get(i).toString());
             }
         }
-        return toLocalDateTime(timestampString, this.formatter);
+        return toLocalDateTime(timestampString, this.formatter, defaultLocalTime);
     }
 
     private static LocalDateTime toLocalDateTime(
-            String timestampString, @Nullable String formatterPattern) {
+            String timestampString, @Nullable String formatterPattern, LocalTime defaultLocalTime) {
 
         if (formatterPattern == null) {
-            return PartitionTimeExtractor.toLocalDateTimeDefault(timestampString);
+            return PartitionTimeExtractor.toLocalDateTimeDefault(timestampString, defaultLocalTime);
         }
         DateTimeFormatter dateTimeFormatter =
                 DateTimeFormatter.ofPattern(Objects.requireNonNull(formatterPattern), Locale.ROOT);
@@ -116,16 +121,17 @@ public class PartitionTimeExtractor {
         } catch (DateTimeParseException e) {
             return LocalDateTime.of(
                     LocalDate.parse(timestampString, Objects.requireNonNull(dateTimeFormatter)),
-                    LocalTime.MIDNIGHT);
+                    defaultLocalTime);
         }
     }
 
-    public static LocalDateTime toLocalDateTimeDefault(String timestampString) {
+    public static LocalDateTime toLocalDateTimeDefault(
+            String timestampString, LocalTime defaultLocalTime) {
         try {
             return LocalDateTime.parse(timestampString, TIMESTAMP_FORMATTER);
         } catch (DateTimeParseException e) {
             return LocalDateTime.of(
-                    LocalDate.parse(timestampString, DATE_FORMATTER), LocalTime.MIDNIGHT);
+                    LocalDate.parse(timestampString, DATE_FORMATTER), defaultLocalTime);
         }
     }
 }
