@@ -90,13 +90,15 @@ public class PostgresRecordParser
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
     private String databaseName;
+    private String compositePrimaryKey;
     private final CdcMetadataConverter[] metadataConverters;
 
     public PostgresRecordParser(
             Configuration postgresConfig,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters,
+            String compositePrimaryKey) {
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
@@ -108,6 +110,7 @@ public class PostgresRecordParser
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()
                         : ZoneId.of(stringifyServerTimeZone);
+        this.compositePrimaryKey = compositePrimaryKey;
     }
 
     @Override
@@ -132,7 +135,10 @@ public class PostgresRecordParser
         CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         afterFields.forEach(
                 (key, value) -> {
-                    DataType dataType = extractFieldType(value);
+                    DataType dataType =
+                            key.equals(compositePrimaryKey)
+                                    ? DataTypes.STRING()
+                                    : extractFieldType(value);
                     dataType =
                             dataType.copy(
                                     typeMapping.containsMode(TO_NULLABLE) || value.optional());
@@ -252,6 +258,9 @@ public class PostgresRecordParser
 
             String className = field.getValue().name();
             String oldValue = objectValue.asText();
+            if (fieldName.equals(compositePrimaryKey)) {
+                oldValue = String.format("%s_%s_%s", databaseName, currentTable, oldValue);
+            }
             String newValue = oldValue;
 
             if (Bits.LOGICAL_NAME.equals(className)) {
