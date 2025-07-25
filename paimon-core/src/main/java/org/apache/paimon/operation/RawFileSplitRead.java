@@ -245,7 +245,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
                         rowLineageEnabled,
                         file.rowIdStart(),
-                        file.minSequenceNumber(),
+                        file.maxSequenceNumber(),
                         formatReaderMapping.getMeta());
 
         if (fileIndexResult instanceof BitmapIndexResult) {

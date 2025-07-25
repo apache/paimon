@@ -175,7 +175,7 @@ public class FormatReaderMapping {
             List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
             if (CoreOptions.fromMap(dataSchema.options()).rowTrackingEnabled()) {
                 allDataFields.add(SpecialFields.ROW_ID);
-                allDataFields.add(SpecialFields.SEQUENCE_NUMBER);
+                allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
             }
             Map<String, Integer> meta = findMeta(readTableFields);
 

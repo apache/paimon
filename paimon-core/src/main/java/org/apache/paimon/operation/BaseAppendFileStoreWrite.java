@@ -44,6 +44,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SequenceNumberCounter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
@@ -79,6 +80,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final SimpleColStatsCollector.Factory[] statsCollectors;
     private final FileIndexOptions fileIndexOptions;
     private boolean forceBufferSpill = false;
+    private SequenceNumberCounter sequenceNumberCounter;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -144,6 +146,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.read.withReadType(readType);
     }
 
+    public void withSequenceNumberCounter(SequenceNumberCounter counter) {
+        this.sequenceNumberCounter = counter;
+    }
+
     protected abstract CompactManager getCompactManager(
             BinaryRow partition,
             int bucket,
@@ -163,7 +169,11 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriterForCompact(
-                        partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        sequenceNumberCounter == null
+                                ? new LongCounter(toCompact.get(0).minSequenceNumber())
+                                : sequenceNumberCounter);
         List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
             dvFactories = new ArrayList<>(toCompact.size());
@@ -189,13 +199,14 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private RowDataRollingFileWriter createRollingFileWriterForCompact(
-            BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+            BinaryRow partition, int bucket, SequenceNumberCounter seqNumCounter) {
         RowType writeRowType = rowType;
         SimpleColStatsCollector.Factory[] writeStatsCollectors = statsCollectors;
         if (options.rowTrackingEnabled()) {
             List<DataField> fields = new ArrayList<>(rowType.getFields());
             fields.add(SpecialFields.ROW_ID);
-            fields.add(SpecialFields.SEQUENCE_NUMBER);
+            // Sequence number is nullable in file schema
+            fields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
             writeRowType = new RowType(fields);
 
             writeStatsCollectors = new SimpleColStatsCollector.Factory[fields.size()];

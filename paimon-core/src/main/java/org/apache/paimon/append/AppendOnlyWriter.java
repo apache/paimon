@@ -211,7 +211,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public long maxSequenceNumber() {
-        return seqNumCounter.getValue() - 1;
+        return seqNumCounter.maxSequenceNumber() - 1;
     }
 
     @Override

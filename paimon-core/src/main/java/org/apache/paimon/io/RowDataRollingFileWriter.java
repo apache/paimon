@@ -29,7 +29,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.SequenceNumberCounter;
 
 import java.util.Arrays;
 
@@ -43,7 +43,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             long targetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter,
+            SequenceNumberCounter seqNumCounter,
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,

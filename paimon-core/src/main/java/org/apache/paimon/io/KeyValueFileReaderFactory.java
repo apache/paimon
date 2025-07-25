@@ -137,7 +137,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
                         false,
                         null,
-                        null,
+                        -1,
                         Collections.emptyMap());
 
         Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());

@@ -47,7 +47,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final CastFieldGetter[] castMapping;
     private final boolean rowLineageEnabled;
     @Nullable private final Long firstRowId;
-    @Nullable private final Long snapshotId;
+    private final long snapshotId;
     private final Map<String, Integer> metaColumnIndex;
 
     public DataFileRecordReader(
@@ -58,7 +58,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             @Nullable PartitionInfo partitionInfo,
             boolean rowLineageEnabled,
             @Nullable Long firstRowId,
-            @Nullable Long snapshotId,
+            long snapshotId,
             Map<String, Integer> metaColumnIndex)
             throws IOException {
         try {

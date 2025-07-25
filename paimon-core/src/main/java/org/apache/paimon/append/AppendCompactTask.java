@@ -35,6 +35,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MinSequenceCounter;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -82,6 +83,7 @@ public class AppendCompactTask {
             fields.add(SpecialFields.ROW_ID);
             fields.add(SpecialFields.SEQUENCE_NUMBER);
             write.withReadType(new RowType(fields));
+            write.withSequenceNumberCounter(new MinSequenceCounter(fields.size() - 1));
         }
         IndexIncrement indexIncrement;
         if (dvEnabled) {
