@@ -216,7 +216,15 @@ public class LocalFileIO implements FileIO {
         try {
             RENAME_LOCK.lock();
             if (dstFile.exists()) {
-                return false;
+                if (!dstFile.isDirectory()) {
+                    return false;
+                }
+                // Make it compatible with HadoopFileIO: if dst is an existing directory,
+                // dst=dst/srcFileName
+                dstFile = new File(dstFile, srcFile.getName());
+                if (dstFile.exists()) {
+                    return false;
+                }
             }
             Files.move(srcFile.toPath(), dstFile.toPath(), StandardCopyOption.ATOMIC_MOVE);
             return true;

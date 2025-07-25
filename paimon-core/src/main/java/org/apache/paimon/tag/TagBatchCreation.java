@@ -45,6 +45,7 @@ public class TagBatchCreation {
     private final TagManager tagManager;
     private final SnapshotManager snapshotManager;
     private final TagDeletion tagDeletion;
+    private final ZoneId zoneId;
 
     public TagBatchCreation(FileStoreTable table) {
         this.table = table;
@@ -52,6 +53,7 @@ public class TagBatchCreation {
         this.tagManager = table.tagManager();
         this.tagDeletion = table.store().newTagDeletion();
         this.options = table.coreOptions();
+        this.zoneId = options.sinkProcessTimeZone();
     }
 
     public void createTag() {
@@ -59,8 +61,8 @@ public class TagBatchCreation {
         if (snapshot == null) {
             return;
         }
-        Instant instant = Instant.ofEpochMilli(snapshot.timeMillis());
-        LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+        LocalDateTime localDateTime =
+                Instant.ofEpochMilli(snapshot.timeMillis()).atZone(zoneId).toLocalDateTime();
         String tagName =
                 options.tagBatchCustomizedName() != null
                         ? options.tagBatchCustomizedName()

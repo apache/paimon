@@ -93,6 +93,19 @@ public class SimpleSqlPredicateConvertor {
                     list.add(literal);
                 }
                 return builder.in(index, list);
+            } else if (kind == calciteClasses.sqlKindDelegate().notIn()) {
+                int index = getFieldIndex(left.toString());
+                List<?> elementslist = calciteClasses.sqlNodeListDelegate().getList(right);
+
+                List<Object> list = new ArrayList<>();
+                for (Object sqlNode : elementslist) {
+                    Object literal =
+                            TypeUtils.castFromString(
+                                    calciteClasses.sqlLiteralDelegate().toValue(sqlNode),
+                                    rowType.getFieldTypes().get(index));
+                    list.add(literal);
+                }
+                return builder.in(index, list).negate().get();
             }
         } else if (calciteClasses.sqlOperatorDelegate().instanceOfSqlPostfixOperator(operator)) {
             Object child =
