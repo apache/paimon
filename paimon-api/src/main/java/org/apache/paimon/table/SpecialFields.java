@@ -22,8 +22,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -100,14 +98,6 @@ public class SpecialFields {
                             ROW_KIND.name(),
                             ROW_ID.name())
                     .collect(Collectors.toSet());
-
-    public static final Map<String, DataField> META_COLUMNS =
-            new HashMap<String, DataField>() {
-                {
-                    put(ROW_ID.name(), ROW_ID);
-                    put(SEQUENCE_NUMBER.name(), SEQUENCE_NUMBER);
-                }
-            };
 
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
