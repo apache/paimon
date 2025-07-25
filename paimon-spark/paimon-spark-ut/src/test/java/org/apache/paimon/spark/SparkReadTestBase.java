@@ -51,6 +51,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import scala.collection.Seq;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base tests for spark read. */
@@ -250,5 +252,15 @@ public abstract class SparkReadTestBase {
 
     protected String defaultShowCreateStringWithNonNullColumn(String table) {
         return showCreateString(table, "a INT NOT NULL", "b BIGINT NOT NULL", "c STRING");
+    }
+
+    protected static Row row(Object... values) {
+        Object[] array = values != null ? values : new Object[] {null};
+        return RowTestHelper.row(array);
+    }
+
+    protected static Seq array(Object... values) {
+        Object[] array = values != null ? values : new Object[] {null};
+        return RowTestHelper.seq(array);
     }
 }
