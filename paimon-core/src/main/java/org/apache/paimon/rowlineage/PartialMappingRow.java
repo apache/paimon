@@ -135,7 +135,7 @@ public class PartialMappingRow implements InternalRow {
         for (int i = 0; i < mappings.length; i++) {
             int mapPos = mappings[i];
             if (pos == mapPos) {
-                return rowLineage.getByte(i);
+                return rowLineage.getDouble(i);
             }
         }
         return main.getDouble(pos);
