@@ -103,7 +103,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 iterator = iterator.transform(projectedRow::replaceRow);
             }
 
-            if (rowLineageEnabled) {
+            if (rowLineageEnabled && !metaColumnIndex.isEmpty()) {
                 GenericRow genericRow = new GenericRow(metaColumnIndex.size());
 
                 int[] projection = new int[metaColumnIndex.size()];
