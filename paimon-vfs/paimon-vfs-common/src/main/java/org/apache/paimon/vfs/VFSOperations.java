@@ -18,6 +18,7 @@
 
 package org.apache.paimon.vfs;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -34,18 +35,27 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.schema.Schema;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_WRITE;
 
 /** Wrap over RESTCatalog to provide basic operations for virtual path. */
 public class VFSOperations {
@@ -55,8 +65,40 @@ public class VFSOperations {
     private final RESTApi api;
     private final CatalogContext context;
 
+    private Cache<Identifier, VFSTableInfo> tableCache;
+    private final boolean cacheEnabled;
+
     public VFSOperations(Options options) {
         this.api = new RESTApi(options);
+
+        this.cacheEnabled = options.get(CACHE_ENABLED);
+        if (cacheEnabled) {
+            Duration expireAfterAccess = options.get(CACHE_EXPIRE_AFTER_ACCESS);
+            if (expireAfterAccess.isZero() || expireAfterAccess.isNegative()) {
+                throw new IllegalArgumentException(
+                        "When 'cache.expire-after-access' is set to negative or 0, the catalog cache should be disabled.");
+            }
+            Duration expireAfterWrite = options.get(CACHE_EXPIRE_AFTER_WRITE);
+            if (expireAfterWrite.isZero() || expireAfterWrite.isNegative()) {
+                throw new IllegalArgumentException(
+                        "When 'cache.expire-after-write' is set to negative or 0, the catalog cache should be disabled.");
+            }
+            LOG.info(
+                    "Initialize virtual file system with table cache enabled, expireAfterAccess={}, expireAfterWrite={}",
+                    expireAfterAccess,
+                    expireAfterWrite);
+
+            tableCache =
+                    Caffeine.newBuilder()
+                            .softValues()
+                            .executor(Runnable::run)
+                            .expireAfterAccess(expireAfterAccess)
+                            .expireAfterWrite(expireAfterWrite)
+                            .ticker(Ticker.systemTicker())
+                            .build();
+        } else {
+            LOG.info("Initialize virtual file system with table cache disabled");
+        }
         // Get the configured options which has been merged from REST Server
         this.context = CatalogContext.create(api.options());
     }
@@ -79,27 +121,16 @@ public class VFSOperations {
             relativePath = String.join("/", Arrays.copyOfRange(parts, 2, parts.length));
         }
         Identifier identifier = new Identifier(databaseName, tableName);
-        // Get table from REST server
-        GetTableResponse table;
         try {
-            table = loadTableMetadata(identifier);
+            VFSTableInfo tableInfo = getTableInfo(identifier);
+            return relativePath == null
+                    ? new VFSTableRootIdentifier(databaseName, tableName, tableInfo)
+                    : new VFSTableObjectIdentifier(
+                            databaseName, tableName, relativePath, tableInfo);
         } catch (FileNotFoundException e) {
-            if (relativePath == null) {
-                return new VFSTableRootIdentifier(databaseName, tableName);
-            } else {
-                return new VFSTableObjectIdentifier(databaseName, tableName, relativePath);
-            }
-        }
-        if (table.isExternal()) {
-            throw new IOException("Do not support visiting external table " + identifier);
-        }
-        Path tablePath = new Path(table.getPath());
-        FileIO fileIO = new RESTTokenFileIO(context, api, identifier, tablePath);
-        VFSTableInfo tableInfo = new VFSTableInfo(table.getId(), tablePath, fileIO);
-        if (relativePath == null) {
-            return new VFSTableRootIdentifier(databaseName, tableName, tableInfo);
-        } else {
-            return new VFSTableObjectIdentifier(databaseName, tableName, relativePath, tableInfo);
+            return relativePath == null
+                    ? new VFSTableRootIdentifier(databaseName, tableName)
+                    : new VFSTableObjectIdentifier(databaseName, tableName, relativePath);
         }
     }
 
@@ -138,6 +169,16 @@ public class VFSOperations {
                                 + " is not empty, set recursive to true to drop it");
             }
             api.dropDatabase(databaseName);
+            // Remove table cache
+            if (cacheEnabled) {
+                List<Identifier> tables = new ArrayList<>();
+                for (Identifier identifier : tableCache.asMap().keySet()) {
+                    if (identifier.getDatabaseName().equals(databaseName)) {
+                        tables.add(identifier);
+                    }
+                }
+                tables.forEach(tableCache::invalidate);
+            }
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Database " + databaseName + " not found");
         } catch (ForbiddenException e) {
@@ -171,6 +212,10 @@ public class VFSOperations {
         Identifier identifier = Identifier.create(databaseName, tableName);
         try {
             api.dropTable(identifier);
+            // Remove table cache
+            if (cacheEnabled) {
+                tableCache.invalidate(identifier);
+            }
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Table " + identifier + " not found");
         } catch (ForbiddenException e) {
@@ -184,6 +229,11 @@ public class VFSOperations {
         Identifier dstIdentifier = Identifier.create(databaseName, dstTableName);
         try {
             api.renameTable(srcIdentifier, dstIdentifier);
+            // Remove table cache
+            if (cacheEnabled) {
+                tableCache.invalidate(srcIdentifier);
+                tableCache.invalidate(dstIdentifier);
+            }
         } catch (NoSuchResourceException e) {
             throw new FileNotFoundException("Source table " + srcIdentifier + " not found");
         } catch (ForbiddenException e) {
@@ -237,5 +287,36 @@ public class VFSOperations {
         }
 
         return response;
+    }
+
+    private VFSTableInfo loadTableInfo(Identifier identifier) throws IOException {
+        // Get table from REST server
+        GetTableResponse table;
+        table = loadTableMetadata(identifier);
+
+        if (table.isExternal()) {
+            throw new IOException("Do not support visiting external table " + identifier);
+        }
+        Path tablePath = new Path(table.getPath());
+        FileIO fileIO = new RESTTokenFileIO(context, api, identifier, tablePath);
+        return new VFSTableInfo(table.getId(), tablePath, fileIO);
+    }
+
+    private VFSTableInfo getTableInfo(Identifier identifier) throws IOException {
+        if (!cacheEnabled) {
+            return loadTableInfo(identifier);
+        }
+        VFSTableInfo vfsTableInfo = tableCache.getIfPresent(identifier);
+        if (vfsTableInfo != null) {
+            return vfsTableInfo;
+        }
+        vfsTableInfo = loadTableInfo(identifier);
+        tableCache.put(identifier, vfsTableInfo);
+        return vfsTableInfo;
+    }
+
+    @VisibleForTesting
+    public boolean isCacheEnabled() {
+        return cacheEnabled;
     }
 }

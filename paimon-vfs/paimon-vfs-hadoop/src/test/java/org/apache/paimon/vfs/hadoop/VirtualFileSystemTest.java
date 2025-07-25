@@ -315,6 +315,16 @@ public abstract class VirtualFileSystemTest {
         Assert.assertTrue(fileStatus.isFile());
         Assert.assertEquals(5, fileStatus.getLen());
 
+        // Rename to table root: /database/table/test_dir/file2.txt -> /database/table/
+        // which actually means: /database/table/test_dir/file2.txt -> /database/table/file2.txt
+        Path vfsPath3 = new Path(vfsRoot, databaseName + "/" + tableName);
+        Assert.assertTrue(vfs.rename(vfsPath2, vfsPath3));
+        fileStatus = vfs.getFileStatus(new Path(vfsPath3, "file2.txt"));
+        Assert.assertEquals(
+                new Path(vfsPath3, "file2.txt").toString(), fileStatus.getPath().toString());
+        Assert.assertTrue(fileStatus.isFile());
+        Assert.assertEquals(5, fileStatus.getLen());
+
         // Rename in non-existing table
         String tableName2 = "object_table2";
         vfsPath = new Path(vfsRoot, databaseName + "/" + tableName2 + "/test_dir/file.txt");
