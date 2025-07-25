@@ -816,7 +816,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 spark.sql("SELECT * FROM paimon.default." + tableName),
                 Arrays.asList(
                         row(1, array(row("apple", 100), row("banana", 101))),
@@ -833,7 +833,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT(110, 'APPLE'), STRUCT(111, 'BANANA'))), "
                         + "(3, ARRAY(STRUCT(310, 'FLOWER')))");
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 spark.sql("SELECT * FROM paimon.default." + tableName),
                 Arrays.asList(
                         row(1, array(row(110, "APPLE"), row(111, "BANANA"))),
@@ -1020,7 +1020,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 spark.sql("SELECT * FROM paimon.default." + tableName),
                 Arrays.asList(
                         row(1, array(row("apple", 100), row("banana", 101))),
@@ -1036,7 +1036,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + " VALUES (1, ARRAY(STRUCT('APPLE', 1000000000000), STRUCT('BANANA', 111))), "
                         + "(3, ARRAY(STRUCT('FLOWER', 3000000000000)))");
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 spark.sql("SELECT * FROM paimon.default." + tableName),
                 Arrays.asList(
                         row(1, array(row("APPLE", 1000000000000L), row("BANANA", 111))),

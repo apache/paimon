@@ -593,7 +593,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
                 .isEqualTo("[[1,10,2022-07-20]]");
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.select("coupon_info"), row(array("loyalty_discount", "shipping_discount")));
 
         // test drop table
@@ -648,7 +648,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     private void innerTestNestedType(Dataset<Row> dataset) {
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset,
                 Arrays.asList(
                         row(1, array("AAA", "BBB"), row(row(1.0, array(null)), 1L)),
@@ -656,9 +656,10 @@ public class SparkReadITCase extends SparkReadTestBase {
                         row(3, array(null, null), row(row(2.0, array(true, false)), 2L)),
                         row(4, array(null, "EEE"), row(row(3.0, array(true, false, true)), 3L))));
 
-        RowTest.checkRowEquals(dataset.select("a"), Arrays.asList(row(1), row(2), row(3), row(4)));
+        RowTestHelper.checkRowEquals(
+                dataset.select("a"), Arrays.asList(row(1), row(2), row(3), row(4)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.select("c.c1"),
                 Arrays.asList(
                         row(row(1.0, array(null))),
@@ -666,13 +667,13 @@ public class SparkReadITCase extends SparkReadTestBase {
                         row(row(2.0, array(true, false))),
                         row(row(3.0, array(true, false, true)))));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.select("c.c2"), Arrays.asList(row(1), row(null), row(2), row(3)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.select("c.c1.c11"), Arrays.asList(row(1.0), row(null), row(2.0), row(3.0)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.select("c.c1.c12"),
                 Arrays.asList(
                         row(array(null)),
@@ -690,25 +691,25 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     private void innerTestNestedTypeFilterPushDown(Dataset<Row> dataset) {
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("a < 4").select("a"), Arrays.asList(row(1), row(2), row(3)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("array_contains(b, 'AAA')").select("b"), row(array("AAA", "BBB")));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("c.c1.c11 is null").select("a", "c"),
                 row(2, row(row(null, array(true)), null)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("c.c1.c11 = 1.0").select("a", "c.c1"),
                 row(1, row(1.0, array(null))));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("c.c2 is null").select("a", "c"),
                 row(2, row(row(null, array(true)), null)));
 
-        RowTest.checkRowEquals(
+        RowTestHelper.checkRowEquals(
                 dataset.filter("array_contains(c.c1.c12, false)").select("a", "c.c1.c12", "c.c2"),
                 Arrays.asList(row(3, array(true, false), 2), row(4, array(true, false, true), 3)));
     }

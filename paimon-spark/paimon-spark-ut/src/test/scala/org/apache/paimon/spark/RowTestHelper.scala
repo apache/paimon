@@ -27,16 +27,16 @@ import org.apache.spark.sql.SparkSession
 import scala.collection.JavaConverters._
 
 /**
- * A utility class for facilitating the comparison of Spark Row objects in Java unit tests, which
+ * A helper class for facilitating the comparison of Spark Row objects in Java unit tests, which
  * leverages QueryTest.checkAnswer for the comparison.
  */
-class RowTest extends QueryTest {
+class RowTestHelper extends QueryTest {
   override protected def spark: SparkSession = {
     throw new UnsupportedOperationException("Not supported")
   }
 }
 
-object RowTest {
+object RowTestHelper {
   def checkRowEquals(df: DataFrame, expectedRows: java.util.List[Row]): Unit = {
     checkAnswer(df, expectedRows)
   }
