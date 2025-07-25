@@ -47,7 +47,7 @@ public class LongCounter implements SequenceNumberCounter {
 
     @Override
     public long maxSequenceNumber() {
-        return this.value;
+        return this.value - 1;
     }
 
     @Override
