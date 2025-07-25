@@ -41,6 +41,10 @@ object RowTest {
     checkAnswer(df, expectedRows)
   }
 
+  def checkRowEquals(df: DataFrame, expectedRow: Row): Unit = {
+    checkAnswer(df, Seq(expectedRow))
+  }
+
   def row(values: Array[Any]): Row = {
     Row.fromSeq(values)
   }

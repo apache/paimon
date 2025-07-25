@@ -255,10 +255,12 @@ public abstract class SparkReadTestBase {
     }
 
     protected static Row row(Object... values) {
-        return RowTest.row(values);
+        Object[] array = values != null ? values : new Object[] {null};
+        return RowTest.row(array);
     }
 
     protected static Seq array(Object... values) {
-        return RowTest.seq(values);
+        Object[] array = values != null ? values : new Object[] {null};
+        return RowTest.seq(array);
     }
 }
