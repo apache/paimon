@@ -22,86 +22,51 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
+import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
-import okhttp3.Headers;
-import okhttp3.HttpUrl;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
+import org.apache.hc.client5.http.classic.methods.HttpDelete;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.http.message.BasicHeader;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.Arrays;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.Function;
 
-import static okhttp3.ConnectionSpec.CLEARTEXT;
-import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
-import static okhttp3.ConnectionSpec.MODERN_TLS;
-import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
-import static org.apache.paimon.rest.LoggingInterceptor.REQUEST_ID_KEY;
+import static org.apache.paimon.rest.HttpClientUtils.createLoggingBuilder;
 
-/** HTTP client for REST catalog. */
+/** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static final OkHttpClient HTTP_CLIENT =
-            new OkHttpClient.Builder()
-                    .retryOnConnectionFailure(true)
-                    .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-                    .addInterceptor(new ExponentialHttpRetryInterceptor(5))
-                    .addInterceptor(new LoggingInterceptor())
-                    .connectTimeout(Duration.ofMinutes(3))
-                    .readTimeout(Duration.ofMinutes(3))
-                    .writeTimeout(Duration.ofMinutes(3))
-                    .build();
-
-    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    private static final CloseableHttpClient HTTP_CLIENT = createLoggingBuilder().build();
 
     private final String uri;
 
     private ErrorHandler errorHandler;
 
     public HttpClient(String uri) {
-        String serverUri;
-        if (StringUtils.isNotEmpty(uri)) {
-            if (uri.endsWith("/")) {
-                serverUri = uri.substring(0, uri.length() - 1);
-            } else {
-                serverUri = uri;
-            }
-            if (!uri.startsWith("http://") && !uri.startsWith("https://")) {
-                serverUri = String.format("http://%s", serverUri);
-            }
-        } else {
-            throw new IllegalArgumentException("uri is empty which must be defined.");
-        }
-        this.uri = serverUri;
+        this.uri = normalizeUri(uri);
         this.errorHandler = DefaultErrorHandler.getInstance();
-    }
-
-    @VisibleForTesting
-    void setErrorHandler(ErrorHandler errorHandler) {
-        this.errorHandler = errorHandler;
     }
 
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
-        Request request =
-                new Request.Builder()
-                        .url(getRequestUrl(path, null))
-                        .get()
-                        .headers(Headers.of(authHeaders))
-                        .build();
-        return exec(request, responseType);
+        Header[] authHeaders = getHeaders(path, "GET", "", restAuthFunction);
+        HttpGet httpGet = new HttpGet(getRequestUrl(path, null));
+        httpGet.setHeaders(authHeaders);
+        return exec(httpGet, responseType);
     }
 
     @Override
@@ -110,15 +75,10 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders =
-                getHeaders(path, queryParams, "GET", "", restAuthFunction);
-        Request request =
-                new Request.Builder()
-                        .url(getRequestUrl(path, queryParams))
-                        .get()
-                        .headers(Headers.of(authHeaders))
-                        .build();
-        return exec(request, responseType);
+        Header[] authHeaders = getHeaders(path, queryParams, "GET", "", restAuthFunction);
+        HttpGet httpGet = new HttpGet(getRequestUrl(path, queryParams));
+        httpGet.setHeaders(authHeaders);
+        return exec(httpGet, responseType);
     }
 
     @Override
@@ -135,30 +95,22 @@ public class HttpClient implements RESTClient {
             RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = RESTApi.toJson(body);
-            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
-            RequestBody requestBody = buildRequestBody(bodyStr);
-            Request request =
-                    new Request.Builder()
-                            .url(getRequestUrl(path, null))
-                            .post(requestBody)
-                            .headers(Headers.of(authHeaders))
-                            .build();
-            return exec(request, responseType);
+            Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
+            HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
+            httpPost.setHeaders(authHeaders);
+            String encodedBody = RESTUtil.encodedBody(body);
+            if (encodedBody != null) {
+                httpPost.setEntity(new StringEntity(encodedBody));
+            }
+            return exec(httpPost, responseType);
         } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build request failed.");
+            throw new RESTException(e, "build post request failed.");
         }
     }
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
-        Request request =
-                new Request.Builder()
-                        .url(getRequestUrl(path, null))
-                        .delete()
-                        .headers(Headers.of(authHeaders))
-                        .build();
-        return exec(request, null);
+        return delete(path, null, restAuthFunction);
     }
 
     @Override
@@ -166,41 +118,28 @@ public class HttpClient implements RESTClient {
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = RESTApi.toJson(body);
-            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
-            RequestBody requestBody = buildRequestBody(bodyStr);
-            Request request =
-                    new Request.Builder()
-                            .url(getRequestUrl(path, null))
-                            .delete(requestBody)
-                            .headers(Headers.of(authHeaders))
-                            .build();
-            return exec(request, null);
+            Header[] authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
+            HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
+            httpDelete.setHeaders(authHeaders);
+            String encodedBody = RESTUtil.encodedBody(body);
+            if (encodedBody != null) {
+                httpDelete.setEntity(new StringEntity(encodedBody));
+            }
+            return exec(httpDelete, null);
         } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build request failed.");
+            throw new RESTException(e, "build delete request failed.");
         }
     }
 
     @VisibleForTesting
-    protected String getRequestUrl(String path, Map<String, String> queryParams) {
-        String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
-        if (queryParams != null && !queryParams.isEmpty()) {
-            HttpUrl httpUrl = HttpUrl.parse(fullPath);
-            HttpUrl.Builder builder = httpUrl.newBuilder();
-            queryParams.forEach(builder::addQueryParameter);
-            fullPath = builder.build().toString();
-        }
-        return fullPath;
+    void setErrorHandler(ErrorHandler errorHandler) {
+        this.errorHandler = errorHandler;
     }
 
-    @VisibleForTesting
-    public String uri() {
-        return uri;
-    }
-
-    private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
-        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
-            String responseBodyStr = response.body() != null ? response.body().string() : null;
-            if (!response.isSuccessful()) {
+    private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
+        try (CloseableHttpResponse response = HTTP_CLIENT.execute(request)) {
+            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+            if (!RESTUtil.isSuccessful(response)) {
                 ErrorResponse error;
                 try {
                     error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
@@ -212,10 +151,9 @@ public class HttpClient implements RESTClient {
                                     responseBodyStr != null
                                             ? responseBodyStr
                                             : "response body is null",
-                                    response.code());
+                                    response.getCode());
                 }
-                String requestId = response.header(REQUEST_ID_KEY, DEFAULT_REQUEST_ID);
-                errorHandler.accept(error, requestId);
+                errorHandler.accept(error, getRequestId(response));
             }
             if (responseType != null && responseBodyStr != null) {
                 return RESTApi.fromJson(responseBodyStr, responseType);
@@ -224,34 +162,65 @@ public class HttpClient implements RESTClient {
             } else {
                 throw new RESTException("response body is null.");
             }
-        } catch (RESTException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RESTException(e, "rest exception");
+        } catch (IOException | ParseException e) {
+            throw new RESTException(
+                    e, "Error occurred while processing %s request", request.getMethod());
         }
     }
 
-    private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
-        return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
+    private String normalizeUri(String rawUri) {
+        if (StringUtils.isEmpty(rawUri)) {
+            throw new IllegalArgumentException("uri is empty which must be defined.");
+        }
+
+        String normalized =
+                rawUri.endsWith("/") ? rawUri.substring(0, rawUri.length() - 1) : rawUri;
+
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = String.format("http://%s", normalized);
+        }
+
+        return normalized;
     }
 
-    private static Map<String, String> getHeaders(
+    @VisibleForTesting
+    protected String getRequestUrl(String path, Map<String, String> queryParams) {
+        String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+        return RESTUtil.buildRequestUrl(fullPath, queryParams);
+    }
+
+    @VisibleForTesting
+    public String uri() {
+        return uri;
+    }
+
+    private static String getRequestId(CloseableHttpResponse response) {
+        Header header = response.getFirstHeader(LoggingInterceptor.REQUEST_ID_KEY);
+        return header != null ? header.getValue() : LoggingInterceptor.DEFAULT_REQUEST_ID;
+    }
+
+    private static Header[] getHeaders(
             String path,
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
-
         return getHeaders(path, Collections.emptyMap(), method, data, headerFunction);
     }
 
-    private static Map<String, String> getHeaders(
+    private static Header[] getHeaders(
             String path,
             Map<String, String> queryParams,
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        if (headerFunction == null) {
+            return new Header[0];
+        }
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(path, queryParams, method, data);
-        return headerFunction.apply(restAuthParameter);
+        Map<String, String> headers = headerFunction.apply(restAuthParameter);
+        return headers.entrySet().stream()
+                .map(entry -> new BasicHeader(entry.getKey(), entry.getValue()))
+                .toArray(Header[]::new);
     }
 }

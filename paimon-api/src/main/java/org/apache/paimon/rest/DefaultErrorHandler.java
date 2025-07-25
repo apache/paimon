@@ -29,7 +29,7 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
+import static org.apache.paimon.rest.interceptor.LoggingInterceptor.DEFAULT_REQUEST_ID;
 
 /** Default error handler. */
 public class DefaultErrorHandler extends ErrorHandler {

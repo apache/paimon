@@ -37,18 +37,17 @@ class RESTResponse(ABC):
 
 @dataclass
 class ErrorResponse(RESTResponse):
-
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
     message: Optional[str] = json_field("message", default=None)
     code: Optional[int] = json_field("code", default=None)
 
     def __init__(
-        self,
-        resource_type: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        message: Optional[str] = None,
-        code: Optional[int] = None,
+            self,
+            resource_type: Optional[str] = None,
+            resource_name: Optional[str] = None,
+            message: Optional[str] = None,
+            code: Optional[int] = None,
     ):
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -203,18 +202,18 @@ class GetTableResponse(AuditRESTResponse):
     schema: Optional[Schema] = json_field(FIELD_SCHEMA, default=None)
 
     def __init__(
-        self,
-        id: str,
-        name: str,
-        path: str,
-        is_external: bool,
-        schema_id: int,
-        schema: Schema,
-        owner: Optional[str] = None,
-        created_at: Optional[int] = None,
-        created_by: Optional[str] = None,
-        updated_at: Optional[int] = None,
-        updated_by: Optional[str] = None,
+            self,
+            id: str,
+            name: str,
+            path: str,
+            is_external: bool,
+            schema_id: int,
+            schema: Schema,
+            owner: Optional[str] = None,
+            created_at: Optional[int] = None,
+            created_by: Optional[str] = None,
+            updated_at: Optional[int] = None,
+            updated_by: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
@@ -239,16 +238,16 @@ class GetDatabaseResponse(AuditRESTResponse):
         FIELD_OPTIONS, default_factory=dict)
 
     def __init__(
-        self,
-        id: Optional[str] = None,
-        name: Optional[str] = None,
-        location: Optional[str] = None,
-        options: Optional[Dict[str, str]] = None,
-        owner: Optional[str] = None,
-        created_at: Optional[int] = None,
-        created_by: Optional[str] = None,
-        updated_at: Optional[int] = None,
-        updated_by: Optional[str] = None,
+            self,
+            id: Optional[str] = None,
+            name: Optional[str] = None,
+            location: Optional[str] = None,
+            options: Optional[Dict[str, str]] = None,
+            owner: Optional[str] = None,
+            created_at: Optional[int] = None,
+            created_by: Optional[str] = None,
+            updated_at: Optional[int] = None,
+            updated_by: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
@@ -279,3 +278,12 @@ class ConfigResponse(RESTResponse):
         merged = options.copy()
         merged.update(self.defaults)
         return merged
+
+
+@dataclass
+class GetTableTokenResponse(RESTResponse):
+    FIELD_TOKEN = "token"
+    FIELD_EXPIRES_AT_MILLIS = "expiresAtMillis"
+
+    token: Dict[str, str] = json_field(FIELD_TOKEN, default=None)
+    expires_at_millis: Optional[int] = json_field(FIELD_EXPIRES_AT_MILLIS, default=None)

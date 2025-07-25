@@ -18,6 +18,8 @@
 from dataclasses import dataclass
 from typing import Optional, TypeVar, Dict
 
+from pypaimon.api.rest_json import json_field
+
 T = TypeVar("T")
 
 
@@ -25,9 +27,9 @@ T = TypeVar("T")
 class Identifier:
     """Table/View/Function identifier"""
 
-    database_name: str
-    object_name: str
-    branch_name: Optional[str] = None
+    database_name: str = json_field("database", default=None)
+    object_name: str = json_field("object", default=None)
+    branch_name: Optional[str] = json_field("branch", default=None)
 
     @classmethod
     def create(cls, database_name: str, object_name: str) -> "Identifier":
@@ -70,17 +72,3 @@ class RESTAuthParameter:
     path: str
     data: str
     parameters: Dict[str, str]
-
-
-class RESTCatalogOptions:
-    URI = "uri"
-    WAREHOUSE = "warehouse"
-    TOKEN_PROVIDER = "token.provider"
-    DLF_REGION = "dlf.region"
-    DLF_ACCESS_KEY_ID = "dlf.access-key-id"
-    DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"
-    DLF_ACCESS_SECURITY_TOKEN = "dlf.security-token"
-    DLF_TOKEN_LOADER = "dlf.token-loader"
-    DLF_TOKEN_ECS_ROLE_NAME = "dlf.token-ecs-role-name"
-    DLF_TOKEN_ECS_METADATA_URL = "dlf.token-ecs-metadata-url"
-    PREFIX = 'prefix'

@@ -19,12 +19,9 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.rest.ExponentialHttpRetryInterceptor;
 import org.apache.paimon.rest.RESTApi;
+import org.apache.paimon.rest.SimpleHttpClient;
 
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,26 +29,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.time.Duration;
-import java.util.Arrays;
-
-import static okhttp3.ConnectionSpec.CLEARTEXT;
-import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
-import static okhttp3.ConnectionSpec.MODERN_TLS;
 
 /** DLF Token Loader for ECS Metadata Service. */
 public class DLFECSTokenLoader implements DLFTokenLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DLFECSTokenLoader.class);
-
-    private static final OkHttpClient HTTP_CLIENT =
-            new OkHttpClient.Builder()
-                    .retryOnConnectionFailure(true)
-                    .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-                    .addInterceptor(new ExponentialHttpRetryInterceptor(3))
-                    .connectTimeout(Duration.ofMinutes(3))
-                    .readTimeout(Duration.ofMinutes(3))
-                    .build();
 
     private final String ecsMetadataURL;
 
@@ -85,7 +67,7 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
 
     private static DLFToken getToken(String url) {
         try {
-            String token = getResponseBody(url);
+            String token = SimpleHttpClient.INSTANCE.get(url);
             return RESTApi.fromJson(token, DLFToken.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -96,19 +78,9 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
 
     @VisibleForTesting
     protected static String getResponseBody(String url) {
-        Request request = new Request.Builder().url(url).get().build();
         long startTime = System.currentTimeMillis();
-        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
-            if (response == null) {
-                throw new RuntimeException("get response failed, response is null");
-            }
-            if (!response.isSuccessful()) {
-                throw new RuntimeException("get response failed, response : " + response);
-            }
-            String responseBodyStr = response.body() != null ? response.body().string() : null;
-            if (responseBodyStr == null) {
-                throw new RuntimeException("get response failed, response body is null");
-            }
+        try {
+            String responseBodyStr = SimpleHttpClient.INSTANCE.get(url);
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
                         "get response success, url : {}, cost : {} ms",

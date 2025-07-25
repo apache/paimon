@@ -26,7 +26,9 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
+import org.assertj.core.api.AssertionsForInterfaceTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -352,6 +354,32 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         assertThat(collectResult("SELECT v, k FROM `t$branch_pk`"))
                 .containsExactlyInAnyOrder(
                         "+I[cat, 20]", "+I[dog, 30]", "+I[lion, 10]", "+I[wolf, 20]");
+    }
+
+    @Test
+    public void testFallbackBranchStreamRead() throws Exception {
+        sql(
+                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+        sql("INSERT INTO t VALUES (1, 10, 'apple'), (1, 20, 'banana')");
+
+        sql("CALL sys.create_branch('default.t', 'pk')");
+        sql("ALTER TABLE `t$branch_pk` SET ( 'primary-key' = 'pt, k', 'bucket' = '2' )");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
+
+        sql("INSERT INTO `t$branch_pk` VALUES (2, 20, 'cat'), (2, 30, 'dog')");
+
+        // read main branch in batch
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder(
+                        "+I[apple, 10]", "+I[banana, 20]", "+I[cat, 20]", "+I[dog, 30]");
+
+        // read main branch streamingly
+        try (BlockingIterator<Row, Row> iter = streamSqlBlockIter("SELECT * FROM t")) {
+            AssertionsForInterfaceTypes.assertThat(iter.collect(2))
+                    .containsExactlyInAnyOrder(
+                            Row.ofKind(RowKind.INSERT, 1, 10, "apple"),
+                            Row.ofKind(RowKind.INSERT, 1, 20, "banana"));
+        }
     }
 
     @Test
