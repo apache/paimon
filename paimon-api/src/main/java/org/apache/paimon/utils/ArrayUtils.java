@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import java.util.List;
+
 /** Utils for array. */
 public class ArrayUtils {
 
@@ -352,6 +354,26 @@ public class ArrayUtils {
         final short[] result = new short[array.length];
         for (int i = 0; i < array.length; i++) {
             result[i] = (short) array[i];
+        }
+        return result;
+    }
+
+    public static byte[] mergeByteArrays(List<byte[]> byteList) {
+        if (byteList.isEmpty()) {
+            return new byte[0];
+        }
+
+        if (byteList.size() == 1) {
+            return byteList.get(0);
+        }
+
+        int totalLength = byteList.stream().mapToInt(arr -> arr.length).sum();
+        byte[] result = new byte[totalLength];
+        int offset = 0;
+
+        for (byte[] arr : byteList) {
+            System.arraycopy(arr, 0, result, offset, arr.length);
+            offset += arr.length;
         }
         return result;
     }
