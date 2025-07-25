@@ -217,7 +217,100 @@ Integers are all BIG_ENDIAN.
 Bitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType,
 LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType.
 
+## Index: Range Bitmap
+
+Advantage:
+1. Smaller than the bitmap index.
+2. Suitable for the point query and the range query in the high level of cardinality scenarios.
+3. Can be used conjunction with bitmap index.
+
+Shortcoming:
+1. The point query evaluation maybe slower than bitmap index.
+
+Options:
+* `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index.
+* `file-index.range-bitmap.<column_name>.chunk-size`: to config the chunk size, default value is 16kb.
+
+<pre>
+Range Bitmap file index format (V1)
++-------------------------------------------------+-----------------
+| header length (4 bytes int)                     |
++-------------------------------------------------+
+| version (1 byte)                                |
++-------------------------------------------------+
+| row number (4 bytes int)                        |
++-------------------------------------------------+
+| cardinality (4 bytes int)                       |       HEAD
++-------------------------------------------------+
+| min value                                       |
++-------------------------------------------------+
+| max value                                       |
++-------------------------------------------------+
+| dictionary length (4 bytes int)                 |
++-------------------------------------------------+-----------------
+| dictionary serialize in bytes                   |
++-------------------------------------------------+       BODY
+| bit-slice index bitmap serialize in bytes       |
++-------------------------------------------------+-----------------
+</pre>
+
+<pre>
+Dictionary format (V1)
++-------------------------------------------------+-----------------
+| header length (4 bytes int)                     |
++-------------------------------------------------+
+| version (1 byte)                                |
++-------------------------------------------------+
+| the chunks size (4 bytes int)                   |       HEAD
++-------------------------------------------------+    
+| the offsets length (4 bytes int)                |       
++-------------------------------------------------+
+| the chunks length (4 bytes int)                 |
++-------------------------------------------------+-----------------
+| offsets serialize in bytes                      |
++-------------------------------------------------+
+| chunks serialize in bytes                       |       BODY
++-------------------------------------------------+
+| keys serialize in bytes                         |
++-------------------------------------------------+-----------------
+</pre>
+
+<pre>
+Bit-slice index bitmap format (V1)
++-------------------------------------------------+-----------------
+| header length (4 bytes int)                     |
++-------------------------------------------------+
+| version (1 byte)                                |
++-------------------------------------------------+
+| slices size (4 bytes int)                       |       HEAD
++-------------------------------------------------+    
+| existence bitmap length (4 bytes int)           |       
++-------------------------------------------------+
+| indexes length (4 bytes int)                    |
++-------------------------------------------------+
+| indexes serialize in bytes                      |
++-------------------------------------------------+-----------------
+| existence bitmap serialize in bytes             |
++-------------------------------------------------+
+| the bit 0 bitmap serialize in bytes             |
++-------------------------------------------------+
+| the bit 1 bitmap serialize in byte              |       BODY
++-------------------------------------------------+
+| the bit 2 bitmap serialize in byte              |
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+-----------------
+</pre>
+
+RangeBitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType, LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType, DoubleType, FloatType.
+
 ## Index: Bit-Slice Index Bitmap
+
+{{< hint warning >}}
+
+Deprecated. Using the range-bitmap index instead.
+
+{{< /hint >}}
 
 BSI file index is a numeric range index, used to accelerate range query, it can be used with bitmap index.
 

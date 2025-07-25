@@ -167,6 +167,32 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 });
     }
 
+    @Test
+    public void testReadWriteTableWithRangeBitmapIndex() throws Catalog.TableNotExistException {
+
+        spark.sql(
+                "CREATE TABLE T(a int) TBLPROPERTIES ("
+                        + "'file-index.range-bitmap.columns'='a',"
+                        + "'file-index.in-manifest-threshold'='1B');");
+        spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
+
+        // check query result
+        List<Row> rows = spark.sql("SELECT a FROM T where a>=3;").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[3], [4], [5]]");
+
+        // check index reader
+        foreachIndexReader(
+                "T",
+                fileIndexReader -> {
+                    FileIndexResult fileIndexResult =
+                            fileIndexReader.visitGreaterOrEqual(
+                                    new FieldRef(0, "", new IntType()), 3);
+                    assertThat(fileIndexResult).isInstanceOf(BitmapIndexResult.class);
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
+                    assertThat(roaringBitmap32).isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
+                });
+    }
+
     protected void foreachIndexReader(String tableName, Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
         Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", tableName));
