@@ -123,12 +123,4 @@ public class ScanCoordinationResponse implements CoordinationResponse {
         }
         return metas;
     }
-
-    public static ScanCoordinationResponse empty() {
-        try {
-            return new ScanCoordinationResponse(null, null, null, null, null);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

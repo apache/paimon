@@ -99,7 +99,8 @@ public class TableWriteCoordinator {
             throws IOException {
         if (snapshot == null) {
             return new PagedCoordinationResponse(
-                    serializeObject(ScanCoordinationResponse.empty()), null);
+                    serializeObject(new ScanCoordinationResponse(null, null, null, null, null)),
+                    null);
         }
 
         Integer pageToken = request.pageToken();
