@@ -61,6 +61,14 @@ public class WithMetaDataTable implements DataTable, ReadonlyTable {
 
     public WithMetaDataTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
+
+        if (!coreOptions().rowTrackingEnabled()) {
+            throw new IllegalArgumentException(
+                    "Table "
+                            + wrapped.name()
+                            + " does not support row tracking, "
+                            + "please enable 'row-tracking.enabled' option to use 'with_metadata' table.");
+        }
     }
 
     @Override
