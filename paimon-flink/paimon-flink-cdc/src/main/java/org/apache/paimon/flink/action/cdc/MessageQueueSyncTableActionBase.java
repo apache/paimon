@@ -52,7 +52,6 @@ import java.util.Map;
  * </ul>
  */
 public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBase {
-
     public MessageQueueSyncTableActionBase(
             String database,
             String table,
@@ -87,6 +86,7 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
                 metadataConverters,
                 caseSensitive,
                 true,
-                false);
+                false,
+                this.syncPKeysFromSourceSchema);
     }
 }

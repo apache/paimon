@@ -34,6 +34,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.SYNC_PKEYS_FROM_SOURCE_SCHEMA;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_MAPPING;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX_DB;
@@ -85,6 +86,11 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
         if (params.has(COMPUTED_COLUMN)) {
             action.withComputedColumnArgs(
                     new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
+        }
+
+        if (params.has(SYNC_PKEYS_FROM_SOURCE_SCHEMA)) {
+            action.syncPKeysFromSourceSchema(
+                    Boolean.parseBoolean(params.get(SYNC_PKEYS_FROM_SOURCE_SCHEMA)));
         }
     }
 }

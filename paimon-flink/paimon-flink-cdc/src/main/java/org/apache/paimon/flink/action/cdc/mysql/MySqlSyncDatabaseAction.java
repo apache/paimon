@@ -154,7 +154,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             metadataConverters,
                             caseSensitive,
                             false,
-                            true);
+                            true,
+                            this.syncPKeysFromSourceSchema);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 Supplier<String> errMsg =
