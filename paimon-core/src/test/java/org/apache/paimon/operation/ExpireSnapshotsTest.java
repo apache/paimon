@@ -284,6 +284,7 @@ public class ExpireSnapshotsTest {
                         null,
                         FileSource.APPEND,
                         null,
+                        null,
                         null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
@@ -345,7 +346,8 @@ public class ExpireSnapshotsTest {
                         null,
                         FileSource.APPEND,
                         null,
-                        myDataFile.toString());
+                        myDataFile.toString(),
+                        null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 

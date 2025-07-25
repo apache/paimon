@@ -120,7 +120,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(dataSplit, forceKeepDelete)) {
-                return readProvider.getOrCreate().createReader(dataSplit);
+                return readProvider.getOrCreate().withRowId(withRowId).createReader(dataSplit);
             }
         }
 

@@ -51,6 +51,7 @@ public class KeyValue {
     private InternalRow value;
     // determined after read from file
     private int level;
+    private Long rowId;
 
     public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);

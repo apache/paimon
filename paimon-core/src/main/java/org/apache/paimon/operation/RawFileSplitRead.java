@@ -79,6 +79,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
+    private boolean withRowId = false;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -122,6 +123,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
         }
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withRowId(boolean withRowId) {
+        this.withRowId = withRowId;
         return this;
     }
 
@@ -183,7 +190,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                     file,
                                     dataFilePathFactory,
                                     formatReaderMapping,
-                                    dvFactory));
+                                    dvFactory,
+                                    withRowId));
         }
 
         return ConcatRecordReader.create(suppliers);
@@ -194,7 +202,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
-            IOExceptionSupplier<DeletionVector> dvFactory)
+            IOExceptionSupplier<DeletionVector> dvFactory,
+            boolean withRowId)
             throws IOException {
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
@@ -248,8 +257,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         }
 
         if (deletionVector != null && !deletionVector.isEmpty()) {
-            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
+            fileRecordReader = new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
+
+        if (withRowId) {
+            fileRecordReader = fileRecordReader.withRowId(file.rowIdSequence());
+        }
+
         return fileRecordReader;
     }
 }
