@@ -38,7 +38,7 @@ class RowTest extends QueryTest {
 
 object RowTest {
   def checkRowEquals(df: DataFrame, expectedRows: java.util.List[Row]): Unit = {
-    checkAnswer(df, expectedRows.asScala)
+    checkAnswer(df, expectedRows)
   }
 
   def row(values: Array[Any]): Row = {
