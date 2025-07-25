@@ -63,7 +63,9 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
         avroOptions.set(
                 "avro.row-name-mapping",
                 "org.apache.paimon.avro.generated.record:manifest_file,"
-                        + "manifest_file_partitions:r508");
+                        + "manifest_file_partitions:r508,"
+                        + "array_r508:508,"
+                        + "iceberg:true");
         FileFormat fileFormat = FileFormat.fromIdentifier("avro", avroOptions);
         RowType manifestType =
                 IcebergManifestFileMeta.schema(
