@@ -39,10 +39,8 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
@@ -57,10 +55,6 @@ public class AppendCompactTask {
     public AppendCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         Preconditions.checkArgument(files != null);
         this.partition = partition;
-        files.sort(
-                Comparator.comparing(
-                        file -> Optional.ofNullable(file.rowIdStart()).orElse(0L),
-                        Long::compareTo));
         compactBefore = new ArrayList<>(files);
         compactAfter = new ArrayList<>();
     }
