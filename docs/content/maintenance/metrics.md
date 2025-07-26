@@ -260,6 +260,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>The total number of compactions that are queued/running.</td>
         </tr>
         <tr>
+            <td>compactionTotalCount</td>
+            <td>Counter</td>
+            <td>The total number of compactions.</td>
+        </tr>
+        <tr>
             <td>maxCompactionInputSize</td>
             <td>Gauge</td>
             <td>The maximum input file size for this task's compaction.</td>

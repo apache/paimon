@@ -240,6 +240,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         taskFuture = executor.submit(task);
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
+            metricsReporter.increaseCompactionsTotalCount();
         }
     }
 

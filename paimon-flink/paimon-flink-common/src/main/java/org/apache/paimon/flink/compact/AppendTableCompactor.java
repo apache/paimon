@@ -118,6 +118,7 @@ public class AppendTableCompactor {
     private void recordCompactionsQueuedRequest() {
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
+            metricsReporter.increaseCompactionsTotalCount();
         }
     }
 

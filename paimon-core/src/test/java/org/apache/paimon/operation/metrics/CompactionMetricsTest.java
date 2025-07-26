@@ -65,6 +65,7 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_TIME)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_TOTAL_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(0L);
         CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[3];
         for (int i = 0; i < reporters.length; i++) {
@@ -75,6 +76,7 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_TOTAL_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(0L);
 
         reporters[0].reportLevel0FileCount(5);
@@ -98,12 +100,20 @@ public class CompactionMetricsTest {
         reporters[1].increaseCompactionsQueuedCount();
         reporters[2].increaseCompactionsQueuedCount();
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_TOTAL_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(3L);
 
         // completed compactions and remove them from queue
         reporters[0].increaseCompactionsCompletedCount();
+        reporters[0].increaseCompactionsTotalCount();
         reporters[0].decreaseCompactionsQueuedCount();
         reporters[1].decreaseCompactionsQueuedCount();
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(1L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_TOTAL_COUNT)).isEqualTo(1L);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(1L);
+
+        reporters[2].increaseCompactionsTotalCount();
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_TOTAL_COUNT)).isEqualTo(2L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_COMPLETED_COUNT)).isEqualTo(1L);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_QUEUED_COUNT)).isEqualTo(1L);
     }
