@@ -43,6 +43,7 @@ public class CompactionMetrics {
     public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
     public static final String COMPACTION_COMPLETED_COUNT = "compactionCompletedCount";
+    public static final String COMPACTION_TOTAL_COUNT = "compactionTotalCount";
     public static final String COMPACTION_QUEUED_COUNT = "compactionQueuedCount";
     public static final String MAX_COMPACTION_INPUT_SIZE = "maxCompactionInputSize";
     public static final String MAX_COMPACTION_OUTPUT_SIZE = "maxCompactionOutputSize";
@@ -59,6 +60,7 @@ public class CompactionMetrics {
     private final Map<Long, CompactTimer> compactTimers;
     private final Queue<Long> compactionTimes;
     private Counter compactionsCompletedCounter;
+    private Counter compactionsTotalCounter;
     private Counter compactionsQueuedCounter;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
@@ -95,6 +97,7 @@ public class CompactionMetrics {
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
 
         compactionsCompletedCounter = metricGroup.counter(COMPACTION_COMPLETED_COUNT);
+        compactionsTotalCounter = metricGroup.counter(COMPACTION_TOTAL_COUNT);
         compactionsQueuedCounter = metricGroup.counter(COMPACTION_QUEUED_COUNT);
 
         metricGroup.gauge(MAX_TOTAL_FILE_SIZE, () -> getTotalFileSizeStream().max().orElse(-1));
@@ -141,6 +144,8 @@ public class CompactionMetrics {
         void reportCompactionTime(long time);
 
         void increaseCompactionsCompletedCount();
+
+        void increaseCompactionsTotalCount();
 
         void increaseCompactionsQueuedCount();
 
@@ -208,6 +213,11 @@ public class CompactionMetrics {
         @Override
         public void increaseCompactionsCompletedCount() {
             compactionsCompletedCounter.inc();
+        }
+
+        @Override
+        public void increaseCompactionsTotalCount() {
+            compactionsTotalCounter.inc();
         }
 
         @Override
