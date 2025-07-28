@@ -71,7 +71,6 @@ class JSON:
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
         type_mapping = {}
-        print(target_class)
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
