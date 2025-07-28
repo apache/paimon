@@ -213,12 +213,6 @@ under the License.
             <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
-            <td><h5>snapshot.ignore-empty-commit</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Whether ignore empty commit.</td>
-        </tr>
-        <tr>
             <td><h5>compaction.delete-ratio-threshold</h5></td>
             <td style="word-wrap: break-word;">0.2</td>
             <td>Double</td>
@@ -385,6 +379,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
+        </tr>
+        <tr>
+            <td><h5>detect-expiration-setting.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether detect changes to expiration settings.</td>
         </tr>
         <tr>
             <td><h5>disable-explicit-type-casting</h5></td>
@@ -1006,6 +1006,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">50</td>
             <td>Integer</td>
             <td>The maximum number of snapshots allowed to expire at a time.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.ignore-empty-commit</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether ignore empty commit.</td>
         </tr>
         <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
