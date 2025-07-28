@@ -24,14 +24,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Any, Optional, Tuple
 
-from cachetools import LRUCache, TLRUCache
+from cachetools import LRUCache, TTLCache
 from readerwriterlock import rwlock
 
 import fsspec
 from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 
-from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, GetTableResponse, Identifier
+from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, Identifier
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
 from pypaimon.api.config import RESTCatalogOptions, OssOptions, PVFSOptions
 
@@ -85,6 +85,9 @@ class PVFSTableIdentifier(PVFSIdentifier):
     def get_identifier(self):
         return Identifier.create(self.database, self.table)
 
+    def name(self):
+        return f'{self.catalog}.{self.database}.{self.table}'
+
 
 @dataclass
 class PaimonRealStorage:
@@ -100,6 +103,13 @@ class PaimonRealStorage:
         return False
 
 
+@dataclass
+class TableStore:
+    path: str
+    created: datetime
+    modified: datetime
+
+
 class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     options: Dict[str, Any]
 
@@ -113,7 +123,14 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         fs_cache_size = self.__get_cache_size(PVFSOptions.FS_CACHE_SIZE)
         rest_client_cache_size = self.__get_cache_size(PVFSOptions.REST_CLIENT_CACHE_SIZE)
         table_cache_size = self.__get_cache_size(PVFSOptions.TABLE_CACHE_SIZE)
-        self._table_cache = TLRUCache(table_cache_size)
+        cache_expired_time = (
+            PVFSOptions.TABLE_CACHE_TTL
+            if options is None
+            else options.get(
+                PVFSOptions.TABLE_CACHE_TTL, PVFSOptions.DEFAULT_CACHE_TTL
+            )
+        )
+        self._table_cache = TTLCache(maxsize=table_cache_size, ttl=cache_expired_time)
         self._rest_client_cache = LRUCache(rest_client_cache_size)
         self._cache = LRUCache(maxsize=fs_cache_size)
         self._cache_lock = rwlock.RWLockFair()
@@ -122,7 +139,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     @staticmethod
     def __get_cache_size(key: str, options: Dict = None) -> int:
         return (
-            key
+            PVFSOptions.DEFAULT_CACHE_SIZE
             if options is None
             else options.get(key, PVFSOptions.DEFAULT_CACHE_SIZE)
         )
@@ -176,9 +193,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 for table in tables
             ]
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table = rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.table))
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
+            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
+            storage_type = self._get_storage_type(table_path)
+            storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
             virtual_location = pvfs_identifier.get_virtual_location()
             fs = self._get_filesystem(pvfs_identifier, storage_type)
@@ -208,9 +225,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier.catalog)
-            table = rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.table))
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
+            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
+            storage_type = self._get_storage_type(table_path)
+            storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
             virtual_location = pvfs_identifier.get_virtual_location()
             fs = self._get_filesystem(pvfs_identifier, storage_type)
@@ -231,11 +248,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier.catalog)
             try:
-                table = rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.table))
-                if pvfs_identifier.sub_path is None:
+                table_path = self.__get_table_store(rest_api, pvfs_identifier).path
+                if table_path is not None and pvfs_identifier.sub_path is None:
                     return True
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.exists(actual_path)
@@ -251,10 +268,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 and source.sub_path is not None
                 and source == target):
             rest_api = self.__rest_api(source.catalog)
-            table_identifier = source.get_identifier()
-            table = rest_api.get_table(table_identifier)
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
+            table_path = self.__get_table_store(rest_api, source).path
+            storage_type = self._get_storage_type(table_path)
+            storage_location = table_path
             source_actual_path = source.get_actual_path(storage_location)
             target_actual_path = target.get_actual_path(storage_location)
             fs = self._get_filesystem(source, storage_type)
@@ -280,10 +296,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 rest_api.rename_table(source_identifier, target_identifier)
                 return None
             elif target.sub_path is not None and source.sub_path is not None and target == source:
-                table_identifier = source.get_identifier()
-                table = rest_api.get_table(table_identifier)
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                table_path = self.__get_table_store(rest_api, source).path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 source_actual_path = source.get_actual_path(storage_location)
                 target_actual_path = target.get_actual_path(storage_location)
                 fs = self._get_filesystem(source, storage_type)
@@ -315,12 +330,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return True
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table_identifier = pvfs_identifier.get_identifier()
-            table = rest_api.get_table(table_identifier)
+            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
             if pvfs_identifier.sub_path is None:
                 rest_api.drop_table(table_identifier)
                 return True
-            storage_type = self._get_storage_type(table.path)
-            storage_location = table.path
+            storage_type = self._get_storage_type(table_path)
+            storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
             fs = self._get_filesystem(pvfs_identifier, storage_type)
             return fs.rm(
@@ -335,12 +350,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def rm_file(self, path):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = pvfs_identifier.get_identifier()
             rest_api = self.__rest_api(pvfs_identifier.catalog)
-            table = rest_api.get_table(table_identifier)
+            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
             if pvfs_identifier.sub_path is not None:
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.rm_file(
@@ -361,13 +375,13 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return True
             elif isinstance(pvfs_identifier, PVFSTableIdentifier):
                 table_identifier = pvfs_identifier.get_identifier()
-                table = rest_api.get_table(table_identifier)
+                table_path = self.__get_table_store(rest_api, pvfs_identifier).path
                 if pvfs_identifier.sub_path is None:
                     rest_api.drop_table(table_identifier)
                     self._cache.pop(pvfs_identifier)
                     return True
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.rmdir(
@@ -401,15 +415,14 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier.catalog)
-            table_identifier = pvfs_identifier.get_identifier()
-            table = rest_api.get_table(table_identifier)
+            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
             if pvfs_identifier.sub_path is None:
                 raise Exception(
                     f"open is not supported for path: {path}"
                 )
             else:
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.open(
@@ -431,7 +444,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             rest_api.create_database(pvfs_identifier.database, {})
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = pvfs_identifier.get_identifier()
+            table_path: str
             if pvfs_identifier.sub_path is None:
                 if create_parents:
                     try:
@@ -440,23 +453,22 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                         pass
                 self._create_object_table(pvfs_identifier)
             else:
-                table: GetTableResponse
                 if create_parents:
                     try:
                         rest_api.create_database(pvfs_identifier.database, {})
                     except AlreadyExistsException:
                         pass
                     try:
-                        table = rest_api.get_table(table_identifier)
+                        table_path = self.__get_table_store(rest_api, pvfs_identifier).path
                     except NoSuchResourceException:
                         try:
                             self._create_object_table(pvfs_identifier)
                         except AlreadyExistsException:
                             pass
                         finally:
-                            table = rest_api.get_table(table_identifier)
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                            table_path = self.__get_table_store(rest_api, pvfs_identifier).path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.mkdir(
@@ -480,7 +492,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     pass
                 raise e
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 try:
                     self._create_object_table(pvfs_identifier)
@@ -496,9 +507,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                         pass
                     else:
                         raise e
-                table = rest_api.get_table(table_identifier)
-                storage_type = self._get_storage_type(table.path)
-                storage_location = table.path
+                table_path = self.__get_table_store(rest_api, pvfs_identifier).path
+                storage_type = self._get_storage_type(table_path)
+                storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
                 return fs.makedirs(
@@ -516,11 +527,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self.__converse_ts_to_datatime(rest_api.get_database(pvfs_identifier.database).created_at)
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
-                return self.__converse_ts_to_datatime(rest_api.get_table(table_identifier).created_at)
+                return self.__get_table_store(rest_api, pvfs_identifier).created
             else:
-                table = rest_api.get_table(table_identifier)
+                table = self.__get_table_store(rest_api, pvfs_identifier)
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
@@ -541,7 +551,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
-                return self.__converse_ts_to_datatime(rest_api.get_table(table_identifier).updated_at)
+                return self.__get_table_store(rest_api, pvfs_identifier).modified
             else:
                 table = rest_api.get_table(table_identifier)
                 storage_type = self._get_storage_type(table.path)
@@ -563,14 +573,13 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 f"cat file is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
-            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 raise Exception(
                     f"cat file is not supported for path: {path}"
                 )
             else:
                 rest_api = self.__rest_api(pvfs_identifier.catalog)
-                table = rest_api.get_table(table_identifier)
+                table = self.__get_table_store(rest_api, pvfs_identifier)
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
@@ -594,13 +603,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier.catalog)
-            table_identifier = pvfs_identifier.get_identifier()
             if pvfs_identifier.sub_path is None:
                 raise Exception(
                     f"get file is not supported for path: {rpath}"
                 )
             else:
-                table = rest_api.get_table(table_identifier)
+                table = self.__get_table_store(rest_api, pvfs_identifier)
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
@@ -742,6 +750,33 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 table=components[2], sub_path=sub_path
             )
         return None
+
+    def __get_table_store(self, rest_api: RESTApi, pvfs_identifier: PVFSTableIdentifier) -> Optional['TableStore']:
+        read_lock = self._cache_lock.gen_rlock()
+        try:
+            read_lock.acquire()
+            cache_value: Tuple[str, TableStore] = self._table_cache.get(
+                pvfs_identifier.name()
+            )
+            if cache_value is not None:
+                return cache_value
+        finally:
+            read_lock.release()
+        write_lock = self._cache_lock.gen_wlock()
+        try:
+            write_lock.acquire()
+            self.__converse_ts_to_datatime(rest_api.get_database(pvfs_identifier.database).updated_at)
+            table = rest_api.get_table(Identifier.create(pvfs_identifier.database, pvfs_identifier.table))
+            if table is not None:
+                created = self.__converse_ts_to_datatime(table.created_at)
+                modified = self.__converse_ts_to_datatime(table.updated_at)
+                table_store = TableStore(path=table.path, created=created, modified=modified)
+                self._table_cache[pvfs_identifier.name()] = table_store
+                return table_store
+            else:
+                return None
+        finally:
+            write_lock.release()
 
     def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
         read_lock = self._cache_lock.gen_rlock()
