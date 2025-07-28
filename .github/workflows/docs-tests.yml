@@ -20,6 +20,9 @@ on:
     paths:
       - 'docs/**'
 
+env:
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
