@@ -27,6 +27,7 @@ import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.Path;
@@ -90,6 +91,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
+    private final RowType[] shreddingSchemas;
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
@@ -100,7 +102,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             MessageType fileSchema,
             List<ParquetField> fields,
             WritableColumnVector[] vectors,
-            int batchSize)
+            int batchSize,
+            RowType[] shreddingSchemas)
             throws IOException {
         this.filePath = filePath;
         this.reader = reader;
@@ -109,6 +112,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
+        this.shreddingSchemas = shreddingSchemas;
 
         // fetch writer version from file metadata
         try {
@@ -133,6 +137,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                                         .map(ParquetField::getType)
                                         .collect(Collectors.toList()),
                                 vectors));
+        columnarBatch.setVariantSchema(VariantUtils.toVariantSchemas(shreddingSchemas));
         columnVectors = new ParquetColumnVector[fields.size()];
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =

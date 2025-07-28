@@ -26,6 +26,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.LongIterator;
 
@@ -63,6 +64,11 @@ public class ColumnarBatch {
     /** Sets the number of rows in this batch. */
     public void setNumRows(int numRows) {
         this.vectorizedColumnBatch.setNumRows(numRows);
+    }
+
+    /** Sets the variant schemas of this batch. */
+    public void setVariantSchema(VariantSchema[] variantSchemas) {
+        this.vectorizedColumnBatch.setVariantSchemas(variantSchemas);
     }
 
     /** Returns the column at `ordinal`. */
