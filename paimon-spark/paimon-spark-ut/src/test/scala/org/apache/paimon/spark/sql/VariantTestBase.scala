@@ -130,4 +130,45 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
         ))
     )
   }
+
+  test("Paimon Variant: read and write shredded variant") {
+    sql(
+      """
+        |CREATE TABLE T (id INT, v VARIANT)
+        |TBLPROPERTIES
+        |('parquet.variant.shreddingSchema' =
+        |'{"type":"ROW","fields":[{"name":"v","type":{"type":"ROW","fields":[{"name":"age","type":"INT"},{"name":"city","type":"STRING"}]}}]}'
+        |)
+        |""".stripMargin)
+
+    val values =
+      """
+        | SELECT
+        | id,
+        | CASE
+        | WHEN id = 0 THEN parse_json('{"age":27,"city":"Beijing"}')
+        | WHEN id = 1 THEN parse_json('{"age":27}')
+        | WHEN id = 2 THEN parse_json('{"city":"Beijing", "other":"xxx"}')
+        | WHEN id = 3 THEN parse_json('{"other":"yyy"}')
+        | WHEN id = 4 THEN parse_json('{"age":"27"}')
+        | WHEN id = 5 THEN parse_json('"zzz"')
+        | WHEN id = 6 THEN parse_json('{}')
+        | END v FROM range(7)
+        |""".stripMargin
+
+    sql(s"INSERT INTO T $values")
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), sql(values))
+
+    checkAnswer(
+      sql("SELECT variant_get(v, '$.age', 'int') FROM T ORDER BY id"),
+      Seq(Row(27), Row(27), Row(null), Row(null), Row(27), Row(null), Row(null))
+    )
+
+    checkAnswer(
+      sql(
+        "SELECT variant_get(v, '$.city', 'string') FROM T where variant_get(v, '$.age', 'int') = 27 ORDER BY id"),
+      Seq(Row("Beijing"), Row(null), Row(null))
+    )
+  }
 }

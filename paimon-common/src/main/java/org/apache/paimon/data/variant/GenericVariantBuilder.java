@@ -274,7 +274,7 @@ public class GenericVariantBuilder {
     public void appendFloat(float f) {
         checkCapacity(1 + 4);
         writeBuffer[writePos++] = primitiveHeader(FLOAT);
-        writeLong(writeBuffer, writePos, Float.floatToIntBits(f), 8);
+        writeLong(writeBuffer, writePos, Float.floatToIntBits(f), 4);
         writePos += 4;
     }
 

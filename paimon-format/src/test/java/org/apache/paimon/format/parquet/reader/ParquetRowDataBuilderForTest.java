@@ -65,7 +65,8 @@ public class ParquetRowDataBuilderForTest
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
+            this.writer =
+                    new ParquetRowDataWriter(recordConsumer, rowType, schema, new Configuration());
         }
 
         @Override

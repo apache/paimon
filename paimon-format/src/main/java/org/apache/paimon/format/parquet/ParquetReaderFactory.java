@@ -108,10 +108,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         reader.setRequestedSchema(requestedSchema);
+        RowType[] shreddingSchemas =
+                VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
@@ -234,12 +236,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         List<Type> types = requestedSchema.getFields();
         for (int i = 0; i < readFields.length; i++) {
             columns[i] =
-                    createWritableColumnVector(
-                            batchSize,
-                            readFields[i].type(),
-                            types.get(i),
-                            requestedSchema.getColumns(),
-                            0);
+                    createWritableColumnVector(batchSize, readFields[i].type(), types.get(i), 0);
         }
         return columns;
     }
