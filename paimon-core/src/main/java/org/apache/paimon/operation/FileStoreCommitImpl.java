@@ -1035,8 +1035,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (rowTrackingEnabled) {
-                deltaFiles = assignSnapshotId(newSnapshotId, deltaFiles);
-                nextRowId = assignRowMeta(newRowIdStart, deltaFiles);
+                // assigned snapshot id to delta files
+                List<ManifestEntry> snapshotAssigned = new ArrayList<>();
+                assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
+                // assign row id for new files
+                List<ManifestEntry> rowIdAssigned = new ArrayList<>();
+                nextRowId = assignRowLineageMeta(newRowIdStart, snapshotAssigned, rowIdAssigned);
+                deltaFiles = rowIdAssigned;
             }
 
             // the added records subtract the deleted records from
@@ -1155,7 +1160,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return new SuccessResult();
     }
 
-    private long assignRowMeta(long startRowId, List<ManifestEntry> deltaFiles) {
+    private long assignRowLineageMeta(
+            long startRowId, List<ManifestEntry> deltaFiles, List<ManifestEntry> rowIdAssigned) {
         if (deltaFiles.isEmpty()) {
             return startRowId;
         }
@@ -1167,19 +1173,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "This is a bug, file source field for row-tracking table must present.");
             if (entry.file().fileSource().get().equals(FileSource.APPEND)) {
                 long rowCount = entry.file().rowCount();
-                entry.file().setFirstRowId(start);
+                rowIdAssigned.add(entry.assignFirstRowId(start));
                 start += rowCount;
             }
         }
         return start;
     }
 
-    private List<ManifestEntry> assignSnapshotId(long snapshotId, List<ManifestEntry> deltaFiles) {
-        List<ManifestEntry> entries = new ArrayList<>();
+    private void assignSnapshotId(
+            long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
         for (ManifestEntry entry : deltaFiles) {
-            entries.add(entry.copyWithMaxSequenceNumber(snapshotId));
+            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
         }
-        return entries;
     }
 
     public void compactManifest() {

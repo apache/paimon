@@ -62,7 +62,7 @@ public class FormatReaderMapping {
     private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
-    private final Map<String, Integer> meta;
+    private final Map<String, Integer> systemFields;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -72,14 +72,14 @@ public class FormatReaderMapping {
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
             List<Predicate> dataFilters,
-            Map<String, Integer> meta) {
+            Map<String, Integer> systemFields) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
-        this.meta = meta;
+        this.systemFields = systemFields;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -117,8 +117,8 @@ public class FormatReaderMapping {
         return partitionPair;
     }
 
-    public Map<String, Integer> getMeta() {
-        return meta;
+    public Map<String, Integer> getSystemFields() {
+        return systemFields;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -183,7 +183,7 @@ public class FormatReaderMapping {
                     Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
             int[] metaMappings = createIndexMapping(allDataFields, metaDataFields);
 
-            Map<String, Integer> meta = findMeta(readTableFields);
+            Map<String, Integer> meta = findSystemFields(readTableFields);
 
             List<DataField> readDataFields = readDataFields(allDataFields);
             // build index cast mapping
@@ -220,7 +220,7 @@ public class FormatReaderMapping {
                     meta);
         }
 
-        private Map<String, Integer> findMeta(List<DataField> readTableFields) {
+        private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {
             Map<String, Integer> meta = new HashMap<>();
             for (int i = 0; i < readTableFields.size(); i++) {
                 DataField field = readTableFields.get(i);

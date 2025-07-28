@@ -126,7 +126,7 @@ public class DataFileMeta {
     /** external path of file, if it is null, it is in the default warehouse path. */
     private final @Nullable String externalPath;
 
-    private @Nullable Long firstRowId;
+    private final @Nullable Long firstRowId;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -286,10 +286,6 @@ public class DataFileMeta {
         this.fileSource = fileSource;
         this.valueStatsCols = valueStatsCols;
         this.externalPath = externalPath;
-        this.firstRowId = firstRowId;
-    }
-
-    public void setFirstRowId(@Nullable Long firstRowId) {
         this.firstRowId = firstRowId;
     }
 
@@ -479,7 +475,30 @@ public class DataFileMeta {
                 firstRowId);
     }
 
-    public DataFileMeta copyWithMaxSequenceNumber(long maxSequenceNumber) {
+    public DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId);
+    }
+
+    public DataFileMeta assignFirstRowId(long firstRowId) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -604,7 +623,8 @@ public class DataFileMeta {
                 && Objects.equals(deleteRowCount, that.deleteRowCount)
                 && Objects.equals(fileSource, that.fileSource)
                 && Objects.equals(valueStatsCols, that.valueStatsCols)
-                && Objects.equals(externalPath, that.externalPath);
+                && Objects.equals(externalPath, that.externalPath)
+                && Objects.equals(firstRowId, that.firstRowId);
     }
 
     @Override

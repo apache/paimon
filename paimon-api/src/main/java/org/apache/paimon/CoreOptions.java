@@ -1911,6 +1911,7 @@ public class CoreOptions implements Serializable {
                                     + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
                                     + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
