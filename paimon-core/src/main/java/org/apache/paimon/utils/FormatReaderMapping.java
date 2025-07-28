@@ -216,14 +216,14 @@ public class FormatReaderMapping {
         }
 
         private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {
-            Map<String, Integer> meta = new HashMap<>();
+            Map<String, Integer> systemFields = new HashMap<>();
             for (int i = 0; i < readTableFields.size(); i++) {
                 DataField field = readTableFields.get(i);
                 if (SpecialFields.isSystemField(field.name())) {
-                    meta.put(field.name(), i);
+                    systemFields.put(field.name(), i);
                 }
             }
-            return meta;
+            return systemFields;
         }
 
         static Pair<int[], RowType> trimKeyFields(
