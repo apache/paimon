@@ -922,7 +922,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
-        long newRowIdStart =
+        long firstRowIdStart =
                 latestSnapshot == null
                         ? 0L
                         : latestSnapshot.nextRowId() == null ? 0L : latestSnapshot.nextRowId();
@@ -998,7 +998,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
-        long nextRowId = newRowIdStart;
+        long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1040,7 +1040,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
                 // assign row id for new files
                 List<ManifestEntry> rowIdAssigned = new ArrayList<>();
-                nextRowId = assignRowLineageMeta(newRowIdStart, snapshotAssigned, rowIdAssigned);
+                nextRowIdStart =
+                        assignRowLineageMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
                 deltaFiles = rowIdAssigned;
             }
 
@@ -1104,7 +1105,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             statsFileName,
                             // if empty properties, just set to null
                             properties.isEmpty() ? null : properties,
-                            nextRowId);
+                            nextRowIdStart);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpReuseTmpManifests(
@@ -1161,12 +1162,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private long assignRowLineageMeta(
-            long startRowId, List<ManifestEntry> deltaFiles, List<ManifestEntry> rowIdAssigned) {
+            long firstRowIdStart,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> rowIdAssigned) {
         if (deltaFiles.isEmpty()) {
-            return startRowId;
+            return firstRowIdStart;
         }
         // assign row id for new files
-        long start = startRowId;
+        long start = firstRowIdStart;
         for (ManifestEntry entry : deltaFiles) {
             checkArgument(
                     entry.file().fileSource().isPresent(),
