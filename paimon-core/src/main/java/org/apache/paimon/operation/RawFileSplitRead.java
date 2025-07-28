@@ -156,7 +156,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         List<DataField> readTableFields = readRowType.getFields();
         Builder formatReaderMappingBuilder =
-                new Builder(formatDiscover, readTableFields, TableSchema::fields, filters);
+                new Builder(
+                        formatDiscover,
+                        readTableFields,
+                        TableSchema::fields,
+                        filters,
+                        rowTrackingEnabled);
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);

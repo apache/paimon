@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -138,16 +137,19 @@ public class FormatReaderMapping {
         private final List<DataField> readTableFields;
         private final Function<TableSchema, List<DataField>> fieldsExtractor;
         @Nullable private final List<Predicate> filters;
+        private final boolean rowTrackingEnabled;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
                 List<DataField> readTableFields,
                 Function<TableSchema, List<DataField>> fieldsExtractor,
-                @Nullable List<Predicate> filters) {
+                @Nullable List<Predicate> filters,
+                boolean rowTrackingEnabled) {
             this.formatDiscover = formatDiscover;
             this.readTableFields = readTableFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
+            this.rowTrackingEnabled = rowTrackingEnabled;
         }
 
         /**
@@ -173,7 +175,7 @@ public class FormatReaderMapping {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
-            if (CoreOptions.fromMap(dataSchema.options()).rowTrackingEnabled()) {
+            if (rowTrackingEnabled) {
                 allDataFields.add(SpecialFields.ROW_ID);
                 allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
             }
