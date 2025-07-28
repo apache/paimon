@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rowlineage;
+package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -28,13 +28,13 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
 /** Row with row lineage inject in. */
-public class RowWithLineage implements InternalRow {
+public class FallbackMappingRow implements InternalRow {
 
     private InternalRow main;
-    private InternalRow rowLineage;
+    private InternalRow fallbackRow;
     private final int[] mappings;
 
-    public RowWithLineage(int[] mappings) {
+    public FallbackMappingRow(int[] mappings) {
         this.mappings = mappings;
     }
 
@@ -58,13 +58,13 @@ public class RowWithLineage implements InternalRow {
         if (mappings[pos] == -1) {
             return main.isNullAt(pos);
         }
-        return main.isNullAt(pos) || rowLineage.isNullAt(mappings[pos]);
+        return main.isNullAt(pos) || fallbackRow.isNullAt(mappings[pos]);
     }
 
     @Override
     public boolean getBoolean(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getBoolean(mappings[pos]);
+            return fallbackRow.getBoolean(mappings[pos]);
         }
         return main.getBoolean(pos);
     }
@@ -72,7 +72,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public byte getByte(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getByte(mappings[pos]);
+            return fallbackRow.getByte(mappings[pos]);
         }
         return main.getByte(pos);
     }
@@ -80,7 +80,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public short getShort(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getShort(mappings[pos]);
+            return fallbackRow.getShort(mappings[pos]);
         }
         return main.getShort(pos);
     }
@@ -88,7 +88,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public int getInt(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getInt(mappings[pos]);
+            return fallbackRow.getInt(mappings[pos]);
         }
         return main.getInt(pos);
     }
@@ -96,7 +96,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public long getLong(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getLong(mappings[pos]);
+            return fallbackRow.getLong(mappings[pos]);
         }
         return main.getLong(pos);
     }
@@ -104,7 +104,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public float getFloat(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getFloat(mappings[pos]);
+            return fallbackRow.getFloat(mappings[pos]);
         }
         return main.getFloat(pos);
     }
@@ -112,7 +112,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public double getDouble(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getDouble(mappings[pos]);
+            return fallbackRow.getDouble(mappings[pos]);
         }
         return main.getDouble(pos);
     }
@@ -120,7 +120,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public BinaryString getString(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getString(mappings[pos]);
+            return fallbackRow.getString(mappings[pos]);
         }
         return main.getString(pos);
     }
@@ -128,7 +128,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getDecimal(mappings[pos], precision, scale);
+            return fallbackRow.getDecimal(mappings[pos], precision, scale);
         }
         return main.getDecimal(pos, precision, scale);
     }
@@ -136,7 +136,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getTimestamp(mappings[pos], precision);
+            return fallbackRow.getTimestamp(mappings[pos], precision);
         }
         return main.getTimestamp(pos, precision);
     }
@@ -144,7 +144,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public byte[] getBinary(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getBinary(mappings[pos]);
+            return fallbackRow.getBinary(mappings[pos]);
         }
         return main.getBinary(pos);
     }
@@ -152,7 +152,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public Variant getVariant(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getVariant(mappings[pos]);
+            return fallbackRow.getVariant(mappings[pos]);
         }
         return main.getVariant(pos);
     }
@@ -160,7 +160,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public InternalArray getArray(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getArray(mappings[pos]);
+            return fallbackRow.getArray(mappings[pos]);
         }
         return main.getArray(pos);
     }
@@ -168,7 +168,7 @@ public class RowWithLineage implements InternalRow {
     @Override
     public InternalMap getMap(int pos) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getMap(mappings[pos]);
+            return fallbackRow.getMap(mappings[pos]);
         }
         return main.getMap(pos);
     }
@@ -176,14 +176,14 @@ public class RowWithLineage implements InternalRow {
     @Override
     public InternalRow getRow(int pos, int numFields) {
         if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return rowLineage.getRow(mappings[pos], numFields);
+            return fallbackRow.getRow(mappings[pos], numFields);
         }
         return main.getRow(pos, numFields);
     }
 
-    public RowWithLineage replace(InternalRow main, InternalRow rowLineage) {
+    public FallbackMappingRow replace(InternalRow main, InternalRow rowLineage) {
         this.main = main;
-        this.rowLineage = rowLineage;
+        this.fallbackRow = rowLineage;
         return this;
     }
 }

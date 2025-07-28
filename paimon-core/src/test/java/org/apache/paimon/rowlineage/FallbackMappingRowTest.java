@@ -18,14 +18,15 @@
 
 package org.apache.paimon.rowlineage;
 
+import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.GenericRow;
 
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.types.DataTypesTest.assertThat;
 
-/** Test for {@link RowWithLineage}. */
-public class RowWithLineageTest {
+/** Test for {@link FallbackMappingRow}. */
+public class FallbackMappingRowTest {
 
     @Test
     public void testBasic() {
@@ -48,15 +49,15 @@ public class RowWithLineageTest {
         mainRow.setField(1, 1L);
         mainRow.setField(2, 2L);
         mainRow.setField(3, 3L);
-        RowWithLineage rowWithLineage = new RowWithLineage(project);
-        rowWithLineage.replace(mainRow, genericRow);
+        FallbackMappingRow fallbackMappingRow = new FallbackMappingRow(project);
+        fallbackMappingRow.replace(mainRow, genericRow);
 
-        assertThat(rowWithLineage.getFieldCount()).isEqualTo(7);
-        assertThat(rowWithLineage.getLong(6)).isEqualTo(111L);
-        assertThat(rowWithLineage.getLong(5)).isEqualTo(222L);
-        assertThat(rowWithLineage.getLong(0)).isEqualTo(0L);
-        assertThat(rowWithLineage.getLong(1)).isEqualTo(1L);
-        assertThat(rowWithLineage.getLong(2)).isEqualTo(2L);
-        assertThat(rowWithLineage.getLong(3)).isEqualTo(3L);
+        assertThat(fallbackMappingRow.getFieldCount()).isEqualTo(7);
+        assertThat(fallbackMappingRow.getLong(6)).isEqualTo(111L);
+        assertThat(fallbackMappingRow.getLong(5)).isEqualTo(222L);
+        assertThat(fallbackMappingRow.getLong(0)).isEqualTo(0L);
+        assertThat(fallbackMappingRow.getLong(1)).isEqualTo(1L);
+        assertThat(fallbackMappingRow.getLong(2)).isEqualTo(2L);
+        assertThat(fallbackMappingRow.getLong(3)).isEqualTo(3L);
     }
 }

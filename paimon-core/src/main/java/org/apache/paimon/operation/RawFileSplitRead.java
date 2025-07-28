@@ -238,6 +238,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
+                        schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),

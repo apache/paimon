@@ -127,6 +127,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         long fileSize = file.fileSize();
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
+                        schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)

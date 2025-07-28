@@ -62,7 +62,7 @@ public class FormatReaderMapping {
     private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
-    private final int[] metaMappings;
+    private final Map<String, Integer> meta;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -72,14 +72,14 @@ public class FormatReaderMapping {
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
             List<Predicate> dataFilters,
-            int[] metaMappings) {
+            Map<String, Integer> meta) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
-        this.metaMappings = metaMappings;
+        this.meta = meta;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -117,8 +117,8 @@ public class FormatReaderMapping {
         return partitionPair;
     }
 
-    public int[] getMeta() {
-        return metaMappings;
+    public Map<String, Integer> getMeta() {
+        return meta;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -181,7 +181,9 @@ public class FormatReaderMapping {
             }
             List<DataField> metaDataFields =
                     Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
-            int[] metaMappings = createIndexMapping(readTableFields, metaDataFields);
+            int[] metaMappings = createIndexMapping(allDataFields, metaDataFields);
+
+            Map<String, Integer> meta = findMeta(readTableFields);
 
             List<DataField> readDataFields = readDataFields(allDataFields);
             // build index cast mapping
@@ -215,7 +217,18 @@ public class FormatReaderMapping {
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
                     readFilters,
-                    metaMappings);
+                    meta);
+        }
+
+        private Map<String, Integer> findMeta(List<DataField> readTableFields) {
+            Map<String, Integer> meta = new HashMap<>();
+            for (int i = 0; i < readTableFields.size(); i++) {
+                DataField field = readTableFields.get(i);
+                if (SpecialFields.isSystemField(field.name())) {
+                    meta.put(field.name(), i);
+                }
+            }
+            return meta;
         }
 
         static Pair<int[], RowType> trimKeyFields(
@@ -328,7 +341,7 @@ public class FormatReaderMapping {
                     tableSchema.id() == dataSchema.id()
                             ? filters
                             : SchemaEvolutionUtil.devolveFilters(
-                                    tableSchema.fields(), dataSchema.fields(), filters, false);
+                                    tableSchema.fields(), dataSchema.fields(), filters, true);
 
             // Skip pushing down partition filters to reader.
             return excludePredicateWithFields(
