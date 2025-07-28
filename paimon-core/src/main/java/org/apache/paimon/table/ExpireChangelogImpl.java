@@ -55,6 +55,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     private final ChangelogDeletion changelogDeletion;
     private final TagManager tagManager;
     private final SchemaManager schemaManager;
+    private final boolean detectExpirationSettingEnabled;
 
     private ExpireConfig expireConfig;
     private long latestSchemaId;
@@ -64,7 +65,8 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             ChangelogManager changelogManager,
             TagManager tagManager,
             ChangelogDeletion changelogDeletion,
-            SchemaManager schemaManager) {
+            SchemaManager schemaManager,
+            boolean detectExpirationSettingEnabled) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.tagManager = tagManager;
@@ -76,7 +78,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         this.changelogDeletion = changelogDeletion;
         this.expireConfig = ExpireConfig.builder().build();
         this.schemaManager = schemaManager;
-        this.latestSchemaId = this.schemaManager.latest().get().id();
+        this.detectExpirationSettingEnabled = detectExpirationSettingEnabled;
+        if (this.detectExpirationSettingEnabled) {
+            this.latestSchemaId = this.schemaManager.latest().get().id();
+        }
     }
 
     @Override
@@ -87,10 +92,12 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     @Override
     public int expire() {
-        TableSchema latestTableSchema = this.schemaManager.latest().get();
-        if (this.latestSchemaId != latestTableSchema.id()) {
-            this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
-            this.latestSchemaId = latestTableSchema.id();
+        if (this.detectExpirationSettingEnabled) {
+            TableSchema latestTableSchema = this.schemaManager.latest().get();
+            if (this.latestSchemaId != latestTableSchema.id()) {
+                this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
+                this.latestSchemaId = latestTableSchema.id();
+            }
         }
 
         int retainMax = expireConfig.getChangelogRetainMax();

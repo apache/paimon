@@ -687,7 +687,8 @@ public class FileDeletionTest {
                         changelogManager,
                         store.newSnapshotDeletion(),
                         tagManager,
-                        new SchemaManager(fileIO, store.options().path()));
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -763,7 +764,8 @@ public class FileDeletionTest {
                         changelogManager,
                         snapshotDeletion,
                         tagManager,
-                        new SchemaManager(fileIO, store.options().path()));
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         snapshotDeletion.readMergedDataFilesThrowException = true;
         expireSnapshots
                 .config(
@@ -831,7 +833,8 @@ public class FileDeletionTest {
                         changelogManager,
                         snapshotDeletion,
                         tagManager,
-                        new SchemaManager(fileIO, store.options().path()));
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         snapshotDeletion.manifestSkippingSetThrowException = true;
         expireSnapshots
                 .config(

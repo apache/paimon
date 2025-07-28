@@ -662,6 +662,8 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireSnapshotsWithChangedConfig() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.DETECT_EXPIRATION_SETTING_ENABLED, true);
+
         ExpireConfig.Builder builder = ExpireConfig.builder();
         builder.snapshotRetainMin(10)
                 .snapshotRetainMax(Integer.MAX_VALUE)

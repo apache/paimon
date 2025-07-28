@@ -59,6 +59,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final SnapshotDeletion snapshotDeletion;
     private final TagManager tagManager;
     private final SchemaManager schemaManager;
+    private final boolean detectExpirationSettingEnabled;
 
     private ExpireConfig expireConfig;
     private long latestSchemaId;
@@ -68,7 +69,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             ChangelogManager changelogManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
-            SchemaManager schemaManager) {
+            SchemaManager schemaManager,
+            boolean detectExpirationSettingEnabled) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.consumerManager =
@@ -80,7 +82,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
         this.schemaManager = schemaManager;
-        this.latestSchemaId = this.schemaManager.latest().get().id();
+        this.detectExpirationSettingEnabled = detectExpirationSettingEnabled;
+        if (this.detectExpirationSettingEnabled) {
+            this.latestSchemaId = this.schemaManager.latest().get().id();
+        }
     }
 
     @Override
@@ -91,10 +96,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     @Override
     public int expire() {
-        TableSchema latestTableSchema = this.schemaManager.latest().get();
-        if (this.latestSchemaId != latestTableSchema.id()) {
-            this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
-            this.latestSchemaId = latestTableSchema.id();
+        if (this.detectExpirationSettingEnabled) {
+            TableSchema latestTableSchema = this.schemaManager.latest().get();
+            if (this.latestSchemaId != latestTableSchema.id()) {
+                this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
+                this.latestSchemaId = latestTableSchema.id();
+            }
         }
 
         snapshotDeletion.setChangelogDecoupled(expireConfig.isChangelogDecoupled());
