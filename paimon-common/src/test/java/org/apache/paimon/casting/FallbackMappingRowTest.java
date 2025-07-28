@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rowlineage;
+package org.apache.paimon.casting;
 
-import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.GenericRow;
 
 import org.junit.jupiter.api.Test;
@@ -59,5 +58,6 @@ public class FallbackMappingRowTest {
         assertThat(fallbackMappingRow.getLong(1)).isEqualTo(1L);
         assertThat(fallbackMappingRow.getLong(2)).isEqualTo(2L);
         assertThat(fallbackMappingRow.getLong(3)).isEqualTo(3L);
+        assertThat(fallbackMappingRow.isNullAt(4)).isEqualTo(true);
     }
 }
