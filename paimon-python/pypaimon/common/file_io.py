@@ -16,8 +16,7 @@
 # limitations under the License.
 ################################################################################
 from abc import ABC, abstractmethod
-
-from pypaimon.api.path import Path
+from pathlib import Path
 
 
 class FileIO(ABC):

@@ -15,11 +15,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from pathlib import Path
 from typing import Callable, Any
 
 from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
-from pypaimon.api.path import Path
+
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.table.catalog_environment import CatalogEnvironment

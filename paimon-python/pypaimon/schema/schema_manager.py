@@ -15,9 +15,8 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from pathlib import Path
 
-
-from pypaimon.api.path import Path
 from pypaimon.common.file_io import FileIO
 
 
@@ -27,4 +26,4 @@ class SchemaManager:
         self.schema_prefix = "schema-"
         self.file_io = file_io
         self.table_path = table_path
-        self.schema_path = table_path.uri.geturl() + "/schema"
+        self.schema_path = table_path / "schema"

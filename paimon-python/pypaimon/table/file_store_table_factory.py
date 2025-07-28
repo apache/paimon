@@ -15,7 +15,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from pypaimon.api.path import Path
+from pathlib import Path
+
 from pypaimon.api.table_schema import TableSchema
 from pypaimon.common.file_io import FileIO
 from pypaimon.table.catalog_environment import CatalogEnvironment

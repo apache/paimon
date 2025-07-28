@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from pathlib import Path
 from typing import List, Dict, Optional
 
 from pypaimon.api import RESTApi, RESTCatalogOptions
@@ -22,7 +23,7 @@ from pypaimon.api.api_response import PagedList, GetTableResponse
 from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
 from pypaimon.api.options import Options
-from pypaimon.api.path import Path
+
 from pypaimon.api.schema import Schema
 from pypaimon.api.table_schema import TableSchema
 
