@@ -129,8 +129,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 iterator =
                         iterator.transform(
                                 row -> {
-                                    lineageRow.setField(
-                                            0, iteratorInner.returnedPosition() + firstRowId);
+                                    if (firstRowId != null) {
+                                        lineageRow.setField(
+                                                0, iteratorInner.returnedPosition() + firstRowId);
+                                    }
                                     lineageRow.setField(1, maxSequenceNumber);
                                     return fallbackMappingRow.replace(row, lineageRow);
                                 });
