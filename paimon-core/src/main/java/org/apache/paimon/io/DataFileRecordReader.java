@@ -109,7 +109,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             }
 
             if (rowLineageEnabled && !systemFields.isEmpty()) {
-                GenericRow lineageRow = new GenericRow(systemFields.size());
+                GenericRow lineageRow = new GenericRow(2);
 
                 int[] fallbackToLineageMappings = new int[tableRowType.getFieldCount()];
                 Arrays.fill(fallbackToLineageMappings, -1);
