@@ -37,7 +37,6 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -45,7 +44,6 @@ import java.util.Map;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
-import static org.apache.paimon.schema.SchemaEvolutionUtil.createIndexMapping;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 
 /** Class with index mapping and format reader. */
@@ -179,14 +177,9 @@ public class FormatReaderMapping {
                 allDataFields.add(SpecialFields.ROW_ID);
                 allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
             }
-            List<DataField> metaDataFields =
-                    Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
-            int[] metaMappings = createIndexMapping(allDataFields, metaDataFields);
-
-            Map<String, Integer> meta = findSystemFields(readTableFields);
+            Map<String, Integer> systemFields = findSystemFields(readTableFields);
 
             List<DataField> readDataFields = readDataFields(allDataFields);
-            // build index cast mapping
             IndexCastMapping indexCastMapping =
                     SchemaEvolutionUtil.createIndexCastMapping(readTableFields, readDataFields);
 
@@ -217,7 +210,7 @@ public class FormatReaderMapping {
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
                     readFilters,
-                    meta);
+                    systemFields);
         }
 
         private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {
