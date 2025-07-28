@@ -15,16 +15,26 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from pathlib import Path
 from typing import List, Dict, Optional
 
 from pypaimon.api import RESTApi, RESTCatalogOptions
-from pypaimon.api.api_response import PagedList
+from pypaimon.api.api_response import PagedList, GetTableResponse
+from pypaimon.api.core_options import CoreOptions
+from pypaimon.api.identifier import Identifier
 from pypaimon.api.options import Options
+
+from pypaimon.api.schema import Schema
+from pypaimon.api.table_schema import TableSchema
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.catalog_utils import CatalogUtils
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
+from pypaimon.catalog.table_metadata import TableMetadata
+from pypaimon.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.table.file_store_table import FileStoreTable
 
 
 class RESTCatalog(Catalog):
@@ -48,6 +58,7 @@ class RESTCatalog(Catalog):
         response = self.api.get_database(name)
         options = response.options
         options[Catalog.DB_LOCATION_PROP] = response.location
+        response.put_audit_options_to(options)
         if response is not None:
             return Database(name, options)
 
@@ -74,3 +85,37 @@ class RESTCatalog(Catalog):
             page_token,
             table_name_pattern
         )
+
+    def get_table(self, identifier: Identifier) -> FileStoreTable:
+        return CatalogUtils.load_table(
+            identifier,
+            lambda path: self.file_io_for_data(path, identifier),
+            self.file_io_from_options,
+            self.load_table_metadata,
+        )
+
+    def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
+        response = self.api.get_table(identifier)
+        return self.to_table_metadata(identifier.get_database_name(), response)
+
+    def to_table_metadata(self, db: str, response: GetTableResponse) -> TableMetadata:
+        schema = TableSchema.create(response.get_schema_id(), Schema.from_dict(response.get_schema()))
+        options: Dict[str, str] = dict(schema.options)
+        options[CoreOptions.PATH] = response.get_path()
+        response.put_audit_options_to(options)
+
+        identifier = Identifier.create(db, response.get_name())
+        if identifier.get_branch_name() is not None:
+            options[CoreOptions.BRANCH] = identifier.get_branch_name()
+
+        return TableMetadata(
+            schema=schema.copy(options),
+            is_external=response.get_is_external(),
+            uuid=response.get_id()
+        )
+
+    def file_io_from_options(self, path: Path):
+        return None
+
+    def file_io_for_data(self, path: Path, identifier: Identifier):
+        return RESTTokenFileIO(identifier, path, None, None) if self.data_token_enabled else None
