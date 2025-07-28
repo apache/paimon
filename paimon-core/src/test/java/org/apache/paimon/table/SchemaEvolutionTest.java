@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -58,9 +59,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
+import static org.apache.paimon.CoreOptions.DISTINCT;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
+import static org.apache.paimon.CoreOptions.NESTED_KEY;
+import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -458,6 +467,129 @@ public class SchemaEvolutionTest {
         // file 4 won't be filtered
         List<String> rows = readRecords(table, p);
         assertThat(rows).containsExactlyInAnyOrder("2, 2", "3, 3");
+    }
+
+    @Test
+    public void testRenameFieldReferencedByOptions() throws Exception {
+        ImmutableMap.Builder<String, String> mapBuilder = ImmutableMap.builder();
+
+        Schema schema =
+                new Schema(
+                        ImmutableList.of(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(1, "f1", DataTypes.INT()),
+                                new DataField(2, "f2", DataTypes.INT()),
+                                new DataField(3, "f3", DataTypes.INT()),
+                                new DataField(
+                                        4,
+                                        "f4",
+                                        DataTypes.ARRAY(
+                                                DataTypes.ROW(
+                                                        new DataField(5, "f5", DataTypes.INT())))),
+                                new DataField(6, "f6", DataTypes.ARRAY(DataTypes.INT()))),
+                        ImmutableList.of("f0"),
+                        ImmutableList.of(),
+                        mapBuilder
+                                .put(SEQUENCE_FIELD.key(), "f1,f2")
+                                .put(FIELDS_PREFIX + "." + "f3" + "." + IGNORE_RETRACT, "true")
+                                .put(
+                                        FIELDS_PREFIX + "." + "f4" + "." + AGG_FUNCTION,
+                                        "nested_update")
+                                .put(FIELDS_PREFIX + "." + "f4" + "." + NESTED_KEY, "f5")
+                                .put(FIELDS_PREFIX + "." + "f6" + "." + AGG_FUNCTION, "collect")
+                                .put(FIELDS_PREFIX + "." + "f6" + "." + DISTINCT, "true")
+                                .build(),
+                        "");
+
+        schemaManager.createTable(schema);
+
+        TableSchema newSchema =
+                schemaManager.commitChanges(
+                        SchemaChange.renameColumn("f1", "f1_"),
+                        SchemaChange.renameColumn("f2", "f2_"),
+                        SchemaChange.renameColumn("f3", "f3_"),
+                        SchemaChange.renameColumn("f4", "f4_"),
+                        // doesn't support rename nested columns currently
+                        // SchemaChange.renameColumn("f5", "f5_"),
+                        SchemaChange.renameColumn("f6", "f6_"));
+
+        assertThat(newSchema.fieldNames()).containsExactly("f0", "f1_", "f2_", "f3_", "f4_", "f6_");
+
+        assertThat(newSchema.options())
+                .doesNotContainKeys(
+                        FIELDS_PREFIX + "." + "f3" + "." + IGNORE_RETRACT,
+                        FIELDS_PREFIX + "." + "f4" + "." + AGG_FUNCTION,
+                        FIELDS_PREFIX + "." + "f4" + "." + NESTED_KEY,
+                        FIELDS_PREFIX + "." + "f6" + "." + AGG_FUNCTION,
+                        FIELDS_PREFIX + "." + "f6" + "." + DISTINCT);
+
+        Map.Entry[] entries =
+                ImmutableMap.of(
+                                SEQUENCE_FIELD.key(),
+                                "f1_,f2_",
+                                FIELDS_PREFIX + "." + "f3_" + "." + IGNORE_RETRACT,
+                                "true",
+                                FIELDS_PREFIX + "." + "f4_" + "." + AGG_FUNCTION,
+                                "nested_update",
+                                FIELDS_PREFIX + "." + "f6_" + "." + AGG_FUNCTION,
+                                "collect",
+                                FIELDS_PREFIX + "." + "f6_" + "." + DISTINCT,
+                                "true")
+                        .entrySet()
+                        .toArray(new Map.Entry[0]);
+
+        assertThat(newSchema.options()).contains(entries);
+    }
+
+    @Test
+    public void testRenameSeqGroupFields() throws Exception {
+        ImmutableMap.Builder<String, String> mapBuilder = ImmutableMap.builder();
+
+        Schema schema =
+                new Schema(
+                        ImmutableList.of(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(1, "f1", DataTypes.INT()),
+                                new DataField(2, "f2", DataTypes.INT()),
+                                new DataField(3, "f3", DataTypes.INT()),
+                                new DataField(4, "f4", DataTypes.INT()),
+                                new DataField(5, "f5", DataTypes.INT()),
+                                new DataField(6, "f6", DataTypes.INT())),
+                        ImmutableList.of("f0"),
+                        ImmutableList.of(),
+                        mapBuilder
+                                .put(FIELDS_PREFIX + "." + "f1,f2" + "." + SEQUENCE_GROUP, "f3")
+                                .put(FIELDS_PREFIX + "." + "f4" + "." + SEQUENCE_GROUP, "f5,f6")
+                                .build(),
+                        "");
+
+        schemaManager.createTable(schema);
+
+        TableSchema newSchema =
+                schemaManager.commitChanges(
+                        SchemaChange.renameColumn("f1", "f1_"),
+                        SchemaChange.renameColumn("f2", "f2_"),
+                        SchemaChange.renameColumn("f3", "f3_"),
+                        SchemaChange.renameColumn("f4", "f4_"),
+                        SchemaChange.renameColumn("f5", "f5_"),
+                        SchemaChange.renameColumn("f6", "f6_"));
+
+        assertThat(newSchema.fieldNames())
+                .containsExactly("f0", "f1_", "f2_", "f3_", "f4_", "f5_", "f6_");
+
+        assertThat(newSchema.options())
+                .doesNotContainKeys(
+                        FIELDS_PREFIX + "." + "f1,f2" + "." + SEQUENCE_GROUP,
+                        FIELDS_PREFIX + "." + "f4" + "." + SEQUENCE_GROUP);
+
+        Map.Entry[] entries =
+                ImmutableMap.of(
+                                FIELDS_PREFIX + "." + "f1_,f2_" + "." + SEQUENCE_GROUP, "f3_",
+                                FIELDS_PREFIX + "." + "f4_" + "." + SEQUENCE_GROUP, "f5_,f6_")
+                        .entrySet()
+                        .toArray(new Map.Entry[0]);
+
+        assertThat(newSchema.options()).contains(entries);
     }
 
     private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {
