@@ -109,7 +109,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             }
 
             if (rowLineageEnabled && !metaColumnIndex.isEmpty()) {
-                GenericRow genericRow = new GenericRow(metaColumnIndex.size());
+                GenericRow lineageRow = new GenericRow(metaColumnIndex.size());
 
                 int[] fallbackToMetaRowLineageMappings = new int[tableRowType.getFieldCount()];
                 Arrays.fill(fallbackToMetaRowLineageMappings, -1);
@@ -131,10 +131,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 iterator =
                         iterator.transform(
                                 row -> {
-                                    genericRow.setField(
+                                    lineageRow.setField(
                                             0, iteratorInner.returnedPosition() + firstRowId);
-                                    genericRow.setField(1, snapshotId);
-                                    return fallbackMappingRow.replace(row, genericRow);
+                                    lineageRow.setField(1, snapshotId);
+                                    return fallbackMappingRow.replace(row, lineageRow);
                                 });
             }
         }
