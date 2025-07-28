@@ -444,7 +444,7 @@ public class CoreOptions implements Serializable {
                             "The maximum number of snapshots allowed to expire at a time.");
 
     public static final ConfigOption<Boolean> DETECT_EXPIRATION_SETTING_ENABLED =
-            key("detect-expiration-setting.enabled")
+            key("snapshot.expire.detect-config.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether detect changes to expiration settings.");
