@@ -517,6 +517,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Controls the cache memory of writer coordinator to cache manifest files in Job Manager.");
 
+    public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_PAGE_SIZE =
+            key("sink.writer-coordinator.page-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofKibiBytes(32))
+                    .withDescription(
+                            "Controls the page size for one RPC request of writer coordinator.");
+
     public static final ConfigOption<Boolean> FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED =
             key("filesystem.job-level-settings.enabled")
                     .booleanType()
