@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.safe.SafeBinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -30,10 +31,12 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TinyIntType;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
@@ -43,35 +46,42 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta} with safe deserializer. */
-public class DataFileMeta08Serializer implements Serializable {
+/** Serializer for {@link DataFileMeta} with 1.2 snapshot version. */
+public class DataFileMeta12LegacySerializer implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    public static final RowType SCHEMA =
+            new RowType(
+                    false,
+                    Arrays.asList(
+                            new DataField(0, "_FILE_NAME", newStringType(false)),
+                            new DataField(1, "_FILE_SIZE", new BigIntType(false)),
+                            new DataField(2, "_ROW_COUNT", new BigIntType(false)),
+                            new DataField(3, "_MIN_KEY", newBytesType(false)),
+                            new DataField(4, "_MAX_KEY", newBytesType(false)),
+                            new DataField(5, "_KEY_STATS", SimpleStats.SCHEMA),
+                            new DataField(6, "_VALUE_STATS", SimpleStats.SCHEMA),
+                            new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(9, "_SCHEMA_ID", new BigIntType(false)),
+                            new DataField(10, "_LEVEL", new IntType(false)),
+                            new DataField(
+                                    11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))),
+                            new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)),
+                            new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)),
+                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true)),
+                            new DataField(
+                                    16,
+                                    "_VALUE_STATS_COLS",
+                                    DataTypes.ARRAY(DataTypes.STRING().notNull())),
+                            new DataField(17, "_EXTERNAL_PATH", newStringType(true))));
+
     protected final InternalRowSerializer rowSerializer;
 
-    public DataFileMeta08Serializer() {
-        this.rowSerializer = InternalSerializers.create(schemaFor08());
-    }
-
-    private static RowType schemaFor08() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
-        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_KEY_STATS", SimpleStats.SCHEMA));
-        fields.add(new DataField(6, "_VALUE_STATS", SimpleStats.SCHEMA));
-        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
-        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
-        fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
-        fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
-        fields.add(new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)));
-        return new RowType(fields);
+    public DataFileMeta12LegacySerializer() {
+        this.rowSerializer = InternalSerializers.create(SCHEMA);
     }
 
     public final void serializeList(List<DataFileMeta> records, DataOutputView target)
@@ -99,7 +109,10 @@ public class DataFileMeta08Serializer implements Serializable {
                         toStringArrayData(meta.extraFiles()),
                         meta.creationTime(),
                         meta.deleteRowCount().orElse(null),
-                        meta.embeddedIndex());
+                        meta.embeddedIndex(),
+                        meta.fileSource().map(FileSource::toByteValue).orElse(null),
+                        toStringArrayData(meta.valueStatsCols()),
+                        meta.fileSource().map(FileSource::toByteValue).orElse(null));
         rowSerializer.serialize(row, target);
     }
 
@@ -132,9 +145,9 @@ public class DataFileMeta08Serializer implements Serializable {
                 row.getTimestamp(12, 3),
                 row.isNullAt(13) ? null : row.getLong(13),
                 row.isNullAt(14) ? null : row.getBinary(14),
-                null,
-                null,
-                null,
+                row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
+                row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
+                row.isNullAt(17) ? null : row.getString(17).toString(),
                 null);
     }
 }

@@ -58,6 +58,7 @@ public class DataFileTestUtils {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 
@@ -77,6 +78,7 @@ public class DataFileTestUtils {
                 0L,
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 
@@ -102,6 +104,7 @@ public class DataFileTestUtils {
                 deleteRowCount,
                 null,
                 FileSource.APPEND,
+                null,
                 null);
     }
 

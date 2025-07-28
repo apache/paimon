@@ -23,11 +23,14 @@ import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.LongIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
 import javax.annotation.Nullable;
+
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -118,6 +121,57 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             }
             return copy(vectors);
         }
+        return this;
+    }
+
+    public ColumnarRowIterator assignRowLineage(
+            Long firstRowId, Long snapshotId, Map<String, Integer> meta) {
+        VectorizedColumnBatch vectorizedColumnBatch = row.batch();
+        ColumnVector[] vectors = vectorizedColumnBatch.columns;
+
+        if (meta.containsKey(SpecialFields.ROW_ID.name())) {
+            Integer index = meta.get(SpecialFields.ROW_ID.name());
+            final ColumnVector rowIdVector = vectors[index];
+            vectors[index] =
+                    new LongColumnVector() {
+                        @Override
+                        public long getLong(int i) {
+                            if (rowIdVector.isNullAt(i)) {
+                                return firstRowId + returnedPosition();
+                            } else {
+                                return ((LongColumnVector) rowIdVector).getLong(i);
+                            }
+                        }
+
+                        @Override
+                        public boolean isNullAt(int i) {
+                            return false;
+                        }
+                    };
+        }
+
+        if (meta.containsKey(SpecialFields.SEQUENCE_NUMBER.name())) {
+            Integer index = meta.get(SpecialFields.SEQUENCE_NUMBER.name());
+            final ColumnVector versionVector = vectors[index];
+            vectors[index] =
+                    new LongColumnVector() {
+                        @Override
+                        public long getLong(int i) {
+                            if (versionVector.isNullAt(i)) {
+                                return snapshotId;
+                            } else {
+                                return ((LongColumnVector) versionVector).getLong(i);
+                            }
+                        }
+
+                        @Override
+                        public boolean isNullAt(int i) {
+                            return false;
+                        }
+                    };
+        }
+
+        copy(vectors);
         return this;
     }
 }

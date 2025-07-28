@@ -1912,6 +1912,12 @@ public class CoreOptions implements Serializable {
                                     + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
+    public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
+            key("row-tracking.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enable unique row id for append table.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")
                     .booleanType()
@@ -2862,6 +2868,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String recordLevelTimeField() {
         return options.get(RECORD_LEVEL_TIME_FIELD);
+    }
+
+    public boolean rowTrackingEnabled() {
+        return options.get(ROW_TRACKING_ENABLED);
     }
 
     public boolean prepareCommitWaitCompaction() {

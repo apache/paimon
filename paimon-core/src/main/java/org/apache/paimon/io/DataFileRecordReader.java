@@ -21,34 +21,51 @@ package org.apache.paimon.io;
 import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.casting.FallbackMappingRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Map;
 
 /** Reads {@link InternalRow} from data files. */
 public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
+    private final RowType tableRowType;
     private final FileRecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
+    private final boolean rowLineageEnabled;
+    @Nullable private final Long firstRowId;
+    private final long maxSequenceNumber;
+    private final Map<String, Integer> systemFields;
 
     public DataFileRecordReader(
+            RowType tableRowType,
             FormatReaderFactory readerFactory,
             FormatReaderFactory.Context context,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            boolean rowLineageEnabled,
+            @Nullable Long firstRowId,
+            long maxSequenceNumber,
+            Map<String, Integer> systemFields)
             throws IOException {
+        this.tableRowType = tableRowType;
         try {
             this.reader = readerFactory.createReader(context);
         } catch (Exception e) {
@@ -58,6 +75,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
+        this.rowLineageEnabled = rowLineageEnabled;
+        this.firstRowId = firstRowId;
+        this.maxSequenceNumber = maxSequenceNumber;
+        this.systemFields = systemFields;
     }
 
     @Nullable
@@ -70,6 +91,11 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
         if (iterator instanceof ColumnarRowIterator) {
             iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+            if (rowLineageEnabled) {
+                iterator =
+                        ((ColumnarRowIterator) iterator)
+                                .assignRowLineage(firstRowId, maxSequenceNumber, systemFields);
+            }
         } else {
             if (partitionInfo != null) {
                 final PartitionSettedRow partitionSettedRow =
@@ -80,6 +106,36 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             if (indexMapping != null) {
                 final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
                 iterator = iterator.transform(projectedRow::replaceRow);
+            }
+
+            if (rowLineageEnabled && !systemFields.isEmpty()) {
+                GenericRow lineageRow = new GenericRow(2);
+
+                int[] fallbackToLineageMappings = new int[tableRowType.getFieldCount()];
+                Arrays.fill(fallbackToLineageMappings, -1);
+
+                if (systemFields.containsKey(SpecialFields.ROW_ID.name())) {
+                    fallbackToLineageMappings[systemFields.get(SpecialFields.ROW_ID.name())] = 0;
+                }
+                if (systemFields.containsKey(SpecialFields.SEQUENCE_NUMBER.name())) {
+                    fallbackToLineageMappings[
+                                    systemFields.get(SpecialFields.SEQUENCE_NUMBER.name())] =
+                            1;
+                }
+
+                FallbackMappingRow fallbackMappingRow =
+                        new FallbackMappingRow(fallbackToLineageMappings);
+                final FileRecordIterator<InternalRow> iteratorInner = iterator;
+                iterator =
+                        iterator.transform(
+                                row -> {
+                                    if (firstRowId != null) {
+                                        lineageRow.setField(
+                                                0, iteratorInner.returnedPosition() + firstRowId);
+                                    }
+                                    lineageRow.setField(1, maxSequenceNumber);
+                                    return fallbackMappingRow.replace(row, lineageRow);
+                                });
             }
         }
 

@@ -165,6 +165,7 @@ public class DataFileTestDataGenerator {
                         kvs.stream().filter(kv -> kv.valueKind().isRetract()).count(),
                         null,
                         FileSource.APPEND,
+                        null,
                         null),
                 kvs);
     }
