@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Any, Optional, Tuple
 
-from cachetools import LRUCache
+from cachetools import LRUCache, TLRUCache
 from readerwriterlock import rwlock
 
 import fsspec
@@ -110,15 +110,22 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         options.update({RESTCatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
         self.options = options
         self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
-        cache_size = (
-            PVFSOptions.DEFAULT_CACHE_SIZE
-            if options is None
-            else options.get(PVFSOptions.CACHE_SIZE, PVFSOptions.DEFAULT_CACHE_SIZE)
-        )
-        self._rest_client_cache = LRUCache(cache_size)
-        self._cache = LRUCache(maxsize=cache_size)
+        fs_cache_size = self.__get_cache_size(PVFSOptions.FS_CACHE_SIZE)
+        rest_client_cache_size = self.__get_cache_size(PVFSOptions.REST_CLIENT_CACHE_SIZE)
+        table_cache_size = self.__get_cache_size(PVFSOptions.TABLE_CACHE_SIZE)
+        self._table_cache = TLRUCache(table_cache_size)
+        self._rest_client_cache = LRUCache(rest_client_cache_size)
+        self._cache = LRUCache(maxsize=fs_cache_size)
         self._cache_lock = rwlock.RWLockFair()
         super().__init__(**kwargs)
+
+    @staticmethod
+    def __get_cache_size(key: str, options: Dict = None) -> int:
+        return (
+            key
+            if options is None
+            else options.get(key, PVFSOptions.DEFAULT_CACHE_SIZE)
+        )
 
     def __rest_api(self, catalog: str):
         rest_api = self._rest_client_cache.get(catalog)
