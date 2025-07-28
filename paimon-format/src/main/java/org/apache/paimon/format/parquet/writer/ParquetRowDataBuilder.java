@@ -64,7 +64,8 @@ public class ParquetRowDataBuilder
         private ParquetWriteSupport(Configuration conf) {
             this.conf = conf;
             this.schema =
-                    convertToParquetMessageType(VariantUtils.replaceWithShreddingType(conf, rowType));
+                    convertToParquetMessageType(
+                            VariantUtils.replaceWithShreddingType(conf, rowType));
         }
 
         @Override

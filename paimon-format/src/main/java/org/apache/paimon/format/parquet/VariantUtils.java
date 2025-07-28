@@ -38,7 +38,7 @@ import java.util.List;
 /** Utils for variant. */
 public class VariantUtils {
 
-    /** For reader, extract shredding schemas from each parquet schema. */
+    /** For reader, extract shredding schemas from each parquet file's schema. */
     public static RowType[] extractShreddingSchemasFromParquetSchema(
             DataField[] readFields, MessageType fileSchema) {
         RowType[] shreddingSchemas = new RowType[readFields.length];
