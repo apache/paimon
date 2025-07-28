@@ -139,7 +139,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         false,
                         null,
                         -1,
-                        null);
+                        Collections.emptyMap());
 
         Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
