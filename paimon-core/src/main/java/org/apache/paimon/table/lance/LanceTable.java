@@ -26,9 +26,7 @@ import org.apache.paimon.types.RowType;
 import java.util.Map;
 
 /**
- * An object table refers to a directory that contains multiple objects (files). Object table
- * provides metadata indexes for unstructured data objects in this directory, allowing users to
- * analyze unstructured data in Object Storage.
+ * A lance table format table, paimon does not support read and write operation on this table yet.
  */
 public interface LanceTable extends Table {
 
