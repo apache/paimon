@@ -471,6 +471,8 @@ public class IcebergCompatibilityTest {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT(),
+                            DataTypes.TINYINT(),
+                            DataTypes.SMALLINT(),
                             DataTypes.BOOLEAN(),
                             DataTypes.BIGINT(),
                             DataTypes.FLOAT(),
@@ -485,6 +487,8 @@ public class IcebergCompatibilityTest {
                         },
                         new String[] {
                             "v_int",
+                            "v_tinyint",
+                            "v_smallint",
                             "v_boolean",
                             "v_bigint",
                             "v_float",
@@ -507,6 +511,8 @@ public class IcebergCompatibilityTest {
         GenericRow lowerBounds =
                 GenericRow.of(
                         1,
+                        (byte) 1,
+                        (short) 1,
                         true,
                         10L,
                         100.0f,
@@ -522,6 +528,8 @@ public class IcebergCompatibilityTest {
         GenericRow upperBounds =
                 GenericRow.of(
                         2,
+                        (byte) 3,
+                        (short) 4,
                         true,
                         20L,
                         200.0f,
@@ -583,7 +591,21 @@ public class IcebergCompatibilityTest {
                                     icebergTable ->
                                             IcebergGenerics.read(icebergTable)
                                                     .select(name)
-                                                    .where(Expressions.lessThan(name, upper))
+                                                    .where(
+                                                            // Handle numeric primitive wrappers
+                                                            // that need conversion
+                                                            upper instanceof Short
+                                                                    ? Expressions.lessThan(
+                                                                            name,
+                                                                            ((Short) upper)
+                                                                                    .intValue())
+                                                                    : upper instanceof Byte
+                                                                            ? Expressions.lessThan(
+                                                                                    name,
+                                                                                    ((Byte) upper)
+                                                                                            .intValue())
+                                                                            : Expressions.lessThan(
+                                                                                    name, upper))
                                                     .build(),
                                     Record::toString))
                     .containsExactly("Record(" + expectedLower + ")");
@@ -592,7 +614,25 @@ public class IcebergCompatibilityTest {
                                     icebergTable ->
                                             IcebergGenerics.read(icebergTable)
                                                     .select(name)
-                                                    .where(Expressions.greaterThan(name, lower))
+                                                    .where(
+                                                            // Handle numeric primitive wrappers
+                                                            // that need conversion
+                                                            lower instanceof Short
+                                                                    ? Expressions.greaterThan(
+                                                                            name,
+                                                                            ((Short) lower)
+                                                                                    .intValue())
+                                                                    : lower instanceof Byte
+                                                                            ? Expressions
+                                                                                    .greaterThan(
+                                                                                            name,
+                                                                                            ((Byte)
+                                                                                                            lower)
+                                                                                                    .intValue())
+                                                                            : Expressions
+                                                                                    .greaterThan(
+                                                                                            name,
+                                                                                            lower))
                                                     .build(),
                                     Record::toString))
                     .containsExactly("Record(" + expectedUpper + ")");
@@ -601,7 +641,21 @@ public class IcebergCompatibilityTest {
                                     icebergTable ->
                                             IcebergGenerics.read(icebergTable)
                                                     .select(name)
-                                                    .where(Expressions.lessThan(name, lower))
+                                                    .where(
+                                                            // Handle numeric primitive wrappers
+                                                            // that need conversion
+                                                            lower instanceof Short
+                                                                    ? Expressions.lessThan(
+                                                                            name,
+                                                                            ((Short) lower)
+                                                                                    .intValue())
+                                                                    : lower instanceof Byte
+                                                                            ? Expressions.lessThan(
+                                                                                    name,
+                                                                                    ((Byte) lower)
+                                                                                            .intValue())
+                                                                            : Expressions.lessThan(
+                                                                                    name, lower))
                                                     .build(),
                                     Record::toString))
                     .isEmpty();
@@ -610,7 +664,25 @@ public class IcebergCompatibilityTest {
                                     icebergTable ->
                                             IcebergGenerics.read(icebergTable)
                                                     .select(name)
-                                                    .where(Expressions.greaterThan(name, upper))
+                                                    .where(
+                                                            // Handle numeric primitive wrappers
+                                                            // that need conversion
+                                                            upper instanceof Short
+                                                                    ? Expressions.greaterThan(
+                                                                            name,
+                                                                            ((Short) upper)
+                                                                                    .intValue())
+                                                                    : upper instanceof Byte
+                                                                            ? Expressions
+                                                                                    .greaterThan(
+                                                                                            name,
+                                                                                            ((Byte)
+                                                                                                            upper)
+                                                                                                    .intValue())
+                                                                            : Expressions
+                                                                                    .greaterThan(
+                                                                                            name,
+                                                                                            upper))
                                                     .build(),
                                     Record::toString))
                     .isEmpty();
