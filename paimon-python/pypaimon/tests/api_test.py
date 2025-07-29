@@ -27,7 +27,7 @@ from ..api.auth import BearTokenAuthProvider
 from ..api.identifier import Identifier
 from ..api.options import Options
 from ..api.rest_json import JSON
-from ..api.table_schema import TableSchema
+from pypaimon.schema.table_schema import TableSchema
 from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 
 from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType, DataField
@@ -157,7 +157,8 @@ class ApiTestCase(unittest.TestCase):
                                               MapType(False, AtomicType('INT'), AtomicType('INT'))),
                           'desc  arr11'),
             ]
-            schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
+            schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields, len(data_fields),
+                                 [], [], {}, "")
             test_tables = {
                 "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
             }
@@ -213,7 +214,8 @@ class ApiTestCase(unittest.TestCase):
                                               MapType(False, AtomicType('INT'), AtomicType('INT'))),
                           'desc  arr11'),
             ]
-            schema = TableSchema(len(data_fields), data_fields, len(data_fields), [], [], {}, "")
+            schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields, len(data_fields),
+                                 [], [], {}, "")
             test_tables = {
                 "default.user": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
             }

@@ -17,7 +17,7 @@ limitations under the License.
 """
 from typing import Optional
 
-from pypaimon.api.table_schema import TableSchema
+from pypaimon.schema.table_schema import TableSchema
 
 
 class TableMetadata:

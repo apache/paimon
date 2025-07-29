@@ -22,4 +22,16 @@ from pathlib import Path
 class FileIO(ABC):
     @abstractmethod
     def exists(self, path: Path) -> bool:
-        raise NotImplementedError("Method 'exists' must be implemented by subclasses.")
+        """"""
+
+    @abstractmethod
+    def read_file_utf8(self, path: Path) -> str:
+        """"""
+
+    @abstractmethod
+    def try_to_write_atomic(self, path: Path, content: str) -> bool:
+        """"""
+
+    @abstractmethod
+    def list_status(self, path: Path):
+        """"""
