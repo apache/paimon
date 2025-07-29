@@ -22,6 +22,7 @@ import org.apache.paimon.fileindex.rangebitmap.dictionary.Dictionary;
 import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.ChunkedDictionary;
 import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.KeyFactory;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.IOException;
@@ -38,9 +39,7 @@ public class RangeBitmap {
     public static final int VERSION_1 = 1;
     public static final byte CURRENT_VERSION = VERSION_1;
 
-    private final byte version;
     private final int rid;
-    private final int cardinality;
     private final Object min;
     private final Object max;
     private final int dictionaryOffset;
@@ -59,23 +58,24 @@ public class RangeBitmap {
         try {
             in.seek(offset);
             byte[] headerLengthInBytes = new byte[Integer.BYTES];
-            in.read(headerLengthInBytes);
+            IOUtils.readFully(in, headerLengthInBytes);
             headerLength = ByteBuffer.wrap(headerLengthInBytes).getInt();
 
             byte[] headerInBytes = new byte[headerLength];
-            in.read(headerInBytes);
+            IOUtils.readFully(in, headerInBytes);
             headers = ByteBuffer.wrap(headerInBytes);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
         KeyFactory.KeyDeserializer deserializer = factory.createDeserializer();
-        this.version = headers.get();
+        byte version = headers.get();
         if (version > CURRENT_VERSION) {
             throw new RuntimeException("Invalid version " + version);
         }
         this.rid = headers.getInt();
-        this.cardinality = headers.getInt();
+        // ignore cardinality
+        headers.getInt();
         this.min = deserializer.deserialize(headers);
         this.max = deserializer.deserialize(headers);
         int dictionaryLength = headers.getInt();

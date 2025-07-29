@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.rangebitmap.dictionary.chunked;
 
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -95,7 +96,7 @@ public class FixedLengthChunk extends AbstractChunk {
             try {
                 in.seek(keysBaseOffset + offset);
                 byte[] bytes = new byte[keysLength];
-                in.read(bytes);
+                IOUtils.readFully(in, bytes);
                 keys = ByteBuffer.wrap(bytes);
             } catch (IOException e) {
                 throw new RuntimeException(e);

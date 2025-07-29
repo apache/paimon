@@ -27,12 +27,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 
+import static org.apache.paimon.utils.IOUtils.readFully;
+
 /** Chunked implementation of {@link Dictionary}. */
 public class ChunkedDictionary implements Dictionary {
 
     public static final byte CURRENT_VERSION = 1;
 
-    private final byte version;
     private final int size;
     private final int offsetsLength;
     private final int chunksLength;
@@ -49,14 +50,14 @@ public class ChunkedDictionary implements Dictionary {
             throws IOException {
         in.seek(offset);
         byte[] headerLengthInBytes = new byte[Integer.BYTES];
-        in.read(headerLengthInBytes);
+        readFully(in, headerLengthInBytes);
         int headerLength = ByteBuffer.wrap(headerLengthInBytes).getInt();
 
         byte[] headerInBytes = new byte[headerLength];
-        in.read(headerInBytes);
+        readFully(in, headerInBytes);
         ByteBuffer header = ByteBuffer.wrap(headerInBytes);
 
-        this.version = header.get();
+        byte version = header.get();
         if (version > CURRENT_VERSION) {
             throw new IllegalArgumentException(String.format("invalid version %d", version));
         }
@@ -117,7 +118,7 @@ public class ChunkedDictionary implements Dictionary {
             try {
                 byte[] bytes = new byte[offsetsLength + chunksLength];
                 in.seek(bodyOffset);
-                in.read(bytes);
+                readFully(in, bytes);
 
                 ByteBuffer buffer = ByteBuffer.wrap(bytes);
                 offsets = (ByteBuffer) buffer.slice().limit(offsetsLength);

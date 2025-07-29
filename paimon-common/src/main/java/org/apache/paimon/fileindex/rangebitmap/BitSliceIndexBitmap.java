@@ -28,13 +28,14 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.utils.IOUtils.readFully;
+
 /** Implementation of bit-slice index bitmap. */
 public class BitSliceIndexBitmap {
 
     public static final byte VERSION_1 = 1;
     public static final byte CURRENT_VERSION = VERSION_1;
 
-    private final byte version;
     private final int ebmLength;
     private final ByteBuffer indexes;
     private final RoaringBitmap32[] slices;
@@ -47,14 +48,14 @@ public class BitSliceIndexBitmap {
     public BitSliceIndexBitmap(SeekableInputStream in, int offset) throws IOException {
         in.seek(offset);
         byte[] headerLengthInBytes = new byte[Integer.BYTES];
-        in.read(headerLengthInBytes);
+        readFully(in, headerLengthInBytes);
         int headerLength = ByteBuffer.wrap(headerLengthInBytes).getInt();
 
         byte[] headerInBytes = new byte[headerLength];
-        in.read(headerInBytes);
+        readFully(in, headerInBytes);
         ByteBuffer headers = ByteBuffer.wrap(headerInBytes);
 
-        version = headers.get();
+        byte version = headers.get();
         if (version > CURRENT_VERSION) {
             throw new RuntimeException(
                     String.format(
@@ -155,7 +156,7 @@ public class BitSliceIndexBitmap {
             try {
                 in.seek(bodyOffset);
                 byte[] bytes = new byte[ebmLength];
-                in.read(bytes);
+                readFully(in, bytes);
                 RoaringBitmap32 bitmap = new RoaringBitmap32();
                 bitmap.deserialize(ByteBuffer.wrap(bytes));
                 ebm = bitmap;
@@ -185,7 +186,7 @@ public class BitSliceIndexBitmap {
         try {
             in.seek(bodyOffset + ebmLength + offset);
             byte[] bytes = new byte[length];
-            in.read(bytes);
+            readFully(in, bytes);
             ByteBuffer buffer = ByteBuffer.wrap(bytes);
 
             int position = 0;
@@ -212,7 +213,7 @@ public class BitSliceIndexBitmap {
             try {
                 in.seek(bodyOffset + ebmLength + offset);
                 byte[] bytes = new byte[length];
-                in.read(bytes);
+                readFully(in, bytes);
                 RoaringBitmap32 slice = new RoaringBitmap32();
                 slice.deserialize(ByteBuffer.wrap(bytes));
                 slices[index] = slice;
