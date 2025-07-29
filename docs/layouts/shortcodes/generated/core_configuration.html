@@ -273,6 +273,12 @@ under the License.
             <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
         </tr>
         <tr>
+            <td><h5>compaction.total-size-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>When total size is smaller than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
             <td><h5>consumer-id</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
