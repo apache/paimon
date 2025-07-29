@@ -82,6 +82,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -920,12 +921,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
         }
-        long newSnapshotId =
-                latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
-        long firstRowIdStart =
-                latestSnapshot == null
-                        ? 0L
-                        : latestSnapshot.nextRowId() == null ? 0L : latestSnapshot.nextRowId();
+
+        long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
+        long firstRowIdStart = 0;
+        if (latestSnapshot != null) {
+            newSnapshotId = latestSnapshot.id() + 1;
+            Long nextRowId = latestSnapshot.nextRowId();
+            if (nextRowId != null) {
+                firstRowIdStart = nextRowId;
+            }
+        }
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
@@ -1375,7 +1380,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        java.util.function.Consumer<Throwable> conflictHandler =
+        Function<Throwable, RuntimeException> exceptionFunction =
                 e -> {
                     Pair<RuntimeException, RuntimeException> conflictException =
                             createConflictException(
@@ -1385,18 +1390,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     changes,
                                     e);
                     LOG.warn("", conflictException.getLeft());
-                    throw conflictException.getRight();
+                    return conflictException.getRight();
                 };
 
-        Collection<SimpleFileEntry> mergedEntries = null;
+        Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
         } catch (Throwable e) {
-            conflictHandler.accept(e);
+            throw exceptionFunction.apply(e);
         }
 
-        assertNoDelete(mergedEntries, conflictHandler);
+        assertNoDelete(mergedEntries, exceptionFunction);
 
         // fast exit for file store without keys
         if (keyComparator == null) {
@@ -1442,7 +1447,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private void assertNoDelete(
             Collection<SimpleFileEntry> mergedEntries,
-            java.util.function.Consumer<Throwable> conflictHandler) {
+            Function<Throwable, RuntimeException> exceptionFunction) {
         try {
             for (SimpleFileEntry entry : mergedEntries) {
                 Preconditions.checkState(
@@ -1453,7 +1458,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } catch (Throwable e) {
             assertConflictForPartitionExpire(mergedEntries);
-            conflictHandler.accept(e);
+            throw exceptionFunction.apply(e);
         }
     }
 
