@@ -45,6 +45,5 @@ class PVFSOptions:
     REST_CLIENT_CACHE_SIZE = "cache.rest-client.max-num"
     FS_CACHE_SIZE = "cache.fs.max-num"
     TABLE_CACHE_SIZE = 2**31 - 1
-    DEFAULT_TABLE_CACHE_SIZE = 100
     DEFAULT_TABLE_CACHE_TTL = 1800
     DEFAULT_CACHE_SIZE = 20
