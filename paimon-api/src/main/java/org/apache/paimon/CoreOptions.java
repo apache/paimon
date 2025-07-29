@@ -733,6 +733,13 @@ public class CoreOptions implements Serializable {
                             "Implying how often to perform an optimization compaction, this configuration is used to "
                                     + "ensure the query timeliness of the read-optimized system table.");
 
+    public static final ConfigOption<MemorySize> COMPACTION_TOTAL_SIZE_THRESHOLD =
+            key("compaction.total-size-threshold")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When total size is smaller than this threshold, force a full compaction.");
+
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
                     .intType()
@@ -2364,6 +2371,11 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
     }
 
+    @Nullable
+    public MemorySize compactionTotalSizeThreshold() {
+        return options.get(COMPACTION_TOTAL_SIZE_THRESHOLD);
+    }
+
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
@@ -2416,9 +2428,12 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_SIZE_RATIO);
     }
 
-    public OffPeakHours offPeakHours() {
-        return OffPeakHours.create(
-                options.get(COMPACT_OFFPEAK_START_HOUR), options.get(COMPACT_OFFPEAK_END_HOUR));
+    public int compactOffPeakStartHour() {
+        return options.get(COMPACT_OFFPEAK_START_HOUR);
+    }
+
+    public int compactOffPeakEndHour() {
+        return options.get(COMPACT_OFFPEAK_END_HOUR);
     }
 
     public int compactOffPeakRatio() {

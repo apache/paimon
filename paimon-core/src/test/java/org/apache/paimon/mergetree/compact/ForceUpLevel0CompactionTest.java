@@ -29,6 +29,7 @@ import java.util.Collections;
 import java.util.Optional;
 
 import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.file;
+import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.ofTesting;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ForceUpLevel0Compaction}. */
@@ -37,7 +38,7 @@ public class ForceUpLevel0CompactionTest {
     @Test
     public void testForceCompaction0() {
         ForceUpLevel0Compaction compaction =
-                new ForceUpLevel0Compaction(new UniversalCompaction(200, 1, 5));
+                new ForceUpLevel0Compaction(ofTesting(200, 1, 5), null);
 
         Optional<CompactUnit> result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 1)));
         assertThat(result).isPresent();

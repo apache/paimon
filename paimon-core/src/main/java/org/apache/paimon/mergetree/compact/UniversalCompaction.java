@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.OffPeakHours;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -29,10 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Universal Compaction Style is a compaction style, targeting the use cases requiring lower write
@@ -48,81 +45,32 @@ public class UniversalCompaction implements CompactStrategy {
     private final int maxSizeAmp;
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
-    private final OffPeakHours offPeakHours;
-    private final int compactOffPeakRatio;
 
-    @Nullable private final Long opCompactionInterval;
-    @Nullable private Long lastOptimizedCompaction;
-
-    @Nullable private final Integer maxLookupCompactInterval;
-    @Nullable private final AtomicInteger lookupCompactTriggerCount;
-
-    public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
-        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null, OffPeakHours.DISABLED, 0);
-    }
+    @Nullable private final FullCompactTrigger fullCompactTrigger;
+    @Nullable private final OffPeakHours offPeakHours;
 
     public UniversalCompaction(
             int maxSizeAmp,
             int sizeRatio,
             int numRunCompactionTrigger,
-            OffPeakHours offPeakHours,
-            int compactOffPeakRatio) {
-        this(
-                maxSizeAmp,
-                sizeRatio,
-                numRunCompactionTrigger,
-                null,
-                offPeakHours,
-                compactOffPeakRatio);
-    }
-
-    public UniversalCompaction(
-            int maxSizeAmp,
-            int sizeRatio,
-            int numRunCompactionTrigger,
-            @Nullable Duration opCompactionInterval,
-            OffPeakHours offPeakHours,
-            int compactOffPeakRatio) {
-        this(
-                maxSizeAmp,
-                sizeRatio,
-                numRunCompactionTrigger,
-                opCompactionInterval,
-                null,
-                offPeakHours,
-                compactOffPeakRatio);
-    }
-
-    public UniversalCompaction(
-            int maxSizeAmp,
-            int sizeRatio,
-            int numRunCompactionTrigger,
-            @Nullable Duration opCompactionInterval,
-            @Nullable Integer maxLookupCompactInterval,
-            OffPeakHours offPeakHours,
-            int compactOffPeakRatio) {
+            @Nullable FullCompactTrigger fullCompactTrigger,
+            @Nullable OffPeakHours offPeakHours) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
-        this.offPeakHours = offPeakHours;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
-        this.opCompactionInterval =
-                opCompactionInterval == null ? null : opCompactionInterval.toMillis();
-        this.maxLookupCompactInterval = maxLookupCompactInterval;
-        this.lookupCompactTriggerCount =
-                maxLookupCompactInterval == null ? null : new AtomicInteger(0);
-        this.compactOffPeakRatio = compactOffPeakRatio;
+        this.fullCompactTrigger = fullCompactTrigger;
+        this.offPeakHours = offPeakHours;
     }
 
     @Override
     public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
         int maxLevel = numLevels - 1;
 
-        if (opCompactionInterval != null) {
-            if (lastOptimizedCompaction == null
-                    || currentTimeMillis() - lastOptimizedCompaction > opCompactionInterval) {
-                LOG.debug("Universal compaction due to optimized compaction interval");
-                updateLastOptimizedCompaction();
-                return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+        // 0 try full compaction by trigger
+        if (fullCompactTrigger != null) {
+            Optional<CompactUnit> unit = fullCompactTrigger.tryFullCompact(numLevels, runs);
+            if (unit.isPresent()) {
+                return unit;
             }
         }
 
@@ -152,26 +100,6 @@ public class UniversalCompaction implements CompactStrategy {
                 LOG.debug("Universal compaction due to file num");
             }
             return Optional.ofNullable(pickForSizeRatio(maxLevel, runs, candidateCount));
-        }
-
-        // 4 checking if a forced L0 compact should be triggered
-        if (maxLookupCompactInterval != null && lookupCompactTriggerCount != null) {
-            lookupCompactTriggerCount.getAndIncrement();
-            if (lookupCompactTriggerCount.compareAndSet(maxLookupCompactInterval, 0)) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug(
-                            "Universal compaction due to max lookup compaction interval {}.",
-                            maxLookupCompactInterval);
-                }
-                return forcePickL0(numLevels, runs);
-            } else {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug(
-                            "Skip universal compaction due to lookup compaction trigger count {} is less than the max interval {}.",
-                            lookupCompactTriggerCount.get(),
-                            maxLookupCompactInterval);
-                }
-            }
         }
 
         return Optional.empty();
@@ -208,7 +136,9 @@ public class UniversalCompaction implements CompactStrategy {
 
         // size amplification = percentage of additional size
         if (candidateSize * 100 > maxSizeAmp * earliestRunSize) {
-            updateLastOptimizedCompaction();
+            if (fullCompactTrigger != null) {
+                fullCompactTrigger.updateLastFullCompaction();
+            }
             return CompactUnit.fromLevelRuns(maxLevel, runs);
         }
 
@@ -234,11 +164,8 @@ public class UniversalCompaction implements CompactStrategy {
         long candidateSize = candidateSize(runs, candidateCount);
         for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
-            if (candidateSize
-                            * (100.0
-                                    + sizeRatio
-                                    + (offPeakHours.isOffPeak() ? compactOffPeakRatio : 0))
-                            / 100.0
+            int offPeakRatio = offPeakHours == null ? 0 : offPeakHours.currentRatio();
+            if (candidateSize * (100.0 + sizeRatio + offPeakRatio) / 100.0
                     < next.run().totalSize()) {
                 break;
             }
@@ -285,18 +212,12 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         if (runCount == runs.size()) {
-            updateLastOptimizedCompaction();
+            if (fullCompactTrigger != null) {
+                fullCompactTrigger.updateLastFullCompaction();
+            }
             outputLevel = maxLevel;
         }
 
         return CompactUnit.fromLevelRuns(outputLevel, runs.subList(0, runCount));
-    }
-
-    private void updateLastOptimizedCompaction() {
-        lastOptimizedCompaction = currentTimeMillis();
-    }
-
-    long currentTimeMillis() {
-        return System.currentTimeMillis();
     }
 }
