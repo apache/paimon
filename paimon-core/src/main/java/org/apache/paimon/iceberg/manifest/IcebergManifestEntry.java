@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.manifest;
 
+import org.apache.paimon.iceberg.metadata.IcebergPartitionField;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -111,14 +112,32 @@ public class IcebergManifestEntry {
     }
 
     public static RowType schema(RowType partitionType) {
+
+        RowType icebergPartition = icebergPartitionType(partitionType);
+
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "status", DataTypes.INT().notNull()));
         fields.add(new DataField(1, "snapshot_id", DataTypes.BIGINT()));
         fields.add(new DataField(3, "sequence_number", DataTypes.BIGINT()));
         fields.add(new DataField(4, "file_sequence_number", DataTypes.BIGINT()));
         fields.add(
-                new DataField(2, "data_file", IcebergDataFileMeta.schema(partitionType).notNull()));
+                new DataField(
+                        2, "data_file", IcebergDataFileMeta.schema(icebergPartition).notNull()));
         return new RowType(false, fields);
+    }
+
+    // Use correct Field IDs to support ID-based column pruning.
+    // https://iceberg.apache.org/spec/#avro
+    public static RowType icebergPartitionType(RowType partitionType) {
+        List<DataField> fields = new ArrayList<>();
+        for (int i = 0; i < partitionType.getFields().size(); i++) {
+            fields.add(
+                    partitionType
+                            .getFields()
+                            .get(i)
+                            .newId(IcebergPartitionField.FIRST_FIELD_ID + i));
+        }
+        return partitionType.copy(fields);
     }
 
     @Override

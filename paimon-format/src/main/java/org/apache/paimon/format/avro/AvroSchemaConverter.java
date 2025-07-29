@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
@@ -33,12 +34,16 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.SchemaBuilder.ArrayBuilder;
+import org.apache.avro.SchemaBuilder.FieldBuilder;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Converts an Avro schema into Paimon's type information. */
 public class AvroSchemaConverter {
+
+    private static final String ICEBERG = "iceberg";
 
     private AvroSchemaConverter() {
         // private
@@ -163,20 +168,25 @@ public class AvroSchemaConverter {
                 return nullable ? nullableSchema(decimal) : decimal;
             case ROW:
                 RowType rowType = (RowType) dataType;
-                List<String> fieldNames = rowType.getFieldNames();
                 // we have to make sure the record name is different in a Schema
                 SchemaBuilder.FieldAssembler<Schema> builder =
                         SchemaBuilder.builder().record(rowName).fields();
-                for (int i = 0; i < rowType.getFieldCount(); i++) {
-                    String fieldName = fieldNames.get(i);
-                    DataType fieldType = rowType.getTypeAt(i);
+                for (DataField dataField : rowType.getFields()) {
+                    String fieldName = dataField.name();
+                    DataType fieldType = dataField.type();
+
+                    FieldBuilder<Schema> name = builder.name(fieldName);
+
+                    // Add required Field IDs to support ID-based column pruning.
+                    // https://iceberg.apache.org/spec/#avro
+                    if (rowNameMapping.containsKey(ICEBERG)) {
+                        name.prop("field-id", dataField.id());
+                    }
+
                     SchemaBuilder.GenericDefault<Schema> fieldBuilder =
-                            builder.name(fieldName)
-                                    .type(
-                                            convertToSchema(
-                                                    fieldType,
-                                                    rowName + "_" + fieldName,
-                                                    rowNameMapping));
+                            name.type(
+                                    convertToSchema(
+                                            fieldType, rowName + "_" + fieldName, rowNameMapping));
 
                     if (fieldType.isNullable()) {
                         builder = fieldBuilder.withDefault(null);
@@ -195,19 +205,43 @@ public class AvroSchemaConverter {
                     // Avro only natively support map with string key.
                     // To represent a map with non-string key, we use an array containing several
                     // rows. The first field of a row is the key, and the second field is the value.
-                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
-                            SchemaBuilder.builder()
-                                    .record(rowName)
-                                    .fields()
-                                    .name("key")
-                                    .type(
-                                            convertToSchema(
-                                                    keyType, rowName + "_key", rowNameMapping))
+
+                    // Add required Field IDs to support ID-based column pruning.
+                    // https://iceberg.apache.org/spec/#avro
+                    if (rowNameMapping.containsKey(ICEBERG)) {
+                        rowName =
+                                Optional.ofNullable(rowNameMapping.get("kv_name_" + rowName))
+                                        .orElse(rowName);
+                    }
+
+                    FieldBuilder<Schema> key =
+                            SchemaBuilder.builder().record(rowName).fields().name("key");
+
+                    // Add required Field IDs to support ID-based column pruning.
+                    // https://iceberg.apache.org/spec/#avro
+                    if (rowNameMapping.containsKey(ICEBERG)) {
+                        Optional.ofNullable(rowNameMapping.get("k_id_" + rowName))
+                                .map(Integer::valueOf)
+                                .ifPresent(fieldId -> key.prop("field-id", fieldId));
+                    }
+
+                    FieldBuilder<Schema> value =
+                            key.type(convertToSchema(keyType, rowName + "_key", rowNameMapping))
                                     .noDefault()
-                                    .name("value")
-                                    .type(
-                                            convertToSchema(
-                                                    valueType, rowName + "_value", rowNameMapping));
+                                    .name("value");
+
+                    // Add required Field IDs to support ID-based column pruning.
+                    // https://iceberg.apache.org/spec/#avro
+                    if (rowNameMapping.containsKey(ICEBERG)) {
+                        Optional.ofNullable(rowNameMapping.get("v_id_" + rowName))
+                                .map(Integer::valueOf)
+                                .ifPresent(fieldId -> value.prop("field-id", fieldId));
+                    }
+
+                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
+                            value.type(
+                                    convertToSchema(valueType, rowName + "_value", rowNameMapping));
+
                     SchemaBuilder.FieldAssembler<Schema> assembler =
                             valueType.isNullable()
                                     ? kvBuilder.withDefault(null)
@@ -226,14 +260,20 @@ public class AvroSchemaConverter {
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
+                DataType elementType = arrayType.getElementType();
+
+                ArrayBuilder<Schema> arrayBuilder = SchemaBuilder.builder().array();
+
+                // Add required Field IDs to support ID-based column pruning.
+                // https://iceberg.apache.org/spec/#avro
+                if (rowNameMapping.containsKey(ICEBERG)) {
+                    Optional.ofNullable(rowNameMapping.get("array_id_" + rowName))
+                            .map(Integer::valueOf)
+                            .ifPresent(elementId -> arrayBuilder.prop("element-id", elementId));
+                }
+
                 Schema array =
-                        SchemaBuilder.builder()
-                                .array()
-                                .items(
-                                        convertToSchema(
-                                                arrayType.getElementType(),
-                                                rowName,
-                                                rowNameMapping));
+                        arrayBuilder.items(convertToSchema(elementType, rowName, rowNameMapping));
                 return nullable ? nullableSchema(array) : array;
             default:
                 throw new UnsupportedOperationException(
