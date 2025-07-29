@@ -43,6 +43,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -286,9 +287,15 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         // clean index manifests
         String indexManifest = snapshot.indexManifest();
         // check exists, it may have been deleted by other snapshots
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            List<IndexManifestEntry> indexManifestEntries =
-                    indexFileHandler.readManifest(indexManifest);
+        if (indexManifest != null) {
+            List<IndexManifestEntry> indexManifestEntries;
+            try {
+                indexManifestEntries = indexFileHandler.readManifestWithIOException(indexManifest);
+            } catch (FileNotFoundException e) {
+                return;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
             indexManifestEntries.removeIf(
                     entry -> skippingSet.contains(entry.indexFile().fileName()));
             deleteFiles(indexManifestEntries, indexFileHandler::deleteIndexFile);
@@ -404,11 +411,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             }
         }
         return false;
-    }
-
-    /** Changelogs were not checked. Let the subclass determine whether to delete them. */
-    public Set<String> manifestSkippingSet(Snapshot skippingSnapshot) {
-        return manifestSkippingSet(Collections.singletonList(skippingSnapshot));
     }
 
     public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
