@@ -120,11 +120,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         options.update({RESTCatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
         self.options = options
         self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
-        fs_cache_size = self.__get_cache_size(PVFSOptions.FS_CACHE_SIZE, PVFSOptions.DEFAULT_CACHE_SIZE)
-        rest_client_cache_size = self.__get_cache_size(
-            PVFSOptions.REST_CLIENT_CACHE_SIZE,
-            PVFSOptions.DEFAULT_CACHE_SIZE
-        )
         cache_expired_time = (
             PVFSOptions.DEFAULT_TABLE_CACHE_TTL
             if options is None
@@ -134,29 +129,14 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
         self._cache_enable = options.get(PVFSOptions.CACHE_ENABLED, True)
         if self._cache_enable:
-            self._table_cache = TTLCache(maxsize=PVFSOptions.TABLE_CACHE_SIZE, ttl=cache_expired_time)
+            self._table_cache = TTLCache(maxsize=PVFSOptions.DEFAULT_CACHE_SIZE, ttl=cache_expired_time)
             self._table_cache_lock = rwlock.RWLockFair()
-        self._rest_client_cache = LRUCache(rest_client_cache_size)
-        self._cache = LRUCache(maxsize=fs_cache_size)
-        self._cache_lock = rwlock.RWLockFair()
+        self._rest_api_cache = LRUCache(PVFSOptions.DEFAULT_CACHE_SIZE)
+        self._fs_cache = LRUCache(maxsize=PVFSOptions.DEFAULT_CACHE_SIZE)
+        self._table_cache_lock = rwlock.RWLockFair()
+        self._rest_api_cache_lock = rwlock.RWLockFair()
+        self._fs_cache_lock = rwlock.RWLockFair()
         super().__init__(**kwargs)
-
-    @staticmethod
-    def __get_cache_size(key: str, default: int, options: Dict = None) -> int:
-        return (
-            default
-            if options is None
-            else options.get(key, default)
-        )
-
-    def __rest_api(self, catalog: str):
-        rest_api = self._rest_client_cache.get(catalog)
-        if rest_api is None:
-            options = self.options.copy()
-            options.update({RESTCatalogOptions.WAREHOUSE: catalog})
-            rest_api = RESTApi(options)
-            self._rest_client_cache[catalog] = rest_api
-        return rest_api
 
     @property
     def fsid(self):
@@ -795,11 +775,34 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         modified = self.__converse_ts_to_datatime(table.updated_at)
         return TableStore(path=table.path, created=created, modified=modified)
 
-    def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
-        read_lock = self._cache_lock.gen_rlock()
+    def __rest_api(self, catalog: str):
+        read_lock = self._rest_api_cache_lock.gen_rlock()
         try:
             read_lock.acquire()
-            cache_value: Tuple[StorageType, AbstractFileSystem] = self._cache.get(
+            rest_api = self._rest_api_cache.get(catalog)
+            if rest_api is not None:
+                return rest_api
+        finally:
+            read_lock.release()
+
+        write_lock = self._rest_api_cache_lock.gen_wlock()
+        try:
+            write_lock.acquire()
+            rest_api = self._rest_api_cache.get(catalog)
+            if rest_api is None:
+                options = self.options.copy()
+                options.update({RESTCatalogOptions.WAREHOUSE: catalog})
+                rest_api = RESTApi(options)
+                self._rest_api_cache[catalog] = rest_api
+            return rest_api
+        finally:
+            write_lock.release()
+
+    def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
+        read_lock = self._fs_cache_lock.gen_rlock()
+        try:
+            read_lock.acquire()
+            cache_value: Tuple[StorageType, AbstractFileSystem] = self._fs_cache.get(
                 storage_type
             )
             if cache_value is not None:
@@ -807,10 +810,10 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         finally:
             read_lock.release()
 
-        write_lock = self._cache_lock.gen_wlock()
+        write_lock = self._table_cache_lock.gen_wlock()
         try:
             write_lock.acquire()
-            cache_value: PaimonRealStorage = self._cache.get(pvfs_table_identifier)
+            cache_value: PaimonRealStorage = self._fs_cache.get(pvfs_table_identifier)
             if cache_value is not None and cache_value.need_refresh() is False:
                 return cache_value.file_system
             if storage_type == StorageType.LOCAL:
@@ -825,7 +828,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     expires_at_millis=load_token_response.expires_at_millis,
                     file_system=fs
                 )
-                self._cache[pvfs_table_identifier] = paimon_real_storage
+                self._fs_cache[pvfs_table_identifier] = paimon_real_storage
             else:
                 raise Exception(
                     f"Storage type: `{storage_type}` doesn't support now."
