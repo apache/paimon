@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
@@ -59,7 +60,6 @@ public class PartitionMarkDoneTrigger {
             new ListStateDescriptor<>(
                     "mark-done-pending-partitions",
                     new ListSerializer<>(StringSerializer.INSTANCE));
-    private static final LocalDateTime ILLEGAL_PARTITION_START_TIME = LocalDateTime.MIN;
 
     private final State state;
     private final PartitionTimeExtractor timeExtractor;
@@ -142,9 +142,9 @@ public class PartitionMarkDoneTrigger {
             long lastUpdateTime = entry.getValue();
             long partitionStartTime;
 
-            LocalDateTime partitionLocalDateTime = extractDateTime(partition);
+            Optional<LocalDateTime> partitionLocalDateTimeOpt = extractDateTime(partition);
             // skip illegal partition
-            if (ILLEGAL_PARTITION_START_TIME.equals(partitionLocalDateTime)) {
+            if (!partitionLocalDateTimeOpt.isPresent()) {
                 iter.remove();
                 continue;
             }
@@ -152,10 +152,15 @@ public class PartitionMarkDoneTrigger {
             if (watermarkEnabled) {
                 // watermark should be compared as UTC time
                 partitionStartTime =
-                        partitionLocalDateTime.atZone(ZoneId.of("UTC")).toInstant().toEpochMilli();
+                        partitionLocalDateTimeOpt
+                                .get()
+                                .atZone(ZoneId.of("UTC"))
+                                .toInstant()
+                                .toEpochMilli();
             } else {
                 partitionStartTime =
-                        partitionLocalDateTime
+                        partitionLocalDateTimeOpt
+                                .get()
                                 .atZone(ZoneId.systemDefault())
                                 .toInstant()
                                 .toEpochMilli();
@@ -172,14 +177,15 @@ public class PartitionMarkDoneTrigger {
     }
 
     @VisibleForTesting
-    LocalDateTime extractDateTime(String partition) {
+    Optional<LocalDateTime> extractDateTime(String partition) {
         try {
-            return timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition)));
+            return Optional.of(
+                    timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition))));
         } catch (DateTimeParseException e) {
             LOG.warn(
                     "Can't extract datetime from partition {}, please check configuration items 'partition.timestamp-formatter' and 'partition.timestamp-pattern'.",
                     partition);
-            return LocalDateTime.MIN;
+            return Optional.empty();
         }
     }
 

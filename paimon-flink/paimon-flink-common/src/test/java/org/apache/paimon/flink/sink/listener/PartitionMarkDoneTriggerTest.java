@@ -153,7 +153,7 @@ class PartitionMarkDoneTriggerTest {
                         toEpochMillis("2024-02-01"),
                         true);
 
-        assertThat(trigger.extractDateTime("unknown")).isEqualTo(LocalDateTime.MIN);
+        assertThat(trigger.extractDateTime("unknown")).isEmpty();
         trigger.notifyPartition("dt=__DEFAULT_PARTITION__", toEpochMillis("2024-02-01"));
         List<String> partitions = trigger.donePartitions(false, toEpochMillis("2024-02-03"));
         assertThat(partitions).isEmpty();
