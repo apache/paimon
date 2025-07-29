@@ -42,8 +42,8 @@ class RESTCatalogOptions:
 class PVFSOptions:
     TABLE_CACHE_SIZE = "table-cache-size"
     CACHE_ENABLED = "cache-enabled"
-    TABLE_CACHE_TTL = "table-cache-ttl"
+    TABLE_CACHE_TTL = "cache.expire-after-write"
     REST_CLIENT_CACHE_SIZE = "rest-client-cache-size"
     FS_CACHE_SIZE = "fs-cache-size"
     DEFAULT_CACHE_SIZE = 20
-    DEFAULT_CACHE_TTL = 600
+    DEFAULT_CACHE_TTL = 1800

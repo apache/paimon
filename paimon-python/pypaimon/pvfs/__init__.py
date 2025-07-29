@@ -130,7 +130,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 PVFSOptions.TABLE_CACHE_TTL, PVFSOptions.DEFAULT_CACHE_TTL
             )
         )
-        self._cache_enable = options.get(PVFSOptions.CACHE_ENABLED, False)
+        self._cache_enable = options.get(PVFSOptions.CACHE_ENABLED, True)
         if self._cache_enable:
             self._table_cache = TTLCache(maxsize=table_cache_size, ttl=cache_expired_time)
             self._table_cache_lock = rwlock.RWLockFair()
