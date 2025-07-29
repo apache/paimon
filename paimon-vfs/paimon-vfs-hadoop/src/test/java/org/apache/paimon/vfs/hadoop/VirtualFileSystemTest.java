@@ -34,11 +34,13 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.TrashPolicy;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -467,5 +469,22 @@ public abstract class VirtualFileSystemTest {
         Assert.assertTrue(fileStatuses[0].isDirectory());
         Assert.assertEquals(
                 new Path(vfsPath, "schema").toString(), fileStatuses[0].getPath().toString());
+    }
+
+    @Test
+    public void testTrash() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "object_table";
+        createObjectTable(databaseName, tableName);
+
+        Path vfsPath = new Path(vfsRoot, databaseName + "/" + tableName + "/test_dir/file.txt");
+        FSDataOutputStream out = vfs.create(vfsPath);
+        out.write("hello".getBytes());
+        out.close();
+
+        // Trash vfsPath, return false and trash action not executed
+        TrashPolicy trashPolicy = TrashPolicy.getInstance(new Configuration(), vfs);
+        Assert.assertFalse(trashPolicy.moveToTrash(vfsPath));
+        Assert.assertTrue(vfs.exists(vfsPath));
     }
 }

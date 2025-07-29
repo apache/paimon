@@ -393,7 +393,16 @@ public class PaimonVirtualFileSystem extends FileSystem {
 
     @Override
     public boolean mkdirs(Path f, FsPermission permission) throws IOException {
-        VFSIdentifier vfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(f));
+        String virtualPath = getVirtualPath(f);
+        // Hadoop TrashPolicy will mkdir /user/<root>/.Trash, and we should reject this operation
+        // and return false, which indicates trash is not supported for TrashPolicy
+        for (String component : virtualPath.split("/")) {
+            if (component.equals(".Trash")) {
+                LOG.info("PVFS do not support trash directory {}", f);
+                return false;
+            }
+        }
+        VFSIdentifier vfsIdentifier = vfsOperations.getVFSIdentifier(virtualPath);
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
             throw new IOException("Cannot mkdirs for virtual path " + f + " which is a catalog");
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
