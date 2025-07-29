@@ -482,7 +482,7 @@ public abstract class VirtualFileSystemTest {
         out.write("hello".getBytes());
         out.close();
 
-        // Trash vfsPath
+        // Trash vfsPath, return false and trash action not executed
         TrashPolicy trashPolicy = TrashPolicy.getInstance(new Configuration(), vfs);
         Assert.assertFalse(trashPolicy.moveToTrash(vfsPath));
         Assert.assertTrue(vfs.exists(vfsPath));
