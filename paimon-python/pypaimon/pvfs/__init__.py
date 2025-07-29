@@ -120,14 +120,17 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         options.update({RESTCatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
         self.options = options
         self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
-        fs_cache_size = self.__get_cache_size(PVFSOptions.FS_CACHE_SIZE)
-        rest_client_cache_size = self.__get_cache_size(PVFSOptions.REST_CLIENT_CACHE_SIZE)
-        table_cache_size = self.__get_cache_size(PVFSOptions.TABLE_CACHE_SIZE)
+        fs_cache_size = self.__get_cache_size(PVFSOptions.FS_CACHE_SIZE, PVFSOptions.DEFAULT_CACHE_SIZE)
+        rest_client_cache_size = self.__get_cache_size(
+            PVFSOptions.REST_CLIENT_CACHE_SIZE,
+            PVFSOptions.DEFAULT_CACHE_SIZE
+        )
+        table_cache_size = self.__get_cache_size(PVFSOptions.TABLE_CACHE_SIZE, PVFSOptions.DEFAULT_TABLE_CACHE_SIZE)
         cache_expired_time = (
-            PVFSOptions.TABLE_CACHE_TTL
+            PVFSOptions.DEFAULT_TABLE_CACHE_TTL
             if options is None
             else options.get(
-                PVFSOptions.TABLE_CACHE_TTL, PVFSOptions.DEFAULT_CACHE_TTL
+                PVFSOptions.TABLE_CACHE_TTL, PVFSOptions.DEFAULT_TABLE_CACHE_TTL
             )
         )
         self._cache_enable = options.get(PVFSOptions.CACHE_ENABLED, True)
@@ -140,11 +143,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         super().__init__(**kwargs)
 
     @staticmethod
-    def __get_cache_size(key: str, options: Dict = None) -> int:
+    def __get_cache_size(key: str, default: int, options: Dict = None) -> int:
         return (
-            PVFSOptions.DEFAULT_CACHE_SIZE
+            default
             if options is None
-            else options.get(key, PVFSOptions.DEFAULT_CACHE_SIZE)
+            else options.get(key, default)
         )
 
     def __rest_api(self, catalog: str):
