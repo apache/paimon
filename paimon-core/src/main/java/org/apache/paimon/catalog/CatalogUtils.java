@@ -33,6 +33,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
@@ -211,6 +212,10 @@ public class CatalogUtils {
             return toObjectTable(identifier, schema, dataFileIO);
         }
 
+        if (options.type() == TableType.LANCE_TABLE) {
+            return toLanceTable(identifier, schema, dataFileIO);
+        }
+
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
                         identifier,
@@ -302,6 +307,20 @@ public class CatalogUtils {
                 .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .location(location)
+                .comment(schema.comment())
+                .build();
+    }
+
+    private static LanceTable toLanceTable(
+            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+        Map<String, String> options = schema.options();
+        String location = options.get(CoreOptions.PATH.key());
+        return LanceTable.builder()
+                .fileIO(fileIO.apply(new Path(location)))
+                .identifier(identifier)
+                .location(location)
+                .rowType(schema.logicalRowType())
+                .options(options)
                 .comment(schema.comment())
                 .build();
     }

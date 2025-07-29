@@ -2039,6 +2039,36 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(files).containsExactlyInAnyOrder("my_file1", "my_file2", "dir1/my_file3");
     }
 
+    @Test
+    public void testCreateLanceTable() throws Exception {
+        Catalog catalog = newRestCatalogWithDataToken();
+        catalog.createDatabase("test_db", false);
+        List<String> tables = catalog.listTables("test_db");
+        assertThat(tables).isEmpty();
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", "lance-table");
+        options.put("a", "b");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        catalog.createTable(Identifier.create("test_db", "table1"), schema, false);
+
+        tables = catalog.listTables("test_db");
+        Table table = catalog.getTable(Identifier.create("test_db", "table1"));
+        assertThat(table.options()).containsEntry("a", "b");
+        assertThat(table.options().containsKey("path")).isTrue();
+        assertThat(table.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        assertThat(tables).containsExactlyInAnyOrder("table1");
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
