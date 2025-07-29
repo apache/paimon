@@ -41,6 +41,11 @@ public class ForceUpLevel0Compaction implements CompactStrategy {
         this.compactTriggerCount = maxCompactInterval == null ? null : new AtomicInteger(0);
     }
 
+    @Nullable
+    public Integer maxCompactInterval() {
+        return maxCompactInterval;
+    }
+
     @Override
     public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
         Optional<CompactUnit> pick = universal.pick(numLevels, runs);

@@ -31,7 +31,6 @@ import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
-import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -65,7 +64,11 @@ public class KeyValueFileStoreWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "radical");
-        assertCompactStrategy(options, ForceUpLevel0Compaction.class);
+        CompactStrategy compactStrategy = createCompactStrategy(options);
+        assertThat(compactStrategy).isInstanceOf(ForceUpLevel0Compaction.class);
+        Integer maxCompactInterval =
+                ((ForceUpLevel0Compaction) compactStrategy).maxCompactInterval();
+        assertThat(maxCompactInterval).isNull();
     }
 
     @Test
@@ -73,19 +76,22 @@ public class KeyValueFileStoreWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "gentle");
-        assertCompactStrategy(options, UniversalCompaction.class);
+        CompactStrategy compactStrategy = createCompactStrategy(options);
+        assertThat(compactStrategy).isInstanceOf(ForceUpLevel0Compaction.class);
+        Integer maxCompactInterval =
+                ((ForceUpLevel0Compaction) compactStrategy).maxCompactInterval();
+        assertThat(maxCompactInterval).isEqualTo(10);
     }
 
     @Test
     public void testForceUpLevel0CompactStrategy() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0.key(), "true");
-        assertCompactStrategy(options, ForceUpLevel0Compaction.class);
+        CompactStrategy compactStrategy = createCompactStrategy(options);
+        assertThat(compactStrategy).isInstanceOf(ForceUpLevel0Compaction.class);
     }
 
-    private void assertCompactStrategy(
-            Map<String, String> options, Class<? extends CompactStrategy> expected)
-            throws Exception {
+    private CompactStrategy createCompactStrategy(Map<String, String> options) throws Exception {
         KeyValueFileStoreWrite write = createWriteWithOptions(options);
         write.withIOManager(ioManager);
         TestKeyValueGenerator gen = new TestKeyValueGenerator();
@@ -96,8 +102,7 @@ public class KeyValueFileStoreWriteTest {
         MergeTreeWriter writer = (MergeTreeWriter) writerContainer.writer;
         try (MergeTreeCompactManager compactManager =
                 (MergeTreeCompactManager) writer.compactManager()) {
-            CompactStrategy compactStrategy = compactManager.getStrategy();
-            assertThat(compactStrategy).isInstanceOf(expected);
+            return compactManager.getStrategy();
         }
     }
 
