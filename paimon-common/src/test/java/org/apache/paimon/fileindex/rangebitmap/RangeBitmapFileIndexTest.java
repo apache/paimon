@@ -25,11 +25,13 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,9 +46,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RangeBitmapFileIndexTest {
 
     private static final int ROW_COUNT = 10000;
-    private static final int BOUND = 100;
+    private static final int BOUND = 1000000;
 
-    @RepeatedTest(5)
+    @RepeatedTest(10)
     public void test() {
         String prefix = "hello-";
         VarCharType varCharType = new VarCharType();
@@ -228,5 +230,55 @@ public class RangeBitmapFileIndexTest {
             assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                     .isEqualTo(bitmap);
         }
+    }
+
+    @Test
+    public void testSimple() {
+        IntType intType = new IntType();
+        FieldRef fieldRef = new FieldRef(0, "", intType);
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+        writer.writeRecord(1);
+        writer.writeRecord(3);
+        writer.writeRecord(5);
+        writer.writeRecord(7);
+        writer.writeRecord(9);
+
+        // build index
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        // test eq
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 1)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0));
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 2)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 3)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(1));
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 4)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 5)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(2));
+
+        // test gt
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 1)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(1, 2, 3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 6)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 9)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // test gte
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 1)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 6)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(3, 4));
+        assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 9)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(4));
     }
 }

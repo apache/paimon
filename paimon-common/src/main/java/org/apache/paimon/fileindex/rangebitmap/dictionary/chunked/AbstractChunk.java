@@ -36,6 +36,7 @@ public abstract class AbstractChunk implements Chunk {
         }
         int low = 0;
         int high = size() - 1;
+        int base = code() + 1;
         while (low <= high) {
             int mid = (low + high) >>> 1;
             int result = comparator.compare(get(mid), key);
@@ -44,10 +45,10 @@ public abstract class AbstractChunk implements Chunk {
             } else if (result < 0) {
                 low = mid + 1;
             } else {
-                return code() + mid + 1;
+                return base + mid;
             }
         }
-        return -(code() + low + 1);
+        return -(base + low + 1);
     }
 
     @Override
@@ -57,6 +58,9 @@ public abstract class AbstractChunk implements Chunk {
             return key();
         }
         int index = code - current - 1;
+        if (index < 0 || index >= size()) {
+            throw new IndexOutOfBoundsException("invalid code: " + code);
+        }
         return get(index);
     }
 

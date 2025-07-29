@@ -87,11 +87,18 @@ public class ChunkedDictionary implements Dictionary {
                 return found.code();
             }
         }
+        // key not found
+        if (low == 0) {
+            return -(low + 1);
+        }
         return get(low - 1).find(key);
     }
 
     @Override
     public Object find(int code) {
+        if (code < 0) {
+            throw new IndexOutOfBoundsException("invalid code: " + code);
+        }
         int low = 0;
         int high = size - 1;
         while (low <= high) {

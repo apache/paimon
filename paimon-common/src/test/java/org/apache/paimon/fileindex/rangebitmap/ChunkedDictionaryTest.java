@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for {@link ChunkedDictionary}. */
 public class ChunkedDictionaryTest {
@@ -80,19 +81,26 @@ public class ChunkedDictionaryTest {
             Integer value = expected.get(i);
 
             // find code by key
-            assertThat(dictionary.find(value)).isEqualTo(i);
+            int result = dictionary.find(value);
+            assertThat(result).isEqualTo(i);
+            assertThat(result).isEqualTo(Collections.binarySearch(expected, value));
 
             // find key by code
             assertThat(dictionary.find(i)).isEqualTo(value);
         }
 
+        // find key by code out of range
+        assertThatThrownBy(() -> dictionary.find(-1)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> dictionary.find(expected.size()))
+                .isInstanceOf(IndexOutOfBoundsException.class);
+
         // not exists
         for (int i = 0; i < 10; i++) {
             Integer value = random.nextInt(BOUND) + BOUND;
             // find code by key
-            assertThat(dictionary.find(value)).isNegative();
-            assertThat(dictionary.find(value))
-                    .isEqualTo(Collections.binarySearch(expected, value) + 1);
+            int result = dictionary.find(value);
+            assertThat(result).isNegative();
+            assertThat(result).isEqualTo(Collections.binarySearch(expected, value));
         }
     }
 
@@ -116,19 +124,26 @@ public class ChunkedDictionaryTest {
             BinaryString value = expected.get(i);
 
             // find code by key
-            assertThat(dictionary.find(value)).isEqualTo(i);
+            int result = dictionary.find(value);
+            assertThat(result).isEqualTo(i);
+            assertThat(result).isEqualTo(Collections.binarySearch(expected, value));
 
             // find key by code
             assertThat(dictionary.find(i)).isEqualTo(value);
         }
 
+        // find key by code out of range
+        assertThatThrownBy(() -> dictionary.find(-1)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> dictionary.find(expected.size()))
+                .isInstanceOf(IndexOutOfBoundsException.class);
+
         // not exists
         for (int i = 0; i < 10; i++) {
             BinaryString value = BinaryString.fromString(UUID.randomUUID().toString() + i);
             // find code by key
-            assertThat(dictionary.find(value)).isNegative();
-            assertThat(dictionary.find(value))
-                    .isEqualTo(Collections.binarySearch(expected, value) + 1);
+            int result = dictionary.find(value);
+            assertThat(result).isNegative();
+            assertThat(result).isEqualTo(Collections.binarySearch(expected, value));
         }
     }
 }

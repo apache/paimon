@@ -142,7 +142,9 @@ public class RangeBitmap {
         }
 
         int code = getDictionary().find(key);
-        return code < 0 ? getBitSliceIndexBitmap().gte(-code) : getBitSliceIndexBitmap().gte(code);
+        return code < 0
+                ? getBitSliceIndexBitmap().gte(-code - 1)
+                : getBitSliceIndexBitmap().gte(code);
     }
 
     public RoaringBitmap32 gt(Object key) {
@@ -155,7 +157,9 @@ public class RangeBitmap {
         }
 
         int code = getDictionary().find(key);
-        return code < 0 ? getBitSliceIndexBitmap().gte(-code) : getBitSliceIndexBitmap().gt(code);
+        return code < 0
+                ? getBitSliceIndexBitmap().gte(-code - 1)
+                : getBitSliceIndexBitmap().gt(code);
     }
 
     public RoaringBitmap32 in(List<Object> keys) {
