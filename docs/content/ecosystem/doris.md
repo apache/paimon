@@ -154,7 +154,7 @@ See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/
       <td>true</td>
     </tr>
     <tr>
-      <td><code>Varchar</code></td>
+      <td><code>VarChar</code></td>
       <td><code>VarCharType</code></td>
       <td>true</td>
     </tr>
