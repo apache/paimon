@@ -39,14 +39,3 @@ class Schema:
         FIELD_PRIMARY_KEYS, default_factory=list)
     options: Dict[str, str] = json_field(FIELD_OPTIONS, default_factory=dict)
     comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
-
-    @staticmethod
-    def from_dict(data: dict):
-        fields = [DataField.from_dict(field) for field in data["fields"]]
-        return Schema(
-            fields=fields,
-            partition_keys=data["partitionKeys"],
-            primary_keys=data["primaryKeys"],
-            options=data["options"],
-            comment=data.get("comment"),
-        )

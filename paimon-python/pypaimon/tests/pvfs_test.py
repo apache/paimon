@@ -57,7 +57,8 @@ class PVFSTestCase(unittest.TestCase):
             'warehouse': 'test_warehouse',
             'dlf.region': 'cn-hangzhou',
             "token.provider": "bear",
-            'token': self.token
+            'token': self.token,
+            'cache-enabled': True
         }
         self.pvfs = PaimonVirtualFileSystem(options)
         self.database = 'test_database'

@@ -17,7 +17,7 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Type, Dict, TypeVar
+from typing import Any, Type, Dict, TypeVar, get_origin, get_args, Union
 
 T = TypeVar("T")
 
@@ -74,8 +74,13 @@ class JSON:
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
-            if is_dataclass(field_info.type):
-                type_mapping[json_name] = field_info.type
+            origin_type = get_origin(field_info.type)
+            args = get_args(field_info.type)
+            field_type = field_info.type
+            if origin_type is Union and len(args) == 2:
+                field_type = args[0]
+            if is_dataclass(field_type):
+                type_mapping[json_name] = field_type
 
         # Map JSON data to field names
         kwargs = {}

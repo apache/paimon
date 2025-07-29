@@ -40,5 +40,7 @@ class RESTCatalogOptions:
 
 
 class PVFSOptions:
-    DEFAULT_CACHE_SIZE = 20
-    CACHE_SIZE = "cache_size"
+    CACHE_ENABLED = "cache-enabled"
+    TABLE_CACHE_TTL = "cache.expire-after-write"
+    DEFAULT_TABLE_CACHE_TTL = 1800
+    DEFAULT_CACHE_SIZE = 2**31 - 1
