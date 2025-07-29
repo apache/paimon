@@ -20,9 +20,9 @@ package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.rest.SimpleHttpClient;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SimpleHttpClient;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -42,7 +42,6 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 /** Report partition submission information to remote http server. */
 public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
-    private SimpleHttpClient client;
     private String url;
     private ObjectMapper mapper;
 
@@ -72,8 +71,6 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         this.mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-
-        this.client = new SimpleHttpClient(THREAD_NAME);
     }
 
     @Override
@@ -95,9 +92,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
     }
 
     @Override
-    public void close() throws IOException {
-        client.close();
-    }
+    public void close() throws IOException {}
 
     /** RestRequest only for HttpReportMarkDoneAction. */
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -175,7 +170,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
     public HttpReportMarkDoneResponse post(
             HttpReportMarkDoneRequest body, Map<String, String> headers) throws IOException {
-        String responseBodyStr = this.client.post(url, mapper.writeValueAsBytes(body), headers);
+        String responseBodyStr = SimpleHttpClient.INSTANCE.post(url, body, headers);
         return mapper.readValue(responseBodyStr, HttpReportMarkDoneResponse.class);
     }
 }

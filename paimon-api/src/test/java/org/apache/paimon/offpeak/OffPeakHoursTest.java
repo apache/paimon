@@ -21,8 +21,6 @@ package org.apache.paimon.offpeak;
 import org.apache.paimon.OffPeakHours;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,7 +30,6 @@ public class OffPeakHoursTest {
     @Test
     public void testDisabledInstance() {
         OffPeakHours disabled = OffPeakHours.DISABLED;
-        assertThat(disabled.isOffPeak()).isFalse();
         for (int hour = 0; hour < 24; hour++) {
             assertThat(disabled.isOffPeak(hour)).isFalse();
         }
@@ -40,36 +37,22 @@ public class OffPeakHoursTest {
 
     @Test
     public void testGetInstanceWithDisabledValues() {
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(-1, -1);
+        OffPeakHours offPeakHours = OffPeakHours.create(-1, -1);
         assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
     }
 
     @Test
     public void testGetInstanceWithSameStartAndEnd() {
         for (int hour = 0; hour < 24; hour++) {
-            OffPeakHours offPeakHours = OffPeakHours.getInstance(hour, hour);
+            OffPeakHours offPeakHours = OffPeakHours.create(hour, hour);
             assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {-2, -1, 24, 25, 100})
-    public void testGetInstanceWithInvalidStartHour(int invalidHour) {
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(invalidHour, 10);
-        assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {-2, -1, 24, 25, 100})
-    public void testGetInstanceWithInvalidEndHour(int invalidHour) {
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(10, invalidHour);
-        assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
     }
 
     @Test
     public void testNormalRangeOffPeakHours() {
         // Test normal range: 9 AM to 5 PM (9-17)
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(9, 17);
+        OffPeakHours offPeakHours = OffPeakHours.create(9, 17);
 
         // Hours before start should not be off-peak
         for (int hour = 0; hour < 9; hour++) {
@@ -95,7 +78,7 @@ public class OffPeakHoursTest {
 
     @Test
     public void testWrapAroundRangeOffPeakHours() {
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(22, 6);
+        OffPeakHours offPeakHours = OffPeakHours.create(22, 6);
 
         // Hours before end (0-5) should be off-peak
         for (int hour = 0; hour < 6; hour++) {
@@ -122,7 +105,7 @@ public class OffPeakHoursTest {
     @Test
     public void testSingleHourRange() {
         // Test single hour range: 12 to 13
-        OffPeakHours offPeakHours = OffPeakHours.getInstance(12, 13);
+        OffPeakHours offPeakHours = OffPeakHours.create(12, 13);
 
         // Only hour 12 should be off-peak
         for (int hour = 0; hour < 24; hour++) {

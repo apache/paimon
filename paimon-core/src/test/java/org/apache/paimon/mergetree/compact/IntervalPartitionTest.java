@@ -185,6 +185,7 @@ public class IntervalPartitionTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 

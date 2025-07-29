@@ -26,13 +26,14 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{NamedRelation, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateNamedStruct, CreateStruct, Expression, GetArrayItem, GetStructField, If, IsNull, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
+import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, If, IsNull, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
+import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, Metadata, StructField, StructType}
+import org.apache.spark.sql.types._
 
 import scala.collection.mutable
 
@@ -344,8 +345,12 @@ object PaimonV2WriteCommand {
 object PaimonDynamicPartitionOverwrite {
   def unapply(o: OverwritePartitionsDynamic): Option[(DataSourceV2Relation, FileStoreTable)] = {
     if (o.query.resolved) {
+      // when overwrite dynamic is not supported, fallback to use v1 write
       o.table match {
-        case r: DataSourceV2Relation if r.table.isInstanceOf[SparkTable] =>
+        case r: DataSourceV2Relation
+            if r.table.isInstanceOf[SparkTable] && !r.table
+              .capabilities()
+              .contains(TableCapability.OVERWRITE_DYNAMIC) =>
           Some((r, r.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]))
         case _ => None
       }

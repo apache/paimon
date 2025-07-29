@@ -50,11 +50,15 @@ under the License.
             <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
         </dependency>
 
-        <!-- REST Catalog dependencies -->
         <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>${okhttp.version}</version>
+            <groupId>org.apache.httpcomponents.core5</groupId>
+            <artifactId>httpcore5</artifactId>
+            <version>${apache.hc.core.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>${apache.hc.client.version}</version>
         </dependency>
     </dependencies>
 
@@ -90,24 +94,16 @@ under the License.
                                     <include>org.apache.paimon:paimon-shade-guava-30</include>
                                     <include>org.apache.paimon:paimon-shade-caffeine-2</include>
 
-                                    <!-- okhttp3 -->
-                                    <include>com.squareup.okhttp3:okhttp</include>
-                                    <include>com.squareup.okio:okio-jvm</include>
-                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
+                                    <!-- apache httpcomponents 5 -->
+                                    <include>org.apache.httpcomponents.core5:httpcore5</include>
+                                    <include>org.apache.httpcomponents.core5:httpcore5-h2</include>
+                                    <include>org.apache.httpcomponents.client5:httpclient5</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
                                 <relocation>
-                                    <pattern>okhttp3</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>kotlin</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>okio</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
+                                    <pattern>org.apache.hc</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.hc</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>
@@ -116,14 +112,6 @@ under the License.
                                     <artifact>*</artifact>
                                     <excludes>
                                         <exclude>META-INF/LICENSE.txt</exclude>
-                                    </excludes>
-                                </filter>
-
-                                <!-- Exclude okhttp NOTICE. -->
-                                <filter>
-                                    <artifact>*</artifact>
-                                    <excludes>
-                                        <exclude>okhttp3/internal/publicsuffix/NOTICE</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

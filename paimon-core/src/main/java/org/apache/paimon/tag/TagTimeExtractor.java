@@ -36,12 +36,16 @@ public interface TagTimeExtractor {
     /** Extract time from snapshot time millis. */
     class ProcessTimeExtractor implements TagTimeExtractor {
 
+        private final ZoneId processTimeZoneId;
+
+        private ProcessTimeExtractor(ZoneId processTimeZoneId) {
+            this.processTimeZoneId = processTimeZoneId;
+        }
+
         @Override
         public Optional<LocalDateTime> extract(long timeMilli, @Nullable Long watermark) {
             return Optional.of(
-                    Instant.ofEpochMilli(timeMilli)
-                            .atZone(ZoneId.systemDefault())
-                            .toLocalDateTime());
+                    Instant.ofEpochMilli(timeMilli).atZone(processTimeZoneId).toLocalDateTime());
         }
     }
 
@@ -82,7 +86,7 @@ public interface TagTimeExtractor {
             case BATCH:
                 return null;
             case PROCESS_TIME:
-                return new ProcessTimeExtractor();
+                return new ProcessTimeExtractor(options.sinkProcessTimeZone());
             case WATERMARK:
                 return new WatermarkExtractor(ZoneId.of(options.sinkWatermarkTimeZone()));
             default:

@@ -19,13 +19,24 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.HttpStatus;
+import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.net.URIBuilder;
+
+import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.io.UnsupportedEncodingException;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +44,8 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
+
+    private static final Joiner.MapJoiner FORM_JOINER = Joiner.on("&").withKeyValueSeparator("=");
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
@@ -126,5 +139,57 @@ public class RESTUtil {
                 }
             }
         }
+    }
+
+    public static String encodedBody(Object body) {
+        if (body instanceof Map) {
+            Map<?, ?> formData = (Map<?, ?>) body;
+            ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+            formData.forEach(
+                    (key, value) ->
+                            builder.put(
+                                    encodeString(String.valueOf(key)),
+                                    encodeString(String.valueOf(value))));
+            return FORM_JOINER.join(builder.build());
+        } else if (body != null) {
+            try {
+                return RESTApi.toJson(body);
+            } catch (JsonProcessingException e) {
+                throw new RESTException(e, "Failed to encode request body: %s", body);
+            }
+        }
+        return null;
+    }
+
+    public static String extractResponseBodyAsString(CloseableHttpResponse response)
+            throws IOException, ParseException {
+        if (response.getEntity() == null) {
+            return null;
+        }
+
+        return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+    }
+
+    public static boolean isSuccessful(CloseableHttpResponse response) {
+        int code = response.getCode();
+        return code == HttpStatus.SC_OK
+                || code == HttpStatus.SC_ACCEPTED
+                || code == HttpStatus.SC_NO_CONTENT;
+    }
+
+    public static String buildRequestUrl(String url, Map<String, String> queryParams) {
+        try {
+            if (queryParams != null && !queryParams.isEmpty()) {
+                URIBuilder builder = new URIBuilder(url);
+                for (Map.Entry<String, String> entry : queryParams.entrySet()) {
+                    builder.addParameter(entry.getKey(), entry.getValue());
+                }
+                url = builder.build().toString();
+            }
+        } catch (URISyntaxException e) {
+            throw new RESTException(e, "build request URL failed.");
+        }
+
+        return url;
     }
 }

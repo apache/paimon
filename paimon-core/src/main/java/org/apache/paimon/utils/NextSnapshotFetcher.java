@@ -51,7 +51,7 @@ public class NextSnapshotFetcher {
         }
 
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotIdFromFileSystem();
         // No snapshot now
         if (earliestSnapshotId == null || earliestSnapshotId <= nextSnapshotId) {
             if ((earliestSnapshotId == null && nextSnapshotId > 1)

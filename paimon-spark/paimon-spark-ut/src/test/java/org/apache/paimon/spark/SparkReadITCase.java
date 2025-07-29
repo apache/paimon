@@ -592,8 +592,9 @@ public class SparkReadITCase extends SparkReadTestBase {
         Dataset<Row> dataset = spark.read().format("paimon").load(tablePath.toString());
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
                 .isEqualTo("[[1,10,2022-07-20]]");
-        assertThat(dataset.select("coupon_info").collectAsList().toString())
-                .isEqualTo("[[WrappedArray(loyalty_discount, shipping_discount)]]");
+
+        RowTestHelper.checkRowEquals(
+                dataset.select("coupon_info"), row(array("loyalty_discount", "shipping_discount")));
 
         // test drop table
         assertThat(
@@ -647,37 +648,38 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     private void innerTestNestedType(Dataset<Row> dataset) {
-        List<Row> results = dataset.collectAsList();
-        assertThat(results.toString())
-                .isEqualTo(
-                        "[[1,WrappedArray(AAA, BBB),[[1.0,WrappedArray(null)],1]], "
-                                + "[2,WrappedArray(CCC, DDD),[[null,WrappedArray(true)],null]], "
-                                + "[3,WrappedArray(null, null),[[2.0,WrappedArray(true, false)],2]], "
-                                + "[4,WrappedArray(null, EEE),[[3.0,WrappedArray(true, false, true)],3]]]");
+        RowTestHelper.checkRowEquals(
+                dataset,
+                Arrays.asList(
+                        row(1, array("AAA", "BBB"), row(row(1.0, array(null)), 1L)),
+                        row(2, array("CCC", "DDD"), row(row(null, array(true)), null)),
+                        row(3, array(null, null), row(row(2.0, array(true, false)), 2L)),
+                        row(4, array(null, "EEE"), row(row(3.0, array(true, false, true)), 3L))));
 
-        results = dataset.select("a").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1], [2], [3], [4]]");
+        RowTestHelper.checkRowEquals(
+                dataset.select("a"), Arrays.asList(row(1), row(2), row(3), row(4)));
 
-        results = dataset.select("c.c1").collectAsList();
-        assertThat(results.toString())
-                .isEqualTo(
-                        "[[[1.0,WrappedArray(null)]], [[null,WrappedArray(true)]], "
-                                + "[[2.0,WrappedArray(true, false)]], "
-                                + "[[3.0,WrappedArray(true, false, true)]]]");
+        RowTestHelper.checkRowEquals(
+                dataset.select("c.c1"),
+                Arrays.asList(
+                        row(row(1.0, array(null))),
+                        row(row(null, array(true))),
+                        row(row(2.0, array(true, false))),
+                        row(row(3.0, array(true, false, true)))));
 
-        results = dataset.select("c.c2").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1], [null], [2], [3]]");
+        RowTestHelper.checkRowEquals(
+                dataset.select("c.c2"), Arrays.asList(row(1), row(null), row(2), row(3)));
 
-        results = dataset.select("c.c1.c11").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1.0], [null], [2.0], [3.0]]");
+        RowTestHelper.checkRowEquals(
+                dataset.select("c.c1.c11"), Arrays.asList(row(1.0), row(null), row(2.0), row(3.0)));
 
-        results = dataset.select("c.c1.c12").collectAsList();
-        assertThat(results.toString())
-                .isEqualTo(
-                        "[[WrappedArray(null)], "
-                                + "[WrappedArray(true)], "
-                                + "[WrappedArray(true, false)], "
-                                + "[WrappedArray(true, false, true)]]");
+        RowTestHelper.checkRowEquals(
+                dataset.select("c.c1.c12"),
+                Arrays.asList(
+                        row(array(null)),
+                        row(array(true)),
+                        row(array(true, false)),
+                        row(array(true, false, true))));
     }
 
     private void innerTestSimpleTypeFilterPushDown(Dataset<Row> dataset) {
@@ -689,28 +691,27 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     private void innerTestNestedTypeFilterPushDown(Dataset<Row> dataset) {
-        List<Row> results = dataset.filter("a < 4").select("a").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1], [2], [3]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("a < 4").select("a"), Arrays.asList(row(1), row(2), row(3)));
 
-        results = dataset.filter("array_contains(b, 'AAA')").select("b").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[WrappedArray(AAA, BBB)]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("array_contains(b, 'AAA')").select("b"), row(array("AAA", "BBB")));
 
-        results = dataset.filter("c.c1.c11 is null").select("a", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[2,[[null,WrappedArray(true)],null]]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("c.c1.c11 is null").select("a", "c"),
+                row(2, row(row(null, array(true)), null)));
 
-        results = dataset.filter("c.c1.c11 = 1.0").select("a", "c.c1").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1,[1.0,WrappedArray(null)]]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("c.c1.c11 = 1.0").select("a", "c.c1"),
+                row(1, row(1.0, array(null))));
 
-        results = dataset.filter("c.c2 is null").select("a", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[2,[[null,WrappedArray(true)],null]]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("c.c2 is null").select("a", "c"),
+                row(2, row(row(null, array(true)), null)));
 
-        results =
-                dataset.filter("array_contains(c.c1.c12, false)")
-                        .select("a", "c.c1.c12", "c.c2")
-                        .collectAsList();
-        assertThat(results.toString())
-                .isEqualTo(
-                        "[[3,WrappedArray(true, false),2], [4,WrappedArray(true, false, true),3]]");
+        RowTestHelper.checkRowEquals(
+                dataset.filter("array_contains(c.c1.c12, false)").select("a", "c.c1.c12", "c.c2"),
+                Arrays.asList(row(3, array(true, false), 2), row(4, array(true, false, true), 3)));
     }
 
     @Test

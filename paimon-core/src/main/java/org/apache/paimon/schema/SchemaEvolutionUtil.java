@@ -42,6 +42,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -131,13 +132,17 @@ public class SchemaEvolutionUtil {
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
      * @param filters the filters
+     * @param keepNewFieldFilter true if keep new field filter, the new field filter needs to be
+     *     properly handled
      * @return the data filters
      */
-    @Nullable
-    public static List<Predicate> devolveDataFilters(
-            List<DataField> tableFields, List<DataField> dataFields, List<Predicate> filters) {
+    public static List<Predicate> devolveFilters(
+            List<DataField> tableFields,
+            List<DataField> dataFields,
+            List<Predicate> filters,
+            boolean keepNewFieldFilter) {
         if (filters == null) {
-            return null;
+            return Collections.emptyList();
         }
 
         Map<String, DataField> nameToTableFields =
@@ -154,7 +159,7 @@ public class SchemaEvolutionUtil {
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
-                        return Optional.empty();
+                        return keepNewFieldFilter ? Optional.of(predicate) : Optional.empty();
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(

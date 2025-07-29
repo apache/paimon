@@ -20,6 +20,8 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
 
+from .api_response import Schema
+from .identifier import Identifier
 from .rest_json import json_field
 
 
@@ -43,3 +45,21 @@ class AlterDatabaseRequest(RESTRequest):
 
     removals: List[str] = json_field(FIELD_REMOVALS)
     updates: Dict[str, str] = json_field(FIELD_UPDATES)
+
+
+@dataclass
+class RenameTableRequest(RESTRequest):
+    FIELD_SOURCE = "source"
+    FIELD_DESTINATION = "destination"
+
+    source: Identifier = json_field(FIELD_SOURCE)
+    destination: Identifier = json_field(FIELD_DESTINATION)
+
+
+@dataclass
+class CreateTableRequest(RESTRequest):
+    FIELD_IDENTIFIER = "identifier"
+    FIELD_SCHEMA = "schema"
+
+    identifier: Identifier = json_field(FIELD_IDENTIFIER)
+    schema: Schema = json_field(FIELD_SCHEMA)

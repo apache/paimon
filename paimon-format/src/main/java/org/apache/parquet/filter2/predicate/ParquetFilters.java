@@ -131,7 +131,7 @@ public class ParquetFilters {
         @Override
         public FilterPredicate visitOr(List<FilterPredicate> children) {
             if (children.size() != 2) {
-                throw new RuntimeException("Illegal and children: " + children.size());
+                throw new RuntimeException("Illegal or children: " + children.size());
             }
 
             return FilterApi.or(children.get(0), children.get(1));

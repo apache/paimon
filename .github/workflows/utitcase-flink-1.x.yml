@@ -23,6 +23,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - 'paimon-python/**'
 
 env:
   JDK_VERSION: 8

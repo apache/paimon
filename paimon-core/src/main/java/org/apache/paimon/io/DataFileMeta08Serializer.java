@@ -134,6 +134,7 @@ public class DataFileMeta08Serializer implements Serializable {
                 row.isNullAt(14) ? null : row.getBinary(14),
                 null,
                 null,
+                null,
                 null);
     }
 }

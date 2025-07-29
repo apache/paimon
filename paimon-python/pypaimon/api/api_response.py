@@ -21,8 +21,8 @@ from typing import Dict, Optional, Generic, List
 from dataclasses import dataclass
 
 from .rest_json import json_field
+from .schema import Schema
 from .typedef import T
-from .data_types import DataField
 
 
 @dataclass
@@ -37,18 +37,17 @@ class RESTResponse(ABC):
 
 @dataclass
 class ErrorResponse(RESTResponse):
-
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
     message: Optional[str] = json_field("message", default=None)
     code: Optional[int] = json_field("code", default=None)
 
     def __init__(
-        self,
-        resource_type: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        message: Optional[str] = None,
-        code: Optional[int] = None,
+            self,
+            resource_type: Optional[str] = None,
+            resource_name: Optional[str] = None,
+            message: Optional[str] = None,
+            code: Optional[int] = None,
     ):
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -84,6 +83,14 @@ class AuditRESTResponse(RESTResponse):
 
     def get_updated_by(self) -> Optional[str]:
         return self.updated_by
+
+    def put_audit_options_to(self, options: dict[str, str]) -> None:
+        """Puts audit-related options into the provided dictionary."""
+        options[self.FIELD_OWNER] = self.get_owner()
+        options[self.FIELD_CREATED_BY] = str(self.get_created_by())
+        options[self.FIELD_CREATED_AT] = str(self.get_created_at())
+        options[self.FIELD_UPDATED_BY] = str(self.get_updated_by())
+        options[self.FIELD_UPDATED_AT] = str(self.get_updated_at())
 
 
 class PagedResponse(RESTResponse, Generic[T]):
@@ -128,54 +135,6 @@ class ListTablesResponse(PagedResponse[str]):
 
 
 @dataclass
-class Schema:
-    FIELD_FIELDS = "fields"
-    FIELD_PARTITION_KEYS = "partitionKeys"
-    FIELD_PRIMARY_KEYS = "primaryKeys"
-    FIELD_OPTIONS = "options"
-    FIELD_COMMENT = "comment"
-
-    fields: List[DataField] = json_field(FIELD_FIELDS, default_factory=list)
-    partition_keys: List[str] = json_field(
-        FIELD_PARTITION_KEYS, default_factory=list)
-    primary_keys: List[str] = json_field(
-        FIELD_PRIMARY_KEYS, default_factory=list)
-    options: Dict[str, str] = json_field(FIELD_OPTIONS, default_factory=dict)
-    comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
-
-
-@dataclass
-class TableSchema:
-    """Table schema with ID"""
-
-    id: int
-    fields: List[DataField]
-    highest_field_id: int
-    partition_keys: List[str]
-    primary_keys: List[str]
-    options: Dict[str, str]
-    comment: Optional[str]
-
-    def to_schema(self) -> Schema:
-        return Schema(
-            fields=self.fields,
-            partition_keys=self.partition_keys,
-            primary_keys=self.primary_keys,
-            options=self.options,
-            comment=self.comment,
-        )
-
-
-@dataclass
-class TableMetadata:
-    """Table metadata"""
-
-    schema: TableSchema
-    is_external: bool
-    uuid: str
-
-
-@dataclass
 class RESTToken:
     """REST authentication token"""
 
@@ -203,18 +162,18 @@ class GetTableResponse(AuditRESTResponse):
     schema: Optional[Schema] = json_field(FIELD_SCHEMA, default=None)
 
     def __init__(
-        self,
-        id: str,
-        name: str,
-        path: str,
-        is_external: bool,
-        schema_id: int,
-        schema: Schema,
-        owner: Optional[str] = None,
-        created_at: Optional[int] = None,
-        created_by: Optional[str] = None,
-        updated_at: Optional[int] = None,
-        updated_by: Optional[str] = None,
+            self,
+            id: str,
+            name: str,
+            path: str,
+            is_external: bool,
+            schema_id: int,
+            schema: Schema,
+            owner: Optional[str] = None,
+            created_at: Optional[int] = None,
+            created_by: Optional[str] = None,
+            updated_at: Optional[int] = None,
+            updated_by: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
@@ -223,6 +182,24 @@ class GetTableResponse(AuditRESTResponse):
         self.is_external = is_external
         self.schema_id = schema_id
         self.schema = schema
+
+    def get_id(self) -> str:
+        return self.id
+
+    def get_name(self) -> str:
+        return self.name
+
+    def get_path(self) -> str:
+        return self.path
+
+    def get_is_external(self) -> bool:
+        return self.is_external
+
+    def get_schema_id(self) -> int:
+        return self.schema_id
+
+    def get_schema(self) -> Schema:
+        return self.schema
 
 
 @dataclass
@@ -239,16 +216,16 @@ class GetDatabaseResponse(AuditRESTResponse):
         FIELD_OPTIONS, default_factory=dict)
 
     def __init__(
-        self,
-        id: Optional[str] = None,
-        name: Optional[str] = None,
-        location: Optional[str] = None,
-        options: Optional[Dict[str, str]] = None,
-        owner: Optional[str] = None,
-        created_at: Optional[int] = None,
-        created_by: Optional[str] = None,
-        updated_at: Optional[int] = None,
-        updated_by: Optional[str] = None,
+            self,
+            id: Optional[str] = None,
+            name: Optional[str] = None,
+            location: Optional[str] = None,
+            options: Optional[Dict[str, str]] = None,
+            owner: Optional[str] = None,
+            created_at: Optional[int] = None,
+            created_by: Optional[str] = None,
+            updated_at: Optional[int] = None,
+            updated_by: Optional[str] = None,
     ):
         super().__init__(owner, created_at, created_by, updated_at, updated_by)
         self.id = id
@@ -279,3 +256,12 @@ class ConfigResponse(RESTResponse):
         merged = options.copy()
         merged.update(self.defaults)
         return merged
+
+
+@dataclass
+class GetTableTokenResponse(RESTResponse):
+    FIELD_TOKEN = "token"
+    FIELD_EXPIRES_AT_MILLIS = "expiresAtMillis"
+
+    token: Dict[str, str] = json_field(FIELD_TOKEN, default=None)
+    expires_at_millis: Optional[int] = json_field(FIELD_EXPIRES_AT_MILLIS, default=None)

@@ -283,7 +283,10 @@ public class FlinkCatalog extends AbstractCatalog {
     public List<String> listTables(String databaseName)
             throws DatabaseNotExistException, CatalogException {
         try {
-            return catalog.listTables(databaseName);
+            List<String> tablesAndViews = new ArrayList<>();
+            tablesAndViews.addAll(catalog.listViews(databaseName));
+            tablesAndViews.addAll(catalog.listTables(databaseName));
+            return tablesAndViews;
         } catch (Catalog.DatabaseNotExistException e) {
             throw new DatabaseNotExistException(getName(), e.database());
         }

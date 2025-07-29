@@ -245,8 +245,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                         () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
                 .satisfies(
                         anyCauseMatches(
-                                RuntimeException.class,
-                                "Cannot find a time travel version for unknown"));
+                                IllegalArgumentException.class, "Tag 'unknown' doesn't exist"));
     }
 
     @Test

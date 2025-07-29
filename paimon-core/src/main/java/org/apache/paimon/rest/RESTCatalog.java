@@ -971,7 +971,7 @@ public class RESTCatalog implements Catalog {
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
         return dataTokenEnabled
-                ? new RESTTokenFileIO(catalogLoader(), this, identifier, path)
+                ? new RESTTokenFileIO(context, api, identifier, path)
                 : fileIOFromOptions(path);
     }
 

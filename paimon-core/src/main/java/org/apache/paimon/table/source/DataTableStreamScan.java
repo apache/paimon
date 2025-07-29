@@ -211,7 +211,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
-            if (shouldDelaySnapshot(nextSnapshotId)) {
+            if (shouldDelaySnapshot(snapshot)) {
                 return SnapshotNotExistPlan.INSTANCE;
             }
 
@@ -220,6 +220,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 SnapshotReader.Plan overwritePlan = handleOverwriteSnapshot(snapshot);
                 if (overwritePlan != null) {
                     nextSnapshotId++;
+                    if (overwritePlan.splits().isEmpty()) {
+                        continue;
+                    }
                     return overwritePlan;
                 }
             }
@@ -229,6 +232,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
                 nextSnapshotId++;
+                if (plan.splits().isEmpty()) {
+                    continue;
+                }
                 return plan;
             } else {
                 nextSnapshotId++;
@@ -236,17 +242,13 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
     }
 
-    private boolean shouldDelaySnapshot(long snapshotId) {
+    private boolean shouldDelaySnapshot(Snapshot snapshot) {
         if (scanDelayMillis == null) {
             return false;
         }
 
         long snapshotMills = System.currentTimeMillis() - scanDelayMillis;
-        if (snapshotManager.snapshotExists(snapshotId)
-                && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
-            return true;
-        }
-        return false;
+        return snapshot.timeMillis() > snapshotMills;
     }
 
     @Nullable

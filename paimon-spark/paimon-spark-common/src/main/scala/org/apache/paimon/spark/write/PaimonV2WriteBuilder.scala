@@ -59,11 +59,12 @@ class PaimonV2WriteBuilder(table: FileStoreTable, writeSchema: StructType)
   }
 
   override def overwriteDynamicPartitions(): WriteBuilder = {
-    if (overwritePartitions.isDefined) {
+    if (overwritePartitions.exists(_.nonEmpty)) {
       throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
     }
 
     overwriteDynamic = true
+    overwritePartitions = Option.apply(Map.empty[String, String])
     this
   }
 }

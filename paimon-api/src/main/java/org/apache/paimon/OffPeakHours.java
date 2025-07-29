@@ -18,15 +18,14 @@
 
 package org.apache.paimon;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.LocalDateTime;
 
 /** OffPeakHours. */
 public abstract class OffPeakHours {
-    private static final Logger LOG = LoggerFactory.getLogger(OffPeakHours.class);
+
+    public abstract boolean isOffPeak();
+
+    public abstract boolean isOffPeak(int targetHour);
 
     public static final OffPeakHours DISABLED =
             new OffPeakHours() {
@@ -41,24 +40,8 @@ public abstract class OffPeakHours {
                 }
             };
 
-    /**
-     * @param startHour inclusive
-     * @param endHour exclusive
-     */
-    public static OffPeakHours getInstance(int startHour, int endHour) {
+    public static OffPeakHours create(int startHour, int endHour) {
         if (startHour == -1 && endHour == -1) {
-            return DISABLED;
-        }
-
-        if (!isValidHour(startHour) || !isValidHour(endHour)) {
-            if (LOG.isWarnEnabled()) {
-                LOG.warn(
-                        "Ignoring invalid start/end hour for peak hour : start = "
-                                + startHour
-                                + " end = "
-                                + endHour
-                                + ". Valid numbers are [0-23]");
-            }
             return DISABLED;
         }
 
@@ -69,24 +52,11 @@ public abstract class OffPeakHours {
         return new OffPeakHoursImpl(startHour, endHour);
     }
 
-    private static boolean isValidHour(int hour) {
-        return 0 <= hour && hour <= 23;
-    }
-
-    /** Returns whether {@code targetHour} is off-peak hour. */
-    public abstract boolean isOffPeak(int targetHour);
-
-    /** Returns whether it is off-peak hour. */
-    public abstract boolean isOffPeak();
-
     private static class OffPeakHoursImpl extends OffPeakHours {
-        final int startHour;
-        final int endHour;
 
-        /**
-         * @param startHour inclusive
-         * @param endHour exclusive
-         */
+        private final int startHour;
+        private final int endHour;
+
         OffPeakHoursImpl(int startHour, int endHour) {
             this.startHour = startHour;
             this.endHour = endHour;
@@ -94,7 +64,7 @@ public abstract class OffPeakHours {
 
         @Override
         public boolean isOffPeak() {
-            return isOffPeak(ZonedDateTime.now(ZoneId.systemDefault()).getHour());
+            return isOffPeak(LocalDateTime.now().getHour());
         }
 
         @Override

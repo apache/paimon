@@ -45,18 +45,18 @@ public abstract class RESTCatalogITCaseBase extends CatalogITCaseBase {
 
     protected static final String DATABASE_NAME = "mydb";
     protected static final String TABLE_NAME = "t1";
+    protected static final String INIT_TOKEN = "init_token";
 
     protected RESTCatalogServer restCatalogServer;
 
     private String serverUrl;
     private String dataPath;
-    private String warehouse;
+    protected String warehouse;
     @TempDir java.nio.file.Path tempFile;
 
     @BeforeEach
     @Override
     public void before() throws IOException {
-        String initToken = "init_token";
         dataPath = tempFile.toUri().toString();
         warehouse = UUID.randomUUID().toString();
         ConfigResponse config =
@@ -69,7 +69,7 @@ public abstract class RESTCatalogITCaseBase extends CatalogITCaseBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        AuthProvider authProvider = new BearTokenAuthProvider(initToken);
+        AuthProvider authProvider = new BearTokenAuthProvider(INIT_TOKEN);
         restCatalogServer = new RESTCatalogServer(dataPath, authProvider, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();

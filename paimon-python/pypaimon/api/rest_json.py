@@ -17,9 +17,9 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Type, Dict
+from typing import Any, Type, Dict, TypeVar, get_origin, get_args, Union
 
-from .typedef import T
+T = TypeVar("T")
 
 
 def json_field(json_name: str, **kwargs):
@@ -70,15 +70,26 @@ class JSON:
         """Create instance from dictionary"""
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
+        type_mapping = {}
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
+            origin_type = get_origin(field_info.type)
+            args = get_args(field_info.type)
+            field_type = field_info.type
+            if origin_type is Union and len(args) == 2:
+                field_type = args[0]
+            if is_dataclass(field_type):
+                type_mapping[json_name] = field_type
 
         # Map JSON data to field names
         kwargs = {}
         for json_name, value in data.items():
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
-                kwargs[field_name] = value
+                if field_name in type_mapping:
+                    kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
+                else:
+                    kwargs[field_name] = value
 
         return target_class(**kwargs)

@@ -44,10 +44,13 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final boolean fileIndexReadEnabled;
 
-    private Predicate filter;
+    private Predicate inputFilter;
 
-    // just cache.
-    private final Map<Long, Predicate> dataFilterMapping = new ConcurrentHashMap<>();
+    // cache not evolved filter by schema id
+    private final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
+
+    // cache evolved filter by schema id
+    private final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
@@ -72,7 +75,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
-        this.filter = predicate;
+        this.inputFilter = predicate;
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
@@ -80,7 +83,15 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        if (filter == null) {
+        Predicate notEvolvedFilter =
+                notEvolvedFilterMapping.computeIfAbsent(
+                        entry.file().schemaId(),
+                        id ->
+                                // keepNewFieldFilter to handle add field
+                                // for example, add field 'c', 'c > 3': old files can be filtered
+                                simpleStatsEvolutions.filterUnsafeFilter(
+                                        entry.file().schemaId(), inputFilter, true));
+        if (notEvolvedFilter == null) {
             return true;
         }
 
@@ -91,12 +102,23 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().rowCount(),
                         entry.file().valueStatsCols());
 
-        return filter.test(
+        // filter by min max
+        boolean result =
+                notEvolvedFilter.test(
                         entry.file().rowCount(),
                         stats.minValues(),
                         stats.maxValues(),
-                        stats.nullCounts())
-                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+                        stats.nullCounts());
+
+        if (!result) {
+            return false;
+        }
+
+        if (!fileIndexReadEnabled) {
+            return true;
+        }
+
+        return testFileIndex(entry.file().embeddedIndex(), entry);
     }
 
     private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
@@ -107,11 +129,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
 
         Predicate dataPredicate =
-                dataFilterMapping.computeIfAbsent(
+                evolvedFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),
                         id ->
                                 simpleStatsEvolutions.tryDevolveFilter(
-                                        entry.file().schemaId(), filter));
+                                        entry.file().schemaId(), inputFilter));
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {

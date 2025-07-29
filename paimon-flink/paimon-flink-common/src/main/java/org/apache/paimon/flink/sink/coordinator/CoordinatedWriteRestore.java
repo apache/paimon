@@ -21,6 +21,8 @@ package org.apache.paimon.flink.sink.coordinator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.RestoreFiles;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.utils.ArrayUtils;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
@@ -28,8 +30,12 @@ import org.apache.flink.runtime.operators.coordination.CoordinationRequest;
 import org.apache.flink.util.SerializedValue;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
+import static org.apache.paimon.utils.InstantiationUtil.serializeObject;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /**
@@ -66,24 +72,45 @@ public class CoordinatedWriteRestore implements WriteRestore {
             int bucket,
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex) {
-        ScanCoordinationRequest request =
+        ScanCoordinationRequest coordinationRequest =
                 new ScanCoordinationRequest(
                         serializeBinaryRow(partition),
                         bucket,
                         scanDynamicBucketIndex,
                         scanDeleteVectorsIndex);
         try {
-            SerializedValue<CoordinationRequest> serializedRequest = new SerializedValue<>(request);
+            byte[] requestContent = serializeObject(coordinationRequest);
+            Integer nextPageToken = null;
+            List<byte[]> result = new ArrayList<>();
+            String uuid = UUID.randomUUID().toString();
+
+            do {
+                PagedCoordinationRequest request =
+                        new PagedCoordinationRequest(requestContent, uuid, nextPageToken);
+                SerializedValue<CoordinationRequest> serializedRequest =
+                        new SerializedValue<>(request);
+                PagedCoordinationResponse response =
+                        CoordinationResponseUtils.unwrap(
+                                gateway.sendRequestToCoordinator(operatorID, serializedRequest)
+                                        .get());
+                result.add(response.content());
+                nextPageToken = response.nextPageToken();
+            } while (nextPageToken != null);
+
+            byte[] responseContent = ArrayUtils.mergeByteArrays(result);
             ScanCoordinationResponse response =
-                    CoordinationResponseUtils.unwrap(
-                            gateway.sendRequestToCoordinator(operatorID, serializedRequest).get());
+                    InstantiationUtil.deserializeObject(
+                            responseContent, getClass().getClassLoader());
             return new RestoreFiles(
                     response.snapshot(),
                     response.totalBuckets(),
                     response.extractDataFiles(),
                     response.extractDynamicBucketIndex(),
                     response.extractDeletionVectorsIndex());
-        } catch (IOException | ExecutionException | InterruptedException e) {
+        } catch (IOException
+                | ExecutionException
+                | InterruptedException
+                | ClassNotFoundException e) {
             throw new RuntimeException(e);
         }
     }
