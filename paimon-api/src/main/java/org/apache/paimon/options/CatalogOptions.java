@@ -111,13 +111,6 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the max number for which partitions in the catalog are cached.");
 
-    public static final ConfigOption<Long> CACHE_TABLE_MAX_NUM =
-            key("cache.table.max-num")
-                    .longType()
-                    .defaultValue(100L)
-                    .withDescription(
-                            "Controls the max number for which tables in the catalog are cached.");
-
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
             key("cache.manifest.small-file-memory")
                     .memoryType()

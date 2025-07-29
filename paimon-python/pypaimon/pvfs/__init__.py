@@ -125,7 +125,6 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             PVFSOptions.REST_CLIENT_CACHE_SIZE,
             PVFSOptions.DEFAULT_CACHE_SIZE
         )
-        table_cache_size = self.__get_cache_size(PVFSOptions.TABLE_CACHE_SIZE, PVFSOptions.DEFAULT_TABLE_CACHE_SIZE)
         cache_expired_time = (
             PVFSOptions.DEFAULT_TABLE_CACHE_TTL
             if options is None
@@ -135,7 +134,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
         self._cache_enable = options.get(PVFSOptions.CACHE_ENABLED, True)
         if self._cache_enable:
-            self._table_cache = TTLCache(maxsize=table_cache_size, ttl=cache_expired_time)
+            self._table_cache = TTLCache(maxsize=PVFSOptions.TABLE_CACHE_SIZE, ttl=cache_expired_time)
             self._table_cache_lock = rwlock.RWLockFair()
         self._rest_client_cache = LRUCache(rest_client_cache_size)
         self._cache = LRUCache(maxsize=fs_cache_size)

@@ -51,7 +51,6 @@ import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_SNAPSHOT_MAX_NUM_PER_TABLE;
-import static org.apache.paimon.options.CatalogOptions.CACHE_TABLE_MAX_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -63,7 +62,6 @@ public class CachingCatalog extends DelegateCatalog {
     private final Duration expireAfterWrite;
     private final int snapshotMaxNumPerTable;
     private final long cachedPartitionMaxNum;
-    private final long cachedTableMaxNum;
 
     protected Cache<String, Database> databaseCache;
     protected Cache<Identifier, Table> tableCache;
@@ -99,7 +97,6 @@ public class CachingCatalog extends DelegateCatalog {
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
 
         this.cachedPartitionMaxNum = options.get(CACHE_PARTITION_MAX_NUM);
-        this.cachedTableMaxNum = options.get(CACHE_TABLE_MAX_NUM);
         init(Ticker.systemTicker());
     }
 
@@ -119,7 +116,6 @@ public class CachingCatalog extends DelegateCatalog {
                         .executor(Runnable::run)
                         .expireAfterAccess(expireAfterAccess)
                         .expireAfterWrite(expireAfterWrite)
-                        .maximumSize(cachedTableMaxNum)
                         .ticker(ticker)
                         .build();
         this.partitionCache =
