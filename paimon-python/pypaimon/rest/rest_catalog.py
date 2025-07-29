@@ -24,7 +24,6 @@ from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
 from pypaimon.api.options import Options
 
-from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 from pypaimon.catalog.catalog import Catalog
