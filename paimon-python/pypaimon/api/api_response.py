@@ -21,7 +21,7 @@ from typing import Dict, Optional, Generic, List
 from dataclasses import dataclass
 
 from .rest_json import json_field
-from .schema import Schema
+from pypaimon.schema.schema import Schema
 from .typedef import T
 
 
