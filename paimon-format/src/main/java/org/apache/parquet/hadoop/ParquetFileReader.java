@@ -329,7 +329,8 @@ public class ParquetFileReader implements Closeable {
 
     public long getFilteredRecordCount() {
         if (!options.useColumnIndexFilter()
-                || !FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+                || (!FilterCompat.isFilteringRequired(options.getRecordFilter())
+                        && selection == null)) {
             return getRecordCount();
         }
         long total = 0L;
@@ -681,7 +682,8 @@ public class ParquetFileReader implements Closeable {
         }
         // Filtering not required -> fall back to the non-filtering path
         if (!options.useColumnIndexFilter()
-                || !FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+                || (!FilterCompat.isFilteringRequired(options.getRecordFilter())
+                        && selection == null)) {
             return readNextRowGroup();
         }
         BlockMetaData block = blocks.get(currentBlock);
@@ -792,18 +794,40 @@ public class ParquetFileReader implements Closeable {
     }
 
     private RowRanges getRowRanges(int blockIndex) {
-        assert FilterCompat.isFilteringRequired(options.getRecordFilter())
-                : "Should not be invoked if filter is null or NOOP";
+        boolean filteringRequired = FilterCompat.isFilteringRequired(options.getRecordFilter());
+        if (!filteringRequired && selection == null) {
+            throw new IllegalArgumentException("Should not be invoked if filter is null or NOOP");
+        }
+
         RowRanges rowRanges = blockRowRanges.get(blockIndex);
         if (rowRanges == null) {
-            rowRanges =
-                    ColumnIndexFilter.calculateRowRanges(
-                            options.getRecordFilter(),
-                            getColumnIndexStore(blockIndex),
-                            paths.keySet(),
-                            blocks.get(blockIndex).getRowCount(),
-                            blocks.get(blockIndex).getRowIndexOffset(),
-                            selection);
+            long rowCount = blocks.get(blockIndex).getRowCount();
+            long rowIndexOffset = blocks.get(blockIndex).getRowIndexOffset();
+            ColumnIndexStore store = getColumnIndexStore(blockIndex);
+            if (selection != null) {
+                for (ColumnPath path : paths.keySet()) {
+                    OffsetIndex ci = store.getOffsetIndex(path);
+                    if (ci == null) {
+                        continue;
+                    }
+                    RowRanges result = RowRanges.create(rowCount, rowIndexOffset, ci, selection);
+                    rowRanges =
+                            rowRanges == null ? result : RowRanges.intersection(result, rowRanges);
+                }
+                if (rowRanges == null) {
+                    LOG.warn(
+                            "The selection filter did not have any effect because all the column offset index is null. file-path: {}, blockIndex: {}",
+                            file.toString(),
+                            blockIndex);
+                }
+            }
+
+            if (filteringRequired) {
+                RowRanges result =
+                        ColumnIndexFilter.calculateRowRanges(
+                                options.getRecordFilter(), store, paths.keySet(), rowCount);
+                rowRanges = rowRanges == null ? result : RowRanges.intersection(result, rowRanges);
+            }
             blockRowRanges.set(blockIndex, rowRanges);
         }
         return rowRanges;
