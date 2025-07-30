@@ -62,6 +62,10 @@ public class FullCompactTrigger {
     }
 
     public Optional<CompactUnit> tryFullCompact(int numLevels, List<LevelSortedRun> runs) {
+        if (runs.size() == 1) {
+            return Optional.empty();
+        }
+
         int maxLevel = numLevels - 1;
         if (fullCompactionInterval != null) {
             if (lastFullCompaction == null

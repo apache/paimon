@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -140,6 +141,10 @@ public class UniversalCompactionTest {
 
         // total size bigger than threshold
         pick = compaction.pick(3, Arrays.asList(level(0, 2), level(1, 6), level(2, 10)));
+        assertThat(pick.isPresent()).isFalse();
+
+        // one sort run, not trigger
+        pick = compaction.pick(3, Collections.singletonList(level(3, 5)));
         assertThat(pick.isPresent()).isFalse();
     }
 
