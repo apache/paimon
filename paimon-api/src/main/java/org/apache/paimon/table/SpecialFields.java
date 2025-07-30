@@ -20,8 +20,11 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -99,6 +102,9 @@ public class SpecialFields {
                             ROW_ID.name())
                     .collect(Collectors.toSet());
 
+    public static final Set<String> ROW_LINEAGE_FIELD_NAMES =
+            Stream.of(ROW_ID.name(), SEQUENCE_NUMBER.name()).collect(Collectors.toSet());
+
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
     }
@@ -134,5 +140,21 @@ public class SpecialFields {
         return STRUCTURED_TYPE_FIELD_ID_BASE
                 + mapFieldId * STRUCTURED_TYPE_FIELD_DEPTH_LIMIT
                 + depth;
+    }
+
+    public static RowType fieldsWithRowLineage(RowType rowType) {
+        List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
+        fieldsWithRowLineage.forEach(
+                f -> {
+                    if (ROW_LINEAGE_FIELD_NAMES.contains(f.name())) {
+                        throw new IllegalArgumentException(
+                                "Row lineage field name '"
+                                        + f.name()
+                                        + "' conflicts with existing field names.");
+                    }
+                });
+        fieldsWithRowLineage.add(SpecialFields.ROW_ID);
+        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER);
+        return new RowType(fieldsWithRowLineage);
     }
 }

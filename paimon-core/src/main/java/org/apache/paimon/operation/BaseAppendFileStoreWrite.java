@@ -35,6 +35,7 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -43,7 +44,6 @@ import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +59,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
@@ -67,7 +68,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private static final Logger LOG = LoggerFactory.getLogger(BaseAppendFileStoreWrite.class);
 
     private final FileIO fileIO;
-    private final RawFileSplitRead read;
+    private final RawFileSplitRead readForCompact;
     private final long schemaId;
     private final RowType rowType;
     private final FileFormat fileFormat;
@@ -79,7 +80,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
-            RawFileSplitRead read,
+            RawFileSplitRead readForCompact,
             long schemaId,
             RowType rowType,
             RowType partitionType,
@@ -91,15 +92,14 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             String tableName) {
         super(snapshotManager, scan, options, partitionType, null, dvMaintainerFactory, tableName);
         this.fileIO = fileIO;
-        this.read = read;
+        this.readForCompact = readForCompact;
         this.schemaId = schemaId;
         this.rowType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 
         this.statsCollectors =
-                StatsCollectorFactories.createStatsFactories(
-                        options.statsMode(), options, rowType.getFieldNames());
+                createStatsFactories(options.statsMode(), options, rowType.getFieldNames());
         this.fileIndexOptions = options.indexColumnsOptions();
     }
 
@@ -153,10 +153,17 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (toCompact.isEmpty()) {
             return Collections.emptyList();
         }
+        RowType writeSchema =
+                options.rowTrackingEnabled()
+                        ? SpecialFields.fieldsWithRowLineage(rowType)
+                        : rowType;
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        new LongCounter(toCompact.get(0).minSequenceNumber()),
+                        writeSchema);
         List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
             dvFactories = new ArrayList<>(toCompact.size());
@@ -182,17 +189,20 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(
-            BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+            BinaryRow partition, int bucket, LongCounter seqNumCounter, RowType writeSchema) {
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
-                rowType,
+                writeSchema,
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 seqNumCounter,
                 options.fileCompression(),
-                statsCollectors,
+                writeSchema.equals(rowType)
+                        ? statsCollectors
+                        : createStatsFactories(
+                                options.statsMode(), options, writeSchema.getFieldNames()),
                 fileIndexOptions,
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
@@ -205,7 +215,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             List<DataFileMeta> files,
             @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
-        return new RecordReaderIterator<>(read.createReader(partition, bucket, files, dvFactories));
+        return new RecordReaderIterator<>(
+                readForCompact.createReader(partition, bucket, files, dvFactories));
     }
 
     @Override

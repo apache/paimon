@@ -108,6 +108,81 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCompactionWithRowLineage() throws Exception {
+        batchSql("ALTER TABLE append_table_lineage SET ('compaction.max.file-num' = '4')");
+
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (5, 'EEE'), (6, 'FFF')",
+                4L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (7, 'HHH'), (8, 'III')",
+                5L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (9, 'JJJ'), (10, 'KKK')",
+                6L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (11, 'LLL'), (12, 'MMM')",
+                7L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+        assertExecuteExpected(
+                "INSERT INTO append_table_lineage VALUES (13, 'NNN'), (14, 'OOO')",
+                8L,
+                Snapshot.CommitKind.APPEND,
+                "append_table_lineage");
+
+        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        batchSql("call sys.compact('default.append_table_lineage')");
+        waitCompactSnapshot(60000L, "append_table_lineage");
+        List<Row> files = batchSql("SELECT * FROM append_table_lineage$files");
+        assertThat(files.size()).isEqualTo(1);
+        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        assertThat(originRowsWithId2).containsExactlyInAnyOrderElementsOf(rowsAfter2);
+
+        assertThat(rowsAfter2)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA", 0L, 1L),
+                        Row.of(2, "BBB", 1L, 1L),
+                        Row.of(3, "CCC", 2L, 2L),
+                        Row.of(4, "DDD", 3L, 2L),
+                        Row.of(1, "AAA", 4L, 3L),
+                        Row.of(2, "BBB", 5L, 3L),
+                        Row.of(3, "CCC", 6L, 3L),
+                        Row.of(4, "DDD", 7L, 3L),
+                        Row.of(5, "EEE", 8L, 4L),
+                        Row.of(6, "FFF", 9L, 4L),
+                        Row.of(7, "HHH", 10L, 5L),
+                        Row.of(8, "III", 11L, 5L),
+                        Row.of(9, "JJJ", 12L, 6L),
+                        Row.of(10, "KKK", 13L, 6L),
+                        Row.of(11, "LLL", 14L, 7L),
+                        Row.of(12, "MMM", 15L, 7L),
+                        Row.of(13, "NNN", 16L, 8L),
+                        Row.of(14, "OOO", 17L, 8L));
+    }
+
+    @Test
     public void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
