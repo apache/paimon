@@ -151,15 +151,15 @@ class GetTableResponse(AuditRESTResponse):
     FIELD_NAME = "name"
     FIELD_PATH = "path"
     FIELD_IS_EXTERNAL = "isExternal"
-    FIELD_SCHEMA_ID = "tableSchemaId"
-    FIELD_SCHEMA = "tableSchema"
+    FIELD_TABLE_SCHEMA_ID = "tableSchemaId"
+    FIELD_TABLE_SCHEMA = "tableSchema"
 
     id: Optional[str] = json_field(FIELD_ID, default=None)
     name: Optional[str] = json_field(FIELD_NAME, default=None)
     path: Optional[str] = json_field(FIELD_PATH, default=None)
     is_external: Optional[bool] = json_field(FIELD_IS_EXTERNAL, default=None)
-    table_schema_id: Optional[int] = json_field(FIELD_SCHEMA_ID, default=None)
-    table_schema: Optional[TableSchema] = json_field(FIELD_SCHEMA, default=None)
+    table_schema_id: Optional[int] = json_field(FIELD_TABLE_SCHEMA_ID, default=None)
+    table_schema: Optional[TableSchema] = json_field(FIELD_TABLE_SCHEMA, default=None)
 
     def __init__(
             self,
