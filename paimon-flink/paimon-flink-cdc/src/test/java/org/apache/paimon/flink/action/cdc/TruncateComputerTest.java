@@ -22,7 +22,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
@@ -115,7 +114,7 @@ public class TruncateComputerTest {
 
             Expression.TruncateComputer truncateComputer =
                     new Expression.TruncateComputer(field, dataType, literal);
-            assertThat(truncateComputer.eval(value, dataType)).isEqualTo(expected);
+            assertThat(truncateComputer.eval(value)).isEqualTo(expected);
         }
     }
 
@@ -126,7 +125,7 @@ public class TruncateComputerTest {
         Expression.TruncateComputer truncateComputer =
                 new Expression.TruncateComputer(fieldReference, dataType, "7");
 
-        assertThatThrownBy(() -> truncateComputer.eval("abcde", DataTypes.STRING()))
+        assertThatThrownBy(() -> truncateComputer.eval("abcde"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
                         "Invalid width value for truncate function: 7, expected less than or equal to 5.");
@@ -134,7 +133,7 @@ public class TruncateComputerTest {
         DataType notSupportedDataType = new BooleanType();
         Expression.TruncateComputer notSupportTruncateComputer =
                 new Expression.TruncateComputer(fieldReference, notSupportedDataType, "7");
-        assertThatThrownBy(() -> notSupportTruncateComputer.eval("true", notSupportedDataType))
+        assertThatThrownBy(() -> notSupportTruncateComputer.eval("true"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported field type for truncate function: BOOLEAN");
     }

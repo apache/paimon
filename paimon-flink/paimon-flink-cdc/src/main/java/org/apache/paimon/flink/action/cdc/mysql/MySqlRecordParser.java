@@ -280,11 +280,8 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
             String refName = computedColumn.fieldReference();
-            DataType refType = schemaBuilder.getFieldType(refName);
 
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(refName), refType));
+            resultMap.put(computedColumn.columnName(), computedColumn.eval(resultMap.get(refName)));
 
             // remember the computed column data type for later reference by other computed columns
             schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());

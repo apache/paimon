@@ -47,18 +47,22 @@ public class ComputedColumnUtils {
                         .collect(
                                 Collectors.toMap(DataField::name, DataField::type, (v1, v2) -> v2));
 
+        // sort computed column args by dependencies
         LinkedHashMap<String, Tuple2<String, String[]>> sortedArgs =
                 sortComputedColumnArgs(computedColumnArgs, caseSensitive);
+
         List<ComputedColumn> computedColumns = new ArrayList<>();
         for (Map.Entry<String, Tuple2<String, String[]>> columnArg : sortedArgs.entrySet()) {
             String columnName = columnArg.getKey().trim();
             String exprName = columnArg.getValue().f0.trim();
             String[] args = columnArg.getValue().f1;
 
-            computedColumns.add(
-                    new ComputedColumn(
-                            columnName,
-                            Expression.create(typeMapping, caseSensitive, exprName, args)));
+            Expression expr = Expression.create(typeMapping, caseSensitive, exprName, args);
+            ComputedColumn cmpColumn = new ComputedColumn(columnName, expr);
+            computedColumns.add(new ComputedColumn(columnName, expr));
+
+            // remember the column type for later reference by other computed columns
+            typeMapping.put(columnName, cmpColumn.columnType());
         }
 
         return computedColumns;
