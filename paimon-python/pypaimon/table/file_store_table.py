@@ -18,11 +18,13 @@
 
 from pathlib import Path
 
+from pypaimon import Table
+from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.common.file_io import FileIO
 from pypaimon.schema.schema_manager import SchemaManager
-from pypaimon.table.table import Table
+from pypaimon.table.bucket_mode import BucketMode
 
 
 class FileStoreTable(Table):
@@ -40,3 +42,17 @@ class FileStoreTable(Table):
         self.table_schema = table_schema
         self.schema_manager = SchemaManager(file_io, table_path)
         self.is_primary_key_table = bool(self.primary_keys)
+
+    def bucket_mode(self) -> BucketMode:
+        if self.is_primary_key_table:
+            if self.primary_keys == self.partition_keys:
+                return BucketMode.CROSS_PARTITION
+            if self.options.get(CoreOptions.BUCKET, -1) == -1:
+                return BucketMode.HASH_DYNAMIC
+            else:
+                return BucketMode.HASH_FIXED
+        else:
+            if self.options.get(CoreOptions.BUCKET, -1) == -1:
+                return BucketMode.BUCKET_UNAWARE
+            else:
+                return BucketMode.HASH_FIXED

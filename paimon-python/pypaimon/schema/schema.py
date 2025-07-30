@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 
 import pyarrow as pa
-from pypaimon.api.data_types import DataField
-from pypaimon.api.rest_json import json_field
+from pypaimon.schema.data_types import DataField
+from pypaimon.common.rest_json import json_field
 
 
 @dataclass

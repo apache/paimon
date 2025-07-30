@@ -20,9 +20,9 @@ from abc import ABC, abstractmethod
 from typing import Dict, Optional, Generic, List
 from dataclasses import dataclass
 
-from .rest_json import json_field
-from pypaimon.schema.schema import Schema
+from pypaimon.common.rest_json import json_field
 from .typedef import T
+from .. import Schema
 
 
 @dataclass

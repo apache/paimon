@@ -18,7 +18,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from pypaimon.api.rest_json import json_field
+from pypaimon.common.rest_json import json_field
 
 SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch-'

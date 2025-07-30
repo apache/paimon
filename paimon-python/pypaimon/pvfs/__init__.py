@@ -33,7 +33,7 @@ from fsspec.implementations.local import LocalFileSystem
 
 from pypaimon.api import RESTApi, GetTableTokenResponse, Schema, Identifier, GetTableResponse
 from pypaimon.api.client import NoSuchResourceException, AlreadyExistsException
-from pypaimon.api.config import RESTCatalogOptions, OssOptions, PVFSOptions
+from pypaimon.api.config import CatalogOptions, OssOptions, PVFSOptions
 
 PROTOCOL_NAME = "pvfs"
 
@@ -117,9 +117,9 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     _identifier_pattern = re.compile("^pvfs://([^/]+)/([^/]+)/([^/]+)(?:/[^/]+)*/?$")
 
     def __init__(self, options: Dict = None, **kwargs):
-        options.update({RESTCatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
+        options.update({CatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
         self.options = options
-        self.warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
+        self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
             PVFSOptions.DEFAULT_TABLE_CACHE_TTL
             if options is None
@@ -791,7 +791,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             rest_api = self._rest_api_cache.get(catalog)
             if rest_api is None:
                 options = self.options.copy()
-                options.update({RESTCatalogOptions.WAREHOUSE: catalog})
+                options.update({CatalogOptions.WAREHOUSE: catalog})
                 rest_api = RESTApi(options)
                 self._rest_api_cache[catalog] = rest_api
             return rest_api

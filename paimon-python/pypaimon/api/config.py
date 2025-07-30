@@ -22,8 +22,9 @@ class OssOptions:
     OSS_ENDPOINT = "fs.oss.endpoint"
 
 
-class RESTCatalogOptions:
+class CatalogOptions:
     URI = "uri"
+    METASTORE = "metastore"
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
     TOKEN = "token"

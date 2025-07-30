@@ -30,7 +30,7 @@ from urllib3 import Retry
 
 from .typedef import RESTAuthParameter
 from .api_response import ErrorResponse
-from .rest_json import JSON
+from pypaimon.common.rest_json import JSON
 
 T = TypeVar('T', bound='RESTResponse')
 

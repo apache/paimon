@@ -22,11 +22,11 @@ from typing import List, Dict, Optional
 
 import pyarrow
 
-from pypaimon.api import data_types
+from pypaimon import Schema
+from pypaimon.schema import data_types
 from pypaimon.api.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
-from pypaimon.schema.schema import Schema
-from pypaimon.api.data_types import DataField
+from pypaimon.schema.data_types import DataField
 
 
 class TableSchema:

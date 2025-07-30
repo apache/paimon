@@ -27,7 +27,7 @@ from typing import Optional, Dict
 
 from .token_loader import DLFTokenLoader, DLFToken
 from .typedef import RESTAuthParameter
-from .config import RESTCatalogOptions
+from .config import CatalogOptions
 
 
 class AuthProvider(ABC):
@@ -61,13 +61,13 @@ class AuthProviderFactory:
 
     @staticmethod
     def create_auth_provider(options: Dict[str, str]) -> AuthProvider:
-        provider = options.get(RESTCatalogOptions.TOKEN_PROVIDER)
+        provider = options.get(CatalogOptions.TOKEN_PROVIDER)
         if provider == 'bear':
-            token = options.get(RESTCatalogOptions.TOKEN)
+            token = options.get(CatalogOptions.TOKEN)
             return BearTokenAuthProvider(token)
         elif provider == 'dlf':
             return DLFAuthProvider(
-                options.get(RESTCatalogOptions.DLF_REGION),
+                options.get(CatalogOptions.DLF_REGION),
                 DLFToken.from_options(options)
             )
         raise ValueError('Unknown auth provider')

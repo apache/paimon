@@ -17,7 +17,10 @@
 #################################################################################
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Union
+
+from pypaimon import Schema
+from pypaimon.api import Identifier
 
 
 class Catalog(ABC):
@@ -25,13 +28,26 @@ class Catalog(ABC):
     This interface is responsible for reading and writing
     metadata such as database/table from a paimon catalog.
     """
+    DB_SUFFIX = ".db"
+    DEFAULT_DATABASE = "default"
     SYSTEM_DATABASE_NAME = "sys"
+
     DB_LOCATION_PROP = "location"
+    COMMENT_PROP = "comment"
+    OWNER_PROP = "owner"
 
     @abstractmethod
     def get_database(self, name: str) -> 'Database':
         """Get paimon database identified by the given name."""
 
     @abstractmethod
-    def create_database(self, name: str, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
         """Create a database with properties."""
+
+    @abstractmethod
+    def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
+        """Get paimon table identified by the given Identifier."""
+
+    @abstractmethod
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+        """Create table with schema."""
