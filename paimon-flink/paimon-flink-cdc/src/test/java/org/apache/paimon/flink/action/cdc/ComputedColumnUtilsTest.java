@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -41,7 +44,9 @@ public class ComputedColumnUtilsTest {
                         "C=now()",
                         "D=substring(A, 1)",
                         "E=substring(C,1)");
-        List<ComputedColumn> columns = buildComputedColumns(calColArgs, Collections.emptyList());
+        List<DataField> physicalFields =
+                Arrays.asList(new DataField(1, "ExistedColumn", DataTypes.STRING()));
+        List<ComputedColumn> columns = buildComputedColumns(calColArgs, physicalFields);
 
         assertEquals(
                 Arrays.asList("B", "C", "E", "A", "D"),
