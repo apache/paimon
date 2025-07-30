@@ -59,6 +59,10 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
                 @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
+                        name = "included_tables",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
                         name = "excluded_tables",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
@@ -77,6 +81,7 @@ public class CloneProcedure extends ProcedureBase {
             String targetCatalogConfigStr,
             Integer parallelism,
             String where,
+            String includedTablesStr,
             String excludedTablesStr,
             String cloneFrom)
             throws Exception {
@@ -86,6 +91,10 @@ public class CloneProcedure extends ProcedureBase {
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
 
+        List<String> includedTables =
+                StringUtils.isNullOrWhitespaceOnly(includedTablesStr)
+                        ? null
+                        : Arrays.asList(StringUtils.split(includedTablesStr, ","));
         List<String> excludedTables =
                 StringUtils.isNullOrWhitespaceOnly(excludedTablesStr)
                         ? null
@@ -101,6 +110,7 @@ public class CloneProcedure extends ProcedureBase {
                         targetCatalogConfig,
                         parallelism,
                         where,
+                        includedTables,
                         excludedTables,
                         cloneFrom);
         return execute(procedureContext, action, "Clone Job");

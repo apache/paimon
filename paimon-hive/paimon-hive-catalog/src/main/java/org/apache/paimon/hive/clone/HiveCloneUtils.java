@@ -68,7 +68,14 @@ public class HiveCloneUtils {
     }
 
     public static List<Identifier> listTables(
-            HiveCatalog hiveCatalog, @Nullable List<String> excludedTables) throws Exception {
+            HiveCatalog hiveCatalog,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables)
+            throws Exception {
+        Set<String> includedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(includedTables)) {
+            includedTableSet.addAll(includedTables);
+        }
         Set<String> excludedTableSet = new HashSet<>();
         if (CollectionUtils.isNotEmpty(excludedTables)) {
             excludedTableSet.addAll(excludedTables);
@@ -81,15 +88,25 @@ public class HiveCloneUtils {
                 if (excludedTableSet.contains(identifier.getFullName())) {
                     continue;
                 }
-                results.add(identifier);
+                if (CollectionUtils.isEmpty(includedTableSet)
+                        || includedTableSet.contains(identifier.getFullName())) {
+                    results.add(identifier);
+                }
             }
         }
         return results;
     }
 
     public static List<Identifier> listTables(
-            HiveCatalog hiveCatalog, String database, @Nullable List<String> excludedTables)
+            HiveCatalog hiveCatalog,
+            String database,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables)
             throws Exception {
+        Set<String> includedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(includedTables)) {
+            includedTableSet.addAll(includedTables);
+        }
         Set<String> excludedTableSet = new HashSet<>();
         if (CollectionUtils.isNotEmpty(excludedTables)) {
             excludedTableSet.addAll(excludedTables);
@@ -101,7 +118,10 @@ public class HiveCloneUtils {
             if (excludedTableSet.contains(identifier.getFullName())) {
                 continue;
             }
-            results.add(identifier);
+            if (CollectionUtils.isEmpty(includedTableSet)
+                    || includedTableSet.contains(identifier.getFullName())) {
+                results.add(identifier);
+            }
         }
         return results;
     }
