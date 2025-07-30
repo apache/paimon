@@ -15,32 +15,24 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from pypaimon import Catalog
+from pypaimon.api import CatalogOptions
+from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+from pypaimon.rest.rest_catalog import RESTCatalog
 
-from enum import Enum
 
+class CatalogFactory:
 
-class CoreOptions(str, Enum):
-    """Core options for paimon."""
+    CATALOG_REGISTRY = {
+        "filesystem": FileSystemCatalog,
+        "rest": RESTCatalog,
+    }
 
-    def __str__(self):
-        return self.value
-
-    # Basic options
-    AUTO_CREATE = "auto-create"
-    PATH = "path"
-    TYPE = "type"
-    BRANCH = "branch"
-    BUCKET = "bucket"
-    BUCKET_KEY = "bucket-key"
-    WAREHOUSE = "warehouse"
-    # File format options
-    FILE_FORMAT = "file.format"
-    FILE_FORMAT_ORC = "orc"
-    FILE_FORMAT_AVRO = "avro"
-    FILE_FORMAT_PARQUET = "parquet"
-    FILE_COMPRESSION = "file.compression"
-    FILE_COMPRESSION_PER_LEVEL = "file.compression.per.level"
-    FILE_FORMAT_PER_LEVEL = "file.format.per.level"
-    FILE_BLOCK_SIZE = "file.block-size"
-    # Scan options
-    SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
+    @staticmethod
+    def create(catalog_options: dict) -> Catalog:
+        identifier = catalog_options.get(CatalogOptions.METASTORE, "filesystem")
+        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
+        if catalog_class is None:
+            raise ValueError(f"Unknown catalog identifier: {identifier}. "
+                             f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
+        return catalog_class(catalog_options)

@@ -18,8 +18,8 @@
 from pathlib import Path
 from typing import Optional
 
+from pypaimon import Schema
 from pypaimon.common.file_io import FileIO
-from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 

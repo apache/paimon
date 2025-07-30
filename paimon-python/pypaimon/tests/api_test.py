@@ -26,11 +26,11 @@ from ..api import RESTApi
 from ..api.auth import BearTokenAuthProvider
 from ..api.identifier import Identifier
 from ..api.options import Options
-from ..api.rest_json import JSON
+from pypaimon.common.rest_json import JSON
 from pypaimon.schema.table_schema import TableSchema
 from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 
-from ..api.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType, DataField
+from pypaimon.schema.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType, DataField
 from ..catalog.catalog_context import CatalogContext
 from ..catalog.table_metadata import TableMetadata
 from ..rest.rest_catalog import RESTCatalog
@@ -261,8 +261,8 @@ class ApiTestCase(unittest.TestCase):
             server.start()
             ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
             options = {
-                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
+                api.CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
             }
             loader = DLFTokenLoaderFactory.create_token_loader(options)
             load_token = loader.load_token()
@@ -271,9 +271,9 @@ class ApiTestCase(unittest.TestCase):
             self.assertEqual(load_token.security_token, token.security_token)
             self.assertEqual(load_token.expiration, token.expiration)
             options_with_role = {
-                api.RESTCatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                api.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
-                api.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+                api.CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                api.CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
+                api.CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
             }
             loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
             token = loader.load_token()

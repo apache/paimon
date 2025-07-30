@@ -16,9 +16,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 
-from pypaimon.api import RESTApi, RESTCatalogOptions
+from pypaimon import Database, Catalog, Schema
+from pypaimon.api import RESTApi, CatalogOptions
 from pypaimon.api.api_response import PagedList, GetTableResponse
 from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
@@ -26,10 +27,8 @@ from pypaimon.api.options import Options
 
 from pypaimon.schema.table_schema import TableSchema
 
-from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_utils import CatalogUtils
-from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.rest.rest_token_file_io import RESTTokenFileIO
@@ -41,7 +40,7 @@ class RESTCatalog(Catalog):
         self.api = RESTApi(context.options.to_map(), config_required)
         self.context = CatalogContext.create(Options(self.api.options), context.hadoop_conf, context.prefer_io_loader,
                                              context.fallback_io_loader)
-        self.data_token_enabled = self.api.options.get(RESTCatalogOptions.DATA_TOKEN_ENABLED)
+        self.data_token_enabled = self.api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
 
     def list_databases(self) -> List[str]:
         return self.api.list_databases()
@@ -50,7 +49,7 @@ class RESTCatalog(Catalog):
                              database_name_pattern: Optional[str] = None) -> PagedList[str]:
         return self.api.list_databases_paged(max_results, page_token, database_name_pattern)
 
-    def create_database(self, name: str, properties: Dict[str, str] = None):
+    def create_database(self, name: str, ignore_if_exists: bool, properties: Dict[str, str] = None):
         self.api.create_database(name, properties)
 
     def get_database(self, name: str) -> Database:
@@ -85,13 +84,18 @@ class RESTCatalog(Catalog):
             table_name_pattern
         )
 
-    def get_table(self, identifier: Identifier) -> FileStoreTable:
+    def get_table(self, identifier: Union[str, Identifier]) -> FileStoreTable:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
         return CatalogUtils.load_table(
             identifier,
             lambda path: self.file_io_for_data(path, identifier),
             self.file_io_from_options,
             self.load_table_metadata,
         )
+
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+        raise ValueError("Not implemented")
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.api.get_table(identifier)

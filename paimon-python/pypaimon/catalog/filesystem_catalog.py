@@ -1,0 +1,103 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+#################################################################################
+
+from pathlib import Path
+from typing import Optional, Union
+from urllib.parse import urlparse
+
+from pypaimon import Catalog, Database, Table
+from pypaimon.api import CatalogOptions, Identifier
+from pypaimon.api.core_options import CoreOptions
+from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseNotExistException, \
+    TableAlreadyExistException, DatabaseAlreadyExistException
+from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.table.file_store_table import FileStoreTable
+
+
+class FileSystemCatalog(Catalog):
+    def __init__(self, catalog_options: dict):
+        if CatalogOptions.WAREHOUSE not in catalog_options:
+            raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE}' path must be set")
+        self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
+        self.catalog_options = catalog_options
+        self.file_io = None  # FileIO(self.warehouse, self.catalog_options)
+
+    def get_database(self, name: str) -> Database:
+        if self.file_io.exists(self.get_database_path(name)):
+            return Database(name, {})
+        else:
+            raise DatabaseNotExistException(name)
+
+    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+        try:
+            self.get_database(name)
+            if not ignore_if_exists:
+                raise DatabaseAlreadyExistException(name)
+        except DatabaseNotExistException:
+            if properties and Catalog.DB_LOCATION_PROP in properties:
+                raise ValueError("Cannot specify location for a database when using fileSystem catalog.")
+            path = self.get_database_path(name)
+            self.file_io.mkdirs(path)
+
+    def get_table(self, identifier: Union[str, Identifier]) -> Table:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if CoreOptions.SCAN_FALLBACK_BRANCH in self.catalog_options:
+            raise ValueError(CoreOptions.SCAN_FALLBACK_BRANCH)
+        table_path = self.get_table_path(identifier)
+        table_schema = self.get_table_schema(identifier)
+        return FileStoreTable(self.file_io, identifier, table_path, table_schema)
+
+    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
+        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE):
+            raise ValueError(f"The value of {CoreOptions.AUTO_CREATE} property should be False.")
+
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        self.get_database(identifier.get_database_name())
+        try:
+            self.get_table(identifier)
+            if not ignore_if_exists:
+                raise TableAlreadyExistException(identifier)
+        except TableNotExistException:
+            if schema.options and CoreOptions.TYPE in schema.options and schema.options.get(
+                    CoreOptions.TYPE) != "table":
+                raise ValueError(f"Table Type {schema.options.get(CoreOptions.TYPE)}")
+            table_path = self.get_table_path(identifier)
+            schema_manager = SchemaManager(self.file_io, table_path)
+            schema_manager.create_table(schema)
+
+    def get_table_schema(self, identifier: Identifier):
+        table_path = self.get_table_path(identifier)
+        table_schema = SchemaManager(self.file_io, table_path).latest()
+        if table_schema is None:
+            raise TableNotExistException(identifier)
+        return table_schema
+
+    def get_database_path(self, name) -> Path:
+        return self._trim_schema(self.warehouse) / f"{name}{Catalog.DB_SUFFIX}"
+
+    def get_table_path(self, identifier: Identifier) -> Path:
+        return self.get_database_path(identifier.get_database_name()) / identifier.get_table_name()
+
+    @staticmethod
+    def _trim_schema(warehouse_url: str) -> Path:
+        parsed = urlparse(warehouse_url)
+        bucket = parsed.netloc
+        warehouse_dir = parsed.path.lstrip('/')
+        return Path(f"{bucket}/{warehouse_dir}" if warehouse_dir else bucket)

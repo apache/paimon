@@ -15,27 +15,46 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+
 from abc import ABC, abstractmethod
-from pathlib import Path
+from typing import Any
+
+from pypaimon.table.row.row_kind import RowKind
 
 
-class FileIO(ABC):
-    @abstractmethod
-    def exists(self, path: Path) -> bool:
-        """"""
-
-    @abstractmethod
-    def read_file_utf8(self, path: Path) -> str:
-        """"""
+class InternalRow(ABC):
+    """
+    Base interface for an internal data structure representing data of RowType.
+    """
 
     @abstractmethod
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        """"""
+    def get_field(self, pos: int) -> Any:
+        """
+        Returns the value at the given position.
+        """
 
     @abstractmethod
-    def list_status(self, path: Path):
-        """"""
+    def is_null_at(self, pos: int) -> bool:
+        """
+        Returns true if the element is null at the given position.
+        """
 
     @abstractmethod
-    def mkdirs(self, path: Path) -> bool:
-        """"""
+    def get_row_kind(self) -> RowKind:
+        """
+        Returns the kind of change that this row describes in a changelog.
+        """
+
+    @abstractmethod
+    def __len__(self) -> int:
+        """
+        Returns the number of fields in this row.
+        The number does not include RowKind. It is kept separately.
+        """
+
+    def __str__(self) -> str:
+        fields = []
+        for pos in range(self.__len__()):
+            value = self.get_field(pos)
+            fields.append(str(value))
+        return " ".join(fields)
