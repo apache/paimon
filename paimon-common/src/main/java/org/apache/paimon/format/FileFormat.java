@@ -84,6 +84,7 @@ public abstract class FileFormat {
                         options,
                         options.get(CoreOptions.READ_BATCH_SIZE),
                         options.get(CoreOptions.WRITE_BATCH_SIZE),
+                        options.get(CoreOptions.WRITE_BATCH_MEMORY),
                         options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
                         options.get(CoreOptions.FILE_BLOCK_SIZE)));
     }

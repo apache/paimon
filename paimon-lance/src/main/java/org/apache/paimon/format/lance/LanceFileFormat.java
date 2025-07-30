@@ -75,7 +75,12 @@ public class LanceFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new LanceWriterFactory(
-                () -> new ArrowFormatWriter(type, formatContext.writeBatchSize(), true));
+                () ->
+                        new ArrowFormatWriter(
+                                type,
+                                formatContext.writeBatchSize(),
+                                true,
+                                formatContext.writeBatchMemory().getBytes()));
     }
 
     @Override

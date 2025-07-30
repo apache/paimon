@@ -1172,6 +1172,12 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("orc.write.batch-size")
                     .withDescription("Write batch size for any file format if it supports.");
 
+    public static final ConfigOption<MemorySize> WRITE_BATCH_MEMORY =
+            key("write.batch-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("128 mb"))
+                    .withDescription("Write batch memory for any file format if it supports.");
+
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
                     .stringType()
