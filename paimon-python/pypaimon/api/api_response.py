@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 from pypaimon.common.rest_json import json_field
 from .typedef import T
-from .. import Schema
+from ..schema.table_schema import TableSchema
 
 
 @dataclass
@@ -151,15 +151,15 @@ class GetTableResponse(AuditRESTResponse):
     FIELD_NAME = "name"
     FIELD_PATH = "path"
     FIELD_IS_EXTERNAL = "isExternal"
-    FIELD_SCHEMA_ID = "schemaId"
-    FIELD_SCHEMA = "schema"
+    FIELD_SCHEMA_ID = "tableSchemaId"
+    FIELD_SCHEMA = "tableSchema"
 
     id: Optional[str] = json_field(FIELD_ID, default=None)
     name: Optional[str] = json_field(FIELD_NAME, default=None)
     path: Optional[str] = json_field(FIELD_PATH, default=None)
     is_external: Optional[bool] = json_field(FIELD_IS_EXTERNAL, default=None)
-    schema_id: Optional[int] = json_field(FIELD_SCHEMA_ID, default=None)
-    schema: Optional[Schema] = json_field(FIELD_SCHEMA, default=None)
+    table_schema_id: Optional[int] = json_field(FIELD_SCHEMA_ID, default=None)
+    table_schema: Optional[TableSchema] = json_field(FIELD_SCHEMA, default=None)
 
     def __init__(
             self,
@@ -167,8 +167,8 @@ class GetTableResponse(AuditRESTResponse):
             name: str,
             path: str,
             is_external: bool,
-            schema_id: int,
-            schema: Schema,
+            table_schema_id: int,
+            table_schema: TableSchema,
             owner: Optional[str] = None,
             created_at: Optional[int] = None,
             created_by: Optional[str] = None,
@@ -180,8 +180,8 @@ class GetTableResponse(AuditRESTResponse):
         self.name = name
         self.path = path
         self.is_external = is_external
-        self.schema_id = schema_id
-        self.schema = schema
+        self.table_schema_id = table_schema_id
+        self.table_schema = table_schema
 
     def get_id(self) -> str:
         return self.id
@@ -196,10 +196,10 @@ class GetTableResponse(AuditRESTResponse):
         return self.is_external
 
     def get_schema_id(self) -> int:
-        return self.schema_id
+        return self.table_schema_id
 
-    def get_schema(self) -> Schema:
-        return self.schema
+    def get_schema(self) -> TableSchema:
+        return self.table_schema
 
 
 @dataclass
