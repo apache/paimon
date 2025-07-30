@@ -25,7 +25,6 @@ from pypaimon.api.core_options import CoreOptions
 from pypaimon.api.identifier import Identifier
 from pypaimon.api.options import Options
 
-from pypaimon.schema.table_schema import TableSchema
 
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_utils import CatalogUtils
@@ -102,7 +101,7 @@ class RESTCatalog(Catalog):
         return self.to_table_metadata(identifier.get_database_name(), response)
 
     def to_table_metadata(self, db: str, response: GetTableResponse) -> TableMetadata:
-        schema = TableSchema.from_schema(response.get_schema_id(), response.get_schema())
+        schema = response.get_schema()
         options: Dict[str, str] = dict(schema.options)
         options[CoreOptions.PATH] = response.get_path()
         response.put_audit_options_to(options)

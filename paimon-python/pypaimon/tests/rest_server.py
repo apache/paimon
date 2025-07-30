@@ -30,13 +30,14 @@ from urllib.parse import urlparse
 import pypaimon.api as api
 from ..api import RenameTableRequest, CreateTableRequest, CreateDatabaseRequest, Identifier
 from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse,
-                                Schema, GetTableResponse, ListTablesResponse,
+                                GetTableResponse, ListTablesResponse,
                                 RESTResponse, PagedList)
 from pypaimon.common.rest_json import JSON
 from pypaimon.schema.table_schema import TableSchema
 from ..catalog.catalog_exception import DatabaseNoPermissionException, TableNotExistException, \
     DatabaseNotExistException, TableNoPermissionException
 from ..catalog.table_metadata import TableMetadata
+from ..schema.schema import Schema
 
 
 @dataclass
@@ -394,7 +395,7 @@ class RESTCatalogServer:
                 raise TableNotExistException(identifier)
             table_metadata = self.table_metadata_store[identifier.get_full_name()]
             table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
-            schema = table_metadata.schema.to_schema()
+            schema = table_metadata.schema
             response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
         #
@@ -593,7 +594,7 @@ class RESTCatalogServer:
         )
 
     def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str,
-                   schema: Schema) -> GetTableResponse:
+                   schema: TableSchema) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
             name=identifier.get_object_name(),
