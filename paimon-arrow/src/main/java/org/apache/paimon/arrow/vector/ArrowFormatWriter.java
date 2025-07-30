@@ -26,7 +26,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -105,9 +104,7 @@ public class ArrowFormatWriter implements AutoCloseable {
         for (int i = 0; i < currentRow.getFieldCount(); i++) {
             try {
                 fieldWriters[i].write(rowId, currentRow, i);
-            } catch (OversizedAllocationException
-                    | IndexOutOfBoundsException
-                    | OutOfMemoryException e) {
+            } catch (OversizedAllocationException | IndexOutOfBoundsException e) {
                 // maybe out of memory
                 LOG.warn("Arrow field writer failed while writing", e);
                 return false;
