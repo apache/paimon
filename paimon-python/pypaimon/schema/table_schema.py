@@ -25,9 +25,9 @@ from typing import List, Dict, Optional
 import pyarrow
 
 from pypaimon import Schema
+from pypaimon.common.rest_json import json_field
 from pypaimon.schema import data_types
 from pypaimon.api.core_options import CoreOptions
-from pypaimon.api.rest_json import json_field
 from pypaimon.common.file_io import FileIO
 from pypaimon.schema.data_types import DataField
 

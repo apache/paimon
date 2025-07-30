@@ -25,13 +25,11 @@ from ..api.api_response import (ConfigResponse)
 from ..api import RESTApi
 from ..api.auth import BearTokenAuthProvider
 from ..api.identifier import Identifier
-from ..api.options import Options
 from pypaimon.common.rest_json import JSON
 from pypaimon.schema.table_schema import TableSchema
 from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 
 from pypaimon.schema.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType, DataField
-from ..catalog.catalog_context import CatalogContext
 from ..catalog.table_metadata import TableMetadata
 
 
