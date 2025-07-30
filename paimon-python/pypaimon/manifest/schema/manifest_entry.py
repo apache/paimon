@@ -15,39 +15,30 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from abc import ABC, abstractmethod
-from pathlib import Path
+
+from dataclasses import dataclass
+
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta, DATA_FILE_META_SCHEMA
+from pypaimon.table.row.binary_row import BinaryRow
 
 
-class FileIO(ABC):
-    @abstractmethod
-    def exists(self, path: Path) -> bool:
-        """"""
+@dataclass
+class ManifestEntry:
+    kind: int
+    partition: BinaryRow
+    bucket: int
+    total_buckets: int
+    file: DataFileMeta
 
-    @abstractmethod
-    def read_file_utf8(self, path: Path) -> str:
-        """"""
 
-    @abstractmethod
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        """"""
-
-    @abstractmethod
-    def list_status(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def mkdirs(self, path: Path) -> bool:
-        """"""
-
-    @abstractmethod
-    def write_file(self, path: Path, content: str, overwrite: bool = False):
-        """"""
-
-    @abstractmethod
-    def delete_quietly(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def new_input_stream(self, path: Path):
-        """"""
+MANIFEST_ENTRY_SCHEMA = {
+    "type": "record",
+    "name": "ManifestEntry",
+    "fields": [
+        {"name": "_KIND", "type": "int"},
+        {"name": "_PARTITION", "type": "bytes"},
+        {"name": "_BUCKET", "type": "int"},
+        {"name": "_TOTAL_BUCKETS", "type": "int"},
+        {"name": "_FILE", "type": DATA_FILE_META_SCHEMA}
+    ]
+}
