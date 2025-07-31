@@ -682,13 +682,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "If set to true, compaction strategy will always include all level 0 files in candidates.");
 
-    public static final ConfigOption<Boolean> COMPACTION_FORCE_WAIT =
-            key("compaction.force-wait")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "If set to true, prepare commit will wait current compaction finished.");
-
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             key("compaction.size-ratio")
                     .intType()
@@ -2903,7 +2896,11 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean prepareCommitWaitCompaction() {
-        return options.get(COMPACTION_FORCE_WAIT) || (needLookup() && options.get(LOOKUP_WAIT));
+        if (!needLookup()) {
+            return false;
+        }
+
+        return options.get(LOOKUP_WAIT);
     }
 
     public LookupCompactMode lookupCompact() {
