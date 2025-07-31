@@ -36,7 +36,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
@@ -44,7 +43,6 @@ import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -103,10 +101,7 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>(wrapped.rowType().getFields());
-        fields.add(SpecialFields.ROW_ID);
-        fields.add(SpecialFields.SEQUENCE_NUMBER);
-        return new RowType(fields);
+        return SpecialFields.rowTypeWithRowLineage(wrapped.rowType());
     }
 
     @Override

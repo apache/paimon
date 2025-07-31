@@ -1183,6 +1183,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 long rowCount = entry.file().rowCount();
                 rowIdAssigned.add(entry.assignFirstRowId(start));
                 start += rowCount;
+            } else {
+                // for compact file, do not assign first row id.
+                rowIdAssigned.add(entry);
             }
         }
         return start;
