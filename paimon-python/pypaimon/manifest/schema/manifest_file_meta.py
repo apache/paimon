@@ -15,39 +15,35 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from abc import ABC, abstractmethod
-from pathlib import Path
+
+from dataclasses import dataclass
+
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 
 
-class FileIO(ABC):
-    @abstractmethod
-    def exists(self, path: Path) -> bool:
-        """"""
+@dataclass
+class ManifestFileMeta:
+    file_name: str
+    file_size: int
+    num_added_files: int
+    num_deleted_files: int
+    partition_stats: SimpleStats
+    schema_id: int
+    min_bucket: int
+    max_bucket: int
+    min_level: int
+    max_level: int
 
-    @abstractmethod
-    def read_file_utf8(self, path: Path) -> str:
-        """"""
 
-    @abstractmethod
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        """"""
-
-    @abstractmethod
-    def list_status(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def mkdirs(self, path: Path) -> bool:
-        """"""
-
-    @abstractmethod
-    def write_file(self, path: Path, content: str, overwrite: bool = False):
-        """"""
-
-    @abstractmethod
-    def delete_quietly(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def new_input_stream(self, path: Path):
-        """"""
+MANIFEST_FILE_META_SCHEMA = {
+    "type": "record",
+    "name": "ManifestFileMeta",
+    "fields": [
+        {"name": "_FILE_NAME", "type": "string"},
+        {"name": "_FILE_SIZE", "type": "long"},
+        {"name": "_NUM_ADDED_FILES", "type": "long"},
+        {"name": "_NUM_DELETED_FILES", "type": "long"},
+        {"name": "_PARTITION_STATS", "type": "long"},  # TODO
+        {"name": "_SCHEMA_ID", "type": "long"},
+    ]
+}

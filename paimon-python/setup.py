@@ -26,6 +26,7 @@ install_requires = [
     'fsspec==2024.3.1',
     'cachetools==5.3.3',
     'ossfs==2023.12.0'
+    'fastavro==1.11.1'
 ]
 
 long_description = "See Apache Paimon Python API \

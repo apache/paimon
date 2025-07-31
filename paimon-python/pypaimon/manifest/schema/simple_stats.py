@@ -15,39 +15,26 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from abc import ABC, abstractmethod
-from pathlib import Path
+
+from dataclasses import dataclass
+
+from pypaimon.table.row.binary_row import BinaryRow
 
 
-class FileIO(ABC):
-    @abstractmethod
-    def exists(self, path: Path) -> bool:
-        """"""
+@dataclass
+class SimpleStats:
+    min_value: BinaryRow
+    max_value: BinaryRow
+    null_count: int
 
-    @abstractmethod
-    def read_file_utf8(self, path: Path) -> str:
-        """"""
 
-    @abstractmethod
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        """"""
-
-    @abstractmethod
-    def list_status(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def mkdirs(self, path: Path) -> bool:
-        """"""
-
-    @abstractmethod
-    def write_file(self, path: Path, content: str, overwrite: bool = False):
-        """"""
-
-    @abstractmethod
-    def delete_quietly(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def new_input_stream(self, path: Path):
-        """"""
+SIMPLE_STATS_SCHEMA = {
+    "type": "record",
+    "name": "SimpleStats",
+    "namespace": "com.example.paimon",
+    "fields": [
+        {"name": "null_count", "type": ["null", "long"], "default": None},
+        {"name": "min_value", "type": ["null", "bytes"], "default": None},
+        {"name": "max_value", "type": ["null", "bytes"], "default": None},
+    ]
+}
