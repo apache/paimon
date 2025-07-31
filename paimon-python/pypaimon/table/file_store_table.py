@@ -20,7 +20,7 @@ from pathlib import Path
 
 from pypaimon import Table
 from pypaimon.api.core_options import CoreOptions
-from pypaimon.api.identifier import Identifier
+from pypaimon.common.identifier import Identifier
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.common.file_io import FileIO
 from pypaimon.schema.schema_manager import SchemaManager

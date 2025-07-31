@@ -15,24 +15,33 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pypaimon import Catalog
-from pypaimon.api import CatalogOptions
-from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
-from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+
+from dataclasses import dataclass
+from typing import List
+
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.table.row.binary_row import BinaryRow
 
 
-class CatalogFactory:
+@dataclass
+class Split:
+    """Implementation of Split for native Python reading."""
+    files: List[DataFileMeta]
+    partition: BinaryRow
+    bucket: int
+    _file_paths: List[str]
+    _row_count: int
+    _file_size: int
+    raw_convertible: bool = False
 
-    CATALOG_REGISTRY = {
-        "filesystem": FileSystemCatalog,
-        "rest": RESTCatalog,
-    }
+    @property
+    def row_count(self) -> int:
+        return self._row_count
 
-    @staticmethod
-    def create(catalog_options: dict) -> Catalog:
-        identifier = catalog_options.get(CatalogOptions.METASTORE, "filesystem")
-        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
-        if catalog_class is None:
-            raise ValueError(f"Unknown catalog identifier: {identifier}. "
-                             f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
-        return catalog_class(catalog_options)
+    @property
+    def file_size(self) -> int:
+        return self._file_size
+
+    @property
+    def file_paths(self) -> List[str]:
+        return self._file_paths

@@ -15,24 +15,17 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pypaimon import Catalog
-from pypaimon.api import CatalogOptions
-from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
-from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+
+from dataclasses import dataclass
+from typing import List
+
+from pypaimon.read.split import Split
 
 
-class CatalogFactory:
+@dataclass
+class Plan:
+    """Implementation of Plan for native Python reading."""
+    _splits: List[Split]
 
-    CATALOG_REGISTRY = {
-        "filesystem": FileSystemCatalog,
-        "rest": RESTCatalog,
-    }
-
-    @staticmethod
-    def create(catalog_options: dict) -> Catalog:
-        identifier = catalog_options.get(CatalogOptions.METASTORE, "filesystem")
-        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
-        if catalog_class is None:
-            raise ValueError(f"Unknown catalog identifier: {identifier}. "
-                             f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
-        return catalog_class(catalog_options)
+    def splits(self) -> List[Split]:
+        return self._splits
