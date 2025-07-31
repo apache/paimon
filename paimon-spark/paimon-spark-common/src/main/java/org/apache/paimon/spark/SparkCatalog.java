@@ -37,6 +37,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
@@ -121,8 +122,12 @@ public class SparkCatalog extends SparkBaseCatalog
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
         try {
-            catalog.getDatabase(defaultNamespace()[0]);
+            catalog.getDatabase(defaultDatabase);
         } catch (Catalog.DatabaseNotExistException e) {
+            LOG.warn(
+                    "Default database '{}' does not exist due to: {}, start to create it",
+                    defaultDatabase,
+                    ExceptionUtils.stringifyException(e));
             try {
                 createNamespace(defaultNamespace(), new HashMap<>());
             } catch (NamespaceAlreadyExistsException ignored) {
