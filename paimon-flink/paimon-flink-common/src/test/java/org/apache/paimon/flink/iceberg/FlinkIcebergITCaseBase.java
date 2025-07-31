@@ -191,6 +191,8 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + "  pt INT,\n"
                         + "  id INT,"
                         + "  v_int INT,\n"
+                        + "  v_tinyint TINYINT,\n"
+                        + "  v_smallint SMALLINT,\n"
                         + "  v_boolean BOOLEAN,\n"
                         + "  v_bigint BIGINT,\n"
                         + "  v_float FLOAT,\n"
@@ -210,9 +212,9 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql(
                         "INSERT INTO paimon.`default`.T VALUES "
-                                + "(1, 1, 1, true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, 'cat', CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10', TIMESTAMP '2024-10-10 11:22:33.123456'), "
-                                + "(2, 2, 2, false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, 'dog', CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20', TIMESTAMP '2024-10-20 11:22:33.123456'), "
-                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS STRING), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE), CAST(NULL AS TIMESTAMP(6)))")
+                                + "(1, 1, 1, CAST(1 AS TINYINT), CAST(1 as SMALLINT), true, 10, CAST(100.0 AS FLOAT), 1000.0, 123.456, 'cat', CAST('B_cat' AS VARBINARY(20)), DATE '2024-10-10', TIMESTAMP '2024-10-10 11:22:33.123456'), "
+                                + "(2, 2, 2, CAST(2 AS TINYINT), CAST(2 as SMALLINT), false, 20, CAST(200.0 AS FLOAT), 2000.0, 234.567, 'dog', CAST('B_dog' AS VARBINARY(20)), DATE '2024-10-20', TIMESTAMP '2024-10-20 11:22:33.123456'), "
+                                + "(3, 3, CAST(NULL AS INT), CAST(NULL AS TINYINT), CAST(NULL AS SMALLINT), CAST(NULL AS BOOLEAN), CAST(NULL AS BIGINT), CAST(NULL AS FLOAT), CAST(NULL AS DOUBLE), CAST(NULL AS DECIMAL(8, 3)), CAST(NULL AS STRING), CAST(NULL AS VARBINARY(20)), CAST(NULL AS DATE), CAST(NULL AS TIMESTAMP(6)))")
                 .await();
 
         tEnv.executeSql(
@@ -228,6 +230,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where pt = 1")))
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int = 1")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_tinyint = 1")))
+                .containsExactly(Row.of(1));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_smallint = 1")))
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_boolean = true")))
                 .containsExactly(Row.of(1));
@@ -249,6 +255,10 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
                                         "SELECT id FROM T where v_timestamp = TIMESTAMP '2024-10-10 11:22:33.123456'")))
                 .containsExactly(Row.of(1));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_int IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_tinyint IS NULL")))
+                .containsExactly(Row.of(3));
+        assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_smallint IS NULL")))
                 .containsExactly(Row.of(3));
         assertThat(collect(tEnv.executeSql("SELECT id FROM T where v_boolean IS NULL")))
                 .containsExactly(Row.of(3));

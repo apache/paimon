@@ -57,6 +57,14 @@ public class IcebergConversions {
             case INTEGER:
             case DATE:
                 return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(0, (int) value);
+            case TINYINT:
+                return ByteBuffer.allocate(4)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putInt(0, ((byte) value));
+            case SMALLINT:
+                return ByteBuffer.allocate(4)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putInt(0, ((Short) value).intValue());
             case BIGINT:
                 return ByteBuffer.allocate(8)
                         .order(ByteOrder.LITTLE_ENDIAN)

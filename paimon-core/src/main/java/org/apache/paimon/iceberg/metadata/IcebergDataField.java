@@ -150,6 +150,8 @@ public class IcebergDataField {
             case BOOLEAN:
                 return "boolean";
             case INTEGER:
+            case TINYINT:
+            case SMALLINT:
                 return "int";
             case BIGINT:
                 return "long";
