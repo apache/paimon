@@ -30,6 +30,8 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -43,6 +45,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
@@ -52,6 +55,7 @@ import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFro
 /** Trigger to mark partitions done with streaming job. */
 public class PartitionMarkDoneTrigger {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionMarkDoneTrigger.class);
     private static final ListStateDescriptor<List<String>> PENDING_PARTITIONS_STATE_DESC =
             new ListStateDescriptor<>(
                     "mark-done-pending-partitions",
@@ -137,16 +141,26 @@ public class PartitionMarkDoneTrigger {
 
             long lastUpdateTime = entry.getValue();
             long partitionStartTime;
+
+            Optional<LocalDateTime> partitionLocalDateTimeOpt = extractDateTime(partition);
+            // skip illegal partition
+            if (!partitionLocalDateTimeOpt.isPresent()) {
+                iter.remove();
+                continue;
+            }
+
             if (watermarkEnabled) {
                 // watermark should be compared as UTC time
                 partitionStartTime =
-                        extractDateTime(partition)
+                        partitionLocalDateTimeOpt
+                                .get()
                                 .atZone(ZoneId.of("UTC"))
                                 .toInstant()
                                 .toEpochMilli();
             } else {
                 partitionStartTime =
-                        extractDateTime(partition)
+                        partitionLocalDateTimeOpt
+                                .get()
                                 .atZone(ZoneId.systemDefault())
                                 .toInstant()
                                 .toEpochMilli();
@@ -163,11 +177,15 @@ public class PartitionMarkDoneTrigger {
     }
 
     @VisibleForTesting
-    LocalDateTime extractDateTime(String partition) {
+    Optional<LocalDateTime> extractDateTime(String partition) {
         try {
-            return timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition)));
+            return Optional.of(
+                    timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition))));
         } catch (DateTimeParseException e) {
-            throw new RuntimeException("Can't extract datetime from partition " + partition, e);
+            LOG.warn(
+                    "Can't extract datetime from partition {}, please check configuration items 'partition.timestamp-formatter' and 'partition.timestamp-pattern'.",
+                    partition);
+            return Optional.empty();
         }
     }
 
