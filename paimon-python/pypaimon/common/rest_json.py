@@ -87,7 +87,7 @@ class JSON:
         for json_name, value in data.items():
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
-                if field_name in type_mapping:
+                if json_name in type_mapping:
                     kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
                 else:
                     kwargs[field_name] = value

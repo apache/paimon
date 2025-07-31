@@ -27,7 +27,7 @@ from pypaimon.api.api_response import (
     GetDatabaseResponse,
     ConfigResponse,
     PagedResponse,
-    GetTableTokenResponse, Schema,
+    GetTableTokenResponse,
 )
 from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest, \
     CreateTableRequest
@@ -35,6 +35,7 @@ from pypaimon.api.config import CatalogOptions
 from pypaimon.api.client import HttpClient
 from pypaimon.api.identifier import Identifier
 from pypaimon.api.typedef import T
+from pypaimon.schema.schema import Schema
 
 
 class RESTException(Exception):

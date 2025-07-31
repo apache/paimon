@@ -20,9 +20,9 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List
 
-from .api_response import Schema
 from .identifier import Identifier
 from pypaimon.common.rest_json import json_field
+from ..schema.schema import Schema
 
 
 class RESTRequest(ABC):
