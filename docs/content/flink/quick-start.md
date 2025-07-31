@@ -270,11 +270,7 @@ SELECT * FROM ....;
 
 ## Setting dynamic options
 
-When interacting with the Paimon table, table options can be tuned without changing the options in the table or catalog. 
-Paimon will extract job-level dynamic options from Flink config and take effect in the current session. There are two ways to achieve it.
-
-### Set table options
-
+When interacting with the Paimon table, table options can be tuned without changing the options in the catalog. Paimon will extract job-level dynamic options and take effect in the current session.
 The dynamic table option's key format is `paimon.${catalogName}.${dbName}.${tableName}.${config_key}`. The catalogName/dbName/tableName can be `*`, which means matching all the specific parts. 
 The dynamic global option's key format is `${config_key}`. Global options will take effect for all the tables. Table options will override global options if there are conflicts.
 
@@ -299,9 +295,3 @@ SET 'paimon.mycatalog.default.T1.scan.timestamp-millis' = '1697018249000';
 SET 'scan.timestamp-millis' = '1697018249001';
 SELECT * FROM T1 JOIN T2 ON xxxx;
 ```
-
-### Set catalog filesystem options
-
-The Flink config will be passed to FileIO, but currently Paimon's FileIOs didn't handle the options. You can use custom 
-FileIO and handle the runtime config by your self. If you want to disable this feature for a table, set table option 
-`filesystem.job-level-settings.enabled` = `false`.
