@@ -42,6 +42,7 @@ public class CloneAction extends ActionBase {
 
     private final int parallelism;
     @Nullable private final String whereSql;
+    @Nullable private final List<String> includedTables;
     @Nullable private final List<String> excludedTables;
     private final String cloneFrom;
 
@@ -54,6 +55,7 @@ public class CloneAction extends ActionBase {
             Map<String, String> targetCatalogConfig,
             @Nullable Integer parallelism,
             @Nullable String whereSql,
+            @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
             String cloneFrom) {
         super(sourceCatalogConfig);
@@ -80,6 +82,7 @@ public class CloneAction extends ActionBase {
 
         this.parallelism = parallelism == null ? env.getParallelism() : parallelism;
         this.whereSql = whereSql;
+        this.includedTables = includedTables;
         this.excludedTables = excludedTables;
         this.cloneFrom = cloneFrom;
     }
@@ -99,6 +102,7 @@ public class CloneAction extends ActionBase {
                         targetCatalogConfig,
                         parallelism,
                         whereSql,
+                        includedTables,
                         excludedTables);
                 break;
             case "paimon":
@@ -113,6 +117,7 @@ public class CloneAction extends ActionBase {
                         targetCatalogConfig,
                         parallelism,
                         whereSql,
+                        includedTables,
                         excludedTables);
                 break;
         }

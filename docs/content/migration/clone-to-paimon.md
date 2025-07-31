@@ -70,9 +70,12 @@ clone \
 --target_database test \
 --parallelism 10 \
 --target_catalog_conf warehouse=my_warehouse
+--included_tables <included_tables_spec> \
 --excluded_tables <excluded_tables_spec>
 ```
-You can use excluded tables spec to specify the tables that don't need to be cloned. The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+"--included_tables" and "--excluded_tables" are optional parameters, which are used to specify the tables that need or don't need to be cloned.
+The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+"--excluded_tables" has higher priority than "--included_tables" if you specified both.
 
 ## Clone Hive Catalog
 
@@ -82,10 +85,13 @@ clone \
 --catalog_conf metastore=hive \
 --catalog_conf uri=thrift://localhost:9088 \
 --parallelism 10 \
---target_catalog_conf warehouse=my_warehouse
+--target_catalog_conf warehouse=my_warehouse \
+--included_tables <included_tables_spec> \
 --excluded_tables <excluded_tables_spec>
 ```
-You can use excluded tables spec to specify the tables that don't need to be cloned. The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+"--included_tables" and "--excluded_tables" are optional parameters, which are used to specify the tables that need or don't need to be cloned. 
+The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
+"--excluded_tables" has higher priority than "--included_tables" if you specified both.
 
 
 ## Clone Hudi Tables
