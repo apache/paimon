@@ -53,6 +53,7 @@ import static org.apache.paimon.operation.metrics.CompactionMetrics.AVG_COMPACTI
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_COMPLETED_COUNT;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_QUEUED_COUNT;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_THREAD_BUSY;
+import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_TOTAL_COUNT;
 
 /** Test for {@link AppendTableCompactor}. */
 public class AppendTableCompactorTest {
@@ -109,11 +110,13 @@ public class AppendTableCompactorTest {
         double compactionThreadBusy = (double) gaugeMap.get(COMPACTION_THREAD_BUSY).getValue();
         double compactionAvgTime = (double) gaugeMap.get(AVG_COMPACTION_TIME).getValue();
         long compactionsCompletedCount = counterMap.get(COMPACTION_COMPLETED_COUNT).getCount();
+        long compactionsTotalCount = counterMap.get(COMPACTION_TOTAL_COUNT).getCount();
         long compactionsQueuedCount = counterMap.get(COMPACTION_QUEUED_COUNT).getCount();
 
         Assertions.assertThat(compactionThreadBusy).isGreaterThan(45).isLessThan(55);
         Assertions.assertThat(compactionAvgTime).isGreaterThan(120).isLessThan(140);
         Assertions.assertThat(compactionsCompletedCount).isEqualTo(320L);
+        Assertions.assertThat(compactionsTotalCount).isEqualTo(320L);
         Assertions.assertThat(compactionsQueuedCount).isEqualTo(0L);
     }
 

@@ -129,6 +129,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private void recordCompactionsQueuedRequest() {
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
+            metricsReporter.increaseCompactionsTotalCount();
         }
     }
 
