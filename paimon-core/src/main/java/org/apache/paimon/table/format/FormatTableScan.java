@@ -18,37 +18,70 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
-/**
- * {@link TableScan} for {@link FormatTable}.
- */
-public class FormatTableScan implements TableScan {
+/** {@link TableScan} for {@link FormatTable}. */
+public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
+    private Predicate predicate;
+    private int[] projection;
 
-    public FormatTableScan(FormatTable table) {
+    public FormatTableScan(FormatTable table, Predicate predicate, int[] projection) {
         this.table = table;
+        this.predicate = predicate;
+        this.projection = projection;
     }
 
     @Override
-    public TableScan withMetricRegistry(MetricRegistry registry) {
-        // TODO
+    public InnerTableScan withFilter(Predicate predicate) {
+        this.predicate = predicate;
         return this;
     }
 
     @Override
     public Plan plan() {
-        return null;
+        return new FormatTableScanPlan();
     }
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         throw new UnsupportedOperationException();
+    }
+
+    private class FormatTableScanPlan implements Plan {
+        @Override
+        public List<Split> splits() {
+            List<Split> splits = new ArrayList<>();
+            try {
+                FileStatus[] files = table.fileIO().listStatus(new Path(table.location()));
+
+                for (FileStatus file : files) {
+                    FormatDataSplit split =
+                            new FormatDataSplit(
+                                    file.getPath(),
+                                    0,
+                                    file.getLen(),
+                                    table.rowType(),
+                                    predicate,
+                                    projection);
+                    splits.add(split);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to scan files", e);
+            }
+            return splits;
+        }
     }
 }

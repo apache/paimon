@@ -22,11 +22,16 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
@@ -65,6 +70,8 @@ public interface FormatTable extends Table {
 
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
+
+    AppendOnlyFileStoreTable store();
 
     /** Currently supported formats. */
     enum Format {
@@ -163,6 +170,7 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
+        private AppendOnlyFileStoreTable store;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -181,6 +189,16 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
+            TableSchema schema =
+                    TableSchema.create(
+                            0L,
+                            new Schema(
+                                    rowType.getFields(),
+                                    partitionKeys,
+                                    Collections.emptyList(),
+                                    options,
+                                    comment));
+            this.store = new AppendOnlyFileStoreTable(fileIO, new Path(location), schema);
         }
 
         @Override
@@ -234,6 +252,11 @@ public interface FormatTable extends Table {
         }
 
         @Override
+        public AppendOnlyFileStoreTable store() {
+            return store;
+        }
+
+        @Override
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
@@ -251,12 +274,12 @@ public interface FormatTable extends Table {
 
     @Override
     default ReadBuilder newReadBuilder() {
-        throw new UnsupportedOperationException();
+        return new FormatReadBuilder(this);
     }
 
     @Override
     default BatchWriteBuilder newBatchWriteBuilder() {
-        throw new UnsupportedOperationException();
+        return new BatchWriteBuilderImpl(this.store());
     }
 
     default RowType partitionType() {
@@ -264,7 +287,8 @@ public interface FormatTable extends Table {
     }
 
     default String defaultPartName() {
-        return options().getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
+        return options()
+                .getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
     }
 
     // ===================== Unsupported ===============================

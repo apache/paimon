@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
@@ -30,15 +29,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
+
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 
-/**
- * {@link ReadBuilder} for {@link FormatTable}.
- */
+/** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
 
     private static final long serialVersionUID = 1L;
@@ -46,6 +43,8 @@ public class FormatReadBuilder implements ReadBuilder {
     private final FormatTable table;
 
     private @Nullable RowType readType;
+    private @Nullable Predicate predicate;
+    private @Nullable int[] projection;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -63,7 +62,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate predicate) {
-        // TODO
+        this.predicate = predicate;
         return this;
     }
 
@@ -71,10 +70,11 @@ public class FormatReadBuilder implements ReadBuilder {
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
             RowType partitionType = table.partitionType();
-            PartitionPredicate partitionPredicate = fromPredicate(
-                    partitionType,
-                    createPartitionPredicate(
-                            partitionSpec, partitionType, table.defaultPartName()));
+            PartitionPredicate partitionPredicate =
+                    fromPredicate(
+                            partitionType,
+                            createPartitionPredicate(
+                                    partitionSpec, partitionType, table.defaultPartName()));
             withPartitionFilter(partitionPredicate);
         }
         return this;
@@ -97,6 +97,7 @@ public class FormatReadBuilder implements ReadBuilder {
         if (projection == null) {
             return this;
         }
+        this.projection = projection;
         return withReadType(table.rowType().project(projection));
     }
 
@@ -108,7 +109,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
-        return null;
+        return new FormatTableScan(table, predicate, projection);
     }
 
     @Override
