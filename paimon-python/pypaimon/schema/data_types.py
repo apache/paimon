@@ -195,53 +195,6 @@ class DataField:
 
         return result
 
-    def to_pyarrow_field(self):
-        data_type = self.type
-        # if not isinstance(data_type, AtomicType):
-        #     raise ValueError(f"Unsupported data type: {data_type.__class__}")
-        if isinstance(data_type, AtomicType):
-            type_name = data_type.type.upper()
-            if type_name == 'INT':
-                type_name = pyarrow.int32()
-            elif type_name == 'BIGINT':
-                type_name = pyarrow.int64()
-            elif type_name == 'FLOAT':
-                type_name = pyarrow.float32()
-            elif type_name == 'DOUBLE':
-                type_name = pyarrow.float64()
-            elif type_name == 'BOOLEAN':
-                type_name = pyarrow.bool_()
-            elif type_name == 'STRING':
-                type_name = pyarrow.string()
-            elif type_name == 'BINARY':
-                type_name = pyarrow.binary()
-            elif type_name == 'DATE':
-                type_name = pyarrow.date32()
-            elif type_name == 'TIMESTAMP':
-                type_name = pyarrow.timestamp('ms')
-            elif type_name.startswith('DECIMAL'):
-                match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
-                if match:
-                    precision, scale = map(int, match.groups())
-                    type_name = pyarrow.decimal128(precision, scale)
-                else:
-                    type_name = pyarrow.decimal128(38, 18)
-            else:
-                raise ValueError(f"Unsupported data type: {type_name}")
-        elif isinstance(data_type, ArrayType):
-            type_name = pyarrow.list_(DataField(-1, "", data_type.element).to_pyarrow_field())
-        elif isinstance(data_type, MapType):
-            data_type.key.nullable = data_type.nullable
-            df1 = DataField(-1, "", data_type.key)
-            k = df1.to_pyarrow_field()
-            df2 = DataField(-1, "", data_type.value)
-            v = df2.to_pyarrow_field()
-            type_name = pyarrow.map_(k, v)
-        metadata = {}
-        if self.description:
-            metadata[b'description'] = self.description.encode('utf-8')
-        return pyarrow.field(self.name, type_name, nullable=data_type.nullable, metadata=metadata)
-
 
 @dataclass
 class RowType(DataType):
@@ -438,6 +391,117 @@ class DataTypeParser:
         )
 
 
+class PyarrowFieldParse:
+
+    @staticmethod
+    def to_pyarrow_field(data_field: DataField) -> pyarrow.Field:
+        pa_field_type = PyarrowFieldParse.to_pyarrow_data_type(data_field.type)
+        metadata = {}
+        if data_field.description:
+            metadata[b'description'] = data_field.description.encode('utf-8')
+        return pyarrow.field(data_field.name, pa_field_type, nullable=data_field.type.nullable, metadata=metadata)
+
+    @staticmethod
+    def to_pyarrow_data_type(data_type: DataType) -> pyarrow.DataType:
+        if isinstance(data_type, AtomicType):
+            type_name = data_type.type.upper()
+            if type_name == 'INT':
+                return pyarrow.int32()
+            elif type_name == 'BIGINT':
+                return pyarrow.int64()
+            elif type_name == 'FLOAT':
+                return pyarrow.float32()
+            elif type_name == 'DOUBLE':
+                return pyarrow.float64()
+            elif type_name == 'BOOLEAN':
+                return pyarrow.bool_()
+            elif type_name == 'STRING':
+                return pyarrow.string()
+            elif type_name == 'BINARY':
+                return pyarrow.binary()
+            elif type_name == 'DATE':
+                return pyarrow.date32()
+            elif type_name == 'TIMESTAMP':
+                return pyarrow.timestamp('ms')
+            elif type_name.startswith('DECIMAL'):
+                match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+                if match:
+                    precision, scale = map(int, match.groups())
+                    return pyarrow.decimal128(precision, scale)
+                else:
+                    return pyarrow.decimal128(38, 18)
+            else:
+                raise ValueError(f"Unsupported data type: {type_name}")
+        elif isinstance(data_type, ArrayType):
+            return pyarrow.list_(PyarrowFieldParse.to_pyarrow_data_type(data_type.element))
+        elif isinstance(data_type, MapType):
+            key_type = PyarrowFieldParse.to_pyarrow_data_type(data_type.key)
+            value_type = PyarrowFieldParse.to_pyarrow_data_type(data_type.value)
+            return pyarrow.map_(key_type, value_type)
+        else:
+            raise ValueError(f"Unsupported data type: {data_type}")
+
+    @staticmethod
+    def from_pyarrow_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
+        data_type = PyarrowFieldParse.from_pyarrow_data_type(pa_field.type, pa_field.nullable)
+        description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
+            if pa_field.metadata and b'description' in pa_field.metadata else None
+        return DataField(
+            id=field_idx,
+            name=pa_field.name,
+            type=data_type,
+            description=description
+        )
+
+    @staticmethod
+    def from_pyarrow_data_type(pa_type: pyarrow.DataType, nullable: bool) -> DataType:
+        type_name = str(pa_type)
+        if type_name.startswith('int') or type_name.startswith('uint'):
+            type_name = 'INT'
+        elif type_name.startswith('float'):
+            type_name = 'FLOAT'
+        elif type_name.startswith('double'):
+            type_name = 'DOUBLE'
+        elif type_name.startswith('bool'):
+            type_name = 'BOOLEAN'
+        elif type_name.startswith('string'):
+            type_name = 'STRING'
+        elif type_name.startswith('binary'):
+            type_name = 'BINARY'
+        elif type_name.startswith('date'):
+            type_name = 'DATE'
+        elif type_name.startswith('timestamp'):
+            type_name = 'TIMESTAMP'
+        elif type_name.startswith('decimal'):
+            match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
+            if match:
+                precision, scale = map(int, match.groups())
+                type_name = f'DECIMAL({precision},{scale})'
+            else:
+                type_name = 'DECIMAL(38,18)'
+        elif type_name.startswith('list'):
+            pa_type: pyarrow.ListType
+            element_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.value_type, nullable)
+            return ArrayType(nullable, element_type)
+        elif type_name.startswith('map'):
+            pa_type: pyarrow.MapType
+            key_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.key_type, nullable)
+            value_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.item_type, nullable)
+            return MapType(nullable, key_type, value_type)
+        else:
+            raise ValueError(f"Unknown type: {type_name}")
+        return AtomicType(type_name)
+
+    @staticmethod
+    def parse_pyarrow_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        fields = []
+        for i, pa_field in enumerate(pa_schema):
+            pa_field: pyarrow.Field
+            data_field = PyarrowFieldParse.from_pyarrow_field(i, pa_field)
+            fields.append(data_field)
+        return fields
+
+
 def parse_data_type_from_json(
         json_str: str, field_id: Optional[AtomicInteger] = None
 ) -> DataType:
@@ -446,7 +510,7 @@ def parse_data_type_from_json(
 
 
 def parse_data_field_from_json(
-    json_str: str, field_id: Optional[AtomicInteger] = None
+        json_str: str, field_id: Optional[AtomicInteger] = None
 ) -> DataField:
     json_data = json.loads(json_str)
     return DataTypeParser.parse_data_field(json_data, field_id)

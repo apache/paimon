@@ -74,13 +74,6 @@ class TableSchema:
         self.time_millis = time_millis if time_millis is not None else int(time.time() * 1000)
 
     def to_schema(self) -> Schema:
-        try:
-            pa_fields = []
-            for field in self.fields:
-                pa_fields.append(field.to_pyarrow_field())
-            pyarrow.schema(pa_fields)
-        except Exception as e:
-            raise e
         return Schema(
             fields=self.fields,
             partition_keys=self.partition_keys,
@@ -133,12 +126,10 @@ class TableSchema:
     @staticmethod
     def from_schema(schema_id: int, schema: Schema) -> "TableSchema":
         fields: List[DataField] = schema.fields
-        if not schema.fields:
-            fields = data_types.parse_data_fields_from_pyarrow_schema(schema.pa_schema)
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = None  # max(field.id for field in fields)
+        highest_field_id: int = max(field.id for field in fields)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,

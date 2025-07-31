@@ -122,23 +122,6 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
         self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
 
-    def test_types(self):
-        """Example usage of RESTCatalogServer"""
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        data_fields = [
-            DataField(0, "name", AtomicType('INT'), 'desc  name'),
-            DataField(1, "arr11", ArrayType(True, AtomicType('INT')), 'desc  arr11'),
-            DataField(2, "map11",
-                      MapType(False, AtomicType('INT'), MapType(False, AtomicType('INT'), AtomicType('INT'))),
-                      'desc  arr11'),
-        ]
-        table_schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields, len(data_fields),
-                                   [], [], {}, "")
-        schema = table_schema.to_schema()
-        print("\n")
-        print(schema)
-
     def test_api(self):
         """Example usage of RESTCatalogServer"""
         # Setup logging
