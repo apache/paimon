@@ -527,7 +527,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Boolean> FILESYSTEM_JOB_LEVEL_SETTINGS_ENABLED =
             key("filesystem.job-level-settings.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription("Enable pass job level filesystem settings to table file IO.");
 
     public static List<ConfigOption<?>> getOptions() {
