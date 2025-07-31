@@ -25,6 +25,7 @@ from pypaimon.api import CatalogOptions, Identifier
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseNotExistException, \
     TableAlreadyExistException, DatabaseAlreadyExistException
+from pypaimon.common.file_io import FileIO
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -35,7 +36,7 @@ class FileSystemCatalog(Catalog):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.file_io = None  # FileIO(self.warehouse, self.catalog_options)
+        self.file_io = FileIO(self.warehouse, self.catalog_options)
 
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):
