@@ -326,6 +326,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> computedColumnArgs = new ArrayList<>();
         private final List<String> typeMappingModes = new ArrayList<>();
         private final List<String> metadataColumns = new ArrayList<>();
+        private final List<String> compositePrimaryKey = new ArrayList<>();
 
         public SyncTableActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
             this.clazz = clazz;
@@ -371,6 +372,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncTableActionBuilder<T> withCompositePrimaryKey(String... compositePrimaryKey) {
+            this.compositePrimaryKey.addAll(Arrays.asList(compositePrimaryKey));
+            return this;
+        }
+
         public T build() {
             List<String> args =
                     new ArrayList<>(
@@ -393,6 +399,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
             args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
+            args.addAll(listToMultiArgs("--composite_primary_key", compositePrimaryKey));
 
             return createAction(clazz, args);
         }
