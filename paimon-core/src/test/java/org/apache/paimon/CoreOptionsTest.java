@@ -72,10 +72,6 @@ public class CoreOptionsTest {
 
         assertThat(options.prepareCommitWaitCompaction()).isFalse();
 
-        conf.set(CoreOptions.COMPACTION_FORCE_WAIT, true);
-        assertThat(options.prepareCommitWaitCompaction()).isTrue();
-        conf.remove(CoreOptions.COMPACTION_FORCE_WAIT.key());
-
         conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
         assertThat(options.prepareCommitWaitCompaction()).isTrue();
         conf.remove(CoreOptions.DELETION_VECTORS_ENABLED.key());
@@ -89,8 +85,5 @@ public class CoreOptionsTest {
 
         conf.set(CoreOptions.LOOKUP_WAIT, false);
         assertThat(options.prepareCommitWaitCompaction()).isFalse();
-
-        conf.set(CoreOptions.COMPACTION_FORCE_WAIT, true);
-        assertThat(options.prepareCommitWaitCompaction()).isTrue();
     }
 }
