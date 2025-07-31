@@ -155,7 +155,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         }
         RowType writeSchema =
                 options.rowTrackingEnabled()
-                        ? SpecialFields.fieldsWithRowLineage(rowType)
+                        ? SpecialFields.rowTypeWithRowLineage(rowType)
                         : rowType;
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =

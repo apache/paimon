@@ -102,9 +102,6 @@ public class SpecialFields {
                             ROW_ID.name())
                     .collect(Collectors.toSet());
 
-    public static final Set<String> ROW_LINEAGE_FIELD_NAMES =
-            Stream.of(ROW_ID.name(), SEQUENCE_NUMBER.name()).collect(Collectors.toSet());
-
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
     }
@@ -142,11 +139,12 @@ public class SpecialFields {
                 + depth;
     }
 
-    public static RowType fieldsWithRowLineage(RowType rowType) {
+    public static RowType rowTypeWithRowLineage(RowType rowType) {
         List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
+
         fieldsWithRowLineage.forEach(
                 f -> {
-                    if (ROW_LINEAGE_FIELD_NAMES.contains(f.name())) {
+                    if (ROW_ID.name().equals(f.name()) || SEQUENCE_NUMBER.name().equals(f.name())) {
                         throw new IllegalArgumentException(
                                 "Row lineage field name '"
                                         + f.name()
