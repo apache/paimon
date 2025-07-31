@@ -77,8 +77,14 @@ under the License.
     <tr>
         <td><h5>--primary_keys</h5></td>
         <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".
-            If the keys are not in source table, but the source table has primary keys, the sink table will use source table's primary keys.
-            Otherwise, the sink table won't set primary keys.</td>
+            If the keys are not provided, but the source has primary keys, the sink table will use source's primary keys.
+            Otherwise, the sink table won't set primary keys.
+            If the keys are not provided, but the source has primary keys, and you don't want to use source's primary keys,
+            use --sync_primary_keys_from_source_schema.</td>
+    </tr>
+    <tr>
+        <td><h5>--sync_primary_keys_from_source_schema</h5></td>
+        <td>This is used to specify if primary keys from source should be used in paimon schema if primary keys using --primary_keys are not specified. The default is true.</td>
     </tr>
     <tr>
         <td><h5>--pulsar_conf</h5></td>

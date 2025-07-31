@@ -107,7 +107,8 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 metadataConverters,
                 caseSensitive,
                 true,
-                true);
+                true,
+                this.syncPKeysFromSourceSchema);
     }
 
     @Override

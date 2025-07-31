@@ -326,6 +326,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> computedColumnArgs = new ArrayList<>();
         private final List<String> typeMappingModes = new ArrayList<>();
         private final List<String> metadataColumns = new ArrayList<>();
+        private boolean syncPKeysFromSourceSchema = true;
 
         public SyncTableActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
             this.clazz = clazz;
@@ -371,6 +372,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncTableActionBuilder<T> syncPKeysFromSourceSchema(boolean flag) {
+            this.syncPKeysFromSourceSchema = flag;
+            return this;
+        }
+
         public T build() {
             List<String> args =
                     new ArrayList<>(
@@ -381,7 +387,9 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                                     "--database",
                                     database,
                                     "--table",
-                                    tableName));
+                                    tableName,
+                                    "--sync_primary_keys_from_source_schema",
+                                    String.valueOf(syncPKeysFromSourceSchema)));
 
             args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
@@ -393,6 +401,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
             args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
+            args.add("--use_pkeys_from_source_for_paimon_schema");
 
             return createAction(clazz, args);
         }
