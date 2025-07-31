@@ -80,7 +80,7 @@ class TableSchema:
                 pa_fields.append(field.to_pyarrow_field())
             pyarrow.schema(pa_fields)
         except Exception as e:
-            print(e)
+            raise e
         return Schema(
             fields=self.fields,
             partition_keys=self.partition_keys,

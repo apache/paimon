@@ -163,12 +163,12 @@ class DataField:
     default_value: Optional[str] = None
 
     def __init__(
-        self,
-        id: int,
-        name: str,
-        type: DataType,
-        description: Optional[str] = None,
-        default_value: Optional[str] = None,
+            self,
+            id: int,
+            name: str,
+            type: DataType,
+            description: Optional[str] = None,
+            default_value: Optional[str] = None,
     ):
         self.id = id
         self.name = name
@@ -197,36 +197,46 @@ class DataField:
 
     def to_pyarrow_field(self):
         data_type = self.type
-        if not isinstance(data_type, AtomicType):
-            raise ValueError(f"Unsupported data type: {data_type.__class__}")
-        type_name = data_type.type.upper()
-        if type_name == 'INT':
-            type_name = pyarrow.int32()
-        elif type_name == 'BIGINT':
-            type_name = pyarrow.int64()
-        elif type_name == 'FLOAT':
-            type_name = pyarrow.float32()
-        elif type_name == 'DOUBLE':
-            type_name = pyarrow.float64()
-        elif type_name == 'BOOLEAN':
-            type_name = pyarrow.bool_()
-        elif type_name == 'STRING':
-            type_name = pyarrow.string()
-        elif type_name == 'BINARY':
-            type_name = pyarrow.binary()
-        elif type_name == 'DATE':
-            type_name = pyarrow.date32()
-        elif type_name == 'TIMESTAMP':
-            type_name = pyarrow.timestamp('ms')
-        elif type_name.startswith('DECIMAL'):
-            match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
-            if match:
-                precision, scale = map(int, match.groups())
-                type_name = pyarrow.decimal128(precision, scale)
+        # if not isinstance(data_type, AtomicType):
+        #     raise ValueError(f"Unsupported data type: {data_type.__class__}")
+        if isinstance(data_type, AtomicType):
+            type_name = data_type.type.upper()
+            if type_name == 'INT':
+                type_name = pyarrow.int32()
+            elif type_name == 'BIGINT':
+                type_name = pyarrow.int64()
+            elif type_name == 'FLOAT':
+                type_name = pyarrow.float32()
+            elif type_name == 'DOUBLE':
+                type_name = pyarrow.float64()
+            elif type_name == 'BOOLEAN':
+                type_name = pyarrow.bool_()
+            elif type_name == 'STRING':
+                type_name = pyarrow.string()
+            elif type_name == 'BINARY':
+                type_name = pyarrow.binary()
+            elif type_name == 'DATE':
+                type_name = pyarrow.date32()
+            elif type_name == 'TIMESTAMP':
+                type_name = pyarrow.timestamp('ms')
+            elif type_name.startswith('DECIMAL'):
+                match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+                if match:
+                    precision, scale = map(int, match.groups())
+                    type_name = pyarrow.decimal128(precision, scale)
+                else:
+                    type_name = pyarrow.decimal128(38, 18)
             else:
-                type_name = pyarrow.decimal128(38, 18)
-        else:
-            raise ValueError(f"Unsupported data type: {type_name}")
+                raise ValueError(f"Unsupported data type: {type_name}")
+        elif isinstance(data_type, ArrayType):
+            type_name = pyarrow.list_(DataField(-1, "", data_type.element).to_pyarrow_field())
+        elif isinstance(data_type, MapType):
+            data_type.key.nullable = data_type.nullable
+            df1 = DataField(-1, "", data_type.key)
+            k = df1.to_pyarrow_field()
+            df2 = DataField(-1, "", data_type.value)
+            v = df2.to_pyarrow_field()
+            type_name = pyarrow.map_(k, v)
         metadata = {}
         if self.description:
             metadata[b'description'] = self.description.encode('utf-8')
@@ -338,7 +348,7 @@ class DataTypeParser:
 
     @staticmethod
     def parse_data_type(
-        json_data: Union[Dict[str, Any], str], field_id: Optional[AtomicInteger] = None
+            json_data: Union[Dict[str, Any], str], field_id: Optional[AtomicInteger] = None
     ) -> DataType:
 
         if isinstance(json_data, str):
@@ -389,12 +399,12 @@ class DataTypeParser:
 
     @staticmethod
     def parse_data_field(
-        json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
+            json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
     ) -> DataField:
 
         if (
-            DataField.FIELD_ID in json_data
-            and json_data[DataField.FIELD_ID] is not None
+                DataField.FIELD_ID in json_data
+                and json_data[DataField.FIELD_ID] is not None
         ):
             if field_id is not None and field_id.get() != -1:
                 raise ValueError("Partial field id is not allowed.")
@@ -429,7 +439,7 @@ class DataTypeParser:
 
 
 def parse_data_type_from_json(
-    json_str: str, field_id: Optional[AtomicInteger] = None
+        json_str: str, field_id: Optional[AtomicInteger] = None
 ) -> DataType:
     json_data = json.loads(json_str)
     return DataTypeParser.parse_data_type(json_data, field_id)
