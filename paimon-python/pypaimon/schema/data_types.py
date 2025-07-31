@@ -270,36 +270,6 @@ class DataTypeParser:
             raise Exception(f"Unknown type: {base_type}")
 
     @staticmethod
-    def parse_atomic_type_pyarrow_field(field: pyarrow.Field) -> DataType:
-        type_name = str(field.type)
-        if type_name.startswith('int') or type_name.startswith('uint'):
-            type_name = 'INT'
-        elif type_name.startswith('float'):
-            type_name = 'FLOAT'
-        elif type_name.startswith('double'):
-            type_name = 'DOUBLE'
-        elif type_name.startswith('bool'):
-            type_name = 'BOOLEAN'
-        elif type_name.startswith('string'):
-            type_name = 'STRING'
-        elif type_name.startswith('binary'):
-            type_name = 'BINARY'
-        elif type_name.startswith('date'):
-            type_name = 'DATE'
-        elif type_name.startswith('timestamp'):
-            type_name = 'TIMESTAMP'
-        elif type_name.startswith('decimal'):
-            match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
-            if match:
-                precision, scale = map(int, match.groups())
-                type_name = f'DECIMAL({precision},{scale})'
-            else:
-                type_name = 'DECIMAL(38,18)'
-        else:
-            raise ValueError(f"Unknown type: {type_name}")
-        return AtomicType(type_name, field.nullable)
-
-    @staticmethod
     def parse_data_type(
             json_data: Union[Dict[str, Any], str], field_id: Optional[AtomicInteger] = None
     ) -> DataType:
@@ -500,33 +470,3 @@ class PyarrowFieldParse:
             data_field = PyarrowFieldParse.from_pyarrow_field(i, pa_field)
             fields.append(data_field)
         return fields
-
-
-def parse_data_type_from_json(
-        json_str: str, field_id: Optional[AtomicInteger] = None
-) -> DataType:
-    json_data = json.loads(json_str)
-    return DataTypeParser.parse_data_type(json_data, field_id)
-
-
-def parse_data_field_from_json(
-        json_str: str, field_id: Optional[AtomicInteger] = None
-) -> DataField:
-    json_data = json.loads(json_str)
-    return DataTypeParser.parse_data_field(json_data, field_id)
-
-
-def parse_data_fields_from_pyarrow_schema(pa_schema: pyarrow.Schema) -> list[DataField]:
-    fields = []
-    for i, pa_field in enumerate(pa_schema):
-        pa_field: pyarrow.Field
-        data_type = DataTypeParser.parse_atomic_type_pyarrow_field(pa_field)
-        data_field = DataField(
-            id=i,
-            name=pa_field.name,
-            type=data_type,
-            description=pa_field.metadata.get(b'description', b'').decode
-            ('utf-8') if pa_field.metadata and b'description' in pa_field.metadata else None
-        )
-        fields.append(data_field)
-    return fields
