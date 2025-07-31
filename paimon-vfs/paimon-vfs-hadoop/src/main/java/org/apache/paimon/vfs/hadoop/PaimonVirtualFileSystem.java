@@ -67,6 +67,9 @@ public class PaimonVirtualFileSystem extends FileSystem {
         super.initialize(uri, conf);
 
         this.workingDirectory = new Path(uri);
+        if (uri.getAuthority() == null || uri.getAuthority().isEmpty()) {
+            throw new IllegalArgumentException("URI authority is empty: " + uri);
+        }
         this.uri = URI.create(uri.getScheme() + "://" + uri.getAuthority() + "/");
 
         initVFSOperations();
@@ -74,8 +77,21 @@ public class PaimonVirtualFileSystem extends FileSystem {
 
     private void initVFSOperations() {
         Options options = PaimonVirtualFileSystemConfiguration.convertToCatalogOptions(conf);
-        // pvfs://catalog_name/database_name/table_name/file, so uri authority is catalog name
-        options.set(CatalogOptions.WAREHOUSE, uri.getAuthority());
+        String authority = uri.getAuthority();
+        int delimiterIndex = authority.indexOf(".");
+        if (delimiterIndex == 0 || delimiterIndex == authority.length() - 1) {
+            throw new IllegalArgumentException("Invalid URI authority: " + uri);
+        }
+        if (delimiterIndex < 0) {
+            // pvfs://catalog_name/database_name/table_name/file, so uri authority is catalog name
+            options.set(CatalogOptions.WAREHOUSE, authority);
+        } else {
+            // pvfs://catalog_name.endpoint/database_name/table_name/file
+            String catalogName = authority.substring(0, delimiterIndex);
+            String endpoint = authority.substring(delimiterIndex + 1);
+            options.set(CatalogOptions.WAREHOUSE, catalogName);
+            options.set(RESTCatalogOptions.URI, endpoint);
+        }
 
         // Set user agent
         options.set(RESTCatalogOptions.HTTP_USER_AGENT, USER_AGENT);
