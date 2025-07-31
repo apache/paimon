@@ -169,7 +169,6 @@ public class ArrowFormatWriterTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteWithMemoryLimit(boolean limitMemory) {
-        System.out.println("limit memory: " + limitMemory);
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -194,7 +193,7 @@ public class ArrowFormatWriterTest {
             writer.reset();
 
             if (limitMemory) {
-                for (int i = 0; i < 60; i++) {
+                for (int i = 0; i < 64; i++) {
                     Assertions.assertThat(writer.write(genericRow)).isTrue();
                 }
                 Assertions.assertThat(writer.write(genericRow)).isFalse();
