@@ -15,43 +15,17 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from abc import ABC, abstractmethod
-from pathlib import Path
+
+import pyarrow as pa
+
+from pypaimon.write.writer.data_writer import DataWriter
 
 
-class FileIO(ABC):
-    @abstractmethod
-    def exists(self, path: Path) -> bool:
-        """"""
+class AppendOnlyDataWriter(DataWriter):
+    """Data writer for append-only tables."""
 
-    @abstractmethod
-    def read_file_utf8(self, path: Path) -> str:
-        """"""
+    def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
+        return data
 
-    @abstractmethod
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        """"""
-
-    @abstractmethod
-    def list_status(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def mkdirs(self, path: Path) -> bool:
-        """"""
-
-    @abstractmethod
-    def write_file(self, path: Path, content: str, overwrite: bool = False):
-        """"""
-
-    @abstractmethod
-    def delete_quietly(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def new_input_stream(self, path: Path):
-        """"""
-
-    @abstractmethod
-    def get_file_size(self, path: Path):
-        """"""
+    def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
+        return pa.concat_tables([existing_data, new_data])
