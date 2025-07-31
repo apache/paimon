@@ -18,7 +18,7 @@ limitations under the License.
 from pathlib import Path
 from typing import Optional
 
-from pypaimon.api.identifier import Identifier
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.file_io import FileIO
 
 

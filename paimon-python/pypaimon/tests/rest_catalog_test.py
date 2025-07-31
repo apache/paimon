@@ -25,7 +25,7 @@ from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.table_metadata import TableMetadata
-from pypaimon.rest.rest_catalog import RESTCatalog
+from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.schema.data_types import DataField, ArrayType, AtomicType, MapType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.rest_server import RESTCatalogServer

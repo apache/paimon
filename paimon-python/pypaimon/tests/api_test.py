@@ -24,7 +24,7 @@ from .rest_server import RESTCatalogServer
 from ..api.api_response import (ConfigResponse)
 from ..api import RESTApi
 from ..api.auth import BearTokenAuthProvider
-from ..api.identifier import Identifier
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.rest_json import JSON
 from pypaimon.schema.table_schema import TableSchema
 from ..api.token_loader import DLFTokenLoaderFactory, DLFToken

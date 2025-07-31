@@ -22,7 +22,7 @@ from pypaimon import Database, Catalog, Schema
 from pypaimon.api import RESTApi, CatalogOptions
 from pypaimon.api.api_response import PagedList, GetTableResponse
 from pypaimon.api.core_options import CoreOptions
-from pypaimon.api.identifier import Identifier
+from pypaimon.common.identifier import Identifier
 from pypaimon.api.options import Options
 
 
@@ -30,7 +30,7 @@ from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_utils import CatalogUtils
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.table_metadata import TableMetadata
-from pypaimon.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.table.file_store_table import FileStoreTable
 
 

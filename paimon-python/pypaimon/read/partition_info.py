@@ -15,24 +15,32 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pypaimon import Catalog
-from pypaimon.api import CatalogOptions
-from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
-from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+
+from typing import Any, List
+
+from pypaimon.schema.data_types import DataField
+from pypaimon.table.row.binary_row import BinaryRow
 
 
-class CatalogFactory:
+class PartitionInfo:
+    """
+    Partition information about how the row mapping of outer row.
+    """
 
-    CATALOG_REGISTRY = {
-        "filesystem": FileSystemCatalog,
-        "rest": RESTCatalog,
-    }
+    def __init__(self, mapping: List[int], partition: BinaryRow):
+        self.mapping = mapping
+        self.partition_values = partition.values
+        self.partition_fields = partition.fields
 
-    @staticmethod
-    def create(catalog_options: dict) -> Catalog:
-        identifier = catalog_options.get(CatalogOptions.METASTORE, "filesystem")
-        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
-        if catalog_class is None:
-            raise ValueError(f"Unknown catalog identifier: {identifier}. "
-                             f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
-        return catalog_class(catalog_options)
+    def size(self) -> int:
+        return len(self.mapping) - 1
+
+    def is_partition_row(self, pos: int) -> bool:
+        return self.mapping[pos] < 0
+
+    def get_real_index(self, pos: int) -> int:
+        return abs(self.mapping[pos]) - 1
+
+    def get_partition_value(self, pos: int) -> (Any, DataField):
+        real_index = self.get_real_index(pos)
+        return self.partition_values[real_index], self.partition_fields[real_index]
