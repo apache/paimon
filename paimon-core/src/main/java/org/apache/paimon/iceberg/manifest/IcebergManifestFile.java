@@ -102,8 +102,18 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         avroOptions.set(
                 "avro.row-name-mapping",
                 "org.apache.paimon.avro.generated.record:manifest_entry,"
+                        + "iceberg:true,"
                         + "manifest_entry_data_file:r2,"
-                        + "r2_partition:r102");
+                        + "r2_partition:r102,"
+                        + "kv_name_r2_null_value_counts:k121_v122,"
+                        + "k_id_k121_v122:121,"
+                        + "v_id_k121_v122:122,"
+                        + "kv_name_r2_lower_bounds:k126_v127,"
+                        + "k_id_k126_v127:126,"
+                        + "v_id_k126_v127:127,"
+                        + "kv_name_r2_upper_bounds:k129_v130,"
+                        + "k_id_k129_v130:129,"
+                        + "v_id_k129_v130:130");
         FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", avroOptions);
         return new IcebergManifestFile(
                 table.fileIO(),
