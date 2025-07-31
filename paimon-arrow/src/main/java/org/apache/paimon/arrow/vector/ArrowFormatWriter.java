@@ -27,7 +27,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.util.OversizedAllocationException;
 import org.slf4j.Logger;
@@ -90,7 +90,7 @@ public class ArrowFormatWriter implements AutoCloseable {
         if (rowId >= batchSize) {
             return false;
         }
-        if (memoryUsedMaxInBytes != null && rowId % 20 == 0) {
+        if (memoryUsedMaxInBytes != null && rowId % 32 == 0) {
             long memoryUsed = memoryUsed();
             if (memoryUsed > memoryUsedMaxInBytes) {
                 LOG.debug(
@@ -117,9 +117,11 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     public long memoryUsed() {
         vectorSchemaRoot.setRowCount(rowId);
-        return vectorSchemaRoot.getFieldVectors().stream()
-                .mapToInt(ValueVector::getBufferSize)
-                .sum();
+        long memoryUsed = 0;
+        for (FieldVector fieldVector : vectorSchemaRoot.getFieldVectors()) {
+            memoryUsed += fieldVector.getBufferSize();
+        }
+        return memoryUsed;
     }
 
     public boolean empty() {
