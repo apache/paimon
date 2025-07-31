@@ -22,6 +22,7 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -48,7 +49,8 @@ public class ParquetFileFormatTest {
         Options options = new Options();
         options.set(parquetKey, "hello");
         options.set(otherKey, "test");
-        FormatContext context = new FormatContext(options, 1024, 1024, 2, null);
+        FormatContext context =
+                new FormatContext(options, 1024, 1024, MemorySize.VALUE_128_MB, 2, null);
 
         Options actual = new ParquetFileFormat(context).getOptions();
         assertThat(actual.get(parquetKey)).isEqualTo("hello");
