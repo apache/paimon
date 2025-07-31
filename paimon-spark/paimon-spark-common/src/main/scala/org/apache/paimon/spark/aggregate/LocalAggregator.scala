@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.aggregate
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.schema.SchemaManager
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.stats.SimpleStatsEvolutions
@@ -46,10 +44,7 @@ class LocalAggregator(table: FileStoreTable) {
   private var aggFuncEvaluatorGetter: () => Seq[AggFuncEvaluator[_]] = _
   private var isInitialized = false
   private lazy val simpleStatsEvolutions = {
-    val schemaManager = new SchemaManager(
-      table.fileIO(),
-      table.location(),
-      CoreOptions.branch(table.schema().options()))
+    val schemaManager = table.schemaManager()
     new SimpleStatsEvolutions(sid => schemaManager.schema(sid).fields(), table.schema().id())
   }
 

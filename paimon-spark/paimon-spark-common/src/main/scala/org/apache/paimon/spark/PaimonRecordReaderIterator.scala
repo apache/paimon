@@ -35,16 +35,16 @@ case class PaimonRecordReaderIterator(
     split: Split)
   extends CloseableIterator[PaimonInternalRow] {
 
+  private val needMetadata = metadataColumns.nonEmpty
+  private val metadataRow: GenericRow =
+    GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
+  private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
+
   private var lastFilePath: Path = _
   private var isFileRecordIterator: Boolean = false
   private var currentIterator: RecordReader.RecordIterator[PaimonInternalRow] = readBatch()
   private var advanced = false
   private var currentResult: PaimonInternalRow = _
-
-  private val needMetadata = metadataColumns.nonEmpty
-  private val metadataRow: GenericRow =
-    GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
-  private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
 
   private def validateMetadataColumns(): Unit = {
     if (needMetadata) {
@@ -98,6 +98,11 @@ case class PaimonRecordReaderIterator(
       case _ =>
         isFileRecordIterator = false
     }
+
+    if (iter != null) {
+      validateMetadataColumns()
+    }
+
     iter
   }
 
@@ -110,7 +115,6 @@ case class PaimonRecordReaderIterator(
           val dataRow = currentIterator.next()
           if (dataRow != null) {
             if (needMetadata) {
-              validateMetadataColumns()
               updateMetadataRow(currentIterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else {

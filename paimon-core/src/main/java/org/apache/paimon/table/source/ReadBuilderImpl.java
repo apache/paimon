@@ -110,12 +110,6 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withReadType(RowType readType) {
-        RowType tableRowType = table.rowType();
-        checkState(
-                readType.isPrunedFrom(tableRowType),
-                "read row type must be a pruned type from table row type, read row type: %s, table row type: %s",
-                readType,
-                tableRowType);
         this.readType = readType;
         return this;
     }

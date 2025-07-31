@@ -18,24 +18,38 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{InnerTable, SpecialFields}
 import org.apache.paimon.table.source.ReadBuilder
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{DataField, RowType}
 import org.apache.paimon.utils.Preconditions.checkState
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
+import java.util.{ArrayList => JArrayList}
+
 trait ColumnPruningAndPushDown extends Scan with Logging {
-  def table: Table
+  def table: InnerTable
   def requiredSchema: StructType
   def filters: Seq[Predicate]
   def pushDownLimit: Option[Int] = None
 
-  lazy val tableRowType: RowType = table.rowType
+  lazy val tableRowType: RowType = {
+    val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+    if (coreOptions.rowTrackingEnabled()) {
+      val fields = new JArrayList[DataField](table.rowType().getFields)
+      fields.add(SpecialFields.ROW_ID)
+      fields.add(SpecialFields.SEQUENCE_NUMBER)
+      new RowType(fields)
+    } else {
+      table.rowType()
+    }
+  }
+
   lazy val tableSchema: StructType = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
   final def partitionType: StructType = {
