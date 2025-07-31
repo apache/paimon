@@ -263,6 +263,7 @@ public class SnapshotManagerTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -287,6 +288,7 @@ public class SnapshotManagerTest {
                 null,
                 watermark,
                 null,
+                null,
                 null);
     }
 
@@ -306,6 +308,7 @@ public class SnapshotManagerTest {
                         0L,
                         Snapshot.CommitKind.APPEND,
                         millis,
+                        null,
                         null,
                         null,
                         null,
@@ -337,6 +340,7 @@ public class SnapshotManagerTest {
                             0L,
                             Snapshot.CommitKind.APPEND,
                             i * 1000,
+                            null,
                             null,
                             null,
                             null,
@@ -390,6 +394,7 @@ public class SnapshotManagerTest {
                             0L,
                             Snapshot.CommitKind.APPEND,
                             i * 1000,
+                            null,
                             null,
                             null,
                             null,

@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -80,7 +81,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                options.fileIndexReadEnabled());
+                options.fileIndexReadEnabled(),
+                options.rowTrackingEnabled());
     }
 
     @Override
@@ -95,9 +97,13 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
                         : null;
         if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
+            RawFileSplitRead readForCompact = newRead();
+            if (options.rowTrackingEnabled()) {
+                readForCompact.withReadType(SpecialFields.rowTypeWithRowLineage(rowType));
+            }
             return new AppendFileStoreWrite(
                     fileIO,
-                    newRead(),
+                    readForCompact,
                     schema.id(),
                     rowType,
                     partitionType,

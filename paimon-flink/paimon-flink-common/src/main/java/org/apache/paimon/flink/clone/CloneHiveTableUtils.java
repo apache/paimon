@@ -61,6 +61,7 @@ public class CloneHiveTableUtils {
             String targetDatabase,
             String targetTableName,
             Catalog sourceCatalog,
+            @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
             StreamExecutionEnvironment env)
             throws Exception {
@@ -79,7 +80,7 @@ public class CloneHiveTableUtils {
 
             for (Identifier identifier :
                     org.apache.paimon.hive.clone.HiveCloneUtils.listTables(
-                            hiveCatalog, excludedTables)) {
+                            hiveCatalog, includedTables, excludedTables)) {
                 result.add(new Tuple2<>(identifier, identifier));
             }
         } else if (StringUtils.isNullOrWhitespaceOnly(sourceTableName)) {
@@ -92,7 +93,7 @@ public class CloneHiveTableUtils {
 
             for (Identifier identifier :
                     org.apache.paimon.hive.clone.HiveCloneUtils.listTables(
-                            hiveCatalog, sourceDatabase, excludedTables)) {
+                            hiveCatalog, sourceDatabase, includedTables, excludedTables)) {
                 result.add(
                         new Tuple2<>(
                                 identifier,
@@ -105,6 +106,9 @@ public class CloneHiveTableUtils {
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must not be blank when clone a table.");
+            checkArgument(
+                    CollectionUtils.isEmpty(includedTables),
+                    "includedTables must be empty when clone a single table.");
             checkArgument(
                     CollectionUtils.isEmpty(excludedTables),
                     "excludedTables must be empty when clone a single table.");
@@ -142,6 +146,7 @@ public class CloneHiveTableUtils {
             Map<String, String> targetCatalogConfig,
             int parallelism,
             @Nullable String whereSql,
+            @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables)
             throws Exception {
         // list source tables
@@ -152,6 +157,7 @@ public class CloneHiveTableUtils {
                         targetDatabase,
                         targetTableName,
                         sourceCatalog,
+                        includedTables,
                         excludedTables,
                         env);
 

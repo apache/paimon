@@ -27,10 +27,13 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.util.OversizedAllocationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 /** Write from {@link InternalRow} to {@link VectorSchemaRoot}. */
 public class ArrowFormatWriter implements AutoCloseable {
@@ -39,18 +42,29 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
-
     private final int batchSize;
-
     private final BufferAllocator allocator;
+    @Nullable private final Long memoryUsedMaxInBytes;
     private int rowId;
 
     public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this(rowType, writeBatchSize, caseSensitive, new RootAllocator());
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null);
     }
 
     public ArrowFormatWriter(
-            RowType rowType, int writeBatchSize, boolean caseSensitive, BufferAllocator allocator) {
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            @Nullable Long memoryUsedMaxInBytes) {
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), memoryUsedMaxInBytes);
+    }
+
+    public ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes) {
         this.allocator = allocator;
 
         vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, caseSensitive);
@@ -65,6 +79,7 @@ public class ArrowFormatWriter implements AutoCloseable {
         }
 
         this.batchSize = writeBatchSize;
+        this.memoryUsedMaxInBytes = memoryUsedMaxInBytes;
     }
 
     public void flush() {
@@ -74,6 +89,17 @@ public class ArrowFormatWriter implements AutoCloseable {
     public boolean write(InternalRow currentRow) {
         if (rowId >= batchSize) {
             return false;
+        }
+        if (memoryUsedMaxInBytes != null && rowId % 32 == 0) {
+            long memoryUsed = memoryUsed();
+            if (memoryUsed > memoryUsedMaxInBytes) {
+                LOG.debug(
+                        "Memory used by ArrowFormatCWriter exceeds the limit: {} > {} while writing record row id: {}",
+                        memoryUsed,
+                        memoryUsedMaxInBytes,
+                        rowId);
+                return false;
+            }
         }
         for (int i = 0; i < currentRow.getFieldCount(); i++) {
             try {
@@ -87,6 +113,15 @@ public class ArrowFormatWriter implements AutoCloseable {
 
         rowId++;
         return true;
+    }
+
+    public long memoryUsed() {
+        vectorSchemaRoot.setRowCount(rowId);
+        long memoryUsed = 0;
+        for (FieldVector fieldVector : vectorSchemaRoot.getFieldVectors()) {
+            memoryUsed += fieldVector.getBufferSize();
+        }
+        return memoryUsed;
     }
 
     public boolean empty() {

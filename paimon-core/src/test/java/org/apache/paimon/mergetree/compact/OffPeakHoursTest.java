@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.offpeak;
-
-import org.apache.paimon.OffPeakHours;
+package org.apache.paimon.mergetree.compact;
 
 import org.junit.jupiter.api.Test;
 
@@ -28,31 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class OffPeakHoursTest {
 
     @Test
-    public void testDisabledInstance() {
-        OffPeakHours disabled = OffPeakHours.DISABLED;
-        for (int hour = 0; hour < 24; hour++) {
-            assertThat(disabled.isOffPeak(hour)).isFalse();
-        }
-    }
-
-    @Test
-    public void testGetInstanceWithDisabledValues() {
-        OffPeakHours offPeakHours = OffPeakHours.create(-1, -1);
-        assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
-    }
-
-    @Test
-    public void testGetInstanceWithSameStartAndEnd() {
-        for (int hour = 0; hour < 24; hour++) {
-            OffPeakHours offPeakHours = OffPeakHours.create(hour, hour);
-            assertThat(offPeakHours).isSameAs(OffPeakHours.DISABLED);
-        }
-    }
-
-    @Test
     public void testNormalRangeOffPeakHours() {
         // Test normal range: 9 AM to 5 PM (9-17)
-        OffPeakHours offPeakHours = OffPeakHours.create(9, 17);
+        OffPeakHours offPeakHours = OffPeakHours.create(9, 17, 0);
 
         // Hours before start should not be off-peak
         for (int hour = 0; hour < 9; hour++) {
@@ -78,7 +54,7 @@ public class OffPeakHoursTest {
 
     @Test
     public void testWrapAroundRangeOffPeakHours() {
-        OffPeakHours offPeakHours = OffPeakHours.create(22, 6);
+        OffPeakHours offPeakHours = OffPeakHours.create(22, 6, 0);
 
         // Hours before end (0-5) should be off-peak
         for (int hour = 0; hour < 6; hour++) {
@@ -105,7 +81,7 @@ public class OffPeakHoursTest {
     @Test
     public void testSingleHourRange() {
         // Test single hour range: 12 to 13
-        OffPeakHours offPeakHours = OffPeakHours.create(12, 13);
+        OffPeakHours offPeakHours = OffPeakHours.create(12, 13, 0);
 
         // Only hour 12 should be off-peak
         for (int hour = 0; hour < 24; hour++) {

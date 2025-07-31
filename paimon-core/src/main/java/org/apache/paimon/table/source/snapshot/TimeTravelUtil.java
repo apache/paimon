@@ -147,6 +147,8 @@ public class TimeTravelUtil {
         } else if (version.chars().allMatch(Character::isDigit)) {
             options.set(SCAN_SNAPSHOT_ID.key(), version);
         } else {
+            // by here, the scan version should be a tag.
+            options.set(SCAN_TAG_NAME.key(), version);
             throw new RuntimeException("Cannot find a time travel version for " + version);
         }
     }

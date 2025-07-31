@@ -51,9 +51,11 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
+import org.apache.paimon.shade.guava30.com.google.common.collect.FluentIterable;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Streams;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -72,14 +74,23 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.DISTINCT;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
+import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
+import static org.apache.paimon.CoreOptions.NESTED_KEY;
+import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -551,7 +562,7 @@ public class SchemaManager implements Serializable {
                         applyNotNestedColumnRename(
                                 oldTableSchema.primaryKeys(),
                                 Iterables.filter(changes, RenameColumn.class)),
-                        applySchemaChanges(newOptions, changes),
+                        applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
         return new TableSchema(
@@ -713,19 +724,106 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static Map<String, String> applySchemaChanges(
+    private static Map<String, String> applyRenameColumnsToOptions(
             Map<String, String> options, Iterable<SchemaChange> changes) {
+        Iterable<RenameColumn> renameColumns =
+                FluentIterable.from(changes).filter(RenameColumn.class);
+
+        if (Iterables.isEmpty(renameColumns)) {
+            return options;
+        }
+
         Map<String, String> newOptions = Maps.newHashMap(options);
+
+        Map<String, String> renameMappings =
+                Streams.stream(renameColumns)
+                        .collect(
+                                Collectors.toMap(
+                                        // currently only non-nested columns are supported
+                                        rename -> rename.fieldNames()[0],
+                                        RenameColumn::newName));
+
+        // case 1: the option key is fixed and only value may contain field names
+
+        // bucket key rename
         String bucketKeysStr = options.get(BUCKET_KEY.key());
         if (!StringUtils.isNullOrWhitespaceOnly(bucketKeysStr)) {
             List<String> bucketColumns = Arrays.asList(bucketKeysStr.split(","));
             List<String> newBucketColumns =
-                    applyNotNestedColumnRename(
-                            bucketColumns, Iterables.filter(changes, RenameColumn.class));
-            newOptions.put(BUCKET_KEY.key(), Joiner.on(',').join(newBucketColumns));
+                    applyNotNestedColumnRename(bucketColumns, renameMappings);
+            newOptions.put(BUCKET_KEY.key(), String.join(",", newBucketColumns));
         }
 
-        // TODO: Apply changes to other options that contain column names, such as `sequence.field`
+        // sequence field rename
+        String sequenceFieldsStr = options.get(SEQUENCE_FIELD.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(sequenceFieldsStr)) {
+            List<String> sequenceFields = Arrays.asList(sequenceFieldsStr.split(","));
+            List<String> newSequenceFields =
+                    applyNotNestedColumnRename(sequenceFields, renameMappings);
+            newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
+        }
+
+        // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field
+        // name, while the option value doesn't contain field names.
+        List<Function<String, String>> fieldNameToOptionKeys =
+                ImmutableList.of(
+                        // NESTED_KEY is not added since renaming nested columns is not supported
+                        // currently
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION,
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT,
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + DISTINCT,
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER);
+
+        for (RenameColumn rename : renameColumns) {
+            String fieldName = rename.fieldNames()[0];
+            String newFieldName = rename.newName();
+
+            for (Function<String, String> fieldNameToKey : fieldNameToOptionKeys) {
+                String key = fieldNameToKey.apply(fieldName);
+                if (newOptions.containsKey(key)) {
+                    String value = newOptions.remove(key);
+                    newOptions.put(fieldNameToKey.apply(newFieldName), value);
+                }
+            }
+        }
+
+        // case 3: both option key and option value may contain field names
+        for (String key : options.keySet()) {
+            if (key.startsWith(FIELDS_PREFIX)) {
+                String matchedSuffix = null;
+                if (key.endsWith(SEQUENCE_GROUP)) {
+                    matchedSuffix = SEQUENCE_GROUP;
+                } else if (key.endsWith(NESTED_KEY)) {
+                    matchedSuffix = NESTED_KEY;
+                }
+
+                if (matchedSuffix != null) {
+                    // Both the key and value may contain field names. If we were to perform a
+                    // "match then replace" operation, the conditions would become quite complex.
+                    // Instead, we directly make a replacement across all instances
+                    String keyFieldsStr =
+                            key.substring(
+                                    FIELDS_PREFIX.length() + 1,
+                                    key.length() - matchedSuffix.length() - 1);
+                    List<String> keyFields = Arrays.asList(keyFieldsStr.split(","));
+                    List<String> newKeyFields =
+                            applyNotNestedColumnRename(keyFields, renameMappings);
+
+                    String valueFieldsStr = newOptions.remove(key);
+                    List<String> valueFields = Arrays.asList(valueFieldsStr.split(","));
+                    List<String> newValueFields =
+                            applyNotNestedColumnRename(valueFields, renameMappings);
+                    newOptions.put(
+                            FIELDS_PREFIX
+                                    + "."
+                                    + String.join(",", newKeyFields)
+                                    + "."
+                                    + matchedSuffix,
+                            String.join(",", newValueFields));
+                }
+            }
+        }
+
         return newOptions;
     }
 
@@ -743,10 +841,15 @@ public class SchemaManager implements Serializable {
                 columnNames.put(renameColumn.fieldNames()[0], renameColumn.newName());
             }
         }
+        return applyNotNestedColumnRename(columns, columnNames);
+    }
+
+    private static List<String> applyNotNestedColumnRename(
+            List<String> columns, Map<String, String> renameMapping) {
 
         // The order of the column names will be preserved, as a non-parallel stream is used here.
         return columns.stream()
-                .map(column -> columnNames.getOrDefault(column, column))
+                .map(column -> renameMapping.getOrDefault(column, column))
                 .collect(Collectors.toList());
     }
 

@@ -61,6 +61,7 @@ public class ClonePaimonTableUtils {
             String targetDatabase,
             String targetTableName,
             Catalog sourceCatalog,
+            @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
             StreamExecutionEnvironment env)
             throws Exception {
@@ -76,7 +77,8 @@ public class ClonePaimonTableUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier : listTables(sourceCatalog, excludedTables)) {
+            for (Identifier identifier :
+                    listTables(sourceCatalog, includedTables, excludedTables)) {
                 result.add(new Tuple2<>(identifier, identifier));
             }
         } else if (StringUtils.isNullOrWhitespaceOnly(sourceTableName)) {
@@ -88,7 +90,7 @@ public class ClonePaimonTableUtils {
                     "targetTableName must be blank when clone all tables in a catalog.");
 
             for (Identifier identifier :
-                    listTables(sourceCatalog, sourceDatabase, excludedTables)) {
+                    listTables(sourceCatalog, sourceDatabase, includedTables, excludedTables)) {
                 result.add(
                         new Tuple2<>(
                                 identifier,
@@ -101,6 +103,9 @@ public class ClonePaimonTableUtils {
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must not be blank when clone a table.");
+            checkArgument(
+                    CollectionUtils.isEmpty(includedTables),
+                    "includedTables must be empty when clone a single table.");
             checkArgument(
                     CollectionUtils.isEmpty(excludedTables),
                     "excludedTables must be empty when clone a single table.");
@@ -129,6 +134,7 @@ public class ClonePaimonTableUtils {
             Map<String, String> targetCatalogConfig,
             int parallelism,
             @Nullable String whereSql,
+            @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables)
             throws Exception {
         // list source tables
@@ -139,6 +145,7 @@ public class ClonePaimonTableUtils {
                         targetDatabase,
                         targetTableName,
                         sourceCatalog,
+                        includedTables,
                         excludedTables,
                         env);
 
@@ -176,7 +183,14 @@ public class ClonePaimonTableUtils {
     }
 
     public static List<Identifier> listTables(
-            Catalog catalog, @Nullable List<String> excludedTables) throws Exception {
+            Catalog catalog,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables)
+            throws Exception {
+        Set<String> includedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(includedTables)) {
+            includedTableSet.addAll(includedTables);
+        }
         Set<String> excludedTableSet = new HashSet<>();
         if (CollectionUtils.isNotEmpty(excludedTables)) {
             excludedTableSet.addAll(excludedTables);
@@ -188,15 +202,25 @@ public class ClonePaimonTableUtils {
                 if (excludedTableSet.contains(identifier.getFullName())) {
                     continue;
                 }
-                results.add(identifier);
+                if (CollectionUtils.isEmpty(includedTableSet)
+                        || includedTableSet.contains(identifier.getFullName())) {
+                    results.add(identifier);
+                }
             }
         }
         return results;
     }
 
     public static List<Identifier> listTables(
-            Catalog catalog, String database, @Nullable List<String> excludedTables)
+            Catalog catalog,
+            String database,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables)
             throws Exception {
+        Set<String> includedTableSet = new HashSet<>();
+        if (CollectionUtils.isNotEmpty(includedTables)) {
+            includedTableSet.addAll(includedTables);
+        }
         Set<String> excludedTableSet = new HashSet<>();
         if (CollectionUtils.isNotEmpty(excludedTables)) {
             excludedTableSet.addAll(excludedTables);
@@ -207,7 +231,10 @@ public class ClonePaimonTableUtils {
             if (excludedTableSet.contains(identifier.getFullName())) {
                 continue;
             }
-            results.add(identifier);
+            if (CollectionUtils.isEmpty(includedTableSet)
+                    || includedTableSet.contains(identifier.getFullName())) {
+                results.add(identifier);
+            }
         }
         return results;
     }

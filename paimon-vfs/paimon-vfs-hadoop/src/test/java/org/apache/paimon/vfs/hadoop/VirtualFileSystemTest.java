@@ -34,11 +34,13 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.TrashPolicy;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -315,6 +317,16 @@ public abstract class VirtualFileSystemTest {
         Assert.assertTrue(fileStatus.isFile());
         Assert.assertEquals(5, fileStatus.getLen());
 
+        // Rename to table root: /database/table/test_dir/file2.txt -> /database/table/
+        // which actually means: /database/table/test_dir/file2.txt -> /database/table/file2.txt
+        Path vfsPath3 = new Path(vfsRoot, databaseName + "/" + tableName);
+        Assert.assertTrue(vfs.rename(vfsPath2, vfsPath3));
+        fileStatus = vfs.getFileStatus(new Path(vfsPath3, "file2.txt"));
+        Assert.assertEquals(
+                new Path(vfsPath3, "file2.txt").toString(), fileStatus.getPath().toString());
+        Assert.assertTrue(fileStatus.isFile());
+        Assert.assertEquals(5, fileStatus.getLen());
+
         // Rename in non-existing table
         String tableName2 = "object_table2";
         vfsPath = new Path(vfsRoot, databaseName + "/" + tableName2 + "/test_dir/file.txt");
@@ -457,5 +469,22 @@ public abstract class VirtualFileSystemTest {
         Assert.assertTrue(fileStatuses[0].isDirectory());
         Assert.assertEquals(
                 new Path(vfsPath, "schema").toString(), fileStatuses[0].getPath().toString());
+    }
+
+    @Test
+    public void testTrash() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "object_table";
+        createObjectTable(databaseName, tableName);
+
+        Path vfsPath = new Path(vfsRoot, databaseName + "/" + tableName + "/test_dir/file.txt");
+        FSDataOutputStream out = vfs.create(vfsPath);
+        out.write("hello".getBytes());
+        out.close();
+
+        // Trash vfsPath, return false and trash action not executed
+        TrashPolicy trashPolicy = TrashPolicy.getInstance(new Configuration(), vfs);
+        Assert.assertFalse(trashPolicy.moveToTrash(vfsPath));
+        Assert.assertTrue(vfs.exists(vfsPath));
     }
 }

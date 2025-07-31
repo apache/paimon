@@ -57,8 +57,16 @@ public class RoaringBitmap32 {
         roaringBitmap.add(x);
     }
 
+    public void and(RoaringBitmap32 other) {
+        roaringBitmap.and(other.roaringBitmap);
+    }
+
     public void or(RoaringBitmap32 other) {
         roaringBitmap.or(other.roaringBitmap);
+    }
+
+    public void andNot(RoaringBitmap32 other) {
+        roaringBitmap.andNot(other.roaringBitmap);
     }
 
     public boolean checkedAdd(int x) {

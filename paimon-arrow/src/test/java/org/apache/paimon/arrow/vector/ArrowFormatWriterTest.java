@@ -42,6 +42,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -162,6 +163,59 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriteWithMemoryLimit(boolean limitMemory) {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "f0", DataTypes.BYTES()),
+                                new DataField(1, "f1", DataTypes.BYTES())));
+        Long memoryLimit = limitMemory ? 100 * 1024 * 1024L : null;
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 4096, true, memoryLimit)) {
+
+            GenericRow genericRow = new GenericRow(2);
+            genericRow.setField(0, randomBytes(1024 * 1024, 1024 * 1024));
+            genericRow.setField(1, randomBytes(1024 * 1024, 1024 * 1024));
+
+            // normal write
+            for (int i = 0; i < 200; i++) {
+                boolean success = writer.write(genericRow);
+                if (!success) {
+                    writer.flush();
+                    writer.reset();
+                    writer.write(genericRow);
+                }
+            }
+            writer.reset();
+
+            if (limitMemory) {
+                for (int i = 0; i < 64; i++) {
+                    Assertions.assertThat(writer.write(genericRow)).isTrue();
+                }
+                Assertions.assertThat(writer.write(genericRow)).isFalse();
+            }
+            writer.reset();
+
+            // Write batch records
+            for (int i = 0; i < 2000; i++) {
+                boolean success = writer.write(genericRow);
+                if (!success) {
+                    writer.flush();
+                    writer.reset();
+                    writer.write(genericRow);
+                }
+            }
+
+            if (limitMemory) {
+                Assertions.assertThat(writer.memoryUsed()).isLessThan(memoryLimit);
+                Assertions.assertThat(writer.getAllocator().getAllocatedMemory())
+                        .isGreaterThan(memoryLimit)
+                        .isLessThan(2 * memoryLimit);
+            }
         }
     }
 

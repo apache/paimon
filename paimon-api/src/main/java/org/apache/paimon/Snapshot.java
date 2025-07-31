@@ -88,6 +88,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_WATERMARK = "watermark";
     protected static final String FIELD_STATISTICS = "statistics";
     protected static final String FIELD_PROPERTIES = "properties";
+    protected static final String FIELD_NEXT_ROW_ID = "nextRowId";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -203,6 +204,11 @@ public class Snapshot implements Serializable {
     @Nullable
     protected final Map<String, String> properties;
 
+    @Nullable
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_NEXT_ROW_ID)
+    protected final Long nextRowId;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -223,7 +229,8 @@ public class Snapshot implements Serializable {
             @Nullable Long changelogRecordCount,
             @Nullable Long watermark,
             @Nullable String statistics,
-            @Nullable Map<String, String> properties) {
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -245,7 +252,8 @@ public class Snapshot implements Serializable {
                 changelogRecordCount,
                 watermark,
                 statistics,
-                properties);
+                properties,
+                nextRowId);
     }
 
     @JsonCreator
@@ -271,7 +279,8 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
-            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties) {
+            @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -293,6 +302,7 @@ public class Snapshot implements Serializable {
         this.watermark = watermark;
         this.statistics = statistics;
         this.properties = properties;
+        this.nextRowId = nextRowId;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -413,6 +423,12 @@ public class Snapshot implements Serializable {
         return properties;
     }
 
+    @JsonGetter(FIELD_NEXT_ROW_ID)
+    @Nullable
+    public Long nextRowId() {
+        return nextRowId;
+    }
+
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -440,7 +456,8 @@ public class Snapshot implements Serializable {
                 changelogRecordCount,
                 watermark,
                 statistics,
-                properties);
+                properties,
+                nextRowId);
     }
 
     @Override
@@ -472,7 +489,8 @@ public class Snapshot implements Serializable {
                 && Objects.equals(changelogRecordCount, that.changelogRecordCount)
                 && Objects.equals(watermark, that.watermark)
                 && Objects.equals(statistics, that.statistics)
-                && Objects.equals(properties, that.properties);
+                && Objects.equals(properties, that.properties)
+                && Objects.equals(nextRowId, that.nextRowId);
     }
 
     /** Type of changes in this snapshot. */

@@ -79,7 +79,7 @@ CREATE CATALOG paimon_dlf PROPERTIES (
 );
 ```
 
-See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog) for more examples.
+See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog#examples) for more examples.
 
 ## Access Paimon Catalog
 
@@ -154,7 +154,7 @@ See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/
       <td>true</td>
     </tr>
     <tr>
-      <td><code>Varchar</code></td>
+      <td><code>VarChar</code></td>
       <td><code>VarCharType</code></td>
       <td>true</td>
     </tr>

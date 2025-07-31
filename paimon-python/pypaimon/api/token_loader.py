@@ -24,8 +24,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
-from .rest_json import json_field, JSON
-from .typedef import RESTCatalogOptions
+from pypaimon.common.rest_json import json_field, JSON
+from .config import CatalogOptions
 from .client import ExponentialRetry
 
 
@@ -59,15 +59,15 @@ class DLFToken:
 
     @classmethod
     def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from .typedef import RESTCatalogOptions
-        if (options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID) is None
-                or options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
+        from .config import CatalogOptions
+        if (options.get(CatalogOptions.DLF_ACCESS_KEY_ID) is None
+                or options.get(CatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None
         else:
             return cls(
-                access_key_id=options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
-                access_key_secret=options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET),
-                security_token=options.get(RESTCatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
+                access_key_id=options.get(CatalogOptions.DLF_ACCESS_KEY_ID),
+                access_key_secret=options.get(CatalogOptions.DLF_ACCESS_KEY_SECRET),
+                security_token=options.get(CatalogOptions.DLF_ACCESS_SECURITY_TOKEN)
             )
 
 
@@ -204,12 +204,12 @@ class DLFTokenLoaderFactory:
     @staticmethod
     def create_token_loader(options: Dict[str, str]) -> Optional['DLFTokenLoader']:
         """Create ECS token loader"""
-        loader = options.get(RESTCatalogOptions.DLF_TOKEN_LOADER)
+        loader = options.get(CatalogOptions.DLF_TOKEN_LOADER)
         if loader == 'ecs':
             ecs_metadata_url = options.get(
-                RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL,
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL,
                 'http://100.100.100.200/latest/meta-data/Ram/security-credentials/'
             )
-            role_name = options.get(RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME)
+            role_name = options.get(CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME)
             return DLFECSTokenLoader(ecs_metadata_url, role_name)
         return None

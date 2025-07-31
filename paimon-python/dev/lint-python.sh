@@ -133,7 +133,7 @@ function check_stage() {
 #########################
 # Flake8 check
 function flake8_check() {
-    local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox \) -prune -o -type f -name "*.py" -print )"
+    local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox -o -path ./.venv \) -prune -o -type f -name "*.py" -print )"
 
     print_function "STAGE" "flake8 checks"
     if [ ! -f "$FLAKE8_PATH" ]; then

@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -81,6 +82,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -92,6 +94,7 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -147,6 +150,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int commitMaxRetries;
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
+    private final boolean rowTrackingEnabled;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -182,7 +186,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitTimeout,
             long commitMinRetryWait,
             long commitMaxRetryWait,
-            @Nullable Long strictModeLastSafeSnapshot) {
+            @Nullable Long strictModeLastSafeSnapshot,
+            boolean rowTrackingEnabled) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -225,6 +230,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
+        this.rowTrackingEnabled = rowTrackingEnabled;
     }
 
     @Override
@@ -247,7 +253,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         for (int i = 1; i < committables.size(); i++) {
-            Preconditions.checkArgument(
+            checkArgument(
                     committables.get(i).identifier() > committables.get(i - 1).identifier(),
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
@@ -549,7 +555,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
-        Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
+        checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -915,8 +921,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
         }
-        long newSnapshotId =
-                latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
+
+        long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
+        long firstRowIdStart = 0;
+        if (latestSnapshot != null) {
+            newSnapshotId = latestSnapshot.id() + 1;
+            Long nextRowId = latestSnapshot.nextRowId();
+            if (nextRowId != null) {
+                firstRowIdStart = nextRowId;
+            }
+        }
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
@@ -989,6 +1003,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1023,6 +1038,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType,
                             manifestReadParallelism);
             baseManifestList = manifestList.write(mergeAfterManifests);
+
+            if (rowTrackingEnabled) {
+                // assigned snapshot id to delta files
+                List<ManifestEntry> snapshotAssigned = new ArrayList<>();
+                assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
+                // assign row id for new files
+                List<ManifestEntry> rowIdAssigned = new ArrayList<>();
+                nextRowIdStart =
+                        assignRowLineageMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
+                deltaFiles = rowIdAssigned;
+            }
 
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
@@ -1083,7 +1109,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             currentWatermark,
                             statsFileName,
                             // if empty properties, just set to null
-                            properties.isEmpty() ? null : properties);
+                            properties.isEmpty() ? null : properties,
+                            nextRowIdStart);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpReuseTmpManifests(
@@ -1133,8 +1160,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeLastSafeSnapshot != null) {
             strictModeLastSafeSnapshot = newSnapshot.id();
         }
-        commitCallbacks.forEach(callback -> callback.call(deltaFiles, indexFiles, newSnapshot));
+        final List<ManifestEntry> finalDeltaFiels = deltaFiles;
+        commitCallbacks.forEach(
+                callback -> callback.call(finalDeltaFiels, indexFiles, newSnapshot));
         return new SuccessResult();
+    }
+
+    private long assignRowLineageMeta(
+            long firstRowIdStart,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> rowIdAssigned) {
+        if (deltaFiles.isEmpty()) {
+            return firstRowIdStart;
+        }
+        // assign row id for new files
+        long start = firstRowIdStart;
+        for (ManifestEntry entry : deltaFiles) {
+            checkArgument(
+                    entry.file().fileSource().isPresent(),
+                    "This is a bug, file source field for row-tracking table must present.");
+            if (entry.file().fileSource().get().equals(FileSource.APPEND)) {
+                long rowCount = entry.file().rowCount();
+                rowIdAssigned.add(entry.assignFirstRowId(start));
+                start += rowCount;
+            } else {
+                // for compact file, do not assign first row id.
+                rowIdAssigned.add(entry);
+            }
+        }
+        return start;
+    }
+
+    private void assignSnapshotId(
+            long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
+        for (ManifestEntry entry : deltaFiles) {
+            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+        }
     }
 
     public void compactManifest() {
@@ -1211,7 +1272,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         0L,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        latestSnapshot.properties());
+                        latestSnapshot.properties(),
+                        latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
@@ -1321,7 +1383,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        java.util.function.Consumer<Throwable> conflictHandler =
+        Function<Throwable, RuntimeException> exceptionFunction =
                 e -> {
                     Pair<RuntimeException, RuntimeException> conflictException =
                             createConflictException(
@@ -1331,18 +1393,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     changes,
                                     e);
                     LOG.warn("", conflictException.getLeft());
-                    throw conflictException.getRight();
+                    return conflictException.getRight();
                 };
 
-        Collection<SimpleFileEntry> mergedEntries = null;
+        Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
         } catch (Throwable e) {
-            conflictHandler.accept(e);
+            throw exceptionFunction.apply(e);
         }
 
-        assertNoDelete(mergedEntries, conflictHandler);
+        assertNoDelete(mergedEntries, exceptionFunction);
 
         // fast exit for file store without keys
         if (keyComparator == null) {
@@ -1388,7 +1450,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private void assertNoDelete(
             Collection<SimpleFileEntry> mergedEntries,
-            java.util.function.Consumer<Throwable> conflictHandler) {
+            Function<Throwable, RuntimeException> exceptionFunction) {
         try {
             for (SimpleFileEntry entry : mergedEntries) {
                 Preconditions.checkState(
@@ -1399,7 +1461,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } catch (Throwable e) {
             assertConflictForPartitionExpire(mergedEntries);
-            conflictHandler.accept(e);
+            throw exceptionFunction.apply(e);
         }
     }
 

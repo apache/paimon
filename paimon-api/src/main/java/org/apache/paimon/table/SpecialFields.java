@@ -20,8 +20,11 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -87,8 +90,16 @@ public class SpecialFields {
             new DataField(
                     Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
 
+    public static final DataField ROW_ID =
+            new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
-            Stream.of(SEQUENCE_NUMBER.name(), VALUE_KIND.name(), LEVEL.name(), ROW_KIND.name())
+            Stream.of(
+                            SEQUENCE_NUMBER.name(),
+                            VALUE_KIND.name(),
+                            LEVEL.name(),
+                            ROW_KIND.name(),
+                            ROW_ID.name())
                     .collect(Collectors.toSet());
 
     public static boolean isSystemField(int fieldId) {
@@ -126,5 +137,22 @@ public class SpecialFields {
         return STRUCTURED_TYPE_FIELD_ID_BASE
                 + mapFieldId * STRUCTURED_TYPE_FIELD_DEPTH_LIMIT
                 + depth;
+    }
+
+    public static RowType rowTypeWithRowLineage(RowType rowType) {
+        List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
+
+        fieldsWithRowLineage.forEach(
+                f -> {
+                    if (ROW_ID.name().equals(f.name()) || SEQUENCE_NUMBER.name().equals(f.name())) {
+                        throw new IllegalArgumentException(
+                                "Row lineage field name '"
+                                        + f.name()
+                                        + "' conflicts with existing field names.");
+                    }
+                });
+        fieldsWithRowLineage.add(SpecialFields.ROW_ID);
+        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER);
+        return new RowType(fieldsWithRowLineage);
     }
 }

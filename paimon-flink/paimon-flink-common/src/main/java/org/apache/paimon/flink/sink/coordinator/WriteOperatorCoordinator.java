@@ -79,8 +79,8 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
                 () -> {
                     try {
                         CoordinationResponse response;
-                        if (request instanceof ScanCoordinationRequest) {
-                            response = coordinator.scan((ScanCoordinationRequest) request);
+                        if (request instanceof PagedCoordinationRequest) {
+                            response = coordinator.scan((PagedCoordinationRequest) request);
                         } else if (request instanceof LatestIdentifierRequest) {
                             response =
                                     new LatestIdentifierResponse(

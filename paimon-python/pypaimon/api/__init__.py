@@ -18,15 +18,24 @@
 import logging
 from typing import Dict, List, Optional, Callable
 from urllib.parse import unquote
-
-from .api_response import PagedList, GetTableResponse, ListDatabasesResponse, ListTablesResponse, \
-    GetDatabaseResponse, ConfigResponse, PagedResponse
-from .api_resquest import CreateDatabaseRequest, AlterDatabaseRequest
-from .typedef import Identifier, RESTCatalogOptions
-from .client import HttpClient
-from .auth import DLFAuthProvider, RESTAuthFunction
-from .token_loader import DLFToken, DLFTokenLoaderFactory
-from .typedef import T
+from pypaimon.api.auth import RESTAuthFunction, AuthProviderFactory
+from pypaimon.api.api_response import (
+    PagedList,
+    GetTableResponse,
+    ListDatabasesResponse,
+    ListTablesResponse,
+    GetDatabaseResponse,
+    ConfigResponse,
+    PagedResponse,
+    GetTableTokenResponse,
+)
+from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest, \
+    CreateTableRequest
+from pypaimon.api.config import CatalogOptions
+from pypaimon.api.client import HttpClient
+from pypaimon.common.identifier import Identifier
+from pypaimon.api.typedef import T
+from pypaimon.schema.schema import Schema
 
 
 class RESTException(Exception):
@@ -75,34 +84,43 @@ class ResourcePaths:
     TABLES = "tables"
     TABLE_DETAILS = "table-details"
 
-    def __init__(self, base_path: str = ""):
-        self.base_path = base_path.rstrip("/")
+    def __init__(self, prefix: str):
+        self.base_path = f"/{self.V1}/{prefix}".rstrip("/")
 
     @classmethod
     def for_catalog_properties(
             cls, options: dict[str, str]) -> "ResourcePaths":
-        prefix = options.get(RESTCatalogOptions.PREFIX, "")
-        return cls(f"/{cls.V1}/{prefix}" if prefix else f"/{cls.V1}")
+        prefix = options.get(CatalogOptions.PREFIX, "")
+        return cls(prefix)
 
-    def config(self) -> str:
-        return f"/{self.V1}/config"
+    @staticmethod
+    def config() -> str:
+        return f"/{ResourcePaths.V1}/config"
 
     def databases(self) -> str:
         return f"{self.base_path}/{self.DATABASES}"
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{name}"
+        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(name)}"
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}"
+            return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}"
         return f"{self.base_path}/{self.TABLES}"
 
     def table(self, database_name: str, table_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLES}/{table_name}"
+        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
+                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}")
 
     def table_details(self, database_name: str) -> str:
         return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
+
+    def table_token(self, database_name: str, table_name: str) -> str:
+        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
+                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token")
+
+    def rename_table(self) -> str:
+        return f"{self.base_path}/{self.TABLES}/rename"
 
 
 class RESTApi:
@@ -114,26 +132,22 @@ class RESTApi:
 
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = HttpClient(options.get(RESTCatalogOptions.URI))
-        auth_provider = DLFAuthProvider(
-            options.get(RESTCatalogOptions.DLF_REGION),
-            DLFToken.from_options(options),
-            DLFTokenLoaderFactory.create_token_loader(options)
-        )
+        self.client = HttpClient(options.get(CatalogOptions.URI))
+        auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
         if config_required:
-            warehouse = options.get(RESTCatalogOptions.WAREHOUSE)
+            warehouse = options.get(CatalogOptions.WAREHOUSE)
             query_params = {}
             if warehouse:
-                query_params[RESTCatalogOptions.WAREHOUSE] = RESTUtil.encode_string(
+                query_params[CatalogOptions.WAREHOUSE] = RESTUtil.encode_string(
                     warehouse)
 
             config_response = self.client.get_with_params(
-                ResourcePaths().config(),
+                ResourcePaths.config(),
                 query_params,
                 ConfigResponse,
-                RESTAuthFunction({}, auth_provider),
+                RESTAuthFunction(base_headers, auth_provider),
             )
             options = config_response.merge(options)
             base_headers.update(
@@ -285,11 +299,42 @@ class RESTApi:
         tables = response.data() or []
         return PagedList(tables, response.get_next_page_token())
 
+    def create_table(self, identifier: Identifier, schema: Schema) -> None:
+        request = CreateTableRequest(identifier, schema)
+        return self.client.post(
+            self.resource_paths.tables(identifier.database_name),
+            request,
+            self.rest_auth_function)
+
     def get_table(self, identifier: Identifier) -> GetTableResponse:
         return self.client.get(
             self.resource_paths.table(
                 identifier.database_name,
                 identifier.object_name),
             GetTableResponse,
+            self.rest_auth_function,
+        )
+
+    def drop_table(self, identifier: Identifier) -> GetTableResponse:
+        return self.client.delete(
+            self.resource_paths.table(
+                identifier.database_name,
+                identifier.object_name),
+            self.rest_auth_function,
+        )
+
+    def rename_table(self, source_identifier: Identifier, target_identifier: Identifier) -> None:
+        request = RenameTableRequest(source_identifier, target_identifier)
+        return self.client.post(
+            self.resource_paths.rename_table(),
+            request,
+            self.rest_auth_function)
+
+    def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
+        return self.client.get(
+            self.resource_paths.table_token(
+                identifier.database_name,
+                identifier.object_name),
+            GetTableTokenResponse,
             self.rest_auth_function,
         )

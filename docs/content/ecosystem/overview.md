@@ -36,7 +36,7 @@ under the License.
 |                                      Trino                                      |   420 - 440   |     ✅      |   ✅(427+)   |   ✅(427+)    |   ✅(427+)   |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
 |                                     Presto                                      | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ❌      |
 | [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) |     3.1+      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
-| [Doris](https://doris.apache.org/docs/lakehouse/datalake-analytics/paimon)      |    2.0.6+     |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
+| [Doris](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog)      |    2.0.6+     |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
 
 ## Streaming Engines
 

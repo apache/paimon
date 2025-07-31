@@ -79,6 +79,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
+    private final boolean rowTrackingEnabled;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -90,7 +91,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean rowTrackingEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -98,6 +100,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.rowTrackingEnabled = rowTrackingEnabled;
         this.readRowType = rowType;
     }
 
@@ -153,7 +156,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         List<DataField> readTableFields = readRowType.getFields();
         Builder formatReaderMappingBuilder =
-                new Builder(formatDiscover, readTableFields, TableSchema::fields, filters);
+                new Builder(
+                        formatDiscover,
+                        readTableFields,
+                        TableSchema::fields,
+                        filters,
+                        rowTrackingEnabled);
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);
@@ -235,11 +243,16 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
+                        schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        rowTrackingEnabled,
+                        file.firstRowId(),
+                        file.maxSequenceNumber(),
+                        formatReaderMapping.getSystemFields());
 
         if (fileIndexResult instanceof BitmapIndexResult) {
             fileRecordReader =

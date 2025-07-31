@@ -36,6 +36,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String TARGET_CATALOG_CONF = "target_catalog_conf";
     private static final String PARALLELISM = "parallelism";
     private static final String WHERE = "where";
+    private static final String INCLUDED_TABLES = "included_tables";
     private static final String EXCLUDED_TABLES = "excluded_tables";
     private static final String CLONE_FROM = "clone_from";
 
@@ -56,6 +57,12 @@ public class CloneActionFactory implements ActionFactory {
         }
 
         String parallelism = params.get(PARALLELISM);
+
+        String includedTablesStr = params.get(INCLUDED_TABLES);
+        List<String> includedTables =
+                StringUtils.isNullOrWhitespaceOnly(includedTablesStr)
+                        ? null
+                        : Arrays.asList(StringUtils.split(includedTablesStr, ","));
 
         String excludedTablesStr = params.get(EXCLUDED_TABLES);
         List<String> excludedTables =
@@ -78,6 +85,7 @@ public class CloneActionFactory implements ActionFactory {
                         targetCatalogConfig,
                         parallelism == null ? null : Integer.parseInt(parallelism),
                         params.get(WHERE),
+                        includedTables,
                         excludedTables,
                         cloneFrom);
 

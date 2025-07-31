@@ -140,6 +140,20 @@ public class ManifestEntry implements FileEntry {
         return new ManifestEntry(kind, partition, bucket, totalBuckets, file.copyWithoutStats());
     }
 
+    public ManifestEntry assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
+        return new ManifestEntry(
+                kind,
+                partition,
+                bucket,
+                totalBuckets,
+                file.assignSequenceNumber(minSequenceNumber, maxSequenceNumber));
+    }
+
+    public ManifestEntry assignFirstRowId(long firstRowId) {
+        return new ManifestEntry(
+                kind, partition, bucket, totalBuckets, file.assignFirstRowId(firstRowId));
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestEntry)) {

@@ -24,6 +24,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - 'paimon-python/**'
 
 env:
   JDK_VERSION: 8
@@ -58,6 +59,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B test -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

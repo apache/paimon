@@ -16,55 +16,52 @@
  * limitations under the License.
  */
 
-package org.apache.paimon;
+package org.apache.paimon.mergetree.compact;
+
+import org.apache.paimon.CoreOptions;
+
+import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
 
-/** OffPeakHours. */
+/** OffPeakHours to control compaction ratio by hours. */
 public abstract class OffPeakHours {
-
-    public abstract boolean isOffPeak();
 
     public abstract boolean isOffPeak(int targetHour);
 
-    public static final OffPeakHours DISABLED =
-            new OffPeakHours() {
-                @Override
-                public boolean isOffPeak() {
-                    return false;
-                }
+    public abstract int currentRatio();
 
-                @Override
-                public boolean isOffPeak(int targetHour) {
-                    return false;
-                }
-            };
+    @Nullable
+    public static OffPeakHours create(CoreOptions options) {
+        return create(
+                options.compactOffPeakStartHour(),
+                options.compactOffPeakEndHour(),
+                options.compactOffPeakRatio());
+    }
 
-    public static OffPeakHours create(int startHour, int endHour) {
+    @Nullable
+    public static OffPeakHours create(int startHour, int endHour, int compactOffPeakRatio) {
         if (startHour == -1 && endHour == -1) {
-            return DISABLED;
+            return null;
         }
 
         if (startHour == endHour) {
-            return DISABLED;
+            return null;
         }
 
-        return new OffPeakHoursImpl(startHour, endHour);
+        return new OffPeakHoursImpl(startHour, endHour, compactOffPeakRatio);
     }
 
     private static class OffPeakHoursImpl extends OffPeakHours {
 
         private final int startHour;
         private final int endHour;
+        private final int compactOffPeakRatio;
 
-        OffPeakHoursImpl(int startHour, int endHour) {
+        OffPeakHoursImpl(int startHour, int endHour, int compactOffPeakRatio) {
             this.startHour = startHour;
             this.endHour = endHour;
-        }
-
-        @Override
-        public boolean isOffPeak() {
-            return isOffPeak(LocalDateTime.now().getHour());
+            this.compactOffPeakRatio = compactOffPeakRatio;
         }
 
         @Override
@@ -73,6 +70,11 @@ public abstract class OffPeakHours {
                 return startHour <= targetHour && targetHour < endHour;
             }
             return targetHour < endHour || startHour <= targetHour;
+        }
+
+        @Override
+        public int currentRatio() {
+            return isOffPeak(LocalDateTime.now().getHour()) ? compactOffPeakRatio : 0;
         }
     }
 }

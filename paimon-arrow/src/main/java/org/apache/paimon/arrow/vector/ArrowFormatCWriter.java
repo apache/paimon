@@ -27,6 +27,8 @@ import org.apache.arrow.c.ArrowSchema;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
+import javax.annotation.Nullable;
+
 /**
  * This writer could flush to c struct, but you need to release it, except it has been released in c
  * code.
@@ -38,12 +40,20 @@ public class ArrowFormatCWriter implements AutoCloseable {
     private final ArrowFormatWriter realWriter;
 
     public ArrowFormatCWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive));
+        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, null));
+    }
+
+    public ArrowFormatCWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            @Nullable Long memoryUsedMaxInVSR) {
+        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, memoryUsedMaxInVSR));
     }
 
     public ArrowFormatCWriter(
             RowType rowType, int writeBatchSize, boolean caseSensitive, BufferAllocator allocator) {
-        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator));
+        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator, null));
     }
 
     private ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {

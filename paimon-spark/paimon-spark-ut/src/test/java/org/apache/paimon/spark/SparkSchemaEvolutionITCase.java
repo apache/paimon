@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -183,10 +184,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         Dataset<Row> table = spark.table("testRenameColumn");
         results = table.select("bb", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
+
         assertThatThrownBy(() -> table.select("b", "c"))
                 .isInstanceOf(AnalysisException.class)
+                // Messages vary across different Spark versions, only validating the common parts.
+                // Spark 4: A column, variable, or function parameter with name `b` cannot be
+                // resolved. Did you mean one of the following? [`a`, `bb`, `c`]
+                // Spark 3.5 and earlier versions: A column or function parameter with name `b`
+                // cannot be resolved. Did you mean one of the following? [`a`, `bb`, `c`]
                 .hasMessageContaining(
-                        "A column or function parameter with name `b` cannot be resolved. Did you mean one of the following?");
+                        "name `b` cannot be resolved. Did you mean one of the following? [`a`, `bb`, `c`]");
     }
 
     @Test
@@ -388,13 +395,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 "Cannot move itself for column b"));
 
         // missing column
+        // Messages vary across different Spark versions and there are no common parts, only
+        // validate the exception class
         createTable("tableMissing");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissing ALTER COLUMN d FIRST"))
-                .hasMessageContaining("Missing field d in table paimon.default.tableMissing");
+                .isInstanceOf(AnalysisException.class);
 
         createTable("tableMissingAfter");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissingAfter ALTER COLUMN a AFTER d"))
-                .hasMessageContaining("Missing field d in table paimon.default.tableMissingAfter");
+                .isInstanceOf(AnalysisException.class);
     }
 
     @Test
@@ -806,13 +815,12 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
-        assertThat(
-                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
-                                .stream()
-                                .map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,WrappedArray([apple,100], [banana,101])]",
-                        "[2,WrappedArray([cat,200], [dog,201])]");
+
+        RowTestHelper.checkRowEquals(
+                spark.sql("SELECT * FROM paimon.default." + tableName),
+                Arrays.asList(
+                        row(1, array(row("apple", 100), row("banana", 101))),
+                        row(2, array(row("cat", 200), row("dog", 201)))));
 
         spark.sql(
                 "ALTER TABLE paimon.default."
@@ -824,14 +832,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, ARRAY(STRUCT(110, 'APPLE'), STRUCT(111, 'BANANA'))), "
                         + "(3, ARRAY(STRUCT(310, 'FLOWER')))");
-        assertThat(
-                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
-                                .stream()
-                                .map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,WrappedArray([110,APPLE], [111,BANANA])]",
-                        "[2,WrappedArray([200,null], [201,null])]",
-                        "[3,WrappedArray([310,FLOWER])]");
+
+        RowTestHelper.checkRowEquals(
+                spark.sql("SELECT * FROM paimon.default." + tableName),
+                Arrays.asList(
+                        row(1, array(row(110, "APPLE"), row(111, "BANANA"))),
+                        row(2, array(row(200, null), row(201, null))),
+                        row(3, array(row(310, "FLOWER")))));
     }
 
     @ParameterizedTest()
@@ -1012,13 +1019,12 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, ARRAY(STRUCT('apple', 100), STRUCT('banana', 101))), "
                         + "(2, ARRAY(STRUCT('cat', 200), STRUCT('dog', 201)))");
-        assertThat(
-                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
-                                .stream()
-                                .map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,WrappedArray([apple,100], [banana,101])]",
-                        "[2,WrappedArray([cat,200], [dog,201])]");
+
+        RowTestHelper.checkRowEquals(
+                spark.sql("SELECT * FROM paimon.default." + tableName),
+                Arrays.asList(
+                        row(1, array(row("apple", 100), row("banana", 101))),
+                        row(2, array(row("cat", 200), row("dog", 201)))));
 
         spark.sql(
                 "ALTER TABLE paimon.default."
@@ -1029,14 +1035,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + tableName
                         + " VALUES (1, ARRAY(STRUCT('APPLE', 1000000000000), STRUCT('BANANA', 111))), "
                         + "(3, ARRAY(STRUCT('FLOWER', 3000000000000)))");
-        assertThat(
-                        spark.sql("SELECT * FROM paimon.default." + tableName).collectAsList()
-                                .stream()
-                                .map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,WrappedArray([APPLE,1000000000000], [BANANA,111])]",
-                        "[2,WrappedArray([cat,200], [dog,201])]",
-                        "[3,WrappedArray([FLOWER,3000000000000])]");
+
+        RowTestHelper.checkRowEquals(
+                spark.sql("SELECT * FROM paimon.default." + tableName),
+                Arrays.asList(
+                        row(1, array(row("APPLE", 1000000000000L), row("BANANA", 111))),
+                        row(2, array(row("cat", 200), row("dog", 201))),
+                        row(3, array(row("FLOWER", 3000000000000L)))));
     }
 
     @ParameterizedTest()

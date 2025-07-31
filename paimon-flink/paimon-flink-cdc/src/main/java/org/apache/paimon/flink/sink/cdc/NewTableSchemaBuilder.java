@@ -38,6 +38,7 @@ public class NewTableSchemaBuilder implements Serializable {
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
     private final boolean requirePrimaryKeys;
+    private final boolean syncPKeysFromSourceSchema;
     private final CdcMetadataConverter[] metadataConverters;
     private final Map<String, List<String>> partitionKeyMultiple;
 
@@ -47,6 +48,7 @@ public class NewTableSchemaBuilder implements Serializable {
             List<String> partitionKeys,
             List<String> primaryKeys,
             boolean requirePrimaryKeys,
+            boolean syncPKeysFromSourceSchema,
             Map<String, List<String>> partitionKeyMultiple,
             CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
@@ -55,6 +57,7 @@ public class NewTableSchemaBuilder implements Serializable {
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.requirePrimaryKeys = requirePrimaryKeys;
+        this.syncPKeysFromSourceSchema = syncPKeysFromSourceSchema;
         this.partitionKeyMultiple = partitionKeyMultiple;
     }
 
@@ -80,6 +83,7 @@ public class NewTableSchemaBuilder implements Serializable {
                         metadataConverters,
                         caseSensitive,
                         false,
-                        requirePrimaryKeys));
+                        requirePrimaryKeys,
+                        syncPKeysFromSourceSchema));
     }
 }

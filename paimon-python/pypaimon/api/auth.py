@@ -27,13 +27,14 @@ from typing import Optional, Dict
 
 from .token_loader import DLFTokenLoader, DLFToken
 from .typedef import RESTAuthParameter
+from .config import CatalogOptions
 
 
 class AuthProvider(ABC):
 
     @abstractmethod
     def merge_auth_header(
-        self, base_header: Dict[str, str], parammeter: RESTAuthParameter
+            self, base_header: Dict[str, str], parammeter: RESTAuthParameter
     ) -> Dict[str, str]:
         """Merge authorization header into header."""
 
@@ -41,8 +42,7 @@ class AuthProvider(ABC):
 class RESTAuthFunction:
 
     def __init__(self,
-                 init_header: Dict[str,
-                                   str],
+                 init_header: Dict[str, str],
                  auth_provider: AuthProvider):
         self.init_header = init_header.copy() if init_header else {}
         self.auth_provider = auth_provider
@@ -55,6 +55,35 @@ class RESTAuthFunction:
 
     def apply(self, rest_auth_parameter: RESTAuthParameter) -> Dict[str, str]:
         return self.__call__(rest_auth_parameter)
+
+
+class AuthProviderFactory:
+
+    @staticmethod
+    def create_auth_provider(options: Dict[str, str]) -> AuthProvider:
+        provider = options.get(CatalogOptions.TOKEN_PROVIDER)
+        if provider == 'bear':
+            token = options.get(CatalogOptions.TOKEN)
+            return BearTokenAuthProvider(token)
+        elif provider == 'dlf':
+            return DLFAuthProvider(
+                options.get(CatalogOptions.DLF_REGION),
+                DLFToken.from_options(options)
+            )
+        raise ValueError('Unknown auth provider')
+
+
+class BearTokenAuthProvider(AuthProvider):
+
+    def __init__(self, token: str):
+        self.token = token
+
+    def merge_auth_header(
+            self, base_header: Dict[str, str], rest_auth_parameter: RESTAuthParameter
+    ) -> Dict[str, str]:
+        headers_with_auth = base_header.copy()
+        headers_with_auth['Authorization'] = f'Bearer {self.token}'
+        return headers_with_auth
 
 
 class DLFAuthProvider(AuthProvider):
@@ -99,7 +128,7 @@ class DLFAuthProvider(AuthProvider):
         return self.token
 
     def merge_auth_header(
-        self, base_header: Dict[str, str], rest_auth_parameter: RESTAuthParameter
+            self, base_header: Dict[str, str], rest_auth_parameter: RESTAuthParameter
     ) -> Dict[str, str]:
         try:
             date_time = base_header.get(
@@ -134,7 +163,7 @@ class DLFAuthProvider(AuthProvider):
 
     @classmethod
     def generate_sign_headers(
-        cls, data: Optional[str], date_time: str, security_token: Optional[str]
+            cls, data: Optional[str], date_time: str, security_token: Optional[str]
     ) -> Dict[str, str]:
         sign_headers = {}
 
@@ -172,13 +201,13 @@ class DLFAuthSignature:
 
     @classmethod
     def get_authorization(
-        cls,
-        rest_auth_parameter: RESTAuthParameter,
-        dlf_token: DLFToken,
-        region: str,
-        headers: Dict[str, str],
-        date_time: str,
-        date: str,
+            cls,
+            rest_auth_parameter: RESTAuthParameter,
+            dlf_token: DLFToken,
+            region: str,
+            headers: Dict[str, str],
+            date_time: str,
+            date: str,
     ) -> str:
         try:
             canonical_request = cls.get_canonical_request(
@@ -231,7 +260,7 @@ class DLFAuthSignature:
 
     @classmethod
     def get_canonical_request(
-        cls, rest_auth_parameter: RESTAuthParameter, headers: Dict[str, str]
+            cls, rest_auth_parameter: RESTAuthParameter, headers: Dict[str, str]
     ) -> str:
         canonical_request = cls.NEW_LINE.join(
             [rest_auth_parameter.method, rest_auth_parameter.path]
@@ -278,7 +307,7 @@ class DLFAuthSignature:
 
     @classmethod
     def _build_sorted_signed_headers_map(
-        cls, headers: Optional[Dict[str, str]]
+            cls, headers: Optional[Dict[str, str]]
     ) -> OrderedDict:
         sorted_headers = OrderedDict()
 

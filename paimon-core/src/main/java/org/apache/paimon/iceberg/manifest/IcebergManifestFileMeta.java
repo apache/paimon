@@ -186,7 +186,7 @@ public class IcebergManifestFileMeta {
         fields.add(new DataField(514, "deleted_rows_count", DataTypes.BIGINT().notNull()));
         fields.add(
                 new DataField(
-                        508, "partitions", DataTypes.ARRAY(IcebergPartitionSummary.schema())));
+                        507, "partitions", DataTypes.ARRAY(IcebergPartitionSummary.schema())));
         return new RowType(false, fields);
     }
 
@@ -209,7 +209,7 @@ public class IcebergManifestFileMeta {
         fields.add(new DataField(514, "deleted_rows_count", DataTypes.BIGINT().notNull()));
         fields.add(
                 new DataField(
-                        508, "partitions", DataTypes.ARRAY(IcebergPartitionSummary.schema())));
+                        507, "partitions", DataTypes.ARRAY(IcebergPartitionSummary.schema())));
         return new RowType(false, fields);
     }
 

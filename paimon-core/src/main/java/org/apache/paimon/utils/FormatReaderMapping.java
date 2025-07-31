@@ -59,6 +59,7 @@ public class FormatReaderMapping {
     private final FormatReaderFactory readerFactory;
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
+    private final Map<String, Integer> systemFields;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -67,13 +68,15 @@ public class FormatReaderMapping {
             @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
-            List<Predicate> dataFilters) {
+            List<Predicate> dataFilters,
+            Map<String, Integer> systemFields) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
         this.partitionPair = partitionPair;
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
+        this.systemFields = systemFields;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -111,6 +114,10 @@ public class FormatReaderMapping {
         return partitionPair;
     }
 
+    public Map<String, Integer> getSystemFields() {
+        return systemFields;
+    }
+
     public FormatReaderFactory getReaderFactory() {
         return readerFactory;
     }
@@ -130,16 +137,19 @@ public class FormatReaderMapping {
         private final List<DataField> readTableFields;
         private final Function<TableSchema, List<DataField>> fieldsExtractor;
         @Nullable private final List<Predicate> filters;
+        private final boolean rowTrackingEnabled;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
                 List<DataField> readTableFields,
                 Function<TableSchema, List<DataField>> fieldsExtractor,
-                @Nullable List<Predicate> filters) {
+                @Nullable List<Predicate> filters,
+                boolean rowTrackingEnabled) {
             this.formatDiscover = formatDiscover;
             this.readTableFields = readTableFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
+            this.rowTrackingEnabled = rowTrackingEnabled;
         }
 
         /**
@@ -165,8 +175,13 @@ public class FormatReaderMapping {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
+            if (rowTrackingEnabled) {
+                allDataFields.add(SpecialFields.ROW_ID);
+                allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
+            }
+            Map<String, Integer> systemFields = findSystemFields(readTableFields);
+
             List<DataField> readDataFields = readDataFields(allDataFields);
-            // build index cast mapping
             IndexCastMapping indexCastMapping =
                     SchemaEvolutionUtil.createIndexCastMapping(readTableFields, readDataFields);
 
@@ -196,7 +211,19 @@ public class FormatReaderMapping {
                             .discover(formatIdentifier)
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
-                    readFilters);
+                    readFilters,
+                    systemFields);
+        }
+
+        private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {
+            Map<String, Integer> systemFields = new HashMap<>();
+            for (int i = 0; i < readTableFields.size(); i++) {
+                DataField field = readTableFields.get(i);
+                if (SpecialFields.isSystemField(field.name())) {
+                    systemFields.put(field.name(), i);
+                }
+            }
+            return systemFields;
         }
 
         static Pair<int[], RowType> trimKeyFields(

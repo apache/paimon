@@ -16,11 +16,14 @@
 #  under the License.
 
 import json
+import re
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Any, Optional, List, Union
+
+import pyarrow
 
 
 class AtomicInteger:
@@ -192,6 +195,43 @@ class DataField:
 
         return result
 
+    def to_pyarrow_field(self):
+        data_type = self.type
+        if not isinstance(data_type, AtomicType):
+            raise ValueError(f"Unsupported data type: {data_type.__class__}")
+        type_name = data_type.type.upper()
+        if type_name == 'INT':
+            type_name = pyarrow.int32()
+        elif type_name == 'BIGINT':
+            type_name = pyarrow.int64()
+        elif type_name == 'FLOAT':
+            type_name = pyarrow.float32()
+        elif type_name == 'DOUBLE':
+            type_name = pyarrow.float64()
+        elif type_name == 'BOOLEAN':
+            type_name = pyarrow.bool_()
+        elif type_name == 'STRING':
+            type_name = pyarrow.string()
+        elif type_name == 'BINARY':
+            type_name = pyarrow.binary()
+        elif type_name == 'DATE':
+            type_name = pyarrow.date32()
+        elif type_name == 'TIMESTAMP':
+            type_name = pyarrow.timestamp('ms')
+        elif type_name.startswith('DECIMAL'):
+            match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+            if match:
+                precision, scale = map(int, match.groups())
+                type_name = pyarrow.decimal128(precision, scale)
+            else:
+                type_name = pyarrow.decimal128(38, 18)
+        else:
+            raise ValueError(f"Unsupported data type: {type_name}")
+        metadata = {}
+        if self.description:
+            metadata[b'description'] = self.description.encode('utf-8')
+        return pyarrow.field(self.name, type_name, nullable=data_type.nullable, metadata=metadata)
+
 
 @dataclass
 class RowType(DataType):
@@ -265,6 +305,36 @@ class DataTypeParser:
             )
         except ValueError:
             raise Exception(f"Unknown type: {base_type}")
+
+    @staticmethod
+    def parse_atomic_type_pyarrow_field(field: pyarrow.Field) -> DataType:
+        type_name = str(field.type)
+        if type_name.startswith('int') or type_name.startswith('uint'):
+            type_name = 'INT'
+        elif type_name.startswith('float'):
+            type_name = 'FLOAT'
+        elif type_name.startswith('double'):
+            type_name = 'DOUBLE'
+        elif type_name.startswith('bool'):
+            type_name = 'BOOLEAN'
+        elif type_name.startswith('string'):
+            type_name = 'STRING'
+        elif type_name.startswith('binary'):
+            type_name = 'BINARY'
+        elif type_name.startswith('date'):
+            type_name = 'DATE'
+        elif type_name.startswith('timestamp'):
+            type_name = 'TIMESTAMP'
+        elif type_name.startswith('decimal'):
+            match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
+            if match:
+                precision, scale = map(int, match.groups())
+                type_name = f'DECIMAL({precision},{scale})'
+            else:
+                type_name = 'DECIMAL(38,18)'
+        else:
+            raise ValueError(f"Unknown type: {type_name}")
+        return AtomicType(type_name, field.nullable)
 
     @staticmethod
     def parse_data_type(
@@ -370,3 +440,19 @@ def parse_data_field_from_json(
 ) -> DataField:
     json_data = json.loads(json_str)
     return DataTypeParser.parse_data_field(json_data, field_id)
+
+
+def parse_data_fields_from_pyarrow_schema(pa_schema: pyarrow.Schema) -> list[DataField]:
+    fields = []
+    for i, pa_field in enumerate(pa_schema):
+        pa_field: pyarrow.Field
+        data_type = DataTypeParser.parse_atomic_type_pyarrow_field(pa_field)
+        data_field = DataField(
+            id=i,
+            name=pa_field.name,
+            type=data_type,
+            description=pa_field.metadata.get(b'description', b'').decode
+            ('utf-8') if pa_field.metadata and b'description' in pa_field.metadata else None
+        )
+        fields.append(data_field)
+    return fields

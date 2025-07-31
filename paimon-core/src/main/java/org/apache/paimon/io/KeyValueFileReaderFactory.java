@@ -127,6 +127,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         long fileSize = file.fileSize();
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
+                        schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
@@ -134,7 +135,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                         fileIO, filePath, fileSize, orcPoolSize),
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        false,
+                        null,
+                        -1,
+                        Collections.emptyMap());
 
         Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
@@ -267,7 +272,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     finalReadKeyType,
                     readValueType,
                     new FormatReaderMapping.Builder(
-                            formatDiscover, readTableFields, fieldsExtractor, filters),
+                            formatDiscover, readTableFields, fieldsExtractor, filters, false),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,

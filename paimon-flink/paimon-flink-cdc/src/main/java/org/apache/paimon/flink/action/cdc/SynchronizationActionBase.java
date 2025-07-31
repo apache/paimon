@@ -68,6 +68,9 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     protected Map<String, String> tableConfig = new HashMap<>();
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
+    // this is to specify if we should use primary keys from source
+    // in paimon schema if pkeys are not specified in action command
+    protected boolean syncPKeysFromSourceSchema = true;
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
 
     public SynchronizationActionBase(
@@ -99,6 +102,11 @@ public abstract class SynchronizationActionBase extends ActionBase {
                 metadataColumns.stream()
                         .map(this.syncJobHandler::provideMetadataConverter)
                         .toArray(CdcMetadataConverter[]::new);
+        return this;
+    }
+
+    public SynchronizationActionBase syncPKeysFromSourceSchema(boolean flag) {
+        this.syncPKeysFromSourceSchema = flag;
         return this;
     }
 

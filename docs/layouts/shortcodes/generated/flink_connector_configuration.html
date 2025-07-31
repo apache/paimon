@@ -46,7 +46,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>filesystem.job-level-settings.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Enable pass job level filesystem settings to table file IO.</td>
         </tr>
@@ -307,6 +307,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Enable sink writer coordinator to plan data files in Job Manager.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-coordinator.page-size</h5></td>
+            <td style="word-wrap: break-word;">32 kb</td>
+            <td>MemorySize</td>
+            <td>Controls the page size for one RPC request of writer coordinator.</td>
         </tr>
         <tr>
             <td><h5>sink.writer-cpu</h5></td>

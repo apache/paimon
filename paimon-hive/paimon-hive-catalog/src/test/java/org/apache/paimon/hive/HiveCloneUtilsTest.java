@@ -43,7 +43,7 @@ public class HiveCloneUtilsTest {
         when(mockClient.getAllTables("db1")).thenReturn(Arrays.asList("tbl1", "tbl2", "tbl3"));
         when(mockClient.getAllTables("db2")).thenReturn(Arrays.asList("tbl1", "tbl2", "tbl3"));
 
-        List<Identifier> sourceTables = HiveCloneUtils.listTables(mockHiveCatalog, null);
+        List<Identifier> sourceTables = HiveCloneUtils.listTables(mockHiveCatalog, null, null);
         List<Identifier> expectedTables =
                 Arrays.asList(
                         Identifier.create("db1", "tbl1"),
@@ -55,13 +55,29 @@ public class HiveCloneUtilsTest {
         Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
-                HiveCloneUtils.listTables(mockHiveCatalog, Arrays.asList("db1.tbl3", "db2.tbl1"));
+                HiveCloneUtils.listTables(
+                        mockHiveCatalog, null, Arrays.asList("db1.tbl3", "db2.tbl1"));
         expectedTables =
                 Arrays.asList(
                         Identifier.create("db1", "tbl1"),
                         Identifier.create("db1", "tbl2"),
                         Identifier.create("db2", "tbl2"),
                         Identifier.create("db2", "tbl3"));
+        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+
+        sourceTables =
+                HiveCloneUtils.listTables(
+                        mockHiveCatalog, Arrays.asList("db1.tbl3", "db2.tbl1"), null);
+        expectedTables =
+                Arrays.asList(Identifier.create("db1", "tbl3"), Identifier.create("db2", "tbl1"));
+        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+
+        sourceTables =
+                HiveCloneUtils.listTables(
+                        mockHiveCatalog,
+                        Arrays.asList("db1.tbl3", "db2.tbl1"),
+                        Arrays.asList("db1.tbl3"));
+        expectedTables = Arrays.asList(Identifier.create("db2", "tbl1"));
         Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 
@@ -72,7 +88,8 @@ public class HiveCloneUtilsTest {
         when(mockHiveCatalog.getHmsClient()).thenReturn(mockClient);
         when(mockClient.getAllTables("db1")).thenReturn(Arrays.asList("tbl1", "tbl2", "tbl3"));
 
-        List<Identifier> sourceTables = HiveCloneUtils.listTables(mockHiveCatalog, "db1", null);
+        List<Identifier> sourceTables =
+                HiveCloneUtils.listTables(mockHiveCatalog, "db1", null, null);
         List<Identifier> expectedTables =
                 Arrays.asList(
                         Identifier.create("db1", "tbl1"),
@@ -80,9 +97,24 @@ public class HiveCloneUtilsTest {
                         Identifier.create("db1", "tbl3"));
         Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
-        sourceTables = HiveCloneUtils.listTables(mockHiveCatalog, "db1", Arrays.asList("db1.tbl1"));
+        sourceTables =
+                HiveCloneUtils.listTables(mockHiveCatalog, "db1", null, Arrays.asList("db1.tbl1"));
         expectedTables =
                 Arrays.asList(Identifier.create("db1", "tbl2"), Identifier.create("db1", "tbl3"));
+        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+
+        sourceTables =
+                HiveCloneUtils.listTables(mockHiveCatalog, "db1", Arrays.asList("db1.tbl1"), null);
+        expectedTables = Arrays.asList(Identifier.create("db1", "tbl1"));
+        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+
+        sourceTables =
+                HiveCloneUtils.listTables(
+                        mockHiveCatalog,
+                        "db1",
+                        Arrays.asList("db1.tbl1", "db1.tbl2"),
+                        Arrays.asList("db1.tbl1"));
+        expectedTables = Arrays.asList(Identifier.create("db1", "tbl2"));
         Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 }

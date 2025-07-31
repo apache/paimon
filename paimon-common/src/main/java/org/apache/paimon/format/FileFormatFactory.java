@@ -37,23 +37,35 @@ public interface FileFormatFactory {
         private final Options options;
         private final int readBatchSize;
         private final int writeBatchSize;
+        private final MemorySize writeBatchMemory;
         private final int zstdLevel;
         @Nullable private final MemorySize blockSize;
 
         @VisibleForTesting
         public FormatContext(Options options, int readBatchSize, int writeBatchSize) {
-            this(options, readBatchSize, writeBatchSize, 1, null);
+            this(options, readBatchSize, writeBatchSize, MemorySize.VALUE_128_MB, 1, null);
+        }
+
+        @VisibleForTesting
+        public FormatContext(
+                Options options,
+                int readBatchSize,
+                int writeBatchSize,
+                MemorySize writeBatchMemory) {
+            this(options, readBatchSize, writeBatchSize, writeBatchMemory, 1, null);
         }
 
         public FormatContext(
                 Options options,
                 int readBatchSize,
                 int writeBatchSize,
+                MemorySize writeBatchMemory,
                 int zstdLevel,
                 @Nullable MemorySize blockSize) {
             this.options = options;
             this.readBatchSize = readBatchSize;
             this.writeBatchSize = writeBatchSize;
+            this.writeBatchMemory = writeBatchMemory;
             this.zstdLevel = zstdLevel;
             this.blockSize = blockSize;
         }
@@ -68,6 +80,10 @@ public interface FileFormatFactory {
 
         public int writeBatchSize() {
             return writeBatchSize;
+        }
+
+        public MemorySize writeBatchMemory() {
+            return writeBatchMemory;
         }
 
         public int zstdLevel() {
