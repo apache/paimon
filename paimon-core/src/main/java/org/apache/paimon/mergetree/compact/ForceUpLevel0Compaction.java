@@ -21,16 +21,29 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.mergetree.LevelSortedRun;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** A {@link CompactStrategy} to force compacting level 0 files. */
 public class ForceUpLevel0Compaction implements CompactStrategy {
 
     private final UniversalCompaction universal;
+    @Nullable private final Integer maxCompactInterval;
+    @Nullable private final AtomicInteger compactTriggerCount;
 
-    public ForceUpLevel0Compaction(UniversalCompaction universal) {
+    public ForceUpLevel0Compaction(
+            UniversalCompaction universal, @Nullable Integer maxCompactInterval) {
         this.universal = universal;
+        this.maxCompactInterval = maxCompactInterval;
+        this.compactTriggerCount = maxCompactInterval == null ? null : new AtomicInteger(0);
+    }
+
+    @Nullable
+    public Integer maxCompactInterval() {
+        return maxCompactInterval;
     }
 
     @Override
@@ -40,6 +53,26 @@ public class ForceUpLevel0Compaction implements CompactStrategy {
             return pick;
         }
 
-        return universal.forcePickL0(numLevels, runs);
+        if (maxCompactInterval == null || compactTriggerCount == null) {
+            return universal.forcePickL0(numLevels, runs);
+        }
+
+        compactTriggerCount.getAndIncrement();
+        if (compactTriggerCount.compareAndSet(maxCompactInterval, 0)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Universal compaction due to max lookup compaction interval {}.",
+                        maxCompactInterval);
+            }
+            return universal.forcePickL0(numLevels, runs);
+        } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Skip universal compaction due to lookup compaction trigger count {} is less than the max interval {}.",
+                        compactTriggerCount.get(),
+                        maxCompactInterval);
+            }
+            return Optional.empty();
+        }
     }
 }

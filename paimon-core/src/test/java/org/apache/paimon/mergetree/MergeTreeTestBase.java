@@ -46,7 +46,6 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
-import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -90,6 +89,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.ofTesting;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -277,7 +277,7 @@ public abstract class MergeTreeTestBase {
                 new MockFailResultCompactionManager(
                         service,
                         new Levels(comparator, dataFileMetas, options.numLevels()),
-                        new UniversalCompaction(
+                        ofTesting(
                                 options.maxSizeAmplificationPercent(),
                                 options.sortedRunSizeRatio(),
                                 options.numSortedRunCompactionTrigger()),
@@ -438,7 +438,7 @@ public abstract class MergeTreeTestBase {
     private MergeTreeCompactManager createCompactManager(
             ExecutorService compactExecutor, List<DataFileMeta> files) {
         CompactStrategy strategy =
-                new UniversalCompaction(
+                ofTesting(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger());

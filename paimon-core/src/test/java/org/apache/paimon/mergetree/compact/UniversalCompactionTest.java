@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.OffPeakHours;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
@@ -27,9 +26,9 @@ import org.apache.paimon.mergetree.SortedRun;
 
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -42,7 +41,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testOutputLevel() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
+        UniversalCompaction compaction = ofTesting(25, 1, 3);
         assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 1).outputLevel())
                 .isEqualTo(1);
         assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 2).outputLevel())
@@ -57,7 +56,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testPick() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
+        UniversalCompaction compaction = ofTesting(25, 1, 3);
 
         // by size amplification
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 3, 3));
@@ -86,14 +85,15 @@ public class UniversalCompactionTest {
     @Test
     public void testOptimizedCompactionInterval() {
         AtomicLong time = new AtomicLong(0);
-        UniversalCompaction compaction =
-                new UniversalCompaction(
-                        100, 1, 3, Duration.ofMillis(1000), OffPeakHours.DISABLED, 0) {
+        FullCompactTrigger fullCompactTrigger =
+                new FullCompactTrigger(1000L, null) {
                     @Override
                     long currentTimeMillis() {
                         return time.get();
                     }
                 };
+        UniversalCompaction compaction =
+                new UniversalCompaction(100, 1, 3, fullCompactTrigger, null);
 
         // first time, force optimized compaction
         Optional<CompactUnit> pick =
@@ -127,8 +127,30 @@ public class UniversalCompactionTest {
     }
 
     @Test
+    public void testTotalSizeThreshold() {
+        FullCompactTrigger fullCompactTrigger = new FullCompactTrigger(null, 10L);
+        UniversalCompaction compaction =
+                new UniversalCompaction(100, 1, 3, fullCompactTrigger, null);
+
+        // total size less than threshold
+        Optional<CompactUnit> pick =
+                compaction.pick(3, Arrays.asList(level(0, 1), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isTrue();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 3, 5});
+
+        // total size bigger than threshold
+        pick = compaction.pick(3, Arrays.asList(level(0, 2), level(1, 6), level(2, 10)));
+        assertThat(pick.isPresent()).isFalse();
+
+        // one sort run, not trigger
+        pick = compaction.pick(3, Collections.singletonList(level(3, 5)));
+        assertThat(pick.isPresent()).isFalse();
+    }
+
+    @Test
     public void testNoOutputLevel0() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
+        UniversalCompaction compaction = ofTesting(25, 1, 3);
 
         Optional<CompactUnit> pick =
                 compaction.pick(
@@ -148,7 +170,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testExtremeCaseNoOutputLevel0() {
-        UniversalCompaction compaction = new UniversalCompaction(200, 1, 5);
+        UniversalCompaction compaction = ofTesting(200, 1, 5);
 
         Optional<CompactUnit> pick =
                 compaction.pick(
@@ -168,7 +190,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testSizeAmplification() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 0, 1);
+        UniversalCompaction compaction = ofTesting(25, 0, 1);
         long[] sizes = new long[] {1};
         sizes = appendAndPickForSizeAmp(compaction, sizes);
         assertThat(sizes).isEqualTo(new long[] {2});
@@ -208,7 +230,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testSizeRatio() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 5);
+        UniversalCompaction compaction = ofTesting(25, 1, 5);
         long[] sizes = new long[] {1, 1, 1, 1};
         sizes = appendAndPickForSizeRatio(compaction, sizes);
         assertThat(sizes).isEqualTo(new long[] {5});
@@ -261,16 +283,13 @@ public class UniversalCompactionTest {
     @Test
     public void testSizeRatioThreshold() {
         long[] sizes = new long[] {8, 9, 10};
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2), sizes))
-                .isEqualTo(new long[] {8, 9, 10});
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 20, 2), sizes))
-                .isEqualTo(new long[] {27});
+        assertThat(pickForSizeRatio(ofTesting(25, 10, 2), sizes)).isEqualTo(new long[] {8, 9, 10});
+        assertThat(pickForSizeRatio(ofTesting(25, 20, 2), sizes)).isEqualTo(new long[] {27});
     }
 
     @Test
     public void testLookup() {
-        ForceUpLevel0Compaction compaction =
-                new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
+        ForceUpLevel0Compaction compaction = new ForceUpLevel0Compaction(ofTesting(25, 1, 3), null);
 
         // level 0 to max level
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 2, 2));
@@ -297,8 +316,9 @@ public class UniversalCompactionTest {
     @Test
     public void testForcePickL0() {
         int maxInterval = 5;
-        UniversalCompaction compaction =
-                new UniversalCompaction(25, 1, 5, null, maxInterval, OffPeakHours.DISABLED, 0);
+        ForceUpLevel0Compaction compaction =
+                new ForceUpLevel0Compaction(
+                        new UniversalCompaction(25, 1, 5, null, null), maxInterval);
 
         // level 0 to max level
         List<LevelSortedRun> level0ToMax = level0(1, 2, 2, 2);
@@ -324,16 +344,15 @@ public class UniversalCompactionTest {
         List<LevelSortedRun> level0ForcePick = Arrays.asList(level(0, 2), level(1, 2), level(2, 2));
 
         for (int i = 1; i <= maxInterval; i++) {
+            pick = compaction.pick(3, level0ForcePick);
             if (i == maxInterval) {
                 // level 0 force pick triggered
-                pick = compaction.pick(3, level0ForcePick);
                 assertThat(pick.isPresent()).isTrue();
                 results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
                 assertThat(results).isEqualTo(new long[] {2, 2, 2});
                 assertThat(pick.get().outputLevel()).isEqualTo(2);
             } else {
                 // compact skipped
-                pick = compaction.pick(3, level0ForcePick);
                 assertThat(pick.isPresent()).isFalse();
             }
         }
@@ -440,5 +459,10 @@ public class UniversalCompactionTest {
                 FileSource.APPEND,
                 null,
                 null);
+    }
+
+    public static UniversalCompaction ofTesting(
+            int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
+        return new UniversalCompaction(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null, null);
     }
 }
