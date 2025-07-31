@@ -15,7 +15,6 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-import json
 import re
 import threading
 from abc import ABC, abstractmethod
