@@ -125,7 +125,7 @@ public class SparkCatalog extends SparkBaseCatalog
             catalog.getDatabase(defaultDatabase);
         } catch (Catalog.DatabaseNotExistException e) {
             LOG.warn(
-                    "Default database '{}' does not exist due to: {}, start to create it",
+                    "Default database '{}' does not exist, caused by: {}, start to create it",
                     defaultDatabase,
                     ExceptionUtils.stringifyException(e));
             try {
