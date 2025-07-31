@@ -562,7 +562,7 @@ public class SchemaManager implements Serializable {
                         applyNotNestedColumnRename(
                                 oldTableSchema.primaryKeys(),
                                 Iterables.filter(changes, RenameColumn.class)),
-                        applySchemaChanges(newOptions, changes),
+                        applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
         return new TableSchema(
@@ -724,7 +724,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static Map<String, String> applySchemaChanges(
+    private static Map<String, String> applyRenameColumnsToOptions(
             Map<String, String> options, Iterable<SchemaChange> changes) {
         Iterable<RenameColumn> renameColumns =
                 FluentIterable.from(changes).filter(RenameColumn.class);
