@@ -29,15 +29,16 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
-from pypaimon.table.file_store_table import FileStoreTable
 
 
 class TableScan:
     """Implementation of TableScan for native Python reading."""
 
-    def __init__(self, table: FileStoreTable, predicate: Optional[Predicate], limit: Optional[int],
+    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int],
                  read_type: List[DataField]):
-        self.table = table
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
         self.predicate = predicate
         self.predicate = predicate
         self.limit = limit

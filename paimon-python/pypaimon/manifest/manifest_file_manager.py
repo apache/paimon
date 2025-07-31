@@ -23,7 +23,6 @@ from io import BytesIO
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry, MANIFEST_ENTRY_SCHEMA
-from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.binary_row import BinaryRowDeserializer, BinaryRowSerializer, BinaryRow
 
 
@@ -31,6 +30,8 @@ class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
     def __init__(self, table):
+        from pypaimon.table.file_store_table import FileStoreTable
+
         self.table: FileStoreTable = table
         self.manifest_path = table.table_path / "manifest"
         self.file_io = table.file_io

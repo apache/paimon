@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 from pypaimon import Catalog, Database, Table
 from pypaimon.api import CatalogOptions, Identifier
-from pypaimon.api.core_options import CoreOptions
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseNotExistException, \
     TableAlreadyExistException, DatabaseAlreadyExistException
 from pypaimon.schema.schema_manager import SchemaManager

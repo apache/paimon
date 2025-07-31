@@ -24,14 +24,15 @@ from io import BytesIO
 
 from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.file_store_table import FileStoreTable
 
 
 class ManifestListManager:
     """Manager for manifest list files in Avro format using unified FileIO."""
 
-    def __init__(self, table: FileStoreTable):
-        self.table = table
+    def __init__(self, table):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
         self.manifest_path = self.table.table_path / "manifest"
         self.file_io = self.table.file_io
 
