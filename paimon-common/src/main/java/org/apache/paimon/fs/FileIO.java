@@ -192,9 +192,22 @@ public interface FileIO extends Serializable, Closeable {
     /**
      * Check if exists.
      *
-     * @param path source file
+     * @param path source file or dir
      */
     boolean exists(Path path) throws IOException;
+
+    /**
+     * Check if exists.
+     *
+     * @param path source file
+     */
+    default boolean fileExists(Path path) throws IOException {
+        try {
+            return !getFileStatus(path).isDir();
+        } catch (FileNotFoundException e) {
+            return false;
+        }
+    }
 
     /**
      * Delete a file.

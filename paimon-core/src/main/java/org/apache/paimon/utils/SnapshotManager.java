@@ -148,7 +148,7 @@ public class SnapshotManager implements Serializable {
     public boolean snapshotExists(long snapshotId) {
         Path path = snapshotPath(snapshotId);
         try {
-            return fileIO.exists(path);
+            return fileIO.fileExists(path);
         } catch (IOException e) {
             throw new RuntimeException(
                     "Failed to determine if snapshot #" + snapshotId + " exists in path " + path,
