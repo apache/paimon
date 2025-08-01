@@ -19,6 +19,7 @@
 package org.apache.paimon.bucket;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowKind;
 
 /** Paimon default bucket function. */
@@ -28,6 +29,9 @@ public class DefaultBucketFunction implements BucketFunction {
 
     @Override
     public int bucket(BinaryRow row, int numBuckets) {
+        if (numBuckets == BucketMode.UNAWARE_BUCKET) {
+            return BucketMode.UNAWARE_BUCKET;
+        }
         assert numBuckets > 0 && row.getRowKind() == RowKind.INSERT;
         int hash = row.hashCode();
         return Math.abs(hash % numBuckets);

@@ -37,6 +37,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit extends DataSplit {
 
@@ -120,7 +122,7 @@ public class FormatDataSplit extends DataSplit {
 
     @Override
     public int bucket() {
-        return 0;
+        return UNAWARE_BUCKET;
     }
 
     public FileIO fileIO() {
@@ -159,10 +161,6 @@ public class FormatDataSplit extends DataSplit {
 
     public Map<String, String> partitionSpec() {
         return partitionSpec;
-    }
-
-    public long modificationTime() {
-        return modificationTime;
     }
 
     @Override

@@ -553,6 +553,9 @@ public class SchemaValidation {
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
+        if (bucket == BucketMode.UNAWARE_BUCKET) {
+            return;
+        }
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(

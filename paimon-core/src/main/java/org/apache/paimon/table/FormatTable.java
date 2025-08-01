@@ -75,6 +75,10 @@ public interface FormatTable extends Table {
 
     AppendOnlyFileStoreTable store();
 
+    default int bucket() {
+        return BucketMode.UNAWARE_BUCKET;
+    }
+
     /** Currently supported formats. */
     enum Format {
         ORC,

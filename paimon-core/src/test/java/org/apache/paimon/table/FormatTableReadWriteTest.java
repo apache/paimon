@@ -45,8 +45,7 @@ public class FormatTableReadWriteTest extends TableTestBase {
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.SMALLINT());
-        schemaBuilder.option("bucket", "1");
-        schemaBuilder.option("bucket-key", "f1");
+        schemaBuilder.option("bucket", "0");
         schemaBuilder.option("file.format", format);
         schemaBuilder.option("type", "format-table");
         return schemaBuilder.build();
