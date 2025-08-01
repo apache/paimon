@@ -27,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.apache.paimon.utils.NextSnapshotFetcher.RANGE_CHECK_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -117,8 +118,8 @@ public class NextSnapshotFetcherTest {
         when(snapshotManager.earliestSnapshotId()).thenReturn(3L); // earliest is after next
         fetcher = new NextSnapshotFetcher(snapshotManager, changelogManager, false);
 
-        // Act: Call 15 times, should be null and not throw
-        for (int i = 0; i < 15; i++) {
+        // Act: Call RANGE_CHECK_INTERVAL - 1 times, should be null and not throw
+        for (int i = 0; i < RANGE_CHECK_INTERVAL - 1; i++) {
             assertThat(fetcher.getNextSnapshot(nextSnapshotId)).isNull();
         }
 
@@ -155,8 +156,8 @@ public class NextSnapshotFetcherTest {
         when(snapshotManager.latestSnapshotIdFromFileSystem()).thenReturn(8L); // next > latest + 1
         fetcher = new NextSnapshotFetcher(snapshotManager, changelogManager, false);
 
-        // Act: Call 15 times
-        for (int i = 0; i < 15; i++) {
+        // Act: Call RANGE_CHECK_INTERVAL - 1 times
+        for (int i = 0; i < RANGE_CHECK_INTERVAL - 1; i++) {
             fetcher.getNextSnapshot(nextSnapshotId);
         }
 
@@ -205,9 +206,9 @@ public class NextSnapshotFetcherTest {
         Snapshot result = fetcher.getNextSnapshot(existingSnapshotId);
         assertThat(result).isNotNull();
 
-        // Assert: Now call for the missing one again 15 times.
+        // Assert: Now call for the missing one again RANGE_CHECK_INTERVAL - 1 times.
         // If the counter was reset, it shouldn't throw.
-        for (int i = 0; i < 15; i++) {
+        for (int i = 0; i < RANGE_CHECK_INTERVAL - 1; i++) {
             assertThat(fetcher.getNextSnapshot(missingSnapshotId)).isNull();
         }
         // No exception should be thrown on the 16th total call for the missing ID

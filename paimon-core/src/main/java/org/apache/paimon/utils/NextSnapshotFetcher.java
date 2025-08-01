@@ -31,6 +31,8 @@ public class NextSnapshotFetcher {
 
     public static final Logger LOG = LoggerFactory.getLogger(NextSnapshotFetcher.class);
 
+    public static final int RANGE_CHECK_INTERVAL = 16;
+
     private final SnapshotManager snapshotManager;
     private final ChangelogManager changelogManager;
     private final boolean changelogDecoupled;
@@ -58,7 +60,7 @@ public class NextSnapshotFetcher {
         }
 
         rangeCheckCnt++;
-        if (rangeCheckCnt % 16 == 0) {
+        if (rangeCheckCnt % RANGE_CHECK_INTERVAL == 0) {
             rangeCheck(nextSnapshotId);
         }
 
