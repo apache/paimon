@@ -30,12 +30,21 @@ public class MockRestNoCacheVirtualFileSystemTest extends MockRestVirtualFileSys
     @Override
     protected void initFs() throws Exception {
         Configuration conf = new Configuration();
-        conf.set("fs.pvfs.uri", restCatalogServer.getUrl());
+        // With inline endpoint in uri
+        String endpoint = restCatalogServer.getUrl();
+        if (endpoint.startsWith("http://")) {
+            endpoint = endpoint.substring("http://".length());
+        }
+        if (endpoint.endsWith("/")) {
+            endpoint = endpoint.substring(0, endpoint.length() - 1);
+        }
+
         conf.set("fs.pvfs.token.provider", AuthProviderEnum.BEAR.identifier());
         conf.set("fs.pvfs.token", initToken);
+        // Disable table cache
         conf.setBoolean("fs.pvfs.cache-enabled", false);
         this.vfs = new PaimonVirtualFileSystem();
-        this.vfsRoot = new Path("pvfs://" + restWarehouse + "/");
+        this.vfsRoot = new Path("pvfs://" + restWarehouse + "." + endpoint + "/");
         this.vfs.initialize(vfsRoot.toUri(), conf);
 
         Assert.assertFalse(((PaimonVirtualFileSystem) vfs).isCacheEnabled());
