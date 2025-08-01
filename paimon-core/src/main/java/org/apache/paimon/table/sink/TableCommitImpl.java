@@ -88,6 +88,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
     private final boolean forceCreatingSnapshot;
+    private boolean expireForEmptyCommit = true;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -144,6 +145,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl ignoreEmptyCommit(boolean ignoreEmptyCommit) {
         commit.ignoreEmptyCommit(ignoreEmptyCommit);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
+        this.expireForEmptyCommit = expireForEmptyCommit;
         return this;
     }
 
@@ -213,11 +220,16 @@ public class TableCommitImpl implements InnerTableCommit {
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartition == null) {
+            int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
-                commit.commit(committable, checkAppendFiles);
+                newSnapshots += commit.commit(committable, checkAppendFiles);
             }
             if (!committables.isEmpty()) {
-                expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);
+                if (newSnapshots > 0 || expireForEmptyCommit) {
+                    expire(
+                            committables.get(committables.size() - 1).identifier(),
+                            expireMainExecutor);
+                }
             }
         } else {
             ManifestCommittable committable;
@@ -233,8 +245,11 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            commit.overwrite(overwritePartition, committable, Collections.emptyMap());
-            expire(committable.identifier(), expireMainExecutor);
+            int newSnapshots =
+                    commit.overwrite(overwritePartition, committable, Collections.emptyMap());
+            if (newSnapshots > 0 || expireForEmptyCommit) {
+                expire(committable.identifier(), expireMainExecutor);
+            }
         }
     }
 

@@ -40,7 +40,7 @@ public interface FileStoreCommit extends AutoCloseable {
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 
     /** Commit from manifest committable with checkAppendFiles. */
-    void commit(ManifestCommittable committable, boolean checkAppendFiles);
+    int commit(ManifestCommittable committable, boolean checkAppendFiles);
 
     /**
      * Overwrite from manifest committable and partition.
@@ -50,7 +50,7 @@ public interface FileStoreCommit extends AutoCloseable {
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
      */
-    void overwrite(
+    int overwrite(
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties);
