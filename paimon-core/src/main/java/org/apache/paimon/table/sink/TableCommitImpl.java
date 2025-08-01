@@ -30,7 +30,9 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.tag.TagAutoManager;
+import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.PathFactory;
@@ -80,8 +82,8 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
 
-    private final ExecutorService expireMainExecutor;
-    private final AtomicReference<Throwable> expireError;
+    private final ExecutorService maintainExecutor;
+    private final AtomicReference<Throwable> maintainError;
 
     private final String tableName;
 
@@ -112,13 +114,13 @@ public class TableCommitImpl implements InnerTableCommit {
         this.consumerExpireTime = consumerExpireTime;
         this.consumerManager = consumerManager;
 
-        this.expireMainExecutor =
+        this.maintainExecutor =
                 expireExecutionMode == ExpireExecutionMode.SYNC
                         ? MoreExecutors.newDirectExecutorService()
                         : Executors.newSingleThreadExecutor(
                                 new ExecutorThreadFactory(
                                         Thread.currentThread().getName() + "expire-main-thread"));
-        this.expireError = new AtomicReference<>(null);
+        this.maintainError = new AtomicReference<>(null);
 
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
@@ -225,11 +227,10 @@ public class TableCommitImpl implements InnerTableCommit {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
             }
             if (!committables.isEmpty()) {
-                if (newSnapshots > 0 || expireForEmptyCommit) {
-                    expire(
-                            committables.get(committables.size() - 1).identifier(),
-                            expireMainExecutor);
-                }
+                maintain(
+                        committables.get(committables.size() - 1).identifier(),
+                        maintainExecutor,
+                        newSnapshots > 0 || expireForEmptyCommit);
             }
         } else {
             ManifestCommittable committable;
@@ -247,9 +248,10 @@ public class TableCommitImpl implements InnerTableCommit {
             }
             int newSnapshots =
                     commit.overwrite(overwritePartition, committable, Collections.emptyMap());
-            if (newSnapshots > 0 || expireForEmptyCommit) {
-                expire(committable.identifier(), expireMainExecutor);
-            }
+            maintain(
+                    committable.identifier(),
+                    maintainExecutor,
+                    newSnapshots > 0 || expireForEmptyCommit);
         }
     }
 
@@ -330,36 +332,46 @@ public class TableCommitImpl implements InnerTableCommit {
         }
     }
 
-    private void expire(long partitionExpireIdentifier, ExecutorService executor) {
-        if (expireError.get() != null) {
-            throw new RuntimeException(expireError.get());
+    private void maintain(long identifier, ExecutorService executor, boolean doExpire) {
+        if (maintainError.get() != null) {
+            throw new RuntimeException(maintainError.get());
         }
 
         executor.execute(
                 () -> {
                     try {
-                        expire(partitionExpireIdentifier);
+                        maintain(identifier, doExpire);
                     } catch (Throwable t) {
-                        LOG.error("Executing expire encountered an error.", t);
-                        expireError.compareAndSet(null, t);
+                        LOG.error("Executing maintain encountered an error.", t);
+                        maintainError.compareAndSet(null, t);
                     }
                 });
     }
 
-    private void expire(long partitionExpireIdentifier) {
+    private void maintain(long identifier, boolean doExpire) {
         // expire consumer first to avoid preventing snapshot expiration
-        if (consumerExpireTime != null) {
+        if (doExpire && consumerExpireTime != null) {
             consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
         }
 
-        expireSnapshots();
+        if (doExpire && expireSnapshots != null) {
+            expireSnapshots.run();
+        }
 
-        if (partitionExpire != null) {
-            partitionExpire.expire(partitionExpireIdentifier);
+        if (doExpire && partitionExpire != null) {
+            partitionExpire.expire(identifier);
         }
 
         if (tagAutoManager != null) {
-            tagAutoManager.run();
+            TagAutoCreation tagAutoCreation = tagAutoManager.getTagAutoCreation();
+            if (tagAutoCreation != null) {
+                tagAutoCreation.run();
+            }
+
+            TagTimeExpire tagTimeExpire = tagAutoManager.getTagTimeExpire();
+            if (doExpire && tagTimeExpire != null) {
+                tagTimeExpire.expire();
+            }
         }
     }
 
@@ -372,7 +384,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void close() throws Exception {
         commit.close();
-        expireMainExecutor.shutdownNow();
+        maintainExecutor.shutdownNow();
     }
 
     @Override
@@ -381,7 +393,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @VisibleForTesting
-    public ExecutorService getExpireMainExecutor() {
-        return expireMainExecutor;
+    public ExecutorService getMaintainExecutor() {
+        return maintainExecutor;
     }
 }
