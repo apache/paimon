@@ -357,7 +357,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
         List<CommitCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options));
+                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options, table));
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
