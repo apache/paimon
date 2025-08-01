@@ -26,6 +26,7 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.RowType;
 
 /**
  * Write of {@link Table} to provide {@link InternalRow} writing.
@@ -37,6 +38,9 @@ public interface TableWrite extends AutoCloseable {
 
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
+
+    /** Specified the write rowType. */
+    TableWrite withWriteType(RowType writeType);
 
     /** With {@link MemorySegmentPool} for the current table write. */
     TableWrite withMemoryPool(MemorySegmentPool memoryPool);

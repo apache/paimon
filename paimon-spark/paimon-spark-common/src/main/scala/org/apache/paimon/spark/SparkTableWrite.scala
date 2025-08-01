@@ -29,12 +29,20 @@ import org.apache.spark.sql.{PaimonUtils, Row}
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
-class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKindColIdx: Int)
+class SparkTableWrite(
+    writeBuilder: BatchWriteBuilder,
+    toPaimonRow: Row => SparkRow,
+    writeType: Option[RowType] = None)
   extends AutoCloseable {
 
   val ioManager: IOManager = SparkUtils.createIOManager
-  val write: BatchTableWrite =
-    writeBuilder.newWrite().withIOManager(ioManager).asInstanceOf[BatchTableWrite]
+
+  val write: BatchTableWrite = {
+    val _write = writeBuilder.newWrite()
+    _write.withIOManager(ioManager)
+    writeType.map(_write.withWriteType)
+    _write
+  }
 
   def write(row: Row): Unit = {
     write.write(toPaimonRow(row))
@@ -66,9 +74,6 @@ class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKind
     write.close()
     ioManager.close()
   }
-
-  private def toPaimonRow(row: Row) =
-    new SparkRow(rowType, row, SparkRowUtils.getRowKind(row, rowKindColIdx))
 
   private def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
     val taskContext = TaskContext.get

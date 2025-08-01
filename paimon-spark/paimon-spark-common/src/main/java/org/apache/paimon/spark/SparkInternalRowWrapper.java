@@ -25,7 +25,6 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.spark.util.SparkRowUtils$;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
 import org.apache.paimon.types.RowKind;
 
@@ -80,7 +79,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public RowKind getRowKind() {
-        return SparkRowUtils$.MODULE$.getRowKind(internalRow, rowKindIdx);
+        if (rowKindIdx != -1) {
+            return RowKind.fromByteValue(internalRow.getByte(rowKindIdx));
+        } else {
+            return RowKind.INSERT;
+        }
     }
 
     @Override
