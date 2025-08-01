@@ -25,11 +25,11 @@ import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
-import org.apache.paimon.table.{BucketMode, DataTable, FileStoreTable, KnownSplitsTable, Table}
+import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable, KnownSplitsTable, Table}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
+import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
@@ -39,6 +39,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
 case class SparkTable(table: Table)
@@ -48,13 +49,14 @@ case class SparkTable(table: Table)
   with SupportsMetadataColumns
   with PaimonPartitionManagement {
 
+  lazy val coreOptions = new CoreOptions(table.options())
+
   private lazy val useV2Write: Boolean = {
     val v2WriteConfigured = OptionUtils.useV2Write()
     v2WriteConfigured && supportsV2Write
   }
 
   private def supportsV2Write: Boolean = {
-    val coreOptions = new CoreOptions(table.options())
     coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
       table match {
         case storeTable: FileStoreTable =>
@@ -118,20 +120,30 @@ case class SparkTable(table: Table)
 
   override def metadataColumns: Array[MetadataColumn] = {
     val partitionType = SparkTypeUtils.toSparkPartitionType(table)
-    Array[MetadataColumn](
+
+    val _metadataColumns = ArrayBuffer[MetadataColumn](
       PaimonMetadataColumn.FILE_PATH,
       PaimonMetadataColumn.ROW_INDEX,
       PaimonMetadataColumn.PARTITION(partitionType),
       PaimonMetadataColumn.BUCKET
     )
+
+    if (coreOptions.rowTrackingEnabled()) {
+      _metadataColumns.append(PaimonMetadataColumn.ROW_ID)
+      _metadataColumns.append(PaimonMetadataColumn.SEQUENCE_NUMBER)
+    }
+
+    _metadataColumns.toArray
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
     table match {
       case t: KnownSplitsTable =>
         new PaimonSplitScanBuilder(t)
+      case _: InnerTable =>
+        new PaimonScanBuilder(table.copy(options.asCaseSensitiveMap).asInstanceOf[InnerTable])
       case _ =>
-        new PaimonScanBuilder(table.copy(options.asCaseSensitiveMap))
+        throw new RuntimeException("Only InnerTable can be scanned.")
     }
   }
 

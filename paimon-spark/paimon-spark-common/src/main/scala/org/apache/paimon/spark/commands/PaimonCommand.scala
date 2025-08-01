@@ -28,7 +28,7 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
-import org.apache.paimon.table.{BucketMode, FileStoreTable, KnownSplitsTable}
+import org.apache.paimon.table.{BucketMode, InnerTable, KnownSplitsTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.SerializationUtils
@@ -36,7 +36,7 @@ import org.apache.paimon.utils.SerializationUtils
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -160,9 +160,9 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       relation: DataSourceV2Relation): DataSourceV2Relation = {
     assert(relation.table.isInstanceOf[SparkTable])
     val sparkTable = relation.table.asInstanceOf[SparkTable]
-    assert(sparkTable.table.isInstanceOf[FileStoreTable])
+    assert(sparkTable.table.isInstanceOf[InnerTable])
     val knownSplitsTable =
-      KnownSplitsTable.create(sparkTable.table.asInstanceOf[FileStoreTable], splits.toArray)
+      KnownSplitsTable.create(sparkTable.table.asInstanceOf[InnerTable], splits.toArray)
     val outputNames = relation.outputSet.map(_.name)
     def isOutputColumn(colName: String) = {
       val resolve = conf.resolver
