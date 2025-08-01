@@ -210,30 +210,29 @@ public class FormatDataSplit extends DataSplit {
         return result;
     }
 
-    /** Generate BinaryRow partition from Map */
-    public BinaryRow generatePartition(Map<String, Object> partitionMap) {
-        return new BinaryRow(0);
-        //        if (partitionKeys.isEmpty()) {
-        //            // Non-partitioned table returns empty BinaryRow
-        //            return new BinaryRow(0);
-        //        }
-        //
-        //        // 1. Create GenericRow from partition map
-        //        GenericRow genericRow = new GenericRow(partitionKeys.size());
-        //
-        //        for (int i = 0; i < partitionKeys.size(); i++) {
-        //            String partitionKey = partitionKeys.get(i);
-        //            Object value = partitionMap.get(partitionKey);
-        //
-        //            // Convert and validate partition value
-        //            Object convertedValue = convertPartitionValue(value,
-        // partitionType.getTypeAt(i));
-        //            genericRow.setField(i, convertedValue);
-        //        }
-        //
-        //        // 2. Serialize GenericRow to BinaryRow
-        //        return serializer.toBinaryRow(genericRow);
-    }
+    //    public BinaryRow generatePartition(Map<String, Object> partitionMap) {
+    //        return new BinaryRow(0);
+    //                if (partitionKeys.isEmpty()) {
+    //                    // Non-partitioned table returns empty BinaryRow
+    //                    return new BinaryRow(0);
+    //                }
+    //
+    //                // 1. Create GenericRow from partition map
+    //                GenericRow genericRow = new GenericRow(partitionKeys.size());
+    //
+    //                for (int i = 0; i < partitionKeys.size(); i++) {
+    //                    String partitionKey = partitionKeys.get(i);
+    //                    Object value = partitionMap.get(partitionKey);
+    //
+    //                    // Convert and validate partition value
+    //                    Object convertedValue = convertPartitionValue(value,
+    //         partitionType.getTypeAt(i));
+    //                    genericRow.setField(i, convertedValue);
+    //                }
+    //
+    //                // 2. Serialize GenericRow to BinaryRow
+    //                return serializer.toBinaryRow(genericRow);
+    //    }
 
     @Override
     public String toString() {

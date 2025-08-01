@@ -20,7 +20,10 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -51,9 +54,19 @@ public class FormatTableReadWriteTest extends TableTestBase {
 
     @Test
     public void testAllFormatReadWrite() throws Exception {
-        //        testReadWrite("orc");
         testReadWrite("parquet");
-        //        testReadWrite("avro");
+    }
+
+    @Override
+    protected void write(Table table, IOManager ioManager, InternalRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.withIOManager(ioManager);
+            for (InternalRow row : rows) {
+                write.write(row);
+            }
+            write.prepareCommit();
+        }
     }
 
     private void testReadWrite(String format) throws Exception {
