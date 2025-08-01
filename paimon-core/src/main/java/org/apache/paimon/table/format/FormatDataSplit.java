@@ -18,7 +18,10 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
@@ -26,6 +29,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -36,6 +40,7 @@ import java.util.Optional;
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit extends DataSplit {
 
+    private final FileIO fileIO;
     private final Path filePath;
     private final long offset;
     private final long length;
@@ -44,8 +49,10 @@ public class FormatDataSplit extends DataSplit {
     private final int[] projection;
     private final Map<String, String> partitionSpec;
     private final long modificationTime;
+    public List<DataFileMeta> dataFiles;
 
     public FormatDataSplit(
+            FileIO fileIO,
             Path filePath,
             long offset,
             long length,
@@ -53,6 +60,7 @@ public class FormatDataSplit extends DataSplit {
             @Nullable Predicate predicate,
             @Nullable int[] projection) {
         this(
+                fileIO,
                 filePath,
                 offset,
                 length,
@@ -64,6 +72,7 @@ public class FormatDataSplit extends DataSplit {
     }
 
     public FormatDataSplit(
+            FileIO fileIO,
             Path filePath,
             long offset,
             long length,
@@ -72,6 +81,7 @@ public class FormatDataSplit extends DataSplit {
             @Nullable int[] projection,
             Map<String, String> partitionSpec,
             long modificationTime) {
+        this.fileIO = fileIO;
         this.filePath = filePath;
         this.offset = offset;
         this.length = length;
@@ -80,6 +90,41 @@ public class FormatDataSplit extends DataSplit {
         this.projection = projection;
         this.partitionSpec = partitionSpec;
         this.modificationTime = modificationTime;
+        this.dataFiles = new ArrayList<>();
+        dataFiles.add(
+                new DataFileMeta(
+                        filePath.getName(),
+                        length,
+                        length,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        0L,
+                        0L,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null));
+    }
+
+    @Override
+    public BinaryRow partition() {
+        return new BinaryRow(0);
+    }
+
+    @Override
+    public int bucket() {
+        return 0;
+    }
+
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     public Path path() {
@@ -96,6 +141,10 @@ public class FormatDataSplit extends DataSplit {
 
     public RowType rowType() {
         return rowType;
+    }
+
+    public List<DataFileMeta> dataFiles() {
+        return dataFiles;
     }
 
     @Nullable
@@ -159,6 +208,31 @@ public class FormatDataSplit extends DataSplit {
                         modificationTime);
         result = 31 * result + Arrays.hashCode(projection);
         return result;
+    }
+
+    /** Generate BinaryRow partition from Map */
+    public BinaryRow generatePartition(Map<String, Object> partitionMap) {
+        return new BinaryRow(0);
+        //        if (partitionKeys.isEmpty()) {
+        //            // Non-partitioned table returns empty BinaryRow
+        //            return new BinaryRow(0);
+        //        }
+        //
+        //        // 1. Create GenericRow from partition map
+        //        GenericRow genericRow = new GenericRow(partitionKeys.size());
+        //
+        //        for (int i = 0; i < partitionKeys.size(); i++) {
+        //            String partitionKey = partitionKeys.get(i);
+        //            Object value = partitionMap.get(partitionKey);
+        //
+        //            // Convert and validate partition value
+        //            Object convertedValue = convertPartitionValue(value,
+        // partitionType.getTypeAt(i));
+        //            genericRow.setField(i, convertedValue);
+        //        }
+        //
+        //        // 2. Serialize GenericRow to BinaryRow
+        //        return serializer.toBinaryRow(genericRow);
     }
 
     @Override

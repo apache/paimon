@@ -18,10 +18,16 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.AbstractDataTableRead;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -30,6 +36,7 @@ import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -114,7 +121,26 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        return null;
+        InnerTableRead read = table.store().newRead();
+        TableSchema schema = table.schema();
+        return new AbstractDataTableRead(schema) {
+
+            @Override
+            protected InnerTableRead innerWithFilter(Predicate predicate) {
+                read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public void applyReadType(RowType readType) {
+                read.withReadType(readType);
+            }
+
+            @Override
+            public RecordReader<InternalRow> reader(Split split) throws IOException {
+                return read.createReader(split);
+            }
+        };
     }
 
     // ===================== Unsupported ===============================

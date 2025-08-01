@@ -65,11 +65,13 @@ public class FormatTableScan implements InnerTableScan {
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
             try {
-                FileStatus[] files = table.fileIO().listStatus(new Path(table.location()));
+                FileStatus[] files =
+                        table.fileIO().listStatus(new Path(table.location() + "/bucket-0/"));
 
                 for (FileStatus file : files) {
                     FormatDataSplit split =
                             new FormatDataSplit(
+                                    table.fileIO(),
                                     file.getPath(),
                                     0,
                                     file.getLen(),

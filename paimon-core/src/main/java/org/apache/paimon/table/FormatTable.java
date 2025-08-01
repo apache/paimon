@@ -71,6 +71,8 @@ public interface FormatTable extends Table {
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
 
+    TableSchema schema();
+
     AppendOnlyFileStoreTable store();
 
     /** Currently supported formats. */
@@ -170,6 +172,7 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
+        private TableSchema schema;
         private AppendOnlyFileStoreTable store;
 
         public FormatTableImpl(
@@ -189,7 +192,7 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
-            TableSchema schema =
+            this.schema =
                     TableSchema.create(
                             0L,
                             new Schema(
@@ -249,6 +252,11 @@ public interface FormatTable extends Table {
         @Override
         public FileIO fileIO() {
             return fileIO;
+        }
+
+        @Override
+        public TableSchema schema() {
+            return schema;
         }
 
         @Override
