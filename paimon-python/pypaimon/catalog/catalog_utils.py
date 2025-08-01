@@ -18,7 +18,7 @@ limitations under the License.
 from pathlib import Path
 from typing import Callable, Any
 
-from pypaimon.api.core_options import CoreOptions
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
 
 from pypaimon.catalog.table_metadata import TableMetadata

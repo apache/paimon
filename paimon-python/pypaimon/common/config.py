@@ -20,6 +20,15 @@ class OssOptions:
     OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret"
     OSS_SECURITY_TOKEN = "fs.oss.securityToken"
     OSS_ENDPOINT = "fs.oss.endpoint"
+    OSS_REGION = "fs.oss.region"
+
+
+class S3Options:
+    S3_ACCESS_KEY_ID = "fs.s3.accessKeyId"
+    S3_ACCESS_KEY_SECRET = "fs.s3.accessKeySecret"
+    S3_SECURITY_TOKEN = "fs.s3.securityToken"
+    S3_ENDPOINT = "fs.s3.endpoint"
+    S3_REGION = "fs.s3.region"
 
 
 class CatalogOptions:

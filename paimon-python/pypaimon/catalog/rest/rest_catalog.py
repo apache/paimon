@@ -21,7 +21,7 @@ from typing import List, Dict, Optional, Union
 from pypaimon import Database, Catalog, Schema
 from pypaimon.api import RESTApi, CatalogOptions
 from pypaimon.api.api_response import PagedList, GetTableResponse
-from pypaimon.api.core_options import CoreOptions
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.options import Options
 

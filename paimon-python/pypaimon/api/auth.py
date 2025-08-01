@@ -27,7 +27,7 @@ from typing import Optional, Dict
 
 from .token_loader import DLFTokenLoader, DLFToken
 from .typedef import RESTAuthParameter
-from .config import CatalogOptions
+from pypaimon.common.config import CatalogOptions
 
 
 class AuthProvider(ABC):

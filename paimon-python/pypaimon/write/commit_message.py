@@ -14,21 +14,32 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 # limitations under the License.
-#################################################################################
+################################################################################
 
-from abc import ABC, abstractmethod
+from typing import Tuple, List
 
-from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.write.batch_write_builder import BatchWriteBuilder
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
 
-class Table(ABC):
-    """A table provides basic abstraction for table read and write."""
+class CommitMessage:
+    """Python implementation of CommitMessage"""
 
-    @abstractmethod
-    def new_read_builder(self) -> ReadBuilder:
-        """Return a builder for building table scan and table read."""
+    def __init__(self, partition: Tuple, bucket: int, new_files: List[DataFileMeta]):
+        self._partition = partition
+        self._bucket = bucket
+        self._new_files = new_files or []
 
-    @abstractmethod
-    def new_batch_write_builder(self) -> BatchWriteBuilder:
-        """Returns a builder for building batch table write and table commit."""
+    def partition(self) -> Tuple:
+        """Get the partition of this commit message."""
+        return self._partition
+
+    def bucket(self) -> int:
+        """Get the bucket of this commit message."""
+        return self._bucket
+
+    def new_files(self) -> List[DataFileMeta]:
+        """Get the list of new files."""
+        return self._new_files
+
+    def is_empty(self):
+        return not self._new_files

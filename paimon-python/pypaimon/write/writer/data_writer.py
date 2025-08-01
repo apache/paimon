@@ -23,17 +23,18 @@ from typing import Tuple, Optional, List
 from pathlib import Path
 from abc import ABC, abstractmethod
 
-from pypaimon.api.core_options import CoreOptions
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.binary_row import BinaryRow
 
 
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
-    def __init__(self, table: FileStoreTable, partition: Tuple, bucket: int):
-        self.table = table
+    def __init__(self, table, partition: Tuple, bucket: int):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
         self.partition = partition
         self.bucket = bucket
 

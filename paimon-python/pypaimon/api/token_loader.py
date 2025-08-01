@@ -25,7 +25,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from pypaimon.common.rest_json import json_field, JSON
-from .config import CatalogOptions
+from pypaimon.common.config import CatalogOptions
 from .client import ExponentialRetry
 
 
@@ -59,7 +59,7 @@ class DLFToken:
 
     @classmethod
     def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from .config import CatalogOptions
+        from pypaimon.common.config import CatalogOptions
         if (options.get(CatalogOptions.DLF_ACCESS_KEY_ID) is None
                 or options.get(CatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None

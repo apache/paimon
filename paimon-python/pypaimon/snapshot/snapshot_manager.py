@@ -21,14 +21,15 @@ from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.file_store_table import FileStoreTable
 
 
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
 
-    def __init__(self, table: FileStoreTable):
-        self.table = table
+    def __init__(self, table):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
         self.file_io: FileIO = self.table.file_io
         self.snapshot_dir = self.table.table_path / "snapshot"
 

@@ -18,7 +18,7 @@
 
 import pyarrow as pa
 import pyarrow.compute as pc
-from typing import Tuple, Dict
+from typing import Tuple
 
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -26,12 +26,10 @@ from pypaimon.write.writer.data_writer import DataWriter
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting."""
 
-    def __init__(self, partition: Tuple, bucket: int, file_io, table_schema, table_identifier,
-                 target_file_size: int, options: Dict[str, str]):
-        super().__init__(partition, bucket, file_io, table_schema, table_identifier,
-                         target_file_size, options)
+    def __init__(self, table, partition: Tuple, bucket: int):
+        super().__init__(table, partition, bucket)
         self.sequence_generator = SequenceGenerator()
-        self.trimmed_primary_key = [field.name for field in self.table.table_schema.get_trimmed_primary_key_fields()]
+        self.trimmed_primary_key = [field.name for field in self.trimmed_primary_key_fields]
 
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
         enhanced_data = self._add_system_fields(data)
