@@ -277,7 +277,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void commit(ManifestCommittable committable, boolean checkAppendFiles) {
+    public int commit(ManifestCommittable committable, boolean checkAppendFiles) {
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
@@ -399,6 +399,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         attempts);
             }
         }
+        return generatedSnapshot;
     }
 
     private void reportCommit(
@@ -422,7 +423,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void overwrite(
+    public int overwrite(
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties) {
@@ -551,6 +552,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         attempts);
             }
         }
+        return generatedSnapshot;
     }
 
     @Override

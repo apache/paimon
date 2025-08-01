@@ -1345,7 +1345,7 @@ public abstract class SimpleTableTestBase {
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
         TableCommitImpl commit = table.copy(options).newCommit(commitUser);
-        ExecutorService executor = commit.getExpireMainExecutor();
+        ExecutorService executor = commit.getMaintainExecutor();
         CountDownLatch before = new CountDownLatch(1);
         CountDownLatch after = new CountDownLatch(1);
 
