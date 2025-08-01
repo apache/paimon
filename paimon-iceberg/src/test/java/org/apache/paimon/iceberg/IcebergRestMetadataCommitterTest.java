@@ -557,6 +557,57 @@ public class IcebergRestMetadataCommitterTest {
         commit.close();
     }
 
+    @Test
+    public void testWithExistedTableLocation() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION.key(),
+                IcebergOptions.StorageLocation.TABLE_LOCATION.toString());
+        dynamicOptions.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        FileStoreTable table =
+                createPaimonTable(
+                                rowType,
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                1,
+                                "avro",
+                                Collections.emptyMap())
+                        .copy(dynamicOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(table.fileIO().exists(new Path(table.location(), "metadata/v1.metadata.json")))
+                .isTrue();
+
+        dynamicOptions.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        table = table.copy(dynamicOptions);
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(table.fileIO().exists(new Path(table.location(), "metadata/v3.metadata.json")))
+                .isTrue();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
     private static class TestRecord {
         private final BinaryRow partition;
         private final GenericRow record;

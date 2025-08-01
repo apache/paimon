@@ -94,7 +94,6 @@ If the two are incompatible, we take the metadata stored in the separate directo
 
 There are some cases when committing to iceberg rest catalog:
 1. table not exists in iceberg rest-catalog. It'll create the table in rest catalog first, and commit metadata.
-2. table exists in iceberg rest-catalog and is compatible with the base metadata stored in the separate directory. It'll directly get the table and commit metadata.
-3. table exists, and last-sequence-number is 0 and current-snapshot-id is -1. It'll treat the table as a new table, directly get the table and commit metadata.
-4. table exists, and isn't compatible with the base metadata stored in the separate directory. It'll **drop the table and recreate the table**, then commit metadata. 
+2. table exists in iceberg rest-catalog and is compatible with the base metadata stored in the separate directory. It'll directly get the table and commit metadata. 
+3. table exists, and isn't compatible with the base metadata stored in the separate directory. It'll **drop the table and recreate the table**, then commit metadata. 
 
