@@ -155,6 +155,10 @@ class PVFSTestCase(unittest.TestCase):
         self.assertSetEqual(set(table_dirs), expect_table_dirs)
         database_virtual_path = f"pvfs://{self.catalog}/{self.database}"
         self.assertEqual(database_virtual_path, self.pvfs.info(database_virtual_path).get('name'))
+
+        database_virtual_path_with_endpoint = f"pvfs://{self.catalog}.localhost:{self.server.port}/{self.database}"
+        self.assertEqual(database_virtual_path, self.pvfs.info(database_virtual_path_with_endpoint).get('name'))
+
         self.assertEqual(True, self.pvfs.exists(database_virtual_path))
         table_virtual_path = f"pvfs://{self.catalog}/{self.database}/{self.table}"
         self.assertEqual(table_virtual_path, self.pvfs.info(table_virtual_path).get('name'))
