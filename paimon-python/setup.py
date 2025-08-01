@@ -25,8 +25,8 @@ install_requires = [
     'readerwriterlock==1.0.9',
     'fsspec==2024.3.1',
     'cachetools==5.3.3',
-    'ossfs==2023.12.0'
-    'fastavro==1.11.1'
+    'ossfs==2023.12.0',
+    'fastavro==1.11.1',
     'pyarrow==15.0.2'
 ]
 

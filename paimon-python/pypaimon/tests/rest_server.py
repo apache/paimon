@@ -395,7 +395,7 @@ class RESTCatalogServer:
                 raise TableNotExistException(identifier)
             table_metadata = self.table_metadata_store[identifier.get_full_name()]
             table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
-            schema = table_metadata.schema
+            schema = table_metadata.schema.to_schema()
             response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
         #
@@ -594,14 +594,14 @@ class RESTCatalogServer:
         )
 
     def mock_table(self, identifier: Identifier, table_metadata: TableMetadata, path: str,
-                   schema: TableSchema) -> GetTableResponse:
+                   schema: Schema) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
             name=identifier.get_object_name(),
             path=path,
             is_external=table_metadata.is_external,
-            table_schema_id=table_metadata.schema.id,
-            table_schema=schema,
+            schema_id=table_metadata.schema.id,
+            schema=schema,
             owner="owner",
             created_at=1,
             created_by="created",
