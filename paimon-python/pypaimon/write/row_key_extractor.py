@@ -58,7 +58,6 @@ class RowKeyExtractor(ABC):
     @abstractmethod
     def _extract_buckets_batch(self, table: pa.RecordBatch) -> List[int]:
         """Extract bucket numbers for all rows. Must be implemented by subclasses."""
-        pass
 
 
 class FixedBucketRowKeyExtractor(RowKeyExtractor):
