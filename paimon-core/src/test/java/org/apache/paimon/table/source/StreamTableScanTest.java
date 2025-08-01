@@ -38,6 +38,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.utils.NextSnapshotFetcher.RANGE_CHECK_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
@@ -369,7 +370,9 @@ public class StreamTableScanTest extends ScannerTestBase {
 
         try {
             // second call with snapshot, should throw an OutOfRangeException
-            scan.plan();
+            for (int i = 0; i < RANGE_CHECK_INTERVAL; i++) {
+                scan.plan();
+            }
             fail("Should throw an OutOfRangeException.");
         } catch (OutOfRangeException ignore) {
             // ignore

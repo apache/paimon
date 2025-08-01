@@ -31,9 +31,13 @@ public class NextSnapshotFetcher {
 
     public static final Logger LOG = LoggerFactory.getLogger(NextSnapshotFetcher.class);
 
+    public static final int RANGE_CHECK_INTERVAL = 16;
+
     private final SnapshotManager snapshotManager;
     private final ChangelogManager changelogManager;
     private final boolean changelogDecoupled;
+
+    private int rangeCheckCnt = 0;
 
     public NextSnapshotFetcher(
             SnapshotManager snapshotManager,
@@ -47,11 +51,26 @@ public class NextSnapshotFetcher {
     @Nullable
     public Snapshot getNextSnapshot(long nextSnapshotId) {
         if (snapshotManager.snapshotExists(nextSnapshotId)) {
+            rangeCheckCnt = 0;
             return snapshotManager.snapshot(nextSnapshotId);
         }
 
+        if (changelogDecoupled && changelogManager.longLivedChangelogExists(nextSnapshotId)) {
+            return changelogManager.changelog(nextSnapshotId);
+        }
+
+        rangeCheckCnt++;
+        if (rangeCheckCnt % RANGE_CHECK_INTERVAL == 0) {
+            rangeCheck(nextSnapshotId);
+        }
+
+        return null;
+    }
+
+    private void rangeCheck(long nextSnapshotId) {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         Long latestSnapshotId = snapshotManager.latestSnapshotIdFromFileSystem();
+
         // No snapshot now
         if (earliestSnapshotId == null || earliestSnapshotId <= nextSnapshotId) {
             if ((earliestSnapshotId == null && nextSnapshotId > 1)
@@ -66,17 +85,15 @@ public class NextSnapshotFetcher {
             LOG.debug(
                     "Next snapshot id {} does not exist, wait for the snapshot generation.",
                     nextSnapshotId);
-            return null;
+        } else {
+            if (!changelogDecoupled) {
+                throw new OutOfRangeException(
+                        String.format(
+                                "The snapshot with id %d has expired. You can: "
+                                        + "1. increase the snapshot or changelog expiration time. "
+                                        + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
+                                nextSnapshotId));
+            }
         }
-
-        if (!changelogDecoupled || !changelogManager.longLivedChangelogExists(nextSnapshotId)) {
-            throw new OutOfRangeException(
-                    String.format(
-                            "The snapshot with id %d has expired. You can: "
-                                    + "1. increase the snapshot or changelog expiration time. "
-                                    + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
-                            nextSnapshotId));
-        }
-        return changelogManager.changelog(nextSnapshotId);
     }
 }
