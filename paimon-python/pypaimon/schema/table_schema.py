@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Optional
 
-
 from pypaimon import Schema
 from pypaimon.common.rest_json import json_field
 from pypaimon.common.core_options import CoreOptions
@@ -127,7 +126,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = max(field.id for field in fields)
+        highest_field_id: int = -1  # max(field.id for field in fields)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,
