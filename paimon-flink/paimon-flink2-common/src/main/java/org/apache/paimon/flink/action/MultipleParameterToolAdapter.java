@@ -31,6 +31,10 @@ public class MultipleParameterToolAdapter {
         this.params = MultipleParameterTool.fromArgs(args);
     }
 
+    private MultipleParameterToolAdapter(MultipleParameterTool params) {
+        this.params = params;
+    }
+
     public boolean has(String key) {
         return params.has(key) || params.has(fallback(key));
     }
@@ -58,5 +62,9 @@ public class MultipleParameterToolAdapter {
                             + "' is required. Run '<action> --help' for more information.");
         }
         return value;
+    }
+
+    public MultipleParameterToolAdapter mergeWith(MultipleParameterToolAdapter other) {
+        return new MultipleParameterToolAdapter(this.params.mergeWith(other.params));
     }
 }
