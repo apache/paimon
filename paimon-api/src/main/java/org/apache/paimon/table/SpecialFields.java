@@ -77,7 +77,7 @@ public class SpecialFields {
     public static final int KEY_FIELD_ID_START = SYSTEM_FIELD_ID_START;
 
     public static final DataField SEQUENCE_NUMBER =
-            new DataField(Integer.MAX_VALUE - 1, "_SEQUENCE_NUMBER", DataTypes.BIGINT());
+            new DataField(Integer.MAX_VALUE - 1, "_SEQUENCE_NUMBER", DataTypes.BIGINT().notNull());
 
     public static final DataField VALUE_KIND =
             new DataField(Integer.MAX_VALUE - 2, "_VALUE_KIND", DataTypes.TINYINT().notNull());
@@ -152,7 +152,7 @@ public class SpecialFields {
                     }
                 });
         fieldsWithRowLineage.add(SpecialFields.ROW_ID);
-        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER);
+        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
         return new RowType(fieldsWithRowLineage);
     }
 }

@@ -47,6 +47,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -56,17 +57,17 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
 
   private lazy val tableSchema = table.schema
 
-  private lazy val writeType = {
+  private lazy val bucketMode = table.bucketMode
+
+  @transient private lazy val serializer = new CommitMessageSerializer
+
+  private val writeType = {
     if (writeRowLineage) {
       SpecialFields.rowTypeWithRowLineage(table.rowType())
     } else {
       table.rowType()
     }
   }
-
-  private lazy val bucketMode = table.bucketMode
-
-  @transient private lazy val serializer = new CommitMessageSerializer
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
