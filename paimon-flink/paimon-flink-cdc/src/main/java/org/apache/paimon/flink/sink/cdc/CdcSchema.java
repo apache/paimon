@@ -184,10 +184,7 @@ public class CdcSchema implements Serializable {
         /** Returns the data type of the specified field. */
         public DataType getFieldType(String fieldName) {
             DataField field = columns.get(fieldName);
-            if (field == null) {
-                throw new IllegalArgumentException("Field " + fieldName + " not found in schema.");
-            }
-            return field.type();
+            return field == null ? null : field.type();
         }
 
         /** Returns an instance of an unresolved {@link CdcSchema}. */

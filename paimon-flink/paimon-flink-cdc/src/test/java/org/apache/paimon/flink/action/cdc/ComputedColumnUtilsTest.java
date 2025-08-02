@@ -18,44 +18,47 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.sortComputedColumns;
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for ComputedColumnUtils. */
 public class ComputedColumnUtilsTest {
-    @Test
-    public void testSortComputedColumns() {
-        List<ComputedColumn> columns =
-                Arrays.asList(
-                        new ComputedColumn("A", Expression.substring("B", "1")),
-                        new ComputedColumn("B", Expression.substring("ExistedColumn", "1")),
-                        new ComputedColumn("C", Expression.cast("No Reference")),
-                        new ComputedColumn("D", Expression.substring("A", "1")),
-                        new ComputedColumn("E", Expression.substring("C", "1")));
 
-        List<ComputedColumn> sortedColumns = sortComputedColumns(columns);
+    @Test
+    public void testComputedColumns() {
+        List<String> calColArgs =
+                Arrays.asList(
+                        "A=substring(B, 1)",
+                        "B=substring(ExistedColumn,1)",
+                        "C=now()",
+                        "D=substring(A, 1)",
+                        "E=substring(C,1)");
+        List<DataField> physicalFields =
+                Arrays.asList(new DataField(1, "ExistedColumn", DataTypes.STRING()));
+        List<ComputedColumn> columns = buildComputedColumns(calColArgs, physicalFields);
+
         assertEquals(
                 Arrays.asList("B", "C", "E", "A", "D"),
-                sortedColumns.stream()
-                        .map(ComputedColumn::columnName)
-                        .collect(Collectors.toList()));
+                columns.stream().map(ComputedColumn::columnName).collect(Collectors.toList()));
     }
 
     @Test
     public void testCycleReference() {
-        List<ComputedColumn> columns =
-                Arrays.asList(
-                        new ComputedColumn("A", Expression.substring("B", "1")),
-                        new ComputedColumn("B", Expression.substring("C", "1")),
-                        new ComputedColumn("C", Expression.substring("A", "1")));
-
-        assertThrows(IllegalArgumentException.class, () -> sortComputedColumns(columns));
+        List<String> calColArgs =
+                Arrays.asList("A=substring(B, 1)", "B=substring(C, 1)", "C=substring(A, 1)");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> buildComputedColumns(calColArgs, Collections.emptyList()));
     }
 }

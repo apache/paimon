@@ -121,7 +121,7 @@ public class PostgresRecordParser
         extractRecords().forEach(out::collect);
     }
 
-    private CdcSchema extractSchema(DebeziumEvent.Field schema) {
+    private CdcSchema extractSchema(DebeziumEvent.Field schema, CdcSchema.Builder schemaBuilder) {
         Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
         Preconditions.checkArgument(
                 !afterFields.isEmpty(),
@@ -129,7 +129,6 @@ public class PostgresRecordParser
                         + "Please make sure that `includeSchema` is true "
                         + "in the JsonDebeziumDeserializationSchema you created");
 
-        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         afterFields.forEach(
                 (key, value) -> {
                     DataType dataType = extractFieldType(value);
@@ -207,15 +206,16 @@ public class PostgresRecordParser
 
     private List<RichCdcMultiplexRecord> extractRecords() {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+        CdcSchema schema = extractSchema(root.schema(), schemaBuilder);
 
-        Map<String, String> before = extractRow(root.payload().before());
+        Map<String, String> before = extractRow(root.payload().before(), schemaBuilder);
         if (!before.isEmpty()) {
             records.add(createRecord(RowKind.DELETE, before));
         }
 
-        Map<String, String> after = extractRow(root.payload().after());
+        Map<String, String> after = extractRow(root.payload().after(), schemaBuilder);
         if (!after.isEmpty()) {
-            CdcSchema schema = extractSchema(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
@@ -227,7 +227,7 @@ public class PostgresRecordParser
         return records;
     }
 
-    private Map<String, String> extractRow(JsonNode recordRow) {
+    private Map<String, String> extractRow(JsonNode recordRow, CdcSchema.Builder schemaBuilder) {
         if (isNull(recordRow)) {
             return new HashMap<>();
         }
@@ -346,9 +346,8 @@ public class PostgresRecordParser
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+            String refName = computedColumn.fieldReference();
+            resultMap.put(computedColumn.columnName(), computedColumn.eval(resultMap.get(refName)));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

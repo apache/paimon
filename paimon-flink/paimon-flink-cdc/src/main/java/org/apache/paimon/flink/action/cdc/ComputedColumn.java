@@ -53,11 +53,6 @@ public class ComputedColumn implements Serializable {
         return expression.fieldReference();
     }
 
-    @Nullable
-    public DataType fieldReferenceType() {
-        return expression.fieldReferenceType();
-    }
-
     /** Compute column's value from given argument. Return null if input is null. */
     @Nullable
     public String eval(@Nullable String input) {
@@ -65,14 +60,5 @@ public class ComputedColumn implements Serializable {
             return null;
         }
         return expression.eval(input);
-    }
-
-    /** Compute column's value from given argument. Return null if input is null. */
-    @Nullable
-    public String eval(@Nullable String input, DataType inputType) {
-        if (fieldReference() != null && input == null) {
-            return null;
-        }
-        return expression.eval(input, inputType);
     }
 }
