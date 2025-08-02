@@ -21,18 +21,18 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.functions.lit
+import org.apache.spark.sql.functions.{col, lit}
 
 case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -82,6 +82,7 @@ case class UpdatePaimonTableCommand(
       Seq.empty[CommitMessage]
     } else {
       val pathFactory = fileStore.pathFactory()
+
       if (deletionVectorsEnabled) {
         // Step2: collect all the deletion vectors that marks the deleted rows.
         val deletionVectors = collectDeletionVectors(
@@ -147,7 +148,7 @@ case class UpdatePaimonTableCommand(
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
       toUpdateScanRelation: DataSourceV2Relation): Seq[CommitMessage] = {
-    val updateColumns = updateExpressions.zip(relation.output).map {
+    var updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
         val updated = if (condition == TrueLiteral) {
           update
@@ -157,7 +158,19 @@ case class UpdatePaimonTableCommand(
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
+    if (coreOptions.rowTrackingEnabled()) {
+      updateColumns = updateColumns ++ Seq(
+        col(SpecialFields.ROW_ID.name()),
+        toColumn(
+          If(
+            condition,
+            Literal(null),
+            toExpression(sparkSession, col(SpecialFields.SEQUENCE_NUMBER.name()))))
+          .as(SpecialFields.SEQUENCE_NUMBER.name())
+      )
+    }
+
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    dvSafeWriter.write(data)
+    dvSafeWriter.withRowLineage().write(data)
   }
 }

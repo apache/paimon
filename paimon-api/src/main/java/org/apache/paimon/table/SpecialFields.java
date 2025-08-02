@@ -152,7 +152,7 @@ public class SpecialFields {
                     }
                 });
         fieldsWithRowLineage.add(SpecialFields.ROW_ID);
-        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER);
+        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER.copy(true));
         return new RowType(fieldsWithRowLineage);
     }
 }

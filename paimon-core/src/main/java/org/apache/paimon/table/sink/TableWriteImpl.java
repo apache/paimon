@@ -109,6 +109,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
+    public TableWriteImpl<T> withWriteType(RowType writeType) {
+        write.withWriteType(writeType);
+        return this;
+    }
+
+    @Override
     public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;

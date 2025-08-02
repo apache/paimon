@@ -174,7 +174,7 @@ public class FormatReaderMapping {
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
 
             // extract the whole data fields in logic.
-            List<DataField> allDataFields = fieldsExtractor.apply(dataSchema);
+            List<DataField> allDataFields = new ArrayList<>(fieldsExtractor.apply(dataSchema));
             if (rowTrackingEnabled) {
                 allDataFields.add(SpecialFields.ROW_ID);
                 allDataFields.add(SpecialFields.SEQUENCE_NUMBER.copy(true));

@@ -28,6 +28,7 @@ import org.apache.paimon.utils.StringUtils;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -106,7 +107,7 @@ public class TableSchema implements Serializable {
             long timeMillis) {
         this.version = version;
         this.id = id;
-        this.fields = fields;
+        this.fields = Collections.unmodifiableList(new ArrayList<>(fields));
         this.highestFieldId = highestFieldId;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
