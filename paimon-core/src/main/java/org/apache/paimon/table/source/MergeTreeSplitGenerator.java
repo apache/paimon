@@ -72,7 +72,11 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
         boolean oneLevel =
                 files.stream().map(DataFileMeta::level).collect(Collectors.toSet()).size() == 1;
 
-        if (rawConvertible && (deletionVectorsEnabled || mergeEngine == FIRST_ROW || oneLevel)) {
+        boolean noKeyOverlap = !hasIntersectedKeyRange(files);
+
+        if (rawConvertible
+                && noKeyOverlap
+                && (deletionVectorsEnabled || mergeEngine == FIRST_ROW || oneLevel)) {
             Function<DataFileMeta, Long> weightFunc =
                     file -> Math.max(file.fileSize(), openFileCost);
             return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
@@ -151,5 +155,19 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     private boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
         // null to true to be compatible with old version
         return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(true);
+    }
+
+    private boolean hasIntersectedKeyRange(List<DataFileMeta> files) {
+        List<DataFileMeta> sorted = new ArrayList<>(files);
+        sorted.sort(Comparator.comparing(DataFileMeta::minKey, keyComparator));
+
+        for (int i = 0; i < sorted.size() - 1; i++) {
+            DataFileMeta current = sorted.get(i);
+            DataFileMeta next = sorted.get(i + 1);
+            if (keyComparator.compare(current.maxKey(), next.minKey()) >= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 }
