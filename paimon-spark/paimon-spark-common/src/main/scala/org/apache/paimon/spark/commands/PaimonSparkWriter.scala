@@ -47,7 +47,6 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
-import java.util
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -99,13 +98,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def toPaimonRow = SparkRowUtils.toPaimonRow(writeType, rowKindColIdx)
-
-    def newWrite() = if (writeRowLineage) {
-      new SparkTableWrite(writeBuilder, toPaimonRow, Option.apply(writeType))
-    } else {
-      new SparkTableWrite(writeBuilder, toPaimonRow)
-    }
+    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
