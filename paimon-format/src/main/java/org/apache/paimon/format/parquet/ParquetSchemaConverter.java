@@ -227,7 +227,8 @@ public class ParquetSchemaConverter {
                                                 PrimitiveType.PrimitiveTypeName.BINARY,
                                                 Type.Repetition.REQUIRED)
                                         .named(Variant.METADATA))
-                        .named(name);
+                        .named(name)
+                        .withId(fieldId);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }

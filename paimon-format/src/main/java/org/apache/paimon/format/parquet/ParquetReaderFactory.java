@@ -108,13 +108,24 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         reader.setRequestedSchema(requestedSchema);
-        WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
+        RowType[] shreddingSchemas =
+                VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
+        DataField[] replacedReadFields =
+                VariantUtils.replaceWithShreddingFields(readFields, shreddingSchemas);
+        WritableColumnVector[] writableVectors =
+                createWritableVectors(requestedSchema, replacedReadFields);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
+        List<ParquetField> fields = buildFieldsList(replacedReadFields, columnIO);
 
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize,
+                shreddingSchemas);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -229,7 +240,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
+    private WritableColumnVector[] createWritableVectors(
+            MessageType requestedSchema, DataField[] readFields) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         List<Type> types = requestedSchema.getFields();
         for (int i = 0; i < readFields.length; i++) {

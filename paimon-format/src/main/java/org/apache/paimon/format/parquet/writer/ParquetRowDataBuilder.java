@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -50,14 +51,22 @@ public class ParquetRowDataBuilder
 
     @Override
     protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
-        return new ParquetWriteSupport();
+        return new ParquetWriteSupport(conf);
     }
 
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
-        private final MessageType schema = convertToParquetMessageType(rowType);
+        private final Configuration conf;
+        private final MessageType schema;
 
         private ParquetRowDataWriter writer;
+
+        private ParquetWriteSupport(Configuration conf) {
+            this.conf = conf;
+            this.schema =
+                    convertToParquetMessageType(
+                            VariantUtils.replaceWithShreddingType(conf, rowType));
+        }
 
         @Override
         public WriteContext init(Configuration configuration) {
@@ -66,7 +75,7 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema, conf);
         }
 
         @Override

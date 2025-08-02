@@ -23,8 +23,12 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -36,11 +40,14 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.Type;
+
+import javax.annotation.Nullable;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -60,10 +67,13 @@ public class ParquetRowDataWriter {
     public static final long NANOS_PER_MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1);
     public static final long NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
+    private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
 
-    public ParquetRowDataWriter(RecordConsumer recordConsumer, RowType rowType, GroupType schema) {
+    public ParquetRowDataWriter(
+            RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
+        this.conf = conf;
         this.recordConsumer = recordConsumer;
         this.rowWriter = new RowWriter(rowType, schema, false);
     }
@@ -142,7 +152,10 @@ public class ParquetRowDataWriter {
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType, t.isNullable());
             } else if (t instanceof VariantType && type instanceof GroupType) {
-                return new VariantWriter(t.isNullable());
+                return new VariantWriter(
+                        t.isNullable(),
+                        groupType,
+                        VariantUtils.extractShreddingSchemaFromConf(conf, type.getName()));
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -620,8 +633,19 @@ public class ParquetRowDataWriter {
 
     private class VariantWriter extends FieldWriter {
 
-        public VariantWriter(boolean isNullable) {
+        @Nullable private final VariantSchema variantSchema;
+        @Nullable private final RowWriter shreddedVariantWriter;
+
+        public VariantWriter(
+                boolean isNullable, GroupType groupType, @Nullable RowType shreddingSchema) {
             super(isNullable);
+            if (shreddingSchema != null) {
+                variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
+                shreddedVariantWriter = new RowWriter(shreddingSchema, groupType, isNullable);
+            } else {
+                variantSchema = null;
+                shreddedVariantWriter = null;
+            }
         }
 
         @Override
@@ -635,6 +659,15 @@ public class ParquetRowDataWriter {
         }
 
         private void writeVariant(Variant variant) {
+            if (shreddedVariantWriter != null) {
+                recordConsumer.startGroup();
+                InternalRow shreddedVariant =
+                        PaimonShreddingUtils.castShredded((GenericVariant) variant, variantSchema);
+                shreddedVariantWriter.write(shreddedVariant);
+                recordConsumer.endGroup();
+                return;
+            }
+
             recordConsumer.startGroup();
             recordConsumer.startField(Variant.VALUE, 0);
             recordConsumer.addBinary(Binary.fromReusedByteArray(variant.value()));
