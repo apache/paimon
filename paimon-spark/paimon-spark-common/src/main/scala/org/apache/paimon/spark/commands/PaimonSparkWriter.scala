@@ -390,7 +390,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
-            def toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx)
+            val toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx)
 
             bootstrapIterator.asScala
               .map(

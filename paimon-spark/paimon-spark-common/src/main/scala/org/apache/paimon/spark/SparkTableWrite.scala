@@ -32,19 +32,23 @@ import scala.collection.mutable.ListBuffer
 case class SparkTableWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    rowkindColIdx: Int,
+    rowKindColIdx: Int = -1,
     writeRowLineage: Boolean = false)
   extends AutoCloseable {
 
-  val ioManager: IOManager = SparkUtils.createIOManager
+  private val ioManager: IOManager = SparkUtils.createIOManager
 
-  val write: BatchTableWrite = {
+  private val write: BatchTableWrite = {
     val _write = writeBuilder.newWrite()
     _write.withIOManager(ioManager)
     if (writeRowLineage) {
       _write.withWriteType(writeType)
     }
     _write
+  }
+
+  private val toPaimonRow = {
+    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx)
   }
 
   def write(row: Row): Unit = {
@@ -76,10 +80,6 @@ case class SparkTableWrite(
   override def close(): Unit = {
     write.close()
     ioManager.close()
-  }
-
-  private def toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, rowkindColIdx)
   }
 
   private def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
