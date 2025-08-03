@@ -41,7 +41,6 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
@@ -256,7 +255,7 @@ public class ParquetSplitReaderUtil {
                         (ParquetGroupField)
                                 constructField(dataField.newType(shreddingSchema), columnIO);
                 return new ParquetGroupField(
-                        DataTypes.VARIANT(),
+                        type,
                         parquetField.getParquetType(),
                         parquetField.getRepetitionLevel(),
                         parquetField.getDefinitionLevel(),
