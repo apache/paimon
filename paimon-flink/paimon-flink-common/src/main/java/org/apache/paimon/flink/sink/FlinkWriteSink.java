@@ -93,14 +93,6 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                         // is needed.
                         return new NoopStoreSinkWriteState(subtaskId);
                     }
-
-                    @Override
-                    protected String getCommitUser(StateInitializationContext context)
-                            throws Exception {
-                        // No conflicts will occur in append only unaware bucket writer, so
-                        // commitUser does not matter.
-                        return commitUser;
-                    }
                 };
             }
         };

@@ -22,12 +22,14 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -281,6 +283,90 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 assertThat(split.dataFiles().size()).isEqualTo(3);
             }
         }
+    }
+
+    @Test
+    public void testStreamingCompactWithChangedExternalPath() throws Exception {
+        String externalPath1 = getTempDirPath();
+        String externalPath2 = getTempDirPath();
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        tableOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                TraceableFileIO.SCHEME + "://" + externalPath1);
+        tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
+        tableOptions.put(CoreOptions.AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS.key(), "true");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        // test that dedicated compact job will expire snapshots
+        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
+        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
+
+        FileStoreTable table =
+                prepareTable(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 1, Snapshot.CommitKind.APPEND);
+
+        // no full compaction has happened, so plan should be empty
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        TableScan.Plan plan = scan.plan();
+        assertThat(plan.splits()).isEmpty();
+
+        runAction(true);
+
+        // first full compaction
+        validateResult(
+                table,
+                ROW_TYPE,
+                scan,
+                Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
+                60_000);
+
+        SchemaChange schemaChange =
+                SchemaChange.setOption(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                        TraceableFileIO.SCHEME + "://" + externalPath2);
+        table.schemaManager().commitChanges(schemaChange);
+
+        // incremental records
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+        // second full compaction
+        validateResult(
+                table,
+                ROW_TYPE,
+                scan,
+                Arrays.asList(
+                        "+U[1, 101, 15, 20221208]",
+                        "+U[1, 101, 15, 20221209]",
+                        "-U[1, 100, 15, 20221208]",
+                        "-U[1, 100, 15, 20221209]"),
+                60_000);
+
+        // assert dedicated compact job will expire snapshots
+        SnapshotManager snapshotManager = table.snapshotManager();
+        CommonTestUtils.waitUtil(
+                () ->
+                        snapshotManager.latestSnapshotId() - 2
+                                == snapshotManager.earliestSnapshotId(),
+                Duration.ofSeconds(60_000),
+                Duration.ofSeconds(10),
+                String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
     }
 
     @Test

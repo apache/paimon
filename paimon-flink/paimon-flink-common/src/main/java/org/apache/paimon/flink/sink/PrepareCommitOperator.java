@@ -18,10 +18,13 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -41,6 +44,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.computeManagedMemory;
@@ -103,6 +107,28 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
     private void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         prepareCommit(waitCompaction, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
+    }
+
+    protected void updateWriteWithNewSchema(FileStoreTable table, StoreSinkWrite write) {
+        if (table.coreOptions().autoDetectDataFileExternalPaths()) {
+            Optional<TableSchema> lastestSchema = table.schemaManager().latest();
+            if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
+                LOG.info(
+                        "table schema has changed, current schema-id:{}, new schema-id:{}. try to update write with new schema.",
+                        table.schema().id(),
+                        lastestSchema.get().id());
+                try {
+                    CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
+                    table = table.copy(newCoreOptions.dataFileExternalPathConfig());
+                    write.replace(table);
+                    LOG.info(
+                            "update write with new schema successfully. current schema-id:{}.",
+                            table.schema().id());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
     }
 
     protected abstract List<OUT> prepareCommit(boolean waitCompaction, long checkpointId)

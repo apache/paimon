@@ -58,7 +58,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreCompactOperator.class);
 
-    private final FileStoreTable table;
+    private FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final boolean fullCompaction;
@@ -167,7 +167,11 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
             throw new RuntimeException("Exception happens while executing compaction.", e);
         }
         waitToCompact.clear();
-        return write.prepareCommit(waitCompaction, checkpointId);
+
+        List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
+
+        updateWriteWithNewSchema(table, write);
+        return committables;
     }
 
     @Override
