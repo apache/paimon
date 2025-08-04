@@ -41,6 +41,23 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Lineage: read row lineage update query") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1))
+      )
+      sql("UPDATE t SET data = 'new-data-update' WHERE id = 11")
+      checkAnswer(
+        sql("SELECT *, _SEQUENCE_NUMBER FROM paimon_incremental_query('t', 0, 2) WHERE id = 11"),
+        Seq(Row(11, "a", 1), Row(11, "new-data-update", 2))
+      )
+    }
+  }
+
   test("Row Lineage: compact table") {
     withTable("t") {
       sql(
