@@ -111,8 +111,9 @@ public class SchemaValidation {
                             "Cannot define 'upsert-key' %s with 'primary-key' %s.",
                             options.upsertKey(), schema.primaryKeys()));
         }
-
-        validateBucket(schema, options);
+        if (!TableType.FORMAT_TABLE.toString().equals(schema.options().get("type"))) {
+            validateBucket(schema, options);
+        }
 
         validateStartupMode(options);
 
@@ -554,9 +555,6 @@ public class SchemaValidation {
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
-        if (schema.options().get("type").equals(TableType.FORMAT_TABLE.toString())) {
-            return;
-        }
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(
