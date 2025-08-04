@@ -1181,7 +1181,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             checkArgument(
                     entry.file().fileSource().isPresent(),
                     "This is a bug, file source field for row-tracking table must present.");
-            if (entry.file().fileSource().get().equals(FileSource.APPEND)) {
+            if (entry.file().fileSource().get().equals(FileSource.APPEND)
+                    && entry.file().firstRowId() == null) {
                 long rowCount = entry.file().rowCount();
                 rowIdAssigned.add(entry.assignFirstRowId(start));
                 start += rowCount;
