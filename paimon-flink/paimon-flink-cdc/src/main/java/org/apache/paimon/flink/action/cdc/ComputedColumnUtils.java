@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.utils.DfsSort;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.DfsSort;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple2;

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.flink.action.cdc.utils;
 
 import org.junit.jupiter.api.Test;
 
