@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -553,7 +554,7 @@ public class SchemaValidation {
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
-        if (bucket == BucketMode.UNAWARE_BUCKET) {
+        if (schema.options().get("type").equals(TableType.FORMAT_TABLE.toString())) {
             return;
         }
         if (bucket == -1) {

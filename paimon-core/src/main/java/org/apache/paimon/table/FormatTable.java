@@ -205,7 +205,7 @@ public interface FormatTable extends Table {
                                     Collections.emptyList(),
                                     options,
                                     comment));
-            this.store = new AppendOnlyFileStoreTable(fileIO, new Path(location), schema);
+            this.store = new FormatTableFileStoreTable(fileIO, new Path(location), schema);
         }
 
         @Override
