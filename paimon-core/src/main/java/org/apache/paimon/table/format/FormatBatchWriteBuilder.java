@@ -41,13 +41,14 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 
+/** A builder to build {@link FormatBatchWriteBuilder}. */
 public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     private static final long serialVersionUID = 1L;
