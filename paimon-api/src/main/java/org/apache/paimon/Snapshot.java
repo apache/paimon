@@ -496,13 +496,13 @@ public class Snapshot implements Serializable {
     /** Type of changes in this snapshot. */
     public enum CommitKind {
 
-        /** Changes flushed from the mem table. */
+        /** New data is appended to the table and no data is deleted. */
         APPEND,
 
         /** Changes by compacting existing data files. */
         COMPACT,
 
-        /** Changes that clear up the whole partition and then add new records. */
+        /** New data is added to overwrite existing data or just delete existing data. */
         OVERWRITE,
 
         /** Collect statistics. */
