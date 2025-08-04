@@ -34,7 +34,8 @@ public enum TableType implements DescribedEnum {
             "A materialized table combines normal Paimon table and materialized SQL."),
     OBJECT_TABLE(
             "object-table", "An object table combines normal Paimon table and object location."),
-    LANCE_TABLE("lance-table", "A lance table, see 'https://lancedb.github.io/lance/'.");
+    LANCE_TABLE("lance-table", "A lance table, see 'https://lancedb.github.io/lance/'."),
+    ICEBERG_TABLE("iceberg-table", "An iceberg table, see 'https://iceberg.apache.org/'.");
 
     private final String value;
     private final String description;
