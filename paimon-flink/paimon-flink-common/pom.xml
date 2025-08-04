@@ -210,6 +210,13 @@ under the License.
             <version>${okhttp.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>${apache.hc.client.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 
