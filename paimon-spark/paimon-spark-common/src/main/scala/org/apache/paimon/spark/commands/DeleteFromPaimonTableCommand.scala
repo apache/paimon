@@ -18,14 +18,14 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MergeEngine
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
-import org.apache.paimon.spark.util.SQLHelper
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.InternalRowPartitionComputer
 
@@ -36,8 +36,6 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-
-import java.util.UUID
 
 import scala.collection.JavaConverters._
 
@@ -109,8 +107,21 @@ case class DeleteFromPaimonTableCommand(
     Seq.empty[Row]
   }
 
-  private def usePrimaryKeyDelete(): Boolean = {
-    withPrimaryKeys && table.coreOptions().mergeEngine() == MergeEngine.DEDUPLICATE
+  /**
+   * Maintain alignment with
+   * org.apache.paimon.flink.sink.SupportsRowLevelOperationFlinkTableSink#validateDeletable
+   * @return
+   */
+  private def usePrimaryKeyDelete(): Boolean = withPrimaryKeys && {
+    val options = Options.fromMap(table.options())
+    table.coreOptions().mergeEngine() match {
+      case MergeEngine.DEDUPLICATE => true
+      case MergeEngine.PARTIAL_UPDATE =>
+        options.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE) ||
+        options.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP) != null
+      case MergeEngine.AGGREGATE => options.get(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE)
+      case _ => false
+    }
   }
 
   private def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
