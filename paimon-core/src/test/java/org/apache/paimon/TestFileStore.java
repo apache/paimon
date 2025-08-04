@@ -263,7 +263,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 Collections.emptyList(),
                 (commit, committable) ->
-                        commit.overwrite(partition, committable, Collections.emptyMap()));
+                        commit.overwritePartition(partition, committable, Collections.emptyMap()));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {

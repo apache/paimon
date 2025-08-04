@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSparkTestBase
 
@@ -434,5 +434,41 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
             .isEqualTo("[[2,b,null]]")
         }
       }
+  }
+
+  test("Paimon delete: non pk table commit kind") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+        sql("DELETE FROM t WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, 2), Row(3, 3)))
+        val table = loadTable("t")
+        var latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 2)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+
+        sql("DELETE FROM t WHERE id = 2")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(3, 3)))
+        latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 3)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+      }
+    }
+  }
+
+  test("Paimon delete: pk dv table commit kind") {
+    withTable("t") {
+      sql(
+        s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'primary-key' = 'id')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+      sql("DELETE FROM t WHERE id = 1")
+      val table = loadTable("t")
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 4)
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
   }
 }
