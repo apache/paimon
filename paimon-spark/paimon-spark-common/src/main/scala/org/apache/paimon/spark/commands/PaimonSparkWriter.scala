@@ -62,7 +62,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
 
   private val writeType = {
     if (writeRowLineage) {
-      SpecialFields.rowTypeWithRowLineage(table.rowType())
+      SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
     } else {
       table.rowType()
     }
