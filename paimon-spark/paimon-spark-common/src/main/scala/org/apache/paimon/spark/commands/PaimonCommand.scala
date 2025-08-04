@@ -64,7 +64,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
     } else {
       PaimonSparkWriter(table)
     }
-
   }
 
   /** Gets a relative path against the table path. */

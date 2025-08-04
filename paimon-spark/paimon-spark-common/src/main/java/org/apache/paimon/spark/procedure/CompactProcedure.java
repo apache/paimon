@@ -37,6 +37,7 @@ import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.AppendCompactTaskSerializer;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -421,6 +422,12 @@ public class CompactProcedure extends BaseProcedure {
                                             BaseAppendFileStoreWrite write =
                                                     (BaseAppendFileStoreWrite)
                                                             table.store().newWrite(commitUser);
+                                            CoreOptions coreOptions = table.coreOptions();
+                                            if (coreOptions.rowTrackingEnabled()) {
+                                                write.withWriteType(
+                                                        SpecialFields.rowTypeWithRowLineage(
+                                                                table.rowType()));
+                                            }
                                             AppendCompactTaskSerializer ser =
                                                     new AppendCompactTaskSerializer();
                                             List<byte[]> messages = new ArrayList<>();
@@ -510,7 +517,7 @@ public class CompactProcedure extends BaseProcedure {
                         .reduce(Dataset::union)
                         .orElse(null);
         if (datasetForWrite != null) {
-            PaimonSparkWriter writer = new PaimonSparkWriter(table);
+            PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
             // Use dynamic partition overwrite
             writer.writeBuilder().withOverwrite();
             writer.commit(writer.write(datasetForWrite));

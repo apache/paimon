@@ -140,6 +140,16 @@ public class SpecialFields {
     }
 
     public static RowType rowTypeWithRowLineage(RowType rowType) {
+        return rowTypeWithRowLineage(rowType, false);
+    }
+
+    /**
+     * Add row lineage fields to rowType.
+     *
+     * @param sequenceNumberNullable sequence number is not null for user, but is nullable when read
+     *     and write
+     */
+    public static RowType rowTypeWithRowLineage(RowType rowType, boolean sequenceNumberNullable) {
         List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
 
         fieldsWithRowLineage.forEach(
@@ -152,7 +162,10 @@ public class SpecialFields {
                     }
                 });
         fieldsWithRowLineage.add(SpecialFields.ROW_ID);
-        fieldsWithRowLineage.add(SpecialFields.SEQUENCE_NUMBER);
+        fieldsWithRowLineage.add(
+                sequenceNumberNullable
+                        ? SpecialFields.SEQUENCE_NUMBER.copy(true)
+                        : SpecialFields.SEQUENCE_NUMBER);
         return new RowType(fieldsWithRowLineage);
     }
 }

@@ -16,28 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.util
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.SparkRow
-import org.apache.paimon.types.{RowKind, RowType}
-
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.StructType
-
-object SparkRowUtils {
-
-  def toPaimonRow(writeType: RowType, rowkindColIdx: Int): Row => SparkRow = {
-    if (rowkindColIdx != -1) {
-      row => new SparkRow(writeType, row, RowKind.fromByteValue(row.getByte(rowkindColIdx)))
-    } else { row => new SparkRow(writeType, row) }
-  }
-
-  def getFieldIndex(schema: StructType, colName: String): Int = {
-    try {
-      schema.fieldIndex(colName)
-    } catch {
-      case _: IllegalArgumentException =>
-        -1
-    }
-  }
-}
+class RowLineageTest extends RowLineageTestBase {}
