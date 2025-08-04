@@ -19,12 +19,22 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FormatKey;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataFileRecordReader;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -37,14 +47,23 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.FormatReaderMapping;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
@@ -52,11 +71,23 @@ import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FormatReadBuilder.class);
+
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
     private final CoreOptions options;
     protected final RowType partitionType;
+
+    private final FileIO fileIO;
+    private final SchemaManager schemaManager;
+    private final TableSchema schema;
+    private final FileFormatDiscover formatDiscover;
+    private final FileStorePathFactory pathFactory;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+
+    private RowType readRowType;
+    @Nullable private List<Predicate> filters;
 
     private @Nullable RowType readType;
     private @Nullable Predicate predicate;
@@ -66,6 +97,13 @@ public class FormatReadBuilder implements ReadBuilder {
         this.table = table;
         this.options = new CoreOptions(table.options());
         this.partitionType = table.partitionType();
+        this.fileIO = table.fileIO();
+        this.schemaManager = new SchemaManager(fileIO, new Path(table.location()));
+        this.schema = table.schema();
+        this.readRowType = schema.logicalRowType().notNull();
+        this.formatDiscover = FileFormatDiscover.of(options);
+        this.pathFactory = pathFactory(options, table.format().name());
+        this.formatReaderMappings = new HashMap<>();
     }
 
     @Override
@@ -132,36 +170,93 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), new Path(table.location()));
-        TableSchema tableSchema = table.schema();
-        RawFileSplitRead read =
-                new RawFileSplitRead(
-                        table.fileIO(),
-                        schemaManager,
-                        tableSchema,
-                        tableSchema.logicalRowType().notNull(),
-                        FileFormatDiscover.of(options),
-                        pathFactory(),
-                        options.fileIndexReadEnabled(),
-                        options.rowTrackingEnabled());
+        FormatReadBuilder read = this;
         return new AbstractDataTableRead(table.schema()) {
-
             @Override
             protected InnerTableRead innerWithFilter(Predicate predicate) {
-                read.withFilter(predicate);
+                this.withFilter(predicate);
                 return this;
             }
 
             @Override
             public void applyReadType(RowType readType) {
-                read.withReadType(readType);
+                this.withReadType(readType);
             }
 
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
-                return read.createReader((DataSplit) split);
+                DataSplit dataSplit = (DataSplit) split;
+                if (dataSplit.beforeFiles().size() > 0) {
+                    LOG.info("Ignore split before files: {}", dataSplit.beforeFiles());
+                }
+
+                return read.createReader(
+                        dataSplit.partition(), dataSplit.bucket(), dataSplit.dataFiles());
             }
         };
+    }
+
+    private RecordReader<InternalRow> createReader(
+            BinaryRow partition, int bucket, List<DataFileMeta> files) throws IOException {
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(partition, bucket);
+        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+
+        List<DataField> readTableFields = readRowType.getFields();
+        FormatReaderMapping.Builder formatReaderMappingBuilder =
+                new FormatReaderMapping.Builder(
+                        formatDiscover, readTableFields, TableSchema::fields, filters, false);
+
+        for (int i = 0; i < files.size(); i++) {
+            DataFileMeta file = files.get(i);
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+            long schemaId = file.schemaId();
+
+            Supplier<FormatReaderMapping> formatSupplier =
+                    () ->
+                            formatReaderMappingBuilder.build(
+                                    formatIdentifier,
+                                    schema,
+                                    schemaId == schema.id()
+                                            ? schema
+                                            : schemaManager.schema(schemaId));
+
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
+                            new FormatKey(file.schemaId(), formatIdentifier),
+                            key -> formatSupplier.get());
+            suppliers.add(
+                    () ->
+                            createFileReader(
+                                    partition, file, dataFilePathFactory, formatReaderMapping));
+        }
+
+        return ConcatRecordReader.create(suppliers);
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            FormatReaderMapping formatReaderMapping)
+            throws IOException {
+
+        FormatReaderContext formatReaderContext =
+                new FormatReaderContext(
+                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), null);
+        FileRecordReader<InternalRow> fileRecordReader =
+                new DataFileRecordReader(
+                        schema.logicalRowType(),
+                        formatReaderMapping.getReaderFactory(),
+                        formatReaderContext,
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        false,
+                        file.firstRowId(),
+                        file.maxSequenceNumber(),
+                        formatReaderMapping.getSystemFields());
+        return fileRecordReader;
     }
 
     public FileStorePathFactory pathFactory() {
