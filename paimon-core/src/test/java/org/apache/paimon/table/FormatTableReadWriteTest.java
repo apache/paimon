@@ -54,6 +54,7 @@ public class FormatTableReadWriteTest extends TableTestBase {
     public void testAllFormatReadWrite() throws Exception {
         testReadWrite("parquet");
         testReadWrite("csv");
+        testReadWrite("json");
     }
 
     @Override
