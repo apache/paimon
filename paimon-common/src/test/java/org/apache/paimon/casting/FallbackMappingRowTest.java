@@ -27,8 +27,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
@@ -83,11 +81,6 @@ public class FallbackMappingRowTest {
 
     @Test
     public void testFallbackMappingRow() {
-        // Define a row type with some sample fields
-        DataType[] fieldTypes = {
-            DataTypes.INT(), DataTypes.STRING(), DataTypes.DECIMAL(10, 2), DataTypes.TIMESTAMP(3)
-        };
-
         // Create main row
         InternalRow mainRow =
                 GenericRow.of(
