@@ -113,6 +113,20 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     options,
                     dvMaintainerFactory,
                     tableName);
+        } else if (bucketMode() == BucketMode.NO_NEED_MODE) {
+            RawFileSplitRead readForCompact = newRead();
+            return new AppendFileStoreWrite(
+                    fileIO,
+                    readForCompact,
+                    schema.id(),
+                    rowType,
+                    partitionType,
+                    pathFactory(),
+                    snapshotManager(),
+                    newScan(),
+                    options,
+                    dvMaintainerFactory,
+                    tableName);
         } else {
             return new BucketedAppendFileStoreWrite(
                     fileIO,
