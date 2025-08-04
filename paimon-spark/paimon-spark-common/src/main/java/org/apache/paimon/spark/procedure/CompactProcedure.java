@@ -422,8 +422,7 @@ public class CompactProcedure extends BaseProcedure {
                                             BaseAppendFileStoreWrite write =
                                                     (BaseAppendFileStoreWrite)
                                                             table.store().newWrite(commitUser);
-                                            CoreOptions coreOptions =
-                                                    new CoreOptions(table.options());
+                                            CoreOptions coreOptions = table.coreOptions();
                                             if (coreOptions.rowTrackingEnabled()) {
                                                 write.withWriteType(
                                                         SpecialFields.rowTypeWithRowLineage(

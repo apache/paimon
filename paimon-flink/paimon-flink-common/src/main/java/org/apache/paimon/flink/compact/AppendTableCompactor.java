@@ -71,7 +71,7 @@ public class AppendTableCompactor {
             @Nullable MetricGroup metricGroup) {
         this.table = table;
         this.commitUser = commitUser;
-        CoreOptions coreOptions = new CoreOptions(table.options());
+        CoreOptions coreOptions = table.coreOptions();
         this.write = (BaseAppendFileStoreWrite) table.store().newWrite(commitUser);
         if (coreOptions.rowTrackingEnabled()) {
             write.withWriteType(SpecialFields.rowTypeWithRowLineage(table.rowType()));

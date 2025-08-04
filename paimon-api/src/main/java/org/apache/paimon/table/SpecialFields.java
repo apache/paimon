@@ -143,6 +143,12 @@ public class SpecialFields {
         return rowTypeWithRowLineage(rowType, false);
     }
 
+    /**
+     * Add row lineage fields to rowType.
+     *
+     * @param sequenceNumberNullable sequence number is not null for user, but is nullable when read
+     *     and write
+     */
     public static RowType rowTypeWithRowLineage(RowType rowType, boolean sequenceNumberNullable) {
         List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
 
