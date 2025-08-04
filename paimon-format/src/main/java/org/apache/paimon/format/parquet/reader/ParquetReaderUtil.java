@@ -55,9 +55,6 @@ import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.PrimitiveColumnIO;
-import org.apache.parquet.schema.GroupType;
-import org.apache.parquet.schema.LogicalTypeAnnotation;
-import org.apache.parquet.schema.Type;
 
 import javax.annotation.Nullable;
 
@@ -69,10 +66,10 @@ import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
 /** Util for generating parquet readers. */
-public class ParquetSplitReaderUtil {
+public class ParquetReaderUtil {
 
     public static WritableColumnVector createWritableColumnVector(
-            int batchSize, DataType fieldType, Type parquetType, int depth) {
+            int batchSize, DataType fieldType) {
         switch (fieldType.getTypeRoot()) {
             case BOOLEAN:
                 return new HeapBooleanVector(batchSize);
@@ -117,79 +114,25 @@ public class ParquetSplitReaderUtil {
                 ArrayType arrayType = (ArrayType) fieldType;
                 return new HeapArrayVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize, arrayType.getElementType(), parquetType, depth));
+                        createWritableColumnVector(batchSize, arrayType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) fieldType;
-                LogicalTypeAnnotation mapTypeAnnotation = parquetType.getLogicalTypeAnnotation();
-                GroupType mapRepeatedType = parquetType.asGroupType().getType(0).asGroupType();
-                if (mapTypeAnnotation.equals(LogicalTypeAnnotation.listType())) {
-                    mapRepeatedType = mapRepeatedType.getType(0).asGroupType();
-                    depth++;
-                    if (mapRepeatedType
-                            .getLogicalTypeAnnotation()
-                            .equals(LogicalTypeAnnotation.mapType())) {
-                        mapRepeatedType = mapRepeatedType.getType(0).asGroupType();
-                        depth++;
-                    }
-                }
                 return new HeapMapVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize,
-                                mapType.getKeyType(),
-                                mapRepeatedType.getType(0),
-                                depth + 2),
-                        createWritableColumnVector(
-                                batchSize,
-                                mapType.getValueType(),
-                                mapRepeatedType.getType(1),
-                                depth + 2));
+                        createWritableColumnVector(batchSize, mapType.getKeyType()),
+                        createWritableColumnVector(batchSize, mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) fieldType;
-                LogicalTypeAnnotation multisetTypeAnnotation =
-                        parquetType.getLogicalTypeAnnotation();
-                GroupType multisetRepeatedType = parquetType.asGroupType().getType(0).asGroupType();
-                if (multisetTypeAnnotation.equals(LogicalTypeAnnotation.listType())) {
-                    multisetRepeatedType = multisetRepeatedType.getType(0).asGroupType();
-                    depth++;
-                    if (multisetRepeatedType
-                            .getLogicalTypeAnnotation()
-                            .equals(LogicalTypeAnnotation.mapType())) {
-                        multisetRepeatedType = multisetRepeatedType.getType(0).asGroupType();
-                        depth++;
-                    }
-                }
                 return new HeapMapVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize,
-                                multisetType.getElementType(),
-                                multisetRepeatedType.getType(0),
-                                depth + 2),
-                        createWritableColumnVector(
-                                batchSize,
-                                new IntType(false),
-                                multisetRepeatedType.getType(1),
-                                depth + 2));
+                        createWritableColumnVector(batchSize, multisetType.getElementType()),
+                        createWritableColumnVector(batchSize, new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) fieldType;
-                GroupType groupType = parquetType.asGroupType();
-                if (LogicalTypeAnnotation.listType().equals(groupType.getLogicalTypeAnnotation())) {
-                    // this means there was two outside struct, need to get group twice.
-                    groupType = groupType.getType(0).asGroupType();
-                    groupType = groupType.getType(0).asGroupType();
-                    depth = depth + 2;
-                }
                 WritableColumnVector[] columnVectors =
                         new WritableColumnVector[rowType.getFieldCount()];
                 for (int i = 0; i < columnVectors.length; i++) {
-                    columnVectors[i] =
-                            createWritableColumnVector(
-                                    batchSize,
-                                    rowType.getTypeAt(i),
-                                    groupType.getType(i),
-                                    depth + 1);
+                    columnVectors[i] = createWritableColumnVector(batchSize, rowType.getTypeAt(i));
                 }
                 return new HeapRowVector(batchSize, columnVectors);
             case VARIANT:
@@ -241,7 +184,6 @@ public class ParquetSplitReaderUtil {
 
             return new ParquetGroupField(
                     type,
-                    groupColumnIO.getType(),
                     repetitionLevel,
                     definitionLevel,
                     required,
@@ -256,7 +198,6 @@ public class ParquetSplitReaderUtil {
                                 constructField(dataField.newType(shreddingSchema), columnIO);
                 return new ParquetGroupField(
                         type,
-                        parquetField.getParquetType(),
                         parquetField.getRepetitionLevel(),
                         parquetField.getDefinitionLevel(),
                         parquetField.isRequired(),
@@ -272,7 +213,6 @@ public class ParquetSplitReaderUtil {
             fieldsBuilder.add(
                     new ParquetPrimitiveField(
                             new BinaryType(),
-                            value.getType(),
                             required,
                             value.getColumnDescriptor(),
                             value.getId(),
@@ -282,14 +222,12 @@ public class ParquetSplitReaderUtil {
             fieldsBuilder.add(
                     new ParquetPrimitiveField(
                             new BinaryType(),
-                            metadata.getType(),
                             required,
                             metadata.getColumnDescriptor(),
                             metadata.getId(),
                             metadata.getFieldPath()));
             return new ParquetGroupField(
                     type,
-                    groupColumnIO.getType(),
                     repetitionLevel,
                     definitionLevel,
                     required,
@@ -311,7 +249,6 @@ public class ParquetSplitReaderUtil {
                             keyValueColumnIO.getChild(1));
             return new ParquetGroupField(
                     type,
-                    groupColumnIO.getType(),
                     repetitionLevel,
                     definitionLevel,
                     required,
@@ -332,7 +269,6 @@ public class ParquetSplitReaderUtil {
                             new DataField(0, "", new IntType()), keyValueColumnIO.getChild(1));
             return new ParquetGroupField(
                     type,
-                    groupColumnIO.getType(),
                     repetitionLevel,
                     definitionLevel,
                     required,
@@ -372,7 +308,6 @@ public class ParquetSplitReaderUtil {
             }
             return new ParquetGroupField(
                     type,
-                    columnIO.getType(),
                     repetitionLevel,
                     definitionLevel,
                     required,
@@ -383,7 +318,6 @@ public class ParquetSplitReaderUtil {
         PrimitiveColumnIO primitiveColumnIO = (PrimitiveColumnIO) columnIO;
         return new ParquetPrimitiveField(
                 type,
-                primitiveColumnIO.getType(),
                 required,
                 primitiveColumnIO.getColumnDescriptor(),
                 primitiveColumnIO.getId(),

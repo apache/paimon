@@ -78,8 +78,8 @@ public class ParquetColumnVector {
         if (column.variantFileType().isPresent()) {
             ParquetField fileContentCol = column.variantFileType().get();
             WritableColumnVector fileContent =
-                    ParquetSplitReaderUtil.createWritableColumnVector(
-                            capacity, fileContentCol.getType(), fileContentCol.getParquetType(), 0);
+                    ParquetReaderUtil.createWritableColumnVector(
+                            capacity, fileContentCol.getType());
             ParquetColumnVector contentVector =
                     new ParquetColumnVector(
                             fileContentCol, fileContent, capacity, missingColumns, false);

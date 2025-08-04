@@ -20,8 +20,6 @@ package org.apache.paimon.format.parquet.type;
 
 import org.apache.paimon.types.DataType;
 
-import org.apache.parquet.schema.Type;
-
 import javax.annotation.Nullable;
 
 import java.util.Optional;
@@ -30,7 +28,6 @@ import java.util.Optional;
 public abstract class ParquetField {
 
     private final DataType type;
-    private final Type parquetType;
     private final int repetitionLevel;
     private final int definitionLevel;
     private final boolean required;
@@ -41,24 +38,21 @@ public abstract class ParquetField {
 
     public ParquetField(
             DataType type,
-            Type parquetType,
             int repetitionLevel,
             int definitionLevel,
             boolean required,
             String[] path) {
-        this(type, parquetType, repetitionLevel, definitionLevel, required, path, null);
+        this(type, repetitionLevel, definitionLevel, required, path, null);
     }
 
     public ParquetField(
             DataType type,
-            Type parquetType,
             int repetitionLevel,
             int definitionLevel,
             boolean required,
             String[] path,
             @Nullable ParquetField variantFileType) {
         this.type = type;
-        this.parquetType = parquetType;
         this.repetitionLevel = repetitionLevel;
         this.definitionLevel = definitionLevel;
         this.required = required;
@@ -68,10 +62,6 @@ public abstract class ParquetField {
 
     public DataType getType() {
         return type;
-    }
-
-    public Type getParquetType() {
-        return parquetType;
     }
 
     public int getRepetitionLevel() {

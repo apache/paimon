@@ -21,7 +21,6 @@ package org.apache.paimon.format.parquet.type;
 import org.apache.paimon.types.DataType;
 
 import org.apache.parquet.column.ColumnDescriptor;
-import org.apache.parquet.schema.Type;
 
 import static java.util.Objects.requireNonNull;
 
@@ -32,15 +31,9 @@ public class ParquetPrimitiveField extends ParquetField {
     private final int id;
 
     public ParquetPrimitiveField(
-            DataType type,
-            Type parquetType,
-            boolean required,
-            ColumnDescriptor descriptor,
-            int id,
-            String[] path) {
+            DataType type, boolean required, ColumnDescriptor descriptor, int id, String[] path) {
         super(
                 type,
-                parquetType,
                 descriptor.getMaxRepetitionLevel(),
                 descriptor.getMaxDefinitionLevel(),
                 required,

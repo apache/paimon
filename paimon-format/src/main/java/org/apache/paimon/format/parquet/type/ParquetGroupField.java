@@ -22,8 +22,6 @@ import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.parquet.schema.Type;
-
 import java.util.List;
 
 import static java.util.Objects.requireNonNull;
@@ -35,25 +33,23 @@ public class ParquetGroupField extends ParquetField {
 
     public ParquetGroupField(
             DataType type,
-            Type parquetType,
             int repetitionLevel,
             int definitionLevel,
             boolean required,
             List<ParquetField> children,
             String[] path) {
-        this(type, parquetType, repetitionLevel, definitionLevel, required, children, path, null);
+        this(type, repetitionLevel, definitionLevel, required, children, path, null);
     }
 
     public ParquetGroupField(
             DataType type,
-            Type parquetType,
             int repetitionLevel,
             int definitionLevel,
             boolean required,
             List<ParquetField> children,
             String[] path,
             ParquetGroupField variantFileType) {
-        super(type, parquetType, repetitionLevel, definitionLevel, required, path, variantFileType);
+        super(type, repetitionLevel, definitionLevel, required, path, variantFileType);
         this.children = ImmutableList.copyOf(requireNonNull(children, "children is null"));
     }
 
