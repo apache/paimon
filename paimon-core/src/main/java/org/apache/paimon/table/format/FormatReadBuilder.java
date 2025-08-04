@@ -49,9 +49,11 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FormatReaderMapping;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,8 +85,8 @@ public class FormatReadBuilder implements ReadBuilder {
     private final SchemaManager schemaManager;
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
-    private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    private final InternalRowPartitionComputer partitionComputer;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -102,8 +104,13 @@ public class FormatReadBuilder implements ReadBuilder {
         this.schema = table.schema();
         this.readRowType = schema.logicalRowType().notNull();
         this.formatDiscover = FileFormatDiscover.of(options);
-        this.pathFactory = pathFactory(options, table.format().name());
         this.formatReaderMappings = new HashMap<>();
+        this.partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        schema.logicalPartitionType(),
+                        schema.partitionKeys().toArray(new String[0]),
+                        options.legacyPartitionName());
     }
 
     @Override
@@ -198,8 +205,6 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private RecordReader<InternalRow> createReader(
             BinaryRow partition, int bucket, List<DataFileMeta> files) throws IOException {
-        DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(partition, bucket);
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
@@ -225,25 +230,22 @@ public class FormatReadBuilder implements ReadBuilder {
                     formatReaderMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> formatSupplier.get());
-            suppliers.add(
-                    () ->
-                            createFileReader(
-                                    partition, file, dataFilePathFactory, formatReaderMapping));
+            suppliers.add(() -> createFileReader(partition, file, formatReaderMapping));
         }
 
         return ConcatRecordReader.create(suppliers);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
-            BinaryRow partition,
-            DataFileMeta file,
-            DataFilePathFactory dataFilePathFactory,
-            FormatReaderMapping formatReaderMapping)
+            BinaryRow partition, DataFileMeta file, FormatReaderMapping formatReaderMapping)
             throws IOException {
 
+        Path filePath =
+                file.externalPath()
+                        .map(Path::new)
+                        .orElse(new Path(dataPath(partition), file.fileName()));
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(
-                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), null);
+                new FormatReaderContext(fileIO, filePath, file.fileSize(), null);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         schema.logicalRowType(),
@@ -259,23 +261,22 @@ public class FormatReadBuilder implements ReadBuilder {
         return fileRecordReader;
     }
 
-    public FileStorePathFactory pathFactory() {
-        return pathFactory(options, options.fileFormatString());
+    public Path dataPath(BinaryRow partition) {
+        Path relativeBucketPath = null;
+        String partitionPath = getPartitionString(partition);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath);
+        }
+        return relativeBucketPath != null
+                ? new Path(table.location(), relativeBucketPath)
+                : new Path(table.location());
     }
 
-    protected FileStorePathFactory pathFactory(CoreOptions options, String format) {
-        return new FileStorePathFactory(
-                options.path(),
-                partitionType,
-                options.partitionDefaultName(),
-                format,
-                options.dataFilePrefix(),
-                options.changelogFilePrefix(),
-                options.legacyPartitionName(),
-                options.fileSuffixIncludeCompression(),
-                options.fileCompression(),
-                options.dataFilePathDirectory(),
-                null);
+    public String getPartitionString(BinaryRow partition) {
+        return PartitionPathUtils.generatePartitionPath(
+                partitionComputer.generatePartValues(
+                        Preconditions.checkNotNull(
+                                partition, "Partition row data is null. This is unexpected.")));
     }
 
     // ===================== Unsupported ===============================
