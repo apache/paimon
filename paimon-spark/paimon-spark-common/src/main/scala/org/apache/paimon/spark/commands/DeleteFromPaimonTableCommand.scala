@@ -18,13 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.CoreOptions.MergeEngine
-import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.InternalRowPartitionComputer
@@ -95,7 +93,7 @@ case class DeleteFromPaimonTableCommand(
           dvSafeWriter.commit(Seq.empty)
         }
       } else {
-        val commitMessages = if (usePrimaryKeyDelete()) {
+        val commitMessages = if (usePKUpsertDelete()) {
           performPrimaryKeyDelete(sparkSession)
         } else {
           performNonPrimaryKeyDelete(sparkSession)
@@ -107,20 +105,12 @@ case class DeleteFromPaimonTableCommand(
     Seq.empty[Row]
   }
 
-  /**
-   * Maintain alignment with
-   * org.apache.paimon.flink.sink.SupportsRowLevelOperationFlinkTableSink#validateDeletable
-   * @return
-   */
-  private def usePrimaryKeyDelete(): Boolean = withPrimaryKeys && {
-    val options = Options.fromMap(table.options())
-    table.coreOptions().mergeEngine() match {
-      case MergeEngine.DEDUPLICATE => true
-      case MergeEngine.PARTIAL_UPDATE =>
-        options.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE) ||
-        options.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP) != null
-      case MergeEngine.AGGREGATE => options.get(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE)
-      case _ => false
+  private def usePKUpsertDelete(): Boolean = {
+    try {
+      validatePKUpsertDeletable(table)
+      true
+    } catch {
+      case _: UnsupportedOperationException => false
     }
   }
 
