@@ -31,6 +31,8 @@ from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               RowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
+from pypaimon.write.row_key_extractor import RowKeyExtractor, FixedBucketRowKeyExtractor, UnawareBucketRowKeyExtractor, \
+    PostponeBucketRowKeyExtractor
 
 
 class FileStoreTable(Table):
@@ -62,6 +64,8 @@ class FileStoreTable(Table):
         else:
             if self.options.get(CoreOptions.BUCKET, -1) == -1:
                 return BucketMode.BUCKET_UNAWARE
+            elif self.options.get(CoreOptions.BUCKET, -2) == -2:
+                return BucketMode.POSTPONE_MODE
             else:
                 return BucketMode.HASH_FIXED
 
@@ -77,6 +81,8 @@ class FileStoreTable(Table):
             return FixedBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.BUCKET_UNAWARE:
             return UnawareBucketRowKeyExtractor(self.table_schema)
+        elif bucket_mode == BucketMode.POSTPONE_MODE:
+            return PostponeBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
             return DynamicBucketRowKeyExtractor(self.table_schema)
         else:

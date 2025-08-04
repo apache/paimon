@@ -26,7 +26,6 @@ from pyarrow._fs import FileSystem
 from pypaimon.api import RESTApi
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import Identifier
 
 
 class RESTTokenFileIO(FileIO):

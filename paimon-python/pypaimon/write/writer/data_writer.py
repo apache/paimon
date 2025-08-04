@@ -134,7 +134,11 @@ class DataWriter(ABC):
 
         for i, field_name in enumerate(self.table.partition_keys):
             path_builder = path_builder / (field_name + "=" + str(self.partition[i]))
-        path_builder = path_builder / ("bucket-" + str(self.bucket)) / file_name
+        if self.bucket == -2:
+            bucket_name = "postpone"
+        else:
+            bucket_name = str(self.bucket)
+        path_builder = path_builder / ("bucket-" + bucket_name) / file_name
 
         return path_builder
 
