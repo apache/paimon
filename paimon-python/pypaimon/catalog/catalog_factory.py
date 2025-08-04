@@ -16,6 +16,8 @@
 # limitations under the License.
 ################################################################################
 from pypaimon.catalog.catalog import Catalog
+from pypaimon.api.options import Options
+from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.config import CatalogOptions
@@ -35,4 +37,6 @@ class CatalogFactory:
         if catalog_class is None:
             raise ValueError(f"Unknown catalog identifier: {identifier}. "
                              f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
-        return catalog_class(catalog_options)
+        return catalog_class(
+            CatalogContext.create_from_options(Options(catalog_options))) if identifier == "rest" else catalog_class(
+            catalog_options)

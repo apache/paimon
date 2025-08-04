@@ -17,10 +17,15 @@ limitations under the License.
 """
 from pathlib import Path
 from typing import Any, Callable
+from typing import Callable, Any
+from urllib.parse import urlparse
 
 from pypaimon.catalog.table_metadata import TableMetadata
+from pypaimon import Catalog
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
+
+from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.file_store_table_factory import FileStoreTableFactory
@@ -43,9 +48,12 @@ class CatalogUtils:
             catalog_loader=None,
             supports_version_management=False
         )
-
-        path = Path(schema.options.get(CoreOptions.PATH))
-        table = FileStoreTableFactory.create(data_file_io(path), path, schema, catalog_env)
+        path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
+        path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
+        table = FileStoreTableFactory.create(data_file_io(path),
+                                             Path(path_parsed.netloc + "/" + path_parsed.path),
+                                             schema,
+                                             catalog_env)
         return table
 
     @staticmethod

@@ -15,20 +15,57 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
+from pypaimon.api import RESTApi
+from pypaimon.catalog.rest.RESTToken import RESTToken
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 
 
 class RESTTokenFileIO(FileIO):
 
-    def __init__(self, identifier: Identifier, path: Path, warehouse: Optional[str] = None,
+    def __init__(self, identifier: Identifier, path: Path,
                  catalog_options: Optional[dict] = None):
-        super().__init__(warehouse, catalog_options)
         self.identifier = identifier
         self.path = path
+        self.token: Optional[RESTToken] = None
+        self.api_instance: Optional[RESTApi] = None
+        self.lock = threading.Lock()
+        self.log = logging.getLogger(__name__)
+        super().__init__(str(path), catalog_options)
 
-    def exists(self, path: Path) -> bool:
-        pass
+    def try_to_refresh_token(self):
+        if self.should_refresh():
+            with self.lock:
+                if self.should_refresh():
+                    self.refresh_token()
+
+    def should_refresh(self):
+        if self.token is None:
+            return True
+        current_time = int(time.time() * 1000)
+        return (self.token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+
+    def refresh_token(self):
+        self.log.info(f"begin refresh data token for identifier [{self.identifier}]")
+        if self.api_instance is None:
+            self.api_instance = RESTApi(self.properties, False)
+
+        response = self.api_instance.load_table_token(self.identifier)
+        self.log.info(
+            f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
+        )
+        self.token = RESTToken(response.token, response.expires_at_millis)
+
+    def get_token(self):
+        return self.token
+
+    def valid_token(self):
+        self.try_to_refresh_token()
+        return self.token

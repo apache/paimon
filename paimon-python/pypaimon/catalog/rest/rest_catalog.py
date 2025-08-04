@@ -20,6 +20,12 @@ from typing import Dict, List, Optional, Union
 
 from pypaimon.api import CatalogOptions, RESTApi
 from pypaimon.api.api_response import GetTableResponse, PagedList
+from pypaimon import Database, Catalog, Schema
+from pypaimon.api import RESTApi, CatalogOptions
+from pypaimon.api.api_response import PagedList, GetTableResponse
+from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -37,6 +43,7 @@ from pypaimon.table.file_store_table import FileStoreTable
 
 class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
+        self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.api = RESTApi(context.options.to_map(), config_required)
         self.context = CatalogContext.create(Options(self.api.options), context.hadoop_conf, context.prefer_io_loader,
                                              context.fallback_io_loader)
@@ -95,7 +102,9 @@ class RESTCatalog(Catalog):
         )
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
-        raise ValueError("Not implemented")
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        self.api.create_table(identifier, schema)
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.api.get_table(identifier)
@@ -117,8 +126,9 @@ class RESTCatalog(Catalog):
             uuid=response.get_id()
         )
 
-    def file_io_from_options(self, path: Path):
-        return None
+    def file_io_from_options(self, table_path: Path) -> FileIO:
+        return FileIO(str(table_path), self.context.options.data)
 
-    def file_io_for_data(self, path: Path, identifier: Identifier):
-        return RESTTokenFileIO(identifier, path, None, None) if self.data_token_enabled else None
+    def file_io_for_data(self, table_path: Path, identifier: Identifier):
+        return RESTTokenFileIO(identifier, table_path, self.context.options.data) \
+            if self.data_token_enabled else self.file_io_from_options(table_path)

@@ -136,14 +136,6 @@ class ListTablesResponse(PagedResponse[str]):
 
 
 @dataclass
-class RESTToken:
-    """REST authentication token"""
-
-    token: Dict[str, str]
-    expire_at_millis: int
-
-
-@dataclass
 class GetTableResponse(AuditRESTResponse):
     """Response for getting table"""
 

@@ -126,6 +126,7 @@ class RESTApi:
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
+    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     def __init__(self, options: Dict[str, str], config_required: bool = True):
         self.logger = logging.getLogger(self.__class__.__name__)
