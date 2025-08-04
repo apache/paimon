@@ -22,16 +22,15 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
@@ -72,8 +71,6 @@ public interface FormatTable extends Table {
     FormatTable copy(Map<String, String> dynamicOptions);
 
     TableSchema schema();
-
-    AppendOnlyFileStoreTable store();
 
     default int bucket() {
         return BucketMode.UNAWARE_BUCKET;
@@ -177,7 +174,6 @@ public interface FormatTable extends Table {
         private final Map<String, String> options;
         @Nullable private final String comment;
         private TableSchema schema;
-        private AppendOnlyFileStoreTable store;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -205,7 +201,6 @@ public interface FormatTable extends Table {
                                     Collections.emptyList(),
                                     options,
                                     comment));
-            this.store = new FormatTableFileStoreTable(fileIO, new Path(location), schema);
         }
 
         @Override
@@ -264,11 +259,6 @@ public interface FormatTable extends Table {
         }
 
         @Override
-        public AppendOnlyFileStoreTable store() {
-            return store;
-        }
-
-        @Override
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
@@ -291,7 +281,7 @@ public interface FormatTable extends Table {
 
     @Override
     default BatchWriteBuilder newBatchWriteBuilder() {
-        return new BatchWriteBuilderImpl(this.store());
+        return new FormatBatchWriteBuilder(this);
     }
 
     default RowType partitionType() {

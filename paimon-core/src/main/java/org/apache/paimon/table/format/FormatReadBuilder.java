@@ -18,13 +18,19 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.AbstractDataTableRead;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -32,6 +38,7 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
@@ -48,6 +55,8 @@ public class FormatReadBuilder implements ReadBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
+    private final CoreOptions options;
+    protected final RowType partitionType;
 
     private @Nullable RowType readType;
     private @Nullable Predicate predicate;
@@ -55,6 +64,8 @@ public class FormatReadBuilder implements ReadBuilder {
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
+        this.options = new CoreOptions(table.options());
+        this.partitionType = table.partitionType();
     }
 
     @Override
@@ -121,9 +132,19 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        InnerTableRead read = table.store().newRead();
-        TableSchema schema = table.schema();
-        return new AbstractDataTableRead(schema) {
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), new Path(table.location()));
+        TableSchema tableSchema = table.schema();
+        RawFileSplitRead read =
+                new RawFileSplitRead(
+                        table.fileIO(),
+                        schemaManager,
+                        tableSchema,
+                        tableSchema.logicalRowType().notNull(),
+                        FileFormatDiscover.of(options),
+                        pathFactory(),
+                        options.fileIndexReadEnabled(),
+                        options.rowTrackingEnabled());
+        return new AbstractDataTableRead(table.schema()) {
 
             @Override
             protected InnerTableRead innerWithFilter(Predicate predicate) {
@@ -138,9 +159,28 @@ public class FormatReadBuilder implements ReadBuilder {
 
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
-                return read.createReader(split);
+                return read.createReader((DataSplit) split);
             }
         };
+    }
+
+    public FileStorePathFactory pathFactory() {
+        return pathFactory(options, options.fileFormatString());
+    }
+
+    protected FileStorePathFactory pathFactory(CoreOptions options, String format) {
+        return new FileStorePathFactory(
+                options.path(),
+                partitionType,
+                options.partitionDefaultName(),
+                format,
+                options.dataFilePrefix(),
+                options.changelogFilePrefix(),
+                options.legacyPartitionName(),
+                options.fileSuffixIncludeCompression(),
+                options.fileCompression(),
+                options.dataFilePathDirectory(),
+                null);
     }
 
     // ===================== Unsupported ===============================
