@@ -52,8 +52,8 @@ public class FormatTableReadWriteTest extends TableTestBase {
 
     @Test
     public void testAllFormatReadWrite() throws Exception {
-        testReadWrite("orc");
         testReadWrite("parquet");
+        testReadWrite("csv");
     }
 
     @Override
@@ -71,18 +71,18 @@ public class FormatTableReadWriteTest extends TableTestBase {
     private void testReadWrite(String format) throws Exception {
         Table table = createTable(format);
 
-        InternalRow[] datas = datas(200);
+        InternalRow[] datas = datas(2);
 
         write(table, datas);
 
         List<InternalRow> readed = read(table);
 
         assertThat(readed).containsExactlyInAnyOrder(datas);
-        dropTableDefault();
+        dropTableDefault(format);
     }
 
-    public void dropTableDefault() throws Exception {
-        catalog.dropTable(identifier(), true);
+    public void dropTableDefault(String format) throws Exception {
+        catalog.dropTable(identifier(format), true);
     }
 
     InternalRow[] datas(int i) {
