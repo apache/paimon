@@ -296,6 +296,15 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_computed_column2 (
+    pk INT,
+    _date DATE,
+    _datetime DATETIME,
+    _timestamp TIMESTAMP,
+    _value VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
 CREATE TABLE test_time_to_int_epoch (
     pk INT,
     _second_val0 INT,

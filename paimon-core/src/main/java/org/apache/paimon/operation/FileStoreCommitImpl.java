@@ -277,7 +277,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void commit(ManifestCommittable committable, boolean checkAppendFiles) {
+    public int commit(ManifestCommittable committable, boolean checkAppendFiles) {
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
@@ -399,6 +399,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         attempts);
             }
         }
+        return generatedSnapshot;
     }
 
     private void reportCommit(
@@ -422,7 +423,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void overwrite(
+    public int overwrite(
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties) {
@@ -551,6 +552,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         attempts);
             }
         }
+        return generatedSnapshot;
     }
 
     @Override
@@ -1179,7 +1181,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             checkArgument(
                     entry.file().fileSource().isPresent(),
                     "This is a bug, file source field for row-tracking table must present.");
-            if (entry.file().fileSource().get().equals(FileSource.APPEND)) {
+            if (entry.file().fileSource().get().equals(FileSource.APPEND)
+                    && entry.file().firstRowId() == null) {
                 long rowCount = entry.file().rowCount();
                 rowIdAssigned.add(entry.assignFirstRowId(start));
                 start += rowCount;

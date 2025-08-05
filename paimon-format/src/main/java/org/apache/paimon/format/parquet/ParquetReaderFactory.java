@@ -56,8 +56,8 @@ import java.util.List;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
-import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.buildFieldsList;
-import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
+import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
+import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWritableColumnVector;
 import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
 
 /**
@@ -108,10 +108,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         reader.setRequestedSchema(requestedSchema);
-        WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
+        RowType[] shreddingSchemas =
+                VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
+        WritableColumnVector[] writableVectors = createWritableVectors();
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
@@ -229,17 +231,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
+    private WritableColumnVector[] createWritableVectors() {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
-        List<Type> types = requestedSchema.getFields();
         for (int i = 0; i < readFields.length; i++) {
-            columns[i] =
-                    createWritableColumnVector(
-                            batchSize,
-                            readFields[i].type(),
-                            types.get(i),
-                            requestedSchema.getColumns(),
-                            0);
+            columns[i] = createWritableColumnVector(batchSize, readFields[i].type());
         }
         return columns;
     }

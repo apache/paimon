@@ -51,98 +51,47 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.parquet.ParquetRuntimeException;
-import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.PrimitiveColumnIO;
-import org.apache.parquet.schema.GroupType;
-import org.apache.parquet.schema.InvalidSchemaException;
-import org.apache.parquet.schema.LogicalTypeAnnotation;
-import org.apache.parquet.schema.PrimitiveType;
-import org.apache.parquet.schema.Type;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
 /** Util for generating parquet readers. */
-public class ParquetSplitReaderUtil {
+public class ParquetReaderUtil {
 
     public static WritableColumnVector createWritableColumnVector(
-            int batchSize,
-            DataType fieldType,
-            Type type,
-            List<ColumnDescriptor> columnDescriptors,
-            int depth) {
-        List<ColumnDescriptor> descriptors =
-                getAllColumnDescriptorByType(depth, type, columnDescriptors);
-        PrimitiveType primitiveType = descriptors.get(0).getPrimitiveType();
-        PrimitiveType.PrimitiveTypeName typeName = primitiveType.getPrimitiveTypeName();
+            int batchSize, DataType fieldType) {
         switch (fieldType.getTypeRoot()) {
             case BOOLEAN:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.BOOLEAN,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapBooleanVector(batchSize);
             case TINYINT:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.INT32,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapByteVector(batchSize);
             case DOUBLE:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.DOUBLE,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapDoubleVector(batchSize);
             case FLOAT:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.FLOAT,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapFloatVector(batchSize);
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.INT32,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapIntVector(batchSize);
             case BIGINT:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.INT64,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapLongVector(batchSize);
             case SMALLINT:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.INT32,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapShortVector(batchSize);
             case CHAR:
             case VARCHAR:
             case VARBINARY:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.BINARY,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapBytesVector(batchSize);
             case BINARY:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.BINARY
-                                || typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY,
-                        "Unexpected type: %s",
-                        typeName);
                 return new HeapBytesVector(batchSize);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -165,87 +114,25 @@ public class ParquetSplitReaderUtil {
                 ArrayType arrayType = (ArrayType) fieldType;
                 return new HeapArrayVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize,
-                                arrayType.getElementType(),
-                                type,
-                                columnDescriptors,
-                                depth));
+                        createWritableColumnVector(batchSize, arrayType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) fieldType;
-                LogicalTypeAnnotation mapTypeAnnotation = type.getLogicalTypeAnnotation();
-                GroupType mapRepeatedType = type.asGroupType().getType(0).asGroupType();
-                if (mapTypeAnnotation.equals(LogicalTypeAnnotation.listType())) {
-                    mapRepeatedType = mapRepeatedType.getType(0).asGroupType();
-                    depth++;
-                    if (mapRepeatedType
-                            .getLogicalTypeAnnotation()
-                            .equals(LogicalTypeAnnotation.mapType())) {
-                        mapRepeatedType = mapRepeatedType.getType(0).asGroupType();
-                        depth++;
-                    }
-                }
                 return new HeapMapVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize,
-                                mapType.getKeyType(),
-                                mapRepeatedType.getType(0),
-                                descriptors,
-                                depth + 2),
-                        createWritableColumnVector(
-                                batchSize,
-                                mapType.getValueType(),
-                                mapRepeatedType.getType(1),
-                                descriptors,
-                                depth + 2));
+                        createWritableColumnVector(batchSize, mapType.getKeyType()),
+                        createWritableColumnVector(batchSize, mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) fieldType;
-                LogicalTypeAnnotation multisetTypeAnnotation = type.getLogicalTypeAnnotation();
-                GroupType multisetRepeatedType = type.asGroupType().getType(0).asGroupType();
-                if (multisetTypeAnnotation.equals(LogicalTypeAnnotation.listType())) {
-                    multisetRepeatedType = multisetRepeatedType.getType(0).asGroupType();
-                    depth++;
-                    if (multisetRepeatedType
-                            .getLogicalTypeAnnotation()
-                            .equals(LogicalTypeAnnotation.mapType())) {
-                        multisetRepeatedType = multisetRepeatedType.getType(0).asGroupType();
-                        depth++;
-                    }
-                }
                 return new HeapMapVector(
                         batchSize,
-                        createWritableColumnVector(
-                                batchSize,
-                                multisetType.getElementType(),
-                                multisetRepeatedType.getType(0),
-                                descriptors,
-                                depth + 2),
-                        createWritableColumnVector(
-                                batchSize,
-                                new IntType(false),
-                                multisetRepeatedType.getType(1),
-                                descriptors,
-                                depth + 2));
+                        createWritableColumnVector(batchSize, multisetType.getElementType()),
+                        createWritableColumnVector(batchSize, new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) fieldType;
-                GroupType groupType = type.asGroupType();
-                if (LogicalTypeAnnotation.listType().equals(groupType.getLogicalTypeAnnotation())) {
-                    // this means there was two outside struct, need to get group twice.
-                    groupType = groupType.getType(0).asGroupType();
-                    groupType = groupType.getType(0).asGroupType();
-                    depth = depth + 2;
-                }
                 WritableColumnVector[] columnVectors =
                         new WritableColumnVector[rowType.getFieldCount()];
                 for (int i = 0; i < columnVectors.length; i++) {
-                    columnVectors[i] =
-                            createWritableColumnVector(
-                                    batchSize,
-                                    rowType.getTypeAt(i),
-                                    groupType.getType(i),
-                                    descriptors,
-                                    depth + 1);
+                    columnVectors[i] = createWritableColumnVector(batchSize, rowType.getTypeAt(i));
                 }
                 return new HeapRowVector(batchSize, columnVectors);
             case VARIANT:
@@ -258,36 +145,25 @@ public class ParquetSplitReaderUtil {
         }
     }
 
-    private static List<ColumnDescriptor> getAllColumnDescriptorByType(
-            int depth, Type type, List<ColumnDescriptor> columns) throws ParquetRuntimeException {
-        List<ColumnDescriptor> res = new ArrayList<>();
-        for (ColumnDescriptor descriptor : columns) {
-            if (depth >= descriptor.getPath().length) {
-                throw new InvalidSchemaException("Corrupted Parquet schema");
-            }
-            if (type.getName().equals(descriptor.getPath()[depth])) {
-                res.add(descriptor);
-            }
-        }
-
-        // If doesn't find the type descriptor in corresponding depth, throw exception
-        if (res.isEmpty()) {
-            throw new InvalidSchemaException(
-                    "Failed to find related Parquet column descriptor with type " + type);
-        }
-        return res;
-    }
-
     public static List<ParquetField> buildFieldsList(
-            DataField[] readFields, MessageColumnIO columnIO) {
+            DataField[] readFields, MessageColumnIO columnIO, RowType[] shreddingSchemas) {
         List<ParquetField> list = new ArrayList<>();
-        for (DataField readField : readFields) {
-            list.add(constructField(readField, lookupColumnByName(columnIO, readField.name())));
+        for (int i = 0; i < readFields.length; i++) {
+            list.add(
+                    constructField(
+                            readFields[i],
+                            lookupColumnByName(columnIO, readFields[i].name()),
+                            shreddingSchemas[i]));
         }
         return list;
     }
 
     private static ParquetField constructField(DataField dataField, ColumnIO columnIO) {
+        return constructField(dataField, columnIO, null);
+    }
+
+    private static ParquetField constructField(
+            DataField dataField, ColumnIO columnIO, @Nullable RowType shreddingSchema) {
         boolean required = columnIO.getType().getRepetition() == REQUIRED;
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
@@ -316,6 +192,20 @@ public class ParquetSplitReaderUtil {
         }
 
         if (type instanceof VariantType) {
+            if (shreddingSchema != null) {
+                ParquetGroupField parquetField =
+                        (ParquetGroupField)
+                                constructField(dataField.newType(shreddingSchema), columnIO);
+                return new ParquetGroupField(
+                        type,
+                        parquetField.getRepetitionLevel(),
+                        parquetField.getDefinitionLevel(),
+                        parquetField.isRequired(),
+                        parquetField.getChildren(),
+                        parquetField.path(),
+                        parquetField);
+            }
+
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
             PrimitiveColumnIO value =

@@ -43,6 +43,8 @@ Paimon also supports reading some hidden metadata columns, currently supporting 
 - `__paimon_partition`: the partition of the record.
 - `__paimon_bucket`: the bucket of the record.
 - `__paimon_row_index`: the row index of the record.
+- `_ROW_ID`: the unique row id of the record (valid only when `row-tracking.enabled` is set to true).
+- `_SEQUENCE_NUMBER`: the sequence number of the record (valid only when `row-tracking.enabled` is set to true).
 
 ```sql
 -- read all columns and the corresponding file path, partition, bucket, rowIndex of the record

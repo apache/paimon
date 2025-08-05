@@ -66,8 +66,10 @@ public class PredicateConverterTest {
                                             new RowType.RowField("long1", new BigIntType()),
                                             new RowType.RowField("double1", new DoubleType()),
                                             new RowType.RowField(
-                                                    "string1",
-                                                    DataTypes.STRING().getLogicalType())))));
+                                                    "string1", DataTypes.STRING().getLogicalType()),
+                                            new RowType.RowField(
+                                                    "boolField",
+                                                    DataTypes.BOOLEAN().getLogicalType())))));
 
     private static final PredicateConverter CONVERTER = new PredicateConverter(BUILDER);
 
@@ -108,6 +110,9 @@ public class PredicateConverterTest {
                 new ValueLiteralExpression(stringLit, DataTypes.STRING().notNull());
         // different type, char(4)
         ValueLiteralExpression stringLitExpr2 = new ValueLiteralExpression(stringLit);
+
+        FieldReferenceExpression boolRefExpr =
+                new FieldReferenceExpression("boolField", DataTypes.BOOLEAN(), 3, 3);
 
         return Stream.of(
                 Arguments.of(longRefExpr, null),
@@ -251,7 +256,19 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.BETWEEN,
                                 Arrays.asList(longRefExpr, intLitExpr, intLitExpr2),
                                 DataTypes.BOOLEAN()),
-                        BUILDER.between(0, 10, 20)));
+                        BUILDER.between(0, 10, 20)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.IS_TRUE,
+                                Arrays.asList(boolRefExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.equal(3, true)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.IS_FALSE,
+                                Arrays.asList(boolRefExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.equal(3, false)));
     }
 
     @MethodSource("provideLikeExpressions")

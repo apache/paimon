@@ -22,9 +22,12 @@ import org.apache.paimon.data.columnar.heap.AbstractArrayBasedVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -36,6 +39,11 @@ public class ParquetColumnVector {
     private final ParquetField column;
     private final List<ParquetColumnVector> children;
     private final WritableColumnVector vector;
+
+    // Describes the file schema of the Parquet variant column. When it is not null, `children`
+    // contains only one child that reads the underlying file content. This `ParquetColumnVector`
+    // should assemble Spark variant values from the file content.
+    private VariantSchema variantSchema;
 
     /**
      * Repetition & Definition levels These are allocated only for leaf columns; for non-leaf
@@ -67,7 +75,20 @@ public class ParquetColumnVector {
             return;
         }
 
-        if (isPrimitive) {
+        if (column.variantFileType().isPresent()) {
+            ParquetField fileContentCol = column.variantFileType().get();
+            WritableColumnVector fileContent =
+                    ParquetReaderUtil.createWritableColumnVector(
+                            capacity, fileContentCol.getType());
+            ParquetColumnVector contentVector =
+                    new ParquetColumnVector(
+                            fileContentCol, fileContent, capacity, missingColumns, false);
+            children.add(contentVector);
+            variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema((RowType) fileContentCol.getType());
+            repetitionLevels = contentVector.repetitionLevels;
+            definitionLevels = contentVector.definitionLevels;
+        } else if (isPrimitive) {
             if (column.getRepetitionLevel() > 0) {
                 repetitionLevels = new HeapIntVector(capacity);
             }
@@ -137,6 +158,13 @@ public class ParquetColumnVector {
      * primitive columns.
      */
     void assemble() {
+        if (variantSchema != null) {
+            children.get(0).assemble();
+            WritableColumnVector fileContent = children.get(0).getValueVector();
+            PaimonShreddingUtils.assembleVariantBatch(fileContent, vector, variantSchema);
+            return;
+        }
+
         // nothing to do if the column itself is missing
         if (vector.isAllNull()) {
             return;

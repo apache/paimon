@@ -23,14 +23,15 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import DataField
-from pypaimon.table.file_store_table import FileStoreTable
 
 
 class ReadBuilder:
     """Implementation of ReadBuilder for native Python reading."""
 
-    def __init__(self, table: FileStoreTable):
-        self.table = table
+    def __init__(self, table):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
         self._projection: Optional[List[str]] = None
         self._limit: Optional[int] = None

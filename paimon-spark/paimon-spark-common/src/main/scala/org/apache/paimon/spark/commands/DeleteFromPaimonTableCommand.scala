@@ -18,14 +18,12 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions.MergeEngine
-import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
-import org.apache.paimon.spark.util.SQLHelper
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
+import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.InternalRowPartitionComputer
 
@@ -36,8 +34,6 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-
-import java.util.UUID
 
 import scala.collection.JavaConverters._
 
@@ -97,7 +93,7 @@ case class DeleteFromPaimonTableCommand(
           dvSafeWriter.commit(Seq.empty)
         }
       } else {
-        val commitMessages = if (usePrimaryKeyDelete()) {
+        val commitMessages = if (usePKUpsertDelete()) {
           performPrimaryKeyDelete(sparkSession)
         } else {
           performNonPrimaryKeyDelete(sparkSession)
@@ -109,8 +105,13 @@ case class DeleteFromPaimonTableCommand(
     Seq.empty[Row]
   }
 
-  private def usePrimaryKeyDelete(): Boolean = {
-    withPrimaryKeys && table.coreOptions().mergeEngine() == MergeEngine.DEDUPLICATE
+  private def usePKUpsertDelete(): Boolean = {
+    try {
+      validatePKUpsertDeletable(table)
+      true
+    } catch {
+      case _: UnsupportedOperationException => false
+    }
   }
 
   private def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {

@@ -31,8 +31,8 @@ under the License.
 #### How to become a committer
 
 There is no strict protocol for becoming a committer. Candidates for new committers are typically people that are
-active contributors and community members. Candidates are suggested by current committers or PPMC members, and
-voted upon by the PPMC.
+active contributors and community members. Candidates are suggested by current committers or PMC members, and
+voted upon by the PMC.
 
 If you would like to become a committer, you should engage with the community and start contributing to Apache Paimon in
 any of the above ways. You might also want to talk to other committers and ask for their advice and guidance.

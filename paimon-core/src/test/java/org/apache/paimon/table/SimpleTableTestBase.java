@@ -116,6 +116,7 @@ import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.NextSnapshotFetcher.RANGE_CHECK_INTERVAL;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -722,7 +723,12 @@ public abstract class SimpleTableTestBase {
         commit.commit(9, write.prepareCommit(true, 9));
 
         StreamTableScan finalScan = scan;
-        assertThatThrownBy(finalScan::plan)
+        assertThatThrownBy(
+                        () -> {
+                            for (int i = 0; i < RANGE_CHECK_INTERVAL; i++) {
+                                finalScan.plan();
+                            }
+                        })
                 .satisfies(
                         anyCauseMatches(
                                 OutOfRangeException.class, "The snapshot with id 5 has expired."));
@@ -1339,7 +1345,7 @@ public abstract class SimpleTableTestBase {
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
         TableCommitImpl commit = table.copy(options).newCommit(commitUser);
-        ExecutorService executor = commit.getExpireMainExecutor();
+        ExecutorService executor = commit.getMaintainExecutor();
         CountDownLatch before = new CountDownLatch(1);
         CountDownLatch after = new CountDownLatch(1);
 

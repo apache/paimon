@@ -16,8 +16,19 @@
 # limitations under the License.
 #################################################################################
 
-from abc import ABC
+from abc import ABC, abstractmethod
+
+from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.write.batch_write_builder import BatchWriteBuilder
 
 
 class Table(ABC):
     """A table provides basic abstraction for table read and write."""
+
+    @abstractmethod
+    def new_read_builder(self) -> ReadBuilder:
+        """Return a builder for building table scan and table read."""
+
+    @abstractmethod
+    def new_batch_write_builder(self) -> BatchWriteBuilder:
+        """Returns a builder for building batch table write and table commit."""

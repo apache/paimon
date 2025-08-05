@@ -186,6 +186,14 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     }
                 }
             }
+        } else if (func == BuiltInFunctionDefinitions.IS_TRUE) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.TRUE);
+        } else if (func == BuiltInFunctionDefinitions.IS_FALSE) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.FALSE);
         }
 
         // TODO is_xxx, between_xxx, similar, in, not_in, not?

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.schema
 
 import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.table.SpecialFields
 import org.apache.paimon.types.DataField
 
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
@@ -47,11 +48,14 @@ object PaimonMetadataColumn {
   val FILE_PATH_COLUMN = "__paimon_file_path"
   val PARTITION_COLUMN = "__paimon_partition"
   val BUCKET_COLUMN = "__paimon_bucket"
+
   val SUPPORTED_METADATA_COLUMNS: Seq[String] = Seq(
     ROW_INDEX_COLUMN,
     FILE_PATH_COLUMN,
     PARTITION_COLUMN,
-    BUCKET_COLUMN
+    BUCKET_COLUMN,
+    SpecialFields.ROW_ID.name(),
+    SpecialFields.SEQUENCE_NUMBER.name()
   )
 
   val ROW_INDEX: PaimonMetadataColumn =
@@ -63,6 +67,10 @@ object PaimonMetadataColumn {
   }
   val BUCKET: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 103, BUCKET_COLUMN, IntegerType)
+  val ROW_ID: PaimonMetadataColumn =
+    PaimonMetadataColumn(Int.MaxValue - 104, SpecialFields.ROW_ID.name(), LongType)
+  val SEQUENCE_NUMBER: PaimonMetadataColumn =
+    PaimonMetadataColumn(Int.MaxValue - 105, SpecialFields.SEQUENCE_NUMBER.name(), LongType)
 
   def get(metadataColumn: String, partitionType: StructType): PaimonMetadataColumn = {
     metadataColumn match {
@@ -70,6 +78,8 @@ object PaimonMetadataColumn {
       case FILE_PATH_COLUMN => FILE_PATH
       case PARTITION_COLUMN => PARTITION(partitionType)
       case BUCKET_COLUMN => BUCKET
+      case ROW_ID.name => ROW_ID
+      case SEQUENCE_NUMBER.name => SEQUENCE_NUMBER
       case _ =>
         throw new IllegalArgumentException(s"$metadataColumn metadata column is not supported.")
     }

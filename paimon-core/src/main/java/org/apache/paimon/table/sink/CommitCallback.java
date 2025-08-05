@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.FileStoreTable;
 
 import java.util.List;
 
@@ -44,4 +45,6 @@ public interface CommitCallback extends AutoCloseable {
             Snapshot snapshot);
 
     void retry(ManifestCommittable committable);
+
+    default void setTable(FileStoreTable table) {}
 }

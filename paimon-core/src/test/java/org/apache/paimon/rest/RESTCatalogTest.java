@@ -2069,6 +2069,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tables).containsExactlyInAnyOrder("table1");
     }
 
+    @Test
+    public void testCreateIcebergTable() throws Exception {
+        Catalog catalog = newRestCatalogWithDataToken();
+        catalog.createDatabase("test_db", false);
+        List<String> tables = catalog.listTables("test_db");
+        assertThat(tables).isEmpty();
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", "iceberg-table");
+        options.put("a", "b");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pt", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        catalog.createTable(Identifier.create("test_db", "table1"), schema, false);
+
+        tables = catalog.listTables("test_db");
+        Table table = catalog.getTable(Identifier.create("test_db", "table1"));
+        assertThat(table.options()).containsEntry("a", "b");
+        assertThat(table.options().containsKey("path")).isTrue();
+        assertThat(table.partitionKeys()).containsExactly("pt");
+        assertThat(table.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        assertThat(tables).containsExactlyInAnyOrder("table1");
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,

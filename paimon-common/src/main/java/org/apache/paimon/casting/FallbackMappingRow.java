@@ -58,7 +58,7 @@ public class FallbackMappingRow implements InternalRow {
         if (mappings[pos] == -1) {
             return main.isNullAt(pos);
         }
-        return main.isNullAt(pos) || fallbackRow.isNullAt(mappings[pos]);
+        return main.isNullAt(pos) && fallbackRow.isNullAt(mappings[pos]);
     }
 
     @Override

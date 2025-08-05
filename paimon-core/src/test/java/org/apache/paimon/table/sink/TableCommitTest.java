@@ -41,6 +41,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -58,6 +59,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -251,10 +253,10 @@ public class TableCommitTest {
         }
 
         // commit 0, fine, it will be filtered
-        commit.filterAndCommit(Collections.singletonMap(0L, messages0));
+        commit.filterAndCommit(singletonMap(0L, messages0));
 
         // commit 1, exception now.
-        assertThatThrownBy(() -> commit.filterAndCommit(Collections.singletonMap(1L, messages1)))
+        assertThatThrownBy(() -> commit.filterAndCommit(singletonMap(1L, messages1)))
                 .hasMessageContaining(
                         "Cannot recover from this checkpoint because some files in the"
                                 + " snapshot that need to be resubmitted have been deleted");
@@ -380,5 +382,58 @@ public class TableCommitTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+    }
+
+    @Test
+    public void testExpireForEmptyCommit() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        SnapshotManager snapshotManager = table.snapshotManager();
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(user1);
+        TableCommitImpl commit = table.copy(singletonMap("write-only", "true")).newCommit(user1);
+
+        for (int i = 0; i < 5; i++) {
+            write.write(GenericRow.of(i, (long) i));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
+
+        // expire for empty commit: false
+        commit = table.newCommit(user1).ignoreEmptyCommit(true).expireForEmptyCommit(false);
+        commit.commit(7, write.prepareCommit(true, 7));
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
+
+        // expire for empty commit: default true
+        commit = table.newCommit(user1).ignoreEmptyCommit(true);
+        commit.commit(7, write.prepareCommit(true, 7));
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
     }
 }

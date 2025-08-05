@@ -25,6 +25,9 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.RowColumnVector;
+import org.apache.paimon.data.columnar.writable.WritableBytesVector;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -428,5 +431,26 @@ public class PaimonShreddingUtils {
     /** Rebuilds a variant from shredded components with the variant schema. */
     public static Variant rebuild(InternalRow row, VariantSchema variantSchema) {
         return ShreddingUtils.rebuild(new PaimonShreddedRow(row), variantSchema);
+    }
+
+    /** Assemble a batch of variant (binary format) from a batch of variant values. */
+    public static void assembleVariantBatch(
+            WritableColumnVector input, WritableColumnVector output, VariantSchema variantSchema) {
+        int numRows = input.getElementsAppended();
+        output.reset();
+        output.reserve(numRows);
+        WritableBytesVector valueChild = (WritableBytesVector) output.getChildren()[0];
+        WritableBytesVector metadataChild = (WritableBytesVector) output.getChildren()[1];
+        for (int i = 0; i < numRows; ++i) {
+            if (input.isNullAt(i)) {
+                output.setNullAt(i);
+            } else {
+                Variant v = rebuild(((RowColumnVector) input).getRow(i), variantSchema);
+                byte[] value = v.value();
+                byte[] metadata = v.metadata();
+                valueChild.putByteArray(i, value, 0, value.length);
+                metadataChild.putByteArray(i, metadata, 0, metadata.length);
+            }
+        }
     }
 }

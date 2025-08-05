@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -32,8 +33,12 @@ public class CallbackUtils {
         return loadCallbacks(coreOptions.tagCallbacks(), TagCallback.class);
     }
 
-    public static List<CommitCallback> loadCommitCallbacks(CoreOptions coreOptions) {
-        return loadCallbacks(coreOptions.commitCallbacks(), CommitCallback.class);
+    public static List<CommitCallback> loadCommitCallbacks(
+            CoreOptions coreOptions, FileStoreTable table) {
+        List<CommitCallback> commitCallbacks =
+                loadCallbacks(coreOptions.commitCallbacks(), CommitCallback.class);
+        commitCallbacks.forEach(callback -> callback.setTable(table));
+        return commitCallbacks;
     }
 
     @SuppressWarnings("unchecked")

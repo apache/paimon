@@ -53,13 +53,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
-import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
-import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP;
-import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
@@ -135,7 +132,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public RowLevelDeleteInfo applyRowLevelDelete(
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
-        validateDeletable();
+        validatePKUpsertDeletable(table);
         return new RowLevelDeleteInfo() {};
     }
 
@@ -143,7 +140,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
-        validateDeletable();
+        validatePKUpsertDeletable(table);
         List<Predicate> predicates = new ArrayList<>();
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
         for (ResolvedExpression filter : list) {
@@ -171,51 +168,6 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
             return Optional.empty();
         } catch (Exception e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    private void validateDeletable() {
-        if (table.primaryKeys().isEmpty()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "table '%s' can not support delete, because there is no primary key.",
-                            table.getClass().getName()));
-        }
-
-        Options options = Options.fromMap(table.options());
-        MergeEngine mergeEngine = options.get(MERGE_ENGINE);
-
-        switch (mergeEngine) {
-            case DEDUPLICATE:
-                return;
-            case PARTIAL_UPDATE:
-                if (options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE)
-                        || options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP) != null) {
-                    return;
-                } else {
-                    throw new UnsupportedOperationException(
-                            String.format(
-                                    "Merge engine %s doesn't support batch delete by default. To support batch delete, "
-                                            + "please set %s to true when there is no %s or set %s.",
-                                    mergeEngine,
-                                    PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(),
-                                    SEQUENCE_GROUP,
-                                    PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP));
-                }
-            case AGGREGATE:
-                if (options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE)) {
-                    return;
-                } else {
-                    throw new UnsupportedOperationException(
-                            String.format(
-                                    "Merge engine %s doesn't support batch delete by default. To support batch delete, "
-                                            + "please set %s to true.",
-                                    mergeEngine, AGGREGATION_REMOVE_RECORD_ON_DELETE.key()));
-                }
-            default:
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Merge engine %s can not support batch delete.", mergeEngine));
         }
     }
 
