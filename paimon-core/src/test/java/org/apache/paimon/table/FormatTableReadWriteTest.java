@@ -47,6 +47,7 @@ public class FormatTableReadWriteTest extends TableTestBase {
         schemaBuilder.column("f2", DataTypes.SMALLINT());
         schemaBuilder.option("file.format", format);
         schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("target-file-size", "1 kb");
         return schemaBuilder.build();
     }
 
@@ -72,13 +73,13 @@ public class FormatTableReadWriteTest extends TableTestBase {
     private void testReadWrite(String format) throws Exception {
         Table table = createTable(format);
 
-        InternalRow[] datas = datas(2);
+        InternalRow[] datas = datas(2000);
 
         write(table, datas);
 
-        List<InternalRow> readed = read(table);
+        List<InternalRow> readData = read(table);
 
-        assertThat(readed).containsExactlyInAnyOrder(datas);
+        assertThat(readData).containsExactlyInAnyOrder(datas);
         dropTableDefault(format);
     }
 
