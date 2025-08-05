@@ -76,7 +76,7 @@ public class ChangelogModeTest {
 
     @Test
     public void testDefault() throws Exception {
-        test(new Options(), ChangelogMode.upsert(), ChangelogMode.upsert());
+        test(new Options(), ChangelogMode.upsert(), ChangelogMode.upsert(false));
     }
 
     @Test

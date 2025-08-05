@@ -33,6 +33,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.types.variant.BinaryVariant;
+import org.apache.flink.types.variant.Variant;
 
 import static org.apache.paimon.flink.FlinkRowWrapper.fromFlinkRowKind;
 
@@ -145,6 +147,11 @@ public class FlinkRowData implements RowData {
         return new FlinkRowData(row.getRow(pos, numFields));
     }
 
+    public Variant getVariant(int pos) {
+        org.apache.paimon.data.variant.Variant variant = row.getVariant(pos);
+        return new BinaryVariant(variant.value(), variant.metadata());
+    }
+
     private static class FlinkArrayData implements ArrayData {
 
         private final InternalArray array;
@@ -216,6 +223,11 @@ public class FlinkRowData implements RowData {
         @Override
         public <T> RawValueData<T> getRawValue(int pos) {
             throw new UnsupportedOperationException();
+        }
+
+        public Variant getVariant(int pos) {
+            org.apache.paimon.data.variant.Variant variant = array.getVariant(pos);
+            return new BinaryVariant(variant.value(), variant.metadata());
         }
 
         @Override
