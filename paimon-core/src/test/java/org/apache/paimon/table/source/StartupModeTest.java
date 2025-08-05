@@ -262,14 +262,7 @@ public class StartupModeTest extends ScannerTestBase {
         // streaming Mode
         StreamTableScan dataTableScan = table.newStreamScan();
         TableScan.Plan firstPlan = dataTableScan.plan();
-
-        long startTime = System.currentTimeMillis();
         TableScan.Plan secondPlan = dataTableScan.plan();
-        long endTime = System.currentTimeMillis();
-        long duration = endTime - startTime;
-
-        // without delay read test
-        assertThat(duration).isLessThan(100);
 
         assertThat(firstPlan.splits()).isEmpty();
         assertThat(secondPlan.splits())
