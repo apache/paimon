@@ -170,7 +170,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
 
-        updateWriteWithNewSchema(table, write);
+        updateWriteWithNewSchema(table, write, state.getSubtaskId());
         return committables;
     }
 

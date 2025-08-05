@@ -62,7 +62,7 @@ public class DynamicBucketRowWriteOperator
             throws IOException {
         List<Committable> committables = super.prepareCommit(waitCompaction, checkpointId);
 
-        updateWriteWithNewSchema(table, write);
+        updateWriteWithNewSchema(table, write, state.getSubtaskId());
         return committables;
     }
 

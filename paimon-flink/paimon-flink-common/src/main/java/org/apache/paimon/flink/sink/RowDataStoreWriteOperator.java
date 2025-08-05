@@ -221,7 +221,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                                                     new LogOffsetCommittable(k, v))));
         }
 
-        updateWriteWithNewSchema(table, write);
+        updateWriteWithNewSchema(table, write, state.getSubtaskId());
 
         return committables;
     }

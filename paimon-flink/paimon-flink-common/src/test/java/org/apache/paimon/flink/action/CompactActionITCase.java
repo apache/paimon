@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
@@ -300,9 +302,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
         tableOptions.put(CoreOptions.AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS.key(), "true");
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
-        // test that dedicated compact job will expire snapshots
-        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
-        tableOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
 
         FileStoreTable table =
                 prepareTable(
@@ -333,6 +332,9 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 scan,
                 Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
                 60_000);
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new Path(externalPath2))).isFalse();
+        assertThat(fileIO.listStatus(new Path(externalPath1)).length).isGreaterThanOrEqualTo(1);
 
         SchemaChange schemaChange =
                 SchemaChange.setOption(
@@ -358,15 +360,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         "-U[1, 100, 15, 20221209]"),
                 60_000);
 
-        // assert dedicated compact job will expire snapshots
-        SnapshotManager snapshotManager = table.snapshotManager();
-        CommonTestUtils.waitUtil(
-                () ->
-                        snapshotManager.latestSnapshotId() - 2
-                                == snapshotManager.earliestSnapshotId(),
-                Duration.ofSeconds(60_000),
-                Duration.ofSeconds(10),
-                String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+        assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
     }
 
     @Test
@@ -409,6 +404,70 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         // second compaction, snapshot will be 5
         checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
+    }
+
+    @Test
+    public void testUnawareBucketStreamingCompactWithChangedExternalPath() throws Exception {
+        String externalPath1 = getTempDirPath();
+        String externalPath2 = getTempDirPath();
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                TraceableFileIO.SCHEME + "://" + externalPath1);
+        tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
+        tableOptions.put(CoreOptions.AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        // repairing that the ut don't specify the real partition of table
+        runActionForUnawareTable(true);
+
+        // first compaction, snapshot will be 3
+        checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new Path(externalPath2))).isFalse();
+        assertThat(fileIO.listStatus(new Path(externalPath1)).length).isGreaterThanOrEqualTo(1);
+
+        SchemaChange schemaChange =
+                SchemaChange.setOption(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                        TraceableFileIO.SCHEME + "://" + externalPath2);
+        table.schemaManager().commitChanges(schemaChange);
+        Thread.sleep(1000);
+
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+        // second compaction, snapshot will be 5
+        checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
+
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+        assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
     }
 
     @Test

@@ -109,23 +109,22 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected void updateWriteWithNewSchema(FileStoreTable table, StoreSinkWrite write) {
+    protected void updateWriteWithNewSchema(
+            FileStoreTable table, StoreSinkWrite write, int taskId) {
         if (table.coreOptions().autoDetectDataFileExternalPaths()) {
             Optional<TableSchema> lastestSchema = table.schemaManager().latest();
             if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
                 LOG.info(
-                        "table schema has changed, current schema-id:{}, new schema-id:{}. try to update write with new schema.",
+                        "task#{}: table schema has changed, current schema-id:{}, try to update write with new schema-id:{}.",
+                        taskId,
                         table.schema().id(),
                         lastestSchema.get().id());
                 try {
                     CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
                     table = table.copy(newCoreOptions.dataFileExternalPathConfig());
                     write.replace(table);
-                    LOG.info(
-                            "update write with new schema successfully. current schema-id:{}.",
-                            table.schema().id());
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    throw new RuntimeException("update write failed.", e);
                 }
             }
         }
