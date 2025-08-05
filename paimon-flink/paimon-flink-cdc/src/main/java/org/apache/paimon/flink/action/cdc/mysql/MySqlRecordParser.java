@@ -32,6 +32,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -235,21 +236,40 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
         Map<String, DebeziumEvent.Field> fields = schema.beforeAndAfterFields();
 
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
+
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
-            String mySqlType = field.getValue().type();
+            String debeziumType = field.getValue().type();
+            String className = field.getValue().name();
+
+            // record the field data type for computed columns reference
+            JsonNode parametersNode = field.getValue().parameters();
+            Map<String, String> parametersMap =
+                    isNull(parametersNode)
+                            ? Collections.emptyMap()
+                            : JsonSerdeUtil.convertValue(
+                                    parametersNode,
+                                    new TypeReference<HashMap<String, String>>() {});
+
+            DataType paimonDataType =
+                    DebeziumSchemaUtils.toDataType(debeziumType, className, parametersMap);
+            schemaBuilder.column(fieldName, paimonDataType);
+
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
                 continue;
             }
 
-            String className = field.getValue().name();
             String oldValue = objectValue.asText();
             String newValue =
                     DebeziumSchemaUtils.transformRawValue(
                             oldValue,
-                            mySqlType,
+                            debeziumType,
                             className,
                             typeMapping,
                             objectValue,
@@ -259,9 +279,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+            String refName = computedColumn.fieldReference();
+
+            resultMap.put(computedColumn.columnName(), computedColumn.eval(resultMap.get(refName)));
+
+            // remember the computed column data type for later reference by other computed columns
+            schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

@@ -18,21 +18,18 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.action.cdc.utils.DfsSort;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.api.java.tuple.Tuple2;
+
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utility methods for {@link ComputedColumn}, such as build. */
 public class ComputedColumnUtils {
@@ -50,16 +47,44 @@ public class ComputedColumnUtils {
                         .collect(
                                 Collectors.toMap(DataField::name, DataField::type, (v1, v2) -> v2));
 
+        // sort computed column args by dependencies
+        LinkedHashMap<String, Tuple2<String, String[]>> sortedArgs =
+                sortComputedColumnArgs(computedColumnArgs, caseSensitive);
+
         List<ComputedColumn> computedColumns = new ArrayList<>();
-        for (String columnArg : computedColumnArgs) {
-            String[] kv = columnArg.split("=");
+        for (Map.Entry<String, Tuple2<String, String[]>> columnArg : sortedArgs.entrySet()) {
+            String columnName = columnArg.getKey().trim();
+            String exprName = columnArg.getValue().f0.trim();
+            String[] args = columnArg.getValue().f1;
+
+            Expression expr = Expression.create(typeMapping, caseSensitive, exprName, args);
+            ComputedColumn cmpColumn = new ComputedColumn(columnName, expr);
+            computedColumns.add(new ComputedColumn(columnName, expr));
+
+            // remember the column type for later reference by other computed columns
+            typeMapping.put(columnName, cmpColumn.columnType());
+        }
+
+        return computedColumns;
+    }
+
+    private static LinkedHashMap<String, Tuple2<String, String[]>> sortComputedColumnArgs(
+            List<String> computedColumnArgs, boolean caseSensitive) {
+        List<String> argList =
+                computedColumnArgs.stream()
+                        .map(x -> caseSensitive ? x : x.toUpperCase())
+                        .collect(Collectors.toList());
+
+        LinkedHashMap<String, Tuple2<String, String[]>> eqMap = new LinkedHashMap<>();
+        LinkedHashMap<String, String> refMap = new LinkedHashMap<>();
+        for (String arg : argList) {
+            String[] kv = arg.split("=");
             if (kv.length != 2) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Invalid computed column argument: %s. Please use format 'column-name=expr-name(args, ...)'.",
-                                columnArg));
+                                arg));
             }
-            String columnName = kv[0].trim();
             String expression = kv[1].trim();
             // parse expression
             int left = expression.indexOf('(');
@@ -69,101 +94,21 @@ public class ComputedColumnUtils {
                     String.format(
                             "Invalid expression: %s. Please use format 'expr-name(args, ...)'.",
                             expression));
-
             String exprName = expression.substring(0, left);
             String[] args = expression.substring(left + 1, right).split(",");
-            checkArgument(args.length >= 1, "Computed column needs at least one argument.");
 
-            computedColumns.add(
-                    new ComputedColumn(
-                            columnName,
-                            Expression.create(typeMapping, caseSensitive, exprName, args)));
+            // args[0] may be empty string, eg. "cal_col=now()"
+            eqMap.put(kv[0].trim(), Tuple2.of(exprName, args));
+            refMap.put(kv[0].trim(), args[0].trim());
         }
 
-        return sortComputedColumns(computedColumns);
-    }
+        List<String> sortedKeys = DfsSort.sortKeys(refMap);
 
-    @VisibleForTesting
-    public static List<ComputedColumn> sortComputedColumns(List<ComputedColumn> columns) {
-        Set<String> columnNames = new HashSet<>();
-        for (ComputedColumn col : columns) {
-            columnNames.add(col.columnName());
+        LinkedHashMap<String, Tuple2<String, String[]>> sortedMap =
+                new LinkedHashMap<>(refMap.size());
+        for (String key : sortedKeys) {
+            sortedMap.put(key, eqMap.get(key));
         }
-
-        // For simple processing, no reference or referring to another computed column, means
-        // independent
-        List<ComputedColumn> independent = new ArrayList<>();
-        List<ComputedColumn> dependent = new ArrayList<>();
-
-        for (ComputedColumn col : columns) {
-            if (col.fieldReference() == null || !columnNames.contains(col.fieldReference())) {
-                independent.add(col);
-            } else {
-                dependent.add(col);
-            }
-        }
-
-        // Sort dependent columns with topological sort
-        Map<String, ComputedColumn> columnMap = new HashMap<>();
-        Map<String, Set<String>> reverseDependencies = new HashMap<>();
-
-        for (ComputedColumn col : dependent) {
-            columnMap.put(col.columnName(), col);
-            reverseDependencies
-                    .computeIfAbsent(col.fieldReference(), k -> new HashSet<>())
-                    .add(col.columnName());
-        }
-
-        List<ComputedColumn> sortedDependent = new ArrayList<>();
-        Set<String> visited = new HashSet<>();
-        Set<String> tempMark = new HashSet<>(); // For cycle detection
-
-        for (ComputedColumn col : dependent) {
-            if (!visited.contains(col.columnName())) {
-                dfs(
-                        col.columnName(),
-                        reverseDependencies,
-                        columnMap,
-                        sortedDependent,
-                        visited,
-                        tempMark);
-            }
-        }
-
-        Collections.reverse(sortedDependent);
-
-        // Independent should precede dependent
-        List<ComputedColumn> result = new ArrayList<>();
-        result.addAll(independent);
-        result.addAll(sortedDependent);
-
-        return result;
-    }
-
-    private static void dfs(
-            String node,
-            Map<String, Set<String>> reverseDependencies,
-            Map<String, ComputedColumn> columnMap,
-            List<ComputedColumn> sorted,
-            Set<String> visited,
-            Set<String> tempMark) {
-        if (tempMark.contains(node)) {
-            throw new IllegalArgumentException("Cycle detected: " + node);
-        }
-        if (visited.contains(node)) {
-            return;
-        }
-
-        tempMark.add(node);
-        ComputedColumn current = columnMap.get(node);
-
-        // Process the dependencies
-        for (String dependent : reverseDependencies.getOrDefault(node, Collections.emptySet())) {
-            dfs(dependent, reverseDependencies, columnMap, sorted, visited, tempMark);
-        }
-
-        tempMark.remove(node);
-        visited.add(node);
-        sorted.add(current);
+        return sortedMap;
     }
 }
