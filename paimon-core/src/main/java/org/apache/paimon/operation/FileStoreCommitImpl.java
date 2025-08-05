@@ -320,15 +320,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // This optimization is mainly used to decrease the number of times we read from
                 // files.
                 latestSnapshot = snapshotManager.latestSnapshot();
-                boolean hasDelete =
-                        appendSimpleEntries.stream()
-                                        .anyMatch(entry -> entry.kind().equals(FileKind.DELETE))
-                                || appendIndexFiles.stream()
-                                        .anyMatch(
-                                                entry ->
-                                                        entry.indexFile()
-                                                                .indexType()
-                                                                .equals(DELETION_VECTORS_INDEX));
+                boolean hasDelete = hasDelete(appendSimpleEntries, appendIndexFiles);
                 Snapshot.CommitKind commitKind =
                         hasDelete ? Snapshot.CommitKind.OVERWRITE : Snapshot.CommitKind.APPEND;
 
@@ -431,6 +423,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         generatedSnapshots,
                         attempts);
         commitMetrics.reportCommit(commitStats);
+    }
+
+    private boolean hasDelete(
+            List<SimpleFileEntry> appendSimpleEntries, List<IndexManifestEntry> appendIndexFiles) {
+        for (SimpleFileEntry appendSimpleEntry : appendSimpleEntries) {
+            if (appendSimpleEntry.kind().equals(FileKind.DELETE)) {
+                return true;
+            }
+        }
+        for (IndexManifestEntry appendIndexFile : appendIndexFiles) {
+            if (appendIndexFile.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -684,11 +691,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> compactChangelog,
             List<IndexManifestEntry> appendIndexFiles,
             List<IndexManifestEntry> compactDvIndexFiles) {
+        boolean isCompact = isCompact(commitMessages);
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
-            boolean isCompact =
-                    !commitMessage.compactIncrement().compactBefore().isEmpty()
-                            || !commitMessage.compactIncrement().compactAfter().isEmpty();
             commitMessage
                     .newFilesIncrement()
                     .newFiles()
@@ -784,6 +789,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             LOG.info("Finished collecting changes, including: {}", String.join(", ", msg));
         }
+    }
+
+    private boolean isCompact(List<CommitMessage> commitMessages) {
+        for (CommitMessage message : commitMessages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            if (!commitMessage.compactIncrement().compactBefore().isEmpty()
+                    || !commitMessage.compactIncrement().compactAfter().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {
