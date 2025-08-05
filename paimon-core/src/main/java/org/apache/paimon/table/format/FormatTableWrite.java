@@ -93,6 +93,12 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
+    public TableWrite withWriteType(RowType writeType) {
+        write.withWriteType(writeType);
+        return this;
+    }
+
+    @Override
     public FormatTableWrite withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;
