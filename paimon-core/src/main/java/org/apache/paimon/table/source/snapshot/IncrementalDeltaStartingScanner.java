@@ -108,16 +108,11 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
         Iterator<ManifestEntry> entries =
                 randomlyExecuteSequentialReturn(
                         reader::readManifest, Lists.newArrayList(manifests), reader.parallelism());
-        List<ManifestEntry> list = new ArrayList<>();
 
         while (entries.hasNext()) {
             ManifestEntry entry = entries.next();
-            list.add(entry);
-            // Spark update append table may produce delta files with kind DELETE in APPEND
-            // snapshot.
-            if (entry.kind() != FileKind.ADD) {
-                continue;
-            }
+            checkArgument(
+                    entry.kind() == FileKind.ADD, "Delta or changelog should only have ADD files.");
             grouped.computeIfAbsent(
                             Pair.of(entry.partition(), entry.bucket()), ignore -> new ArrayList<>())
                     .add(entry);

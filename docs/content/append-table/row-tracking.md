@@ -3,7 +3,7 @@ title: "Row Tracking"
 weight: 5
 type: docs
 aliases:
-- /concepts/spec/datafile.html
+- /concepts/append-table/row-tracking.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,15 +26,11 @@ under the License.
 
 # Use row tracking for Paimon Tables
 
-Row tracking allows Paimon to track row-level lineage in a Paimon table. Once enabled on a Paimom table, two more hidden columns will be added to the table schema:
-- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of updates or merge into. 
-- `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the lineage of the row version.
+## What is row tracking
 
-This two fields follows the following rules:
-- Whenever we read from one table with row tracking enabled, the `_ROW_ID` and `_SEQUENCE_NUMBER` will be `NOT NULL`.
-- If we append records to row-tracking table in the first time, we don't actually write them to the data file, they are lazy assigned by committer.
-- If one row moved from one file to another file for **any reasion**, the `_ROW_ID` column should be copied to the target file. The `_SEQUENCE_NUMBER` field should be set to `NULL` if the record is changed, otherwise, copy it too.
-- Whenever we read from a row-tracking table, we firstly read `_ROW_ID` and `_SEQUENCE_NUMBER` from the data file, then we read the value columns from the data file. If they found `NULL`, we read from `DataFileMeta` to fall back to the lazy assigned values. Anyway, it has no way to be `NULL`.
+Row tracking allows Paimon to track row-level lineage in a Paimon append table. Once enabled on a Paimom table, two more hidden columns will be added to the table schema:
+- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of updates or merge into.
+- `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the lineage of the row version.
 
 ## Enable row tracking
 
@@ -91,19 +87,11 @@ You will get:
                  +---+---------------+-------+----------------+
 ```
 
-You can find the row lineage for 'id=11' by following spark sql:
-```sql
-SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM paimon_incremental_query('t', 0, 2) WHERE id = 11;
-```
+## Spec
 
-You will get:
-```sql
-+---+---------------+----------------+
-| id|           data|_SEQUENCE_NUMBER|
-+---+---------------+----------------+
-| 11|              a|               1|
-| 11|new-data-update|               2|
-+---+---------------+----------------+
-```
+`_ROW_ID` and `_SEQUENCE_NUMBER` fields follows the following rules:
+- Whenever we read from one table with row tracking enabled, the `_ROW_ID` and `_SEQUENCE_NUMBER` will be `NOT NULL`.
+- If we append records to row-tracking table in the first time, we don't actually write them to the data file, they are lazy assigned by committer.
+- If one row moved from one file to another file for **any reasion**, the `_ROW_ID` column should be copied to the target file. The `_SEQUENCE_NUMBER` field should be set to `NULL` if the record is changed, otherwise, copy it too.
+- Whenever we read from a row-tracking table, we firstly read `_ROW_ID` and `_SEQUENCE_NUMBER` from the data file, then we read the value columns from the data file. If they found `NULL`, we read from `DataFileMeta` to fall back to the lazy assigned values. Anyway, it has no way to be `NULL`.
 
-In this case, you can find the row lineage for 'id=11, which data was changed from 'a' to 'new-data-update' in the second version of the table.
