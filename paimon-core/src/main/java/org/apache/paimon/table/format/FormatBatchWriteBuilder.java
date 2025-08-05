@@ -19,13 +19,8 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.AppendFileStoreWrite;
-import org.apache.paimon.operation.BaseAppendFileStoreWrite;
-import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -33,20 +28,15 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.NoNeedBucketRowKeyExtractor;
-import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /** A builder to build {@link FormatBatchWriteBuilder}. */
 public class FormatBatchWriteBuilder implements BatchWriteBuilder {
@@ -54,7 +44,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
-    private final String commitUser;
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
     protected final TableSchema schema;
@@ -65,7 +54,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     public FormatBatchWriteBuilder(FormatTable table) {
         this.table = table;
-        this.commitUser = createCommitUser(new Options(table.options()));
         this.fileIO = table.fileIO();
         this.schemaManager = new SchemaManager(fileIO, new Path(table.location()));
         this.schema = table.schema();
@@ -73,11 +61,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         this.options = new CoreOptions(table.options());
         this.partitionType = table.partitionType();
         this.catalogEnvironment = null;
-    }
-
-    @Override
-    public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -98,49 +81,20 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     @Override
     public BatchTableWrite newWrite() {
         TableSchema tableSchema = table.schema();
-        RawFileSplitRead readForCompact = newRead();
-        BaseAppendFileStoreWrite writer =
-                new AppendFileStoreWrite(
+        FormatTableFileWrite writer =
+                new FormatTableFileWrite(
                         fileIO,
-                        readForCompact,
                         tableSchema.id(),
                         tableSchema.logicalRowType().notNull(),
                         tableSchema.logicalPartitionType(),
                         pathFactory(),
-                        null,
-                        null,
                         options,
-                        null,
                         tableName);
-        return new TableWriteImpl<>(
+        return new FormatTableWrite(
                 rowType(),
                 writer,
-                new NoNeedBucketRowKeyExtractor(tableSchema),
-                (record, rowKind) -> {
-                    Preconditions.checkState(
-                            rowKind.isAdd(),
-                            "Append only writer can not accept row with RowKind %s",
-                            rowKind);
-                    return record.row();
-                },
-                rowKindGenerator(),
+                new RowPartitionKeyExtractor(schema),
                 CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
-    }
-
-    protected RowKindGenerator rowKindGenerator() {
-        return RowKindGenerator.create(schema, options);
-    }
-
-    public RawFileSplitRead newRead() {
-        return new RawFileSplitRead(
-                fileIO,
-                schemaManager,
-                schema,
-                table.schema().logicalRowType().notNull(),
-                FileFormatDiscover.of(options),
-                pathFactory(options, table.format().name()),
-                options.fileIndexReadEnabled(),
-                options.rowTrackingEnabled());
     }
 
     public FileStorePathFactory pathFactory() {
@@ -164,6 +118,11 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
         throw new UnsupportedOperationException();
     }
 }

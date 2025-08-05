@@ -169,6 +169,40 @@ public class FileStorePathFactory {
                 createExternalPathProvider(partition, bucket));
     }
 
+    public DataFilePathFactory createFormatTableDataFilePathFactory(BinaryRow partition) {
+        return new DataFilePathFactory(
+                partitionPath(partition),
+                formatIdentifier,
+                dataFilePrefix,
+                changelogFilePrefix,
+                fileSuffixIncludeCompression,
+                fileCompression,
+                createExternalPartitionPathProvider(partition));
+    }
+
+    private ExternalPathProvider createExternalPartitionPathProvider(BinaryRow partition) {
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return null;
+        }
+
+        return new ExternalPathProvider(externalPaths, partitionPath(partition));
+    }
+
+    public Path partitionPath(BinaryRow partition) {
+        Path relativeBucketPath = null;
+        String partitionPath = getPartitionString(partition);
+        if (!partitionPath.isEmpty()) {
+            relativeBucketPath = new Path(partitionPath);
+        }
+        if (dataFilePathDirectory != null) {
+            relativeBucketPath =
+                    relativeBucketPath != null
+                            ? new Path(dataFilePathDirectory, relativeBucketPath)
+                            : new Path(dataFilePathDirectory);
+        }
+        return relativeBucketPath != null ? new Path(root, relativeBucketPath) : root;
+    }
+
     @Nullable
     private ExternalPathProvider createExternalPathProvider(BinaryRow partition, int bucket) {
         if (externalPaths == null || externalPaths.isEmpty()) {
