@@ -496,13 +496,16 @@ public class Snapshot implements Serializable {
     /** Type of changes in this snapshot. */
     public enum CommitKind {
 
-        /** New data is appended to the table and no data is deleted. */
+        /** New data files are appended to the table and no data file is deleted. */
         APPEND,
 
         /** Changes by compacting existing data files. */
         COMPACT,
 
-        /** New data is added to overwrite existing data or just delete existing data. */
+        /**
+         * New data files are added to overwrite existing data files or just delete existing data
+         * files.
+         */
         OVERWRITE,
 
         /** Collect statistics. */
