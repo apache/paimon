@@ -61,17 +61,8 @@ public class JsonFormatWriter implements FormatWriter {
 
     @Override
     public void close() throws IOException {
-        if (writer != null) {
-            try {
-                writer.flush();
-                writer.close();
-            } catch (IOException e) {
-                // If the underlying stream is already closed, ignore the exception
-                if (!e.getMessage().contains("Already closed")) {
-                    throw e;
-                }
-            }
-        }
+        writer.flush();
+        writer.close();
     }
 
     @Override

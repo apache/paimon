@@ -46,16 +46,7 @@ public class CloseShieldOutputStream extends OutputStream {
 
     @Override
     public void flush() throws IOException {
-        try {
-            out.flush();
-        } catch (IOException e) {
-            // If the underlying stream is already closed, ignore the exception
-            if (e.getMessage() != null && e.getMessage().contains("Already closed")) {
-                // Silently ignore already closed exception
-                return;
-            }
-            throw e;
-        }
+        out.flush();
     }
 
     @Override
