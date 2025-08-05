@@ -39,8 +39,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.table.BucketMode.NO_NEED_BUCKET;
-
 /** Factory which produces {@link Path}s for manifest files. */
 @ThreadSafe
 public class FileStorePathFactory {
@@ -217,20 +215,6 @@ public class FileStorePathFactory {
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        Path relativeBucketPath = null;
-        if (bucket == NO_NEED_BUCKET) {
-            String partitionPath = getPartitionString(partition);
-            if (!partitionPath.isEmpty()) {
-                relativeBucketPath = new Path(partitionPath);
-            }
-            if (dataFilePathDirectory != null) {
-                relativeBucketPath =
-                        relativeBucketPath != null
-                                ? new Path(dataFilePathDirectory, relativeBucketPath)
-                                : new Path(dataFilePathDirectory);
-            }
-            return relativeBucketPath != null ? new Path(root, relativeBucketPath) : root;
-        }
         return new Path(root, relativeBucketPath(partition, bucket));
     }
 

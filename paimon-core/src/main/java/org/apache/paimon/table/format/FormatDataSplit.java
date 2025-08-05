@@ -37,8 +37,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.paimon.table.BucketMode.NO_NEED_BUCKET;
-
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit extends DataSplit {
 
@@ -122,7 +120,7 @@ public class FormatDataSplit extends DataSplit {
 
     @Override
     public int bucket() {
-        return NO_NEED_BUCKET;
+        throw new UnsupportedOperationException("Format Data Split does not support bucket.");
     }
 
     public FileIO fileIO() {

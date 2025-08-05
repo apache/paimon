@@ -65,9 +65,7 @@ public enum BucketMode {
      * different partitions. The bucket will be adaptively adjusted to the appropriate value in the
      * background.
      */
-    POSTPONE_MODE,
-
-    NO_NEED_MODE;
+    POSTPONE_MODE;
 
     public static final int UNAWARE_BUCKET = 0;
 

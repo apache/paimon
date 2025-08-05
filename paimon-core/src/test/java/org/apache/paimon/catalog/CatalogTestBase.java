@@ -23,11 +23,15 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -37,11 +41,14 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Projection;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
@@ -55,12 +62,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
@@ -553,6 +563,78 @@ public abstract class CatalogTestBase {
                                         conflictOptionsSchema,
                                         false))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void testFormatTableWriteAndRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random RANDOM = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        String[] formats = {"orc", "parquet", "csv", "json"};
+        for (String format : formats) {
+            Table table = createFormatTable(dbName, format);
+            int size = 2000;
+            InternalRow[] datas = new InternalRow[size];
+            for (int j = 0; j < size; j++) {
+                datas[j] =
+                        GenericRow.of(RANDOM.nextInt(), RANDOM.nextInt(), (short) RANDOM.nextInt());
+            }
+
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                for (InternalRow row : datas) {
+                    write.write(row);
+                }
+                write.prepareCommit();
+            }
+
+            List<InternalRow> readData = read(table, null);
+
+            assertThat(readData).containsExactlyInAnyOrder(datas);
+            catalog.dropTable(Identifier.create(dbName, format), true);
+        }
+    }
+
+    protected List<InternalRow> read(
+            Table table,
+            @Nullable int[] projection,
+            Pair<ConfigOption<?>, String>... dynamicOptions)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        for (Pair<ConfigOption<?>, String> pair : dynamicOptions) {
+            options.put(pair.getKey().key(), pair.getValue());
+        }
+        table = table.copy(options);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (projection != null) {
+            readBuilder.withProjection(projection);
+        }
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        projection == null
+                                ? table.rowType()
+                                : Projection.of(projection).project(table.rowType()));
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        return rows;
+    }
+
+    private Table createFormatTable(String database, String format) throws Exception {
+        Identifier identifier = Identifier.create(database, format);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.SMALLINT());
+        schemaBuilder.option("file.format", format);
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("target-file-size", "1 kb");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        return catalog.getTable(identifier);
     }
 
     @Test

@@ -55,9 +55,6 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -72,8 +69,6 @@ import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FormatReadBuilder.class);
 
     private static final long serialVersionUID = 1L;
 
@@ -193,18 +188,13 @@ public class FormatReadBuilder implements ReadBuilder {
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
                 DataSplit dataSplit = (DataSplit) split;
-                if (dataSplit.beforeFiles().size() > 0) {
-                    LOG.info("Ignore split before files: {}", dataSplit.beforeFiles());
-                }
-
-                return read.createReader(
-                        dataSplit.partition(), dataSplit.bucket(), dataSplit.dataFiles());
+                return read.createReader(dataSplit.partition(), dataSplit.dataFiles());
             }
         };
     }
 
-    private RecordReader<InternalRow> createReader(
-            BinaryRow partition, int bucket, List<DataFileMeta> files) throws IOException {
+    private RecordReader<InternalRow> createReader(BinaryRow partition, List<DataFileMeta> files)
+            throws IOException {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
