@@ -19,6 +19,7 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.CloseShieldPositionOutputStream;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;

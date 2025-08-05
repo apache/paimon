@@ -19,6 +19,7 @@
 package org.apache.paimon.format.json;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.CloseShieldOutputStream;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -26,6 +27,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
@@ -42,8 +44,9 @@ public class JsonFormatWriter implements FormatWriter {
     public JsonFormatWriter(PositionOutputStream outputStream, RowType rowType, Options options) {
         this.outputStream = outputStream;
         this.writer =
-                new OutputStreamWriter(
-                        new CloseShieldOutputStream(outputStream), StandardCharsets.UTF_8);
+                new BufferedWriter(
+                        new OutputStreamWriter(
+                                new CloseShieldOutputStream(outputStream), StandardCharsets.UTF_8));
         this.converter = new RowToJsonConverter(rowType, options);
         this.objectMapper = new ObjectMapper();
     }

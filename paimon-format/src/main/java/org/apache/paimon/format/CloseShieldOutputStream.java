@@ -16,26 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.csv;
-
-import org.apache.paimon.fs.PositionOutputStream;
+package org.apache.paimon.format;
 
 import java.io.IOException;
+import java.io.OutputStream;
 
-/**
- * A proxy position output stream that prevents the underlying output stream from being closed or
- * flushed when already closed.
- */
-public class CloseShieldPositionOutputStream extends PositionOutputStream {
-    private final PositionOutputStream out;
+/** A proxy output stream that prevents the underlying output stream from being closed. */
+public class CloseShieldOutputStream extends OutputStream {
+    private final OutputStream out;
 
-    public CloseShieldPositionOutputStream(PositionOutputStream out) {
+    public CloseShieldOutputStream(OutputStream out) {
         this.out = out;
-    }
-
-    @Override
-    public long getPos() throws IOException {
-        return out.getPos();
     }
 
     @Override
@@ -44,13 +35,13 @@ public class CloseShieldPositionOutputStream extends PositionOutputStream {
     }
 
     @Override
-    public void write(byte[] b) throws IOException {
-        out.write(b);
+    public void write(byte[] buffer) throws IOException {
+        out.write(buffer);
     }
 
     @Override
-    public void write(byte[] b, int off, int len) throws IOException {
-        out.write(b, off, len);
+    public void write(byte[] buffer, int off, int len) throws IOException {
+        out.write(buffer, off, len);
     }
 
     @Override
