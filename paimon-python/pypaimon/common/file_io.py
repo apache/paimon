@@ -26,7 +26,7 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from pyarrow._fs import FileSystem
 
-from pypaimon.catalog.rest.RESTToken import RESTToken
+
 from pypaimon.common.config import OssOptions, S3Options
 from pypaimon.schema.data_types import PyarrowFieldParser
 
