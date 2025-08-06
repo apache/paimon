@@ -18,29 +18,21 @@
 
 package org.apache.paimon.format.csv;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 
-import java.io.IOException;
+/** Factory to create {@link CsvFileFormat} for TXT files. */
+public class TxtFileFormatFactory implements FileFormatFactory {
 
-/** CSV {@link FormatReaderFactory} implementation. */
-public class CsvReaderFactory implements FormatReaderFactory {
+    public static final String IDENTIFIER = "txt";
 
-    private final RowType rowType;
-    private final Options options;
-    private final boolean isTxtFormat;
-
-    public CsvReaderFactory(RowType rowType, Options options, boolean isTxtFormat) {
-        this.rowType = rowType;
-        this.options = options;
-        this.isTxtFormat = isTxtFormat;
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 
     @Override
-    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(context, rowType, options, isTxtFormat);
+    public FileFormat create(FormatContext formatContext) {
+        return new CsvFileFormat(formatContext, IDENTIFIER);
     }
 }

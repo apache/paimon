@@ -60,7 +60,6 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     private BufferedReader bufferedReader;
     private boolean headerSkipped = false;
-    private String nextLine = null;
     private boolean readerClosed = false;
     private CsvRecordIterator reader;
 
@@ -69,15 +68,27 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, Options options)
+    public CsvFileReader(
+            FormatReaderFactory.Context context,
+            RowType rowType,
+            Options options,
+            boolean isTxtFormat)
             throws IOException {
         this.rowType = rowType;
-        this.fieldDelimiter = options.getString("csv.field-delimiter", ",");
-        this.quoteCharacter = options.getString("csv.quote-character", "\"");
-        this.escapeCharacter = options.getString("csv.escape-character", "\\");
-        this.nullLiteral = options.getString("csv.null-literal", "");
-        this.includeHeader = options.getBoolean("csv.include-header", false);
         this.filePath = context.filePath();
+        if (isTxtFormat) {
+            this.fieldDelimiter = options.get(CsvFileFormat.TXT_FIELD_DELIMITER);
+            this.quoteCharacter = options.get(CsvFileFormat.TXT_QUOTE_CHARACTER);
+            this.escapeCharacter = options.get(CsvFileFormat.TXT_ESCAPE_CHARACTER);
+            this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
+            this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
+        } else {
+            this.fieldDelimiter = options.get(CsvFileFormat.CSV_FIELD_DELIMITER);
+            this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
+            this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
+            this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
+            this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
+        }
 
         FileIO fileIO = context.fileIO();
         SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());

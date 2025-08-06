@@ -70,6 +70,4 @@ public enum BucketMode {
     public static final int UNAWARE_BUCKET = 0;
 
     public static final int POSTPONE_BUCKET = -2;
-
-    public static final int NO_NEED_BUCKET = -3;
 }

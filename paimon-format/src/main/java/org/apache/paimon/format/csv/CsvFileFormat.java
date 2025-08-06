@@ -42,63 +42,156 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
-/** CSV {@link FileFormat}. */
+/** CSV and TXT {@link FileFormat}. */
 public class CsvFileFormat extends FileFormat {
 
-    public static final String IDENTIFIER = "csv";
+    public static final String CSV_IDENTIFIER = "csv";
+    public static final String TXT_IDENTIFIER = "txt";
 
-    private static final ConfigOption<String> CSV_FIELD_DELIMITER =
+    // CSV-specific config options
+    protected static final ConfigOption<String> CSV_FIELD_DELIMITER =
             ConfigOptions.key("csv.field-delimiter")
                     .stringType()
                     .defaultValue(",")
                     .withDescription("The field delimiter for CSV format");
 
-    private static final ConfigOption<String> CSV_LINE_DELIMITER =
+    protected static final ConfigOption<String> CSV_LINE_DELIMITER =
             ConfigOptions.key("csv.line-delimiter")
                     .stringType()
                     .defaultValue("\n")
                     .withDescription("The line delimiter for CSV format");
 
-    private static final ConfigOption<String> CSV_QUOTE_CHARACTER =
+    protected static final ConfigOption<String> CSV_QUOTE_CHARACTER =
             ConfigOptions.key("csv.quote-character")
                     .stringType()
                     .defaultValue("\"")
                     .withDescription("The quote character for CSV format");
 
-    private static final ConfigOption<String> CSV_ESCAPE_CHARACTER =
+    protected static final ConfigOption<String> CSV_ESCAPE_CHARACTER =
             ConfigOptions.key("csv.escape-character")
                     .stringType()
                     .defaultValue("\\")
                     .withDescription("The escape character for CSV format");
 
-    private static final ConfigOption<Boolean> CSV_INCLUDE_HEADER =
+    protected static final ConfigOption<Boolean> CSV_INCLUDE_HEADER =
             ConfigOptions.key("csv.include-header")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to include header in CSV files");
 
-    private static final ConfigOption<String> CSV_NULL_LITERAL =
+    protected static final ConfigOption<String> CSV_NULL_LITERAL =
             ConfigOptions.key("csv.null-literal")
                     .stringType()
                     .defaultValue("")
                     .withDescription("The literal for null values in CSV format");
 
+    // TXT-specific config options
+    protected static final ConfigOption<String> TXT_FIELD_DELIMITER =
+            ConfigOptions.key("txt.field-delimiter")
+                    .stringType()
+                    .defaultValue("\001")
+                    .withDescription("The field delimiter for TXT format");
+
+    protected static final ConfigOption<String> TXT_LINE_DELIMITER =
+            ConfigOptions.key("txt.line-delimiter")
+                    .stringType()
+                    .defaultValue("\n")
+                    .withDescription("The line delimiter for TXT format");
+
+    protected static final ConfigOption<String> TXT_QUOTE_CHARACTER =
+            ConfigOptions.key("txt.quote-character")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription("The quote character for TXT format");
+
+    protected static final ConfigOption<String> TXT_ESCAPE_CHARACTER =
+            ConfigOptions.key("txt.escape-character")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription("The escape character for TXT format");
+
+    protected static final ConfigOption<Boolean> TXT_INCLUDE_HEADER =
+            ConfigOptions.key("txt.include-header")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to include header in TXT files");
+
+    protected static final ConfigOption<String> TXT_NULL_LITERAL =
+            ConfigOptions.key("txt.null-literal")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription("The literal for null values in TXT format");
+
     private final Options options;
+    private final boolean isTxtFormat;
 
     public CsvFileFormat(FormatContext context) {
-        super(IDENTIFIER);
-        this.options = getIdentifierPrefixOptions(context.options());
+        this(context, CSV_IDENTIFIER);
+    }
+
+    public CsvFileFormat(FormatContext context, String identifier) {
+        super(identifier);
+        this.isTxtFormat = TXT_IDENTIFIER.equals(identifier);
+        this.options = createOptionsWithDefaults(context.options(), identifier);
+    }
+
+    private Options createOptionsWithDefaults(Options originalOptions, String identifier) {
+        Options mergedOptions = originalOptions;
+
+        if (TXT_IDENTIFIER.equals(identifier)) {
+            // Apply TXT defaults if not explicitly set
+            if (!originalOptions.contains(TXT_FIELD_DELIMITER)) {
+                mergedOptions.set(TXT_FIELD_DELIMITER, "\001");
+            }
+            if (!originalOptions.contains(TXT_LINE_DELIMITER)) {
+                mergedOptions.set(TXT_LINE_DELIMITER, "\n");
+            }
+            if (!originalOptions.contains(TXT_QUOTE_CHARACTER)) {
+                mergedOptions.set(TXT_QUOTE_CHARACTER, "");
+            }
+            if (!originalOptions.contains(TXT_ESCAPE_CHARACTER)) {
+                mergedOptions.set(TXT_ESCAPE_CHARACTER, "");
+            }
+            if (!originalOptions.contains(TXT_INCLUDE_HEADER)) {
+                mergedOptions.set(TXT_INCLUDE_HEADER, false);
+            }
+            if (!originalOptions.contains(TXT_NULL_LITERAL)) {
+                mergedOptions.set(TXT_NULL_LITERAL, "");
+            }
+        } else {
+            // Apply CSV defaults if not explicitly set
+            if (!originalOptions.contains(CSV_FIELD_DELIMITER)) {
+                mergedOptions.set(CSV_FIELD_DELIMITER, ",");
+            }
+            if (!originalOptions.contains(CSV_LINE_DELIMITER)) {
+                mergedOptions.set(CSV_LINE_DELIMITER, "\n");
+            }
+            if (!originalOptions.contains(CSV_QUOTE_CHARACTER)) {
+                mergedOptions.set(CSV_QUOTE_CHARACTER, "\"");
+            }
+            if (!originalOptions.contains(CSV_ESCAPE_CHARACTER)) {
+                mergedOptions.set(CSV_ESCAPE_CHARACTER, "\\");
+            }
+            if (!originalOptions.contains(CSV_INCLUDE_HEADER)) {
+                mergedOptions.set(CSV_INCLUDE_HEADER, false);
+            }
+            if (!originalOptions.contains(CSV_NULL_LITERAL)) {
+                mergedOptions.set(CSV_NULL_LITERAL, "");
+            }
+        }
+
+        return mergedOptions;
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, options);
+        return new CsvReaderFactory(projectedRowType, options, isTxtFormat);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, options);
+        return new CsvWriterFactory(type, options, isTxtFormat);
     }
 
     @Override
@@ -147,10 +240,12 @@ public class CsvFileFormat extends FileFormat {
 
         private final RowType rowType;
         private final Options options;
+        private final boolean isTxtFormat;
 
-        public CsvWriterFactory(RowType rowType, Options options) {
+        public CsvWriterFactory(RowType rowType, Options options, boolean isTxtFormat) {
             this.rowType = rowType;
             this.options = options;
+            this.isTxtFormat = isTxtFormat;
         }
 
         @Override
@@ -158,7 +253,7 @@ public class CsvFileFormat extends FileFormat {
                 throws IOException {
             // Wrap the output stream to prevent premature closing/flushing
             PositionOutputStream protectedOut = new CloseShieldPositionOutputStream(out);
-            return new CsvFormatWriter(protectedOut, rowType, options);
+            return new CsvFormatWriter(protectedOut, rowType, options, isTxtFormat);
         }
 
         @Override
@@ -166,7 +261,7 @@ public class CsvFileFormat extends FileFormat {
                 throws IOException {
             // Direct file I/O management - this bypasses SingleFileWriter's stream management
             PositionOutputStream out = fileIO.newOutputStream(path, false);
-            return new CsvFormatWriter(out, rowType, options);
+            return new CsvFormatWriter(out, rowType, options, isTxtFormat);
         }
     }
 }

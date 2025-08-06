@@ -41,6 +41,7 @@ import java.time.format.DateTimeFormatter;
 /** CSV format writer implementation. */
 public class CsvFormatWriter implements FormatWriter {
 
+    private final boolean isTxtFormat;
     private final RowType rowType;
     private final String fieldDelimiter;
     private final String lineDelimiter;
@@ -58,15 +59,26 @@ public class CsvFormatWriter implements FormatWriter {
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options)
+    public CsvFormatWriter(
+            PositionOutputStream out, RowType rowType, Options options, boolean isTxtFormat)
             throws IOException {
         this.rowType = rowType;
-        this.fieldDelimiter = options.getString("csv.field-delimiter", ",");
-        this.lineDelimiter = options.getString("csv.line-delimiter", "\n");
-        this.quoteCharacter = options.getString("csv.quote-character", "\"");
-        this.escapeCharacter = options.getString("csv.escape-character", "\\");
-        this.nullLiteral = options.getString("csv.null-literal", "");
-        this.includeHeader = options.getBoolean("csv.include-header", false);
+        this.isTxtFormat = isTxtFormat;
+        if (isTxtFormat) {
+            this.fieldDelimiter = options.get(CsvFileFormat.TXT_FIELD_DELIMITER);
+            this.lineDelimiter = options.get(CsvFileFormat.TXT_LINE_DELIMITER);
+            this.quoteCharacter = options.get(CsvFileFormat.TXT_QUOTE_CHARACTER);
+            this.escapeCharacter = options.get(CsvFileFormat.TXT_ESCAPE_CHARACTER);
+            this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
+            this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
+        } else {
+            this.fieldDelimiter = options.get(CsvFileFormat.CSV_FIELD_DELIMITER);
+            this.lineDelimiter = options.get(CsvFileFormat.CSV_IDENTIFIER);
+            this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
+            this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
+            this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
+            this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
+        }
 
         this.outputStream = out;
         this.writer =
