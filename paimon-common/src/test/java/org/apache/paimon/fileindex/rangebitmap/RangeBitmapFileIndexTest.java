@@ -281,4 +281,60 @@ public class RangeBitmapFileIndexTest {
         assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 9)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(4));
     }
+
+    @Test
+    public void testOnlyNulls() {
+        IntType intType = new IntType();
+        FieldRef fieldRef = new FieldRef(0, "", intType);
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+        writer.writeRecord(null);
+        writer.writeRecord(null);
+
+        // build index
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        // test is null
+        assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+        // test is not null
+        assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // test EQ
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+        // test GT
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+    }
+
+    @Test
+    public void testBuildEmpty() {
+        IntType intType = new IntType();
+        FieldRef fieldRef = new FieldRef(0, "", intType);
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        // build index
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        // test is null
+        assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+        // test is not null
+        assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // test EQ
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+        // test GT
+        assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+    }
 }
