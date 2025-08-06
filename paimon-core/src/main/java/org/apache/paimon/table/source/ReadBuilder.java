@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
@@ -131,6 +132,12 @@ public interface ReadBuilder extends Serializable {
 
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);
+
+    /**
+     * Push TopN filter. Will filter the data as much as possible, but it is not guaranteed that it
+     * is a complete filter.
+     */
+    ReadBuilder withTopN(TopN topN);
 
     /**
      * Specify the shard to be read, and allocate sharded files to read records. Note that this
