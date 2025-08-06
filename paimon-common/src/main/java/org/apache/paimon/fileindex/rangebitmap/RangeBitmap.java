@@ -25,6 +25,8 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
@@ -40,8 +42,9 @@ public class RangeBitmap {
     public static final byte CURRENT_VERSION = VERSION_1;
 
     private final int rid;
-    private final Object min;
-    private final Object max;
+    @Nullable private final Object min;
+    @Nullable private final Object max;
+    private final int cardinality;
     private final int dictionaryOffset;
     private final int bsiOffset;
 
@@ -74,10 +77,9 @@ public class RangeBitmap {
             throw new RuntimeException("Invalid version " + version);
         }
         this.rid = headers.getInt();
-        // ignore cardinality
-        headers.getInt();
-        this.min = deserializer.deserialize(headers);
-        this.max = deserializer.deserialize(headers);
+        this.cardinality = headers.getInt();
+        this.min = cardinality <= 0 ? null : deserializer.deserialize(headers);
+        this.max = cardinality <= 0 ? null : deserializer.deserialize(headers);
         int dictionaryLength = headers.getInt();
 
         this.dictionaryOffset = offset + Integer.BYTES + headerLength;
@@ -89,6 +91,10 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 eq(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         int compareMin = comparator.compare(key, min);
         int compareMax = comparator.compare(key, max);
         if (compareMin == 0 && compareMax == 0) {
@@ -105,10 +111,17 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 neq(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
         return not(eq(key));
     }
 
     public RoaringBitmap32 lte(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         int compareMin = comparator.compare(key, min);
         int compareMax = comparator.compare(key, max);
         if (compareMax >= 0) {
@@ -121,6 +134,10 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 lt(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         int compareMin = comparator.compare(key, min);
         int compareMax = comparator.compare(key, max);
         if (compareMax > 0) {
@@ -133,6 +150,10 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 gte(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         int compareMin = comparator.compare(key, min);
         int compareMax = comparator.compare(key, max);
         if (compareMin <= 0) {
@@ -148,6 +169,10 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 gt(Object key) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         int compareMin = comparator.compare(key, min);
         int compareMax = comparator.compare(key, max);
         if (compareMin < 0) {
@@ -163,6 +188,10 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 in(List<Object> keys) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         RoaringBitmap32 bitmap = new RoaringBitmap32();
         for (Object key : keys) {
             bitmap.or(eq(key));
@@ -171,16 +200,28 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 notIn(List<Object> keys) {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         return not(in(keys));
     }
 
     public RoaringBitmap32 isNull() {
+        if (cardinality <= 0) {
+            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
+        }
+
         RoaringBitmap32 bitmap = isNotNull();
         bitmap.flip(0, rid);
         return bitmap;
     }
 
     public RoaringBitmap32 isNotNull() {
+        if (cardinality <= 0) {
+            return new RoaringBitmap32();
+        }
+
         return getBitSliceIndexBitmap().isNotNull();
     }
 
@@ -228,14 +269,14 @@ public class RangeBitmap {
 
         private int rid;
         private final TreeMap<Object, RoaringBitmap32> bitmaps;
-        private final Dictionary.Appender appender;
-        private final KeyFactory.KeySerializer serializer;
+        private final KeyFactory factory;
+        private final int limitedSerializedSizeInBytes;
 
         public Appender(KeyFactory factory, int limitedSerializedSizeInBytes) {
             this.rid = 0;
             this.bitmaps = new TreeMap<>(factory.createComparator());
-            this.appender = new ChunkedDictionary.Appender(factory, limitedSerializedSizeInBytes);
-            this.serializer = factory.createSerializer();
+            this.factory = factory;
+            this.limitedSerializedSizeInBytes = limitedSerializedSizeInBytes;
         }
 
         public void append(Object key) {
@@ -246,19 +287,17 @@ public class RangeBitmap {
         }
 
         public byte[] serialize() {
-            if (rid == 0) {
-                return new byte[] {};
-            }
-
             int code = 0;
             BitSliceIndexBitmap.Appender bsi =
                     new BitSliceIndexBitmap.Appender(0, bitmaps.size() - 1);
+            ChunkedDictionary.Appender dictionary =
+                    new ChunkedDictionary.Appender(factory, limitedSerializedSizeInBytes);
             for (Map.Entry<Object, RoaringBitmap32> entry : bitmaps.entrySet()) {
                 Object key = entry.getKey();
                 RoaringBitmap32 bitmap = entry.getValue();
 
                 // build the dictionary
-                appender.sortedAppend(key, code);
+                dictionary.sortedAppend(key, code);
 
                 // build the relationship between position and code by the bsi
                 Iterator<Integer> iterator = bitmap.iterator();
@@ -269,20 +308,23 @@ public class RangeBitmap {
                 code++;
             }
 
+            // serializer
+            KeyFactory.KeySerializer serializer = factory.createSerializer();
+
             // min & max
-            Object min = bitmaps.firstKey();
-            Object max = bitmaps.lastKey();
+            Object min = bitmaps.isEmpty() ? null : bitmaps.firstKey();
+            Object max = bitmaps.isEmpty() ? null : bitmaps.lastKey();
 
             int headerSize = 0;
             headerSize += Byte.BYTES; // version
             headerSize += Integer.BYTES; // rid
             headerSize += Integer.BYTES; // cardinality
-            headerSize += serializer.serializedSizeInBytes(min); // min
-            headerSize += serializer.serializedSizeInBytes(max); // max
+            headerSize += min == null ? 0 : serializer.serializedSizeInBytes(min); // min
+            headerSize += max == null ? 0 : serializer.serializedSizeInBytes(max); // max
             headerSize += Integer.BYTES; // dictionary length
 
             // dictionary
-            byte[] dictionarySerializeInBytes = appender.serialize();
+            byte[] dictionarySerializeInBytes = dictionary.serialize();
             int dictionaryLength = dictionarySerializeInBytes.length;
 
             // bsi
@@ -298,8 +340,12 @@ public class RangeBitmap {
             buffer.put(CURRENT_VERSION);
             buffer.putInt(rid);
             buffer.putInt(bitmaps.size());
-            serializer.serialize(buffer, min);
-            serializer.serialize(buffer, max);
+            if (min != null) {
+                serializer.serialize(buffer, min);
+            }
+            if (max != null) {
+                serializer.serialize(buffer, max);
+            }
             buffer.putInt(dictionaryLength);
 
             // write dictionary

@@ -193,13 +193,13 @@ public class ChunkedDictionary implements Dictionary {
                 throw new IllegalArgumentException("key should not be null");
             }
 
-            if (this.key != null && comparator.compare(this.key, key) > 0) {
+            if (this.key != null && comparator.compare(this.key, key) >= 0) {
                 throw new IllegalArgumentException("key can not out of order");
             } else {
                 this.key = key;
             }
 
-            if (this.code != null && this.code.compareTo(code) > 0) {
+            if (this.code != null && this.code.compareTo(code) >= 0) {
                 throw new IllegalArgumentException("code can not out of order");
             } else {
                 this.code = code;

@@ -23,6 +23,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -107,5 +108,40 @@ public class BitSliceIndexBitmapTest {
         for (Pair<Integer, Integer> pair : pairs) {
             assertThat(bsi.get(pair.getKey())).isEqualTo(pair.getValue());
         }
+    }
+
+    @Test
+    public void testSingle() throws IOException {
+        int size = 5;
+        BitSliceIndexBitmap.Appender appender = new BitSliceIndexBitmap.Appender(0, 0);
+        for (int i = 0; i < size; i++) {
+            appender.append(i, 0);
+        }
+
+        ByteBuffer serialize = appender.serialize();
+        ByteArraySeekableStream in = new ByteArraySeekableStream(serialize.array());
+        BitSliceIndexBitmap bsi = new BitSliceIndexBitmap(in, 0);
+
+        assertThat(bsi.isNotNull()).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        assertThat(bsi.eq(0)).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        assertThat(bsi.gt(0)).isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(bsi.gte(0)).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+        for (int i = 0; i < 5; i++) {
+            assertThat(bsi.get(i)).isEqualTo(0);
+        }
+    }
+
+    @Test
+    public void testBuildEmpty() throws IOException {
+        BitSliceIndexBitmap.Appender appender = new BitSliceIndexBitmap.Appender(0, 0);
+
+        ByteBuffer serialize = appender.serialize();
+        ByteArraySeekableStream in = new ByteArraySeekableStream(serialize.array());
+        BitSliceIndexBitmap bsi = new BitSliceIndexBitmap(in, 0);
+
+        assertThat(bsi.isNotNull()).isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(bsi.eq(0)).isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(bsi.gt(0)).isEqualTo(RoaringBitmap32.bitmapOf());
+        assertThat(bsi.gte(0)).isEqualTo(RoaringBitmap32.bitmapOf());
     }
 }
