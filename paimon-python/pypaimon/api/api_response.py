@@ -17,12 +17,13 @@ limitations under the License.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Generic, List
 from dataclasses import dataclass
+from typing import Dict, Generic, List, Optional
 
 from pypaimon.common.rest_json import json_field
+from pypaimon.schema.schema import Schema
+
 from .typedef import T
-from .. import Schema
 
 
 @dataclass

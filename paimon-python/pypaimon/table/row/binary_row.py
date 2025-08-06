@@ -18,11 +18,11 @@
 
 import struct
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Any
+from typing import Any, List
 
-from pypaimon.schema.data_types import DataField, DataType, AtomicType
+from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.row_kind import RowKind
 
 

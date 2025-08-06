@@ -23,11 +23,12 @@ import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
-from typing import Optional, Dict
+from typing import Dict, Optional
 
-from .token_loader import DLFTokenLoader, DLFToken
-from .typedef import RESTAuthParameter
 from pypaimon.common.config import CatalogOptions
+
+from .token_loader import DLFToken, DLFTokenLoader
+from .typedef import RESTAuthParameter
 
 
 class AuthProvider(ABC):

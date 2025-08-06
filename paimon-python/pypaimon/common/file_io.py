@@ -20,13 +20,14 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-from urllib.parse import urlparse, splitport
+from typing import Any, Dict, List, Optional
+from urllib.parse import splitport, urlparse
 
 import pyarrow
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class FileIO:
@@ -299,10 +300,10 @@ class FileIO:
     def write_orc(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
         try:
             import pyarrow.orc as orc
-
+            table = pyarrow.Table.from_batches([data])
             with self.new_output_stream(path) as output_stream:
                 orc.write_table(
-                    data,
+                    table,
                     output_stream,
                     compression=compression,
                     **kwargs
@@ -312,5 +313,11 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: Path, table: pyarrow.RecordBatch, schema: Optional[Dict[str, Any]] = None, **kwargs):
-        raise ValueError("Unsupported write_avro yet")
+    def write_avro(self, path: Path, data: pyarrow.RecordBatch, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+        import fastavro
+
+        if avro_schema is None:
+            avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
+        records = data.to_pylist()
+        with self.new_output_stream(path) as output_stream:
+            fastavro.writer(output_stream, avro_schema, records, **kwargs)

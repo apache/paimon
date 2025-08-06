@@ -20,7 +20,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import pyarrow
 
@@ -360,21 +360,17 @@ class DataTypeParser:
         )
 
 
-class PyarrowFieldParse:
+class PyarrowFieldParser:
 
     @staticmethod
-    def to_pyarrow_field(data_field: DataField) -> pyarrow.Field:
-        pa_field_type = PyarrowFieldParse.to_pyarrow_data_type(data_field.type)
-        metadata = {}
-        if data_field.description:
-            metadata[b'description'] = data_field.description.encode('utf-8')
-        return pyarrow.field(data_field.name, pa_field_type, nullable=data_field.type.nullable, metadata=metadata)
-
-    @staticmethod
-    def to_pyarrow_data_type(data_type: DataType) -> pyarrow.DataType:
+    def from_paimon_type(data_type: DataType) -> pyarrow.DataType:
         if isinstance(data_type, AtomicType):
             type_name = data_type.type.upper()
-            if type_name == 'INT':
+            if type_name == 'TINYINT':
+                return pyarrow.int8()
+            elif type_name == 'SMALLINT':
+                return pyarrow.int16()
+            elif type_name == 'INT':
                 return pyarrow.int32()
             elif type_name == 'BIGINT':
                 return pyarrow.int64()
@@ -402,31 +398,40 @@ class PyarrowFieldParse:
             else:
                 raise ValueError(f"Unsupported data type: {type_name}")
         elif isinstance(data_type, ArrayType):
-            return pyarrow.list_(PyarrowFieldParse.to_pyarrow_data_type(data_type.element))
+            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
         elif isinstance(data_type, MapType):
-            key_type = PyarrowFieldParse.to_pyarrow_data_type(data_type.key)
-            value_type = PyarrowFieldParse.to_pyarrow_data_type(data_type.value)
+            key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
+            value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
             return pyarrow.map_(key_type, value_type)
         else:
             raise ValueError(f"Unsupported data type: {data_type}")
 
     @staticmethod
-    def from_pyarrow_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
-        data_type = PyarrowFieldParse.from_pyarrow_data_type(pa_field.type, pa_field.nullable)
-        description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
-            if pa_field.metadata and b'description' in pa_field.metadata else None
-        return DataField(
-            id=field_idx,
-            name=pa_field.name,
-            type=data_type,
-            description=description
-        )
+    def from_paimon_field(data_field: DataField) -> pyarrow.Field:
+        pa_field_type = PyarrowFieldParser.from_paimon_type(data_field.type)
+        metadata = {}
+        if data_field.description:
+            metadata[b'description'] = data_field.description.encode('utf-8')
+        return pyarrow.field(data_field.name, pa_field_type, nullable=data_field.type.nullable, metadata=metadata)
 
     @staticmethod
-    def from_pyarrow_data_type(pa_type: pyarrow.DataType, nullable: bool) -> DataType:
+    def from_paimon_schema(data_fields: List[DataField]):
+        pa_fields = []
+        for field in data_fields:
+            pa_fields.append(PyarrowFieldParser.from_paimon_field(field))
+        return pyarrow.schema(pa_fields)
+
+    @staticmethod
+    def to_paimon_type(pa_type: pyarrow.DataType, nullable: bool) -> DataType:
         type_name = str(pa_type)
-        if type_name.startswith('int') or type_name.startswith('uint'):
+        if type_name == "int8":
+            type_name = 'TINYINT'
+        elif type_name == "int16":
+            type_name = 'SMALLINT'
+        elif type_name == "int32":
             type_name = 'INT'
+        elif type_name == "int64":
+            type_name = 'BIGINT'
         elif type_name.startswith('float'):
             type_name = 'FLOAT'
         elif type_name.startswith('double'):
@@ -450,22 +455,98 @@ class PyarrowFieldParse:
                 type_name = 'DECIMAL(38,18)'
         elif type_name.startswith('list'):
             pa_type: pyarrow.ListType
-            element_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.value_type, nullable)
+            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
             return ArrayType(nullable, element_type)
         elif type_name.startswith('map'):
             pa_type: pyarrow.MapType
-            key_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.key_type, nullable)
-            value_type = PyarrowFieldParse.from_pyarrow_data_type(pa_type.item_type, nullable)
+            key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
+            value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
         else:
             raise ValueError(f"Unknown type: {type_name}")
         return AtomicType(type_name)
 
     @staticmethod
-    def parse_pyarrow_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+    def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
+        data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+        description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
+            if pa_field.metadata and b'description' in pa_field.metadata else None
+        return DataField(
+            id=field_idx,
+            name=pa_field.name,
+            type=data_type,
+            description=description
+        )
+
+    @staticmethod
+    def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
         fields = []
         for i, pa_field in enumerate(pa_schema):
             pa_field: pyarrow.Field
-            data_field = PyarrowFieldParse.from_pyarrow_field(i, pa_field)
+            data_field = PyarrowFieldParser.to_paimon_field(i, pa_field)
             fields.append(data_field)
         return fields
+
+    @staticmethod
+    def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
+        if pyarrow.types.is_integer(field_type):
+            if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
+               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                return "int"
+            else:
+                return "long"
+        elif pyarrow.types.is_float32(field_type):
+            return "float"
+        elif pyarrow.types.is_float64(field_type):
+            return "double"
+        elif pyarrow.types.is_boolean(field_type):
+            return "boolean"
+        elif pyarrow.types.is_string(field_type) or pyarrow.types.is_large_string(field_type):
+            return "string"
+        elif pyarrow.types.is_binary(field_type) or pyarrow.types.is_large_binary(field_type):
+            return "bytes"
+        elif pyarrow.types.is_decimal(field_type):
+            return {
+                "type": "bytes",
+                "logicalType": "decimal",
+                "precision": field_type.precision,
+                "scale": field_type.scale,
+            }
+        elif pyarrow.types.is_date(field_type):
+            return {"type": "int", "logicalType": "date"}
+        elif pyarrow.types.is_timestamp(field_type):
+            unit = field_type.unit
+            if unit == 'us':
+                return {"type": "long", "logicalType": "timestamp-micros"}
+            elif unit == 'ms':
+                return {"type": "long", "logicalType": "timestamp-millis"}
+            else:
+                return {"type": "long", "logicalType": "timestamp-micros"}
+        elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
+            value_field = field_type.value_field
+            return {
+                "type": "array",
+                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name)
+            }
+        elif pyarrow.types.is_struct(field_type):
+            return PyarrowFieldParser.to_avro_schema(field_type, name=f"{field_name}_record")
+
+        raise ValueError(f"Unsupported pyarrow type for Avro conversion: {field_type}")
+
+    @staticmethod
+    def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
+                       name: str = "Root",
+                       namespace: str = "pyarrow.avro"
+                       ) -> Dict[str, Any]:
+        fields = []
+        for field in pyarrow_schema:
+            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name)
+            if field.nullable:
+                avro_type = ["null", avro_type]
+            fields.append({"name": field.name, "type": avro_type})
+        return {
+            "type": "record",
+            "name": name,
+            "namespace": namespace,
+            "fields": fields,
+        }

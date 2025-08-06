@@ -19,15 +19,16 @@ import shutil
 import tempfile
 import unittest
 import uuid
-import pandas
 from pathlib import Path
+
+import pandas
 
 from pypaimon.api import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.schema.data_types import DataField, AtomicType
-from pypaimon.schema.table_schema import TableSchema
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.pvfs import PaimonVirtualFileSystem
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.api_test import RESTCatalogServer
 
 

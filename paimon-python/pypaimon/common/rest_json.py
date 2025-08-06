@@ -17,7 +17,7 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Type, Dict, TypeVar, get_origin, get_args, Union
+from typing import Any, Dict, Type, TypeVar, Union, get_args, get_origin
 
 T = TypeVar("T")
 

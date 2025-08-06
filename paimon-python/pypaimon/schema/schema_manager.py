@@ -18,8 +18,8 @@
 from pathlib import Path
 from typing import Optional
 
-from pypaimon import Schema
 from pypaimon.common.file_io import FileIO
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 
@@ -92,21 +92,3 @@ class SchemaManager:
                 except ValueError:
                     continue
         return versions
-
-    @staticmethod
-    def _check_schema_for_external_table(exists_schema: Schema, new_schema: Schema):
-        if ((not new_schema.pa_schema or new_schema.pa_schema.equals(exists_schema.pa_schema))
-                and (not new_schema.partition_keys or new_schema.partition_keys == exists_schema.partition_keys)
-                and (not new_schema.primary_keys or new_schema.primary_keys == exists_schema.primary_keys)):
-            exists_options = exists_schema.options
-            new_options = new_schema.options
-            for key, value in new_options.items():
-                if (key != 'owner' and key != 'path'
-                        and (key not in exists_options or exists_options[key] != value)):
-                    raise ValueError(
-                        f"New schema's options are not equal to the exists schema's, "
-                        f"new schema: {new_options}, exists schema: {exists_options}")
-        else:
-            raise ValueError(
-                f"New schema is not equal to the exists schema, "
-                f"new schema: {new_schema}, exists schema: {exists_schema}")

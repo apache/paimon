@@ -14,15 +14,3 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
-
-from .schema.schema import Schema
-from .catalog.catalog import Catalog
-from .catalog.database import Database
-from .table.table import Table
-
-__all__ = [
-    'Schema',
-    'Catalog',
-    'Database',
-    'Table',
-]

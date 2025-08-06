@@ -17,8 +17,8 @@ limitations under the License.
 """
 from typing import Optional
 
-from pypaimon.common.identifier import Identifier
 from pypaimon.catalog.catalog_loader import CatalogLoader
+from pypaimon.common.identifier import Identifier
 
 
 class CatalogEnvironment:

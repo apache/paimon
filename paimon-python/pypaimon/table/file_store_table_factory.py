@@ -17,8 +17,8 @@ limitations under the License.
 """
 from pathlib import Path
 
-from pypaimon.schema.table_schema import TableSchema
 from pypaimon.common.file_io import FileIO
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 

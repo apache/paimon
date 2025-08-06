@@ -21,12 +21,12 @@ import uuid
 
 from pypaimon.api import ConfigResponse, Identifier
 from pypaimon.api.auth import BearTokenAuthProvider
-
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-from pypaimon.schema.data_types import DataField, ArrayType, AtomicType, MapType
+from pypaimon.catalog.table_metadata import TableMetadata
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
+                                        MapType)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.rest_server import RESTCatalogServer
 

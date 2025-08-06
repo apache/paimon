@@ -16,16 +16,18 @@
 #  under the License.
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import Optional, Dict
+from datetime import datetime, timezone
+from typing import Dict, Optional
 from urllib.parse import urljoin
+
 import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
-from pypaimon.common.rest_json import json_field, JSON
 from pypaimon.common.config import CatalogOptions
+from pypaimon.common.rest_json import JSON, json_field
+
 from .client import ExponentialRetry
 
 

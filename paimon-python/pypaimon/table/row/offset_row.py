@@ -18,8 +18,7 @@
 
 from typing import Optional
 
-from pypaimon.table.row.internal_row import InternalRow
-from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.internal_row import InternalRow, RowKind
 
 
 class OffsetRow(InternalRow):

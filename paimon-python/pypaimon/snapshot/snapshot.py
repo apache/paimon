@@ -17,8 +17,8 @@
 ################################################################################
 
 import re
-from dataclasses import dataclass, fields, asdict
-from typing import Optional, Dict, Any
+from dataclasses import asdict, dataclass, fields
+from typing import Any, Dict, Optional
 
 
 @dataclass

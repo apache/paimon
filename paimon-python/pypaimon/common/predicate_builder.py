@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Any, Optional
+from typing import Any, List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField

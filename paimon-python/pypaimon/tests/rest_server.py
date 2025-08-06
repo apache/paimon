@@ -18,24 +18,28 @@
 
 import logging
 import re
+import threading
 import time
 import uuid
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import pypaimon.api as api
-from ..api import RenameTableRequest, CreateTableRequest, CreateDatabaseRequest, Identifier
-from ..api.api_response import (ConfigResponse, ListDatabasesResponse, GetDatabaseResponse,
-                                GetTableResponse, ListTablesResponse,
-                                RESTResponse, PagedList)
 from pypaimon.common.rest_json import JSON
 from pypaimon.schema.table_schema import TableSchema
-from ..catalog.catalog_exception import DatabaseNoPermissionException, TableNotExistException, \
-    DatabaseNotExistException, TableNoPermissionException
+
+from ..api import (CreateDatabaseRequest, CreateTableRequest, Identifier,
+                   RenameTableRequest)
+from ..api.api_response import (ConfigResponse, GetDatabaseResponse,
+                                GetTableResponse, ListDatabasesResponse,
+                                ListTablesResponse, PagedList, RESTResponse)
+from ..catalog.catalog_exception import (DatabaseNoPermissionException,
+                                         DatabaseNotExistException,
+                                         TableNoPermissionException,
+                                         TableNotExistException)
 from ..catalog.table_metadata import TableMetadata
 from ..schema.schema import Schema
 
