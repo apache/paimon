@@ -38,7 +38,7 @@ class PkReaderTest(unittest.TestCase):
 
         cls.pa_schema = pa.schema([
             ('user_id', pa.int32()),
-            ('item_id', pa.int32()),
+            ('item_id', pa.int64()),
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])

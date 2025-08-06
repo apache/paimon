@@ -21,17 +21,29 @@ class ReaderBasicTest(unittest.TestCase):
         cls.catalog.create_database('default', False)
 
         cls.pa_schema = pa.schema([
-            ('user_id', pa.int32()),
-            ('item_id', pa.int32()),
+            ('user_id', pa.int64()),
+            ('item_id', pa.int64()),
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
-        cls.expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=cls.pa_schema)
+        cls.raw_data = {
+            'user_id': [1, 2, 3, 4, 5],
+            'item_id': [1001, 1002, 1003, 1004, 1005],
+            'behavior': ['a', 'b', 'c', None, 'e'],
+            'dt': ['p1', 'p1', 'p1', 'p1', 'p2'],
+        }
+        cls.expected = pa.Table.from_pydict(cls.raw_data, schema=cls.pa_schema)
+
+        schema = Schema.from_pyarrow_schema(cls.pa_schema)
+        cls.catalog.create_table('default.test_reader_iterator', schema, False)
+        cls.table = cls.catalog.get_table('default.test_reader_iterator')
+        write_builder = cls.table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(cls.expected)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
 
     @classmethod
     def tearDownClass(cls):
@@ -64,3 +76,24 @@ class ReaderBasicTest(unittest.TestCase):
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
         self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
+
+    def testReaderIterator(self):
+        read_builder = self.table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        iterator = table_read.to_iterator(splits)
+        result = []
+        value = next(iterator, None)
+        while value is not None:
+            result.append(value.get_field(1))
+            value = next(iterator, None)
+        self.assertEqual(result, [1001, 1002, 1003, 1004, 1005])
+
+    def testReaderDuckDB(self):
+        read_builder = self.table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        duckdb_con = table_read.to_duckdb(splits, 'duckdb_table')
+        actual = duckdb_con.query("SELECT * FROM duckdb_table").fetchdf()
+        expect = pd.DataFrame(self.raw_data)
+        pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
