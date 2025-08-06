@@ -128,7 +128,22 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
-    s"PaimonScan: [${table.name}]" + pushedFiltersStr +
+    val pushedTopNFilterStr = pushDownTopN
+      .map(
+        topN => {
+          val ordersStr = topN
+            .orders()
+            .asScala
+            .map(
+              x => {
+                s"${x.field().name()} ${x.direction().toString} ${x.nullOrdering().toString}"
+              })
+            .mkString(", ")
+
+          s", PushedTopNFilter: [Sort($ordersStr),Limit(${topN.limit()})]"
+        })
+      .getOrElse("")
+    s"PaimonScan: [${table.name}]" + pushedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

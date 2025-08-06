@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -28,6 +29,9 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.TopNVisitor;
 import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
@@ -40,6 +44,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -81,6 +86,22 @@ public class FileIndexPredicate implements Closeable {
                             + (path == null ? "in scan stage" : path.toString()));
         }
         return result;
+    }
+
+    public FileIndexResult evaluate(@Nullable TopN topN, FileIndexResult result) {
+        if (topN == null || !result.remain()) {
+            return result;
+        }
+
+        // for now we only support single column.
+        List<SortValue> orders = topN.orders();
+        if (orders.size() != 1) {
+            return result;
+        }
+
+        String requiredName = orders.get(0).field().name();
+        Set<FileIndexReader> readers = reader.readColumnIndex(requiredName);
+        return new FileIndexTopNTest(readers, result).test(topN);
     }
 
     private Set<String> getRequiredNames(Predicate filePredicate) {
@@ -166,6 +187,41 @@ public class FileIndexPredicate implements Closeable {
                 }
                 return compoundResult == null ? REMAIN : compoundResult;
             }
+        }
+    }
+
+    /** TopN test worker. */
+    private static class FileIndexTopNTest implements TopNVisitor<FileIndexResult> {
+
+        private final Set<FileIndexReader> readers;
+        private final FileIndexResult result;
+
+        public FileIndexTopNTest(Set<FileIndexReader> readers, FileIndexResult result) {
+            this.readers = readers;
+            this.result = result;
+        }
+
+        @Override
+        public FileIndexResult visit(TopN topN) {
+            for (FileIndexReader reader : readers) {
+                FileIndexResult ret = reader.visitTopN(topN, result);
+                if (!REMAIN.equals(ret)) {
+                    ret.remain();
+                    return ret;
+                }
+            }
+            return result;
+        }
+
+        public FileIndexResult test(TopN topN) {
+            int k = topN.limit();
+            if (result instanceof BitmapIndexResult) {
+                long cardinality = ((BitmapIndexResult) result).get().getCardinality();
+                if (cardinality <= k) {
+                    return result;
+                }
+            }
+            return topN.visit(this);
         }
     }
 }

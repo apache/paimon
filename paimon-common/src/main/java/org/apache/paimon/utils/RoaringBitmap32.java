@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
+import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.RoaringBitmap;
 
 import java.io.DataInput;
@@ -103,6 +104,22 @@ public class RoaringBitmap32 {
 
     public boolean intersects(long minimum, long supremum) {
         return roaringBitmap.intersects(minimum, supremum);
+    }
+
+    public RoaringBitmap32 limit(int k) {
+        return new RoaringBitmap32(roaringBitmap.limit(k));
+    }
+
+    public void remove(RoaringBitmap32 from, long n) {
+        if (n <= 0) {
+            return;
+        }
+
+        IntIterator iterator = from.roaringBitmap.getIntIterator();
+        while (iterator.hasNext() && n > 0) {
+            roaringBitmap.remove(iterator.next());
+            n--;
+        }
     }
 
     public RoaringBitmap32 clone() {
