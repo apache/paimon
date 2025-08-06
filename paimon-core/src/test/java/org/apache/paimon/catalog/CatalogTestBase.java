@@ -570,7 +570,7 @@ public abstract class CatalogTestBase {
         if (!supportsFormatTable()) {
             return;
         }
-        Random RANDOM = new Random();
+        Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
         String[] formats = {"orc", "parquet", "csv", "json"};
@@ -580,7 +580,7 @@ public abstract class CatalogTestBase {
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
                 datas[j] =
-                        GenericRow.of(RANDOM.nextInt(), RANDOM.nextInt(), (short) RANDOM.nextInt());
+                        GenericRow.of(random.nextInt(), random.nextInt(), (short) random.nextInt());
             }
 
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
