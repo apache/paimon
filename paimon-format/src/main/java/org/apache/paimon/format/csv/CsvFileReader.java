@@ -76,14 +76,13 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             throws IOException {
         this.rowType = rowType;
         this.filePath = context.filePath();
+        this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
         if (isTxtFormat) {
-            this.fieldDelimiter = options.get(CsvFileFormat.TXT_FIELD_DELIMITER);
             this.quoteCharacter = options.get(CsvFileFormat.TXT_QUOTE_CHARACTER);
             this.escapeCharacter = options.get(CsvFileFormat.TXT_ESCAPE_CHARACTER);
             this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
             this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
         } else {
-            this.fieldDelimiter = options.get(CsvFileFormat.CSV_FIELD_DELIMITER);
             this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
             this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
             this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);

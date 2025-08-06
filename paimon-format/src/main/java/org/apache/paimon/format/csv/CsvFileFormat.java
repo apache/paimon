@@ -48,12 +48,11 @@ public class CsvFileFormat extends FileFormat {
     public static final String CSV_IDENTIFIER = "csv";
     public static final String TXT_IDENTIFIER = "txt";
 
-    // CSV-specific config options
-    protected static final ConfigOption<String> CSV_FIELD_DELIMITER =
-            ConfigOptions.key("csv.field-delimiter")
+    protected static final ConfigOption<String> FIELD_DELIMITER =
+            ConfigOptions.key("field-delimiter")
                     .stringType()
-                    .defaultValue(",")
-                    .withDescription("The field delimiter for CSV format");
+                    .defaultValue("\001")
+                    .withDescription("The field delimiter for CSV or TXT format");
 
     protected static final ConfigOption<String> CSV_LINE_DELIMITER =
             ConfigOptions.key("csv.line-delimiter")
@@ -84,13 +83,6 @@ public class CsvFileFormat extends FileFormat {
                     .stringType()
                     .defaultValue("")
                     .withDescription("The literal for null values in CSV format");
-
-    // TXT-specific config options
-    protected static final ConfigOption<String> TXT_FIELD_DELIMITER =
-            ConfigOptions.key("txt.field-delimiter")
-                    .stringType()
-                    .defaultValue("\001")
-                    .withDescription("The field delimiter for TXT format");
 
     protected static final ConfigOption<String> TXT_LINE_DELIMITER =
             ConfigOptions.key("txt.line-delimiter")
@@ -132,55 +124,7 @@ public class CsvFileFormat extends FileFormat {
     public CsvFileFormat(FormatContext context, String identifier) {
         super(identifier);
         this.isTxtFormat = TXT_IDENTIFIER.equals(identifier);
-        this.options = createOptionsWithDefaults(context.options(), identifier);
-    }
-
-    private Options createOptionsWithDefaults(Options originalOptions, String identifier) {
-        Options mergedOptions = originalOptions;
-
-        if (TXT_IDENTIFIER.equals(identifier)) {
-            // Apply TXT defaults if not explicitly set
-            if (!originalOptions.contains(TXT_FIELD_DELIMITER)) {
-                mergedOptions.set(TXT_FIELD_DELIMITER, "\001");
-            }
-            if (!originalOptions.contains(TXT_LINE_DELIMITER)) {
-                mergedOptions.set(TXT_LINE_DELIMITER, "\n");
-            }
-            if (!originalOptions.contains(TXT_QUOTE_CHARACTER)) {
-                mergedOptions.set(TXT_QUOTE_CHARACTER, "");
-            }
-            if (!originalOptions.contains(TXT_ESCAPE_CHARACTER)) {
-                mergedOptions.set(TXT_ESCAPE_CHARACTER, "");
-            }
-            if (!originalOptions.contains(TXT_INCLUDE_HEADER)) {
-                mergedOptions.set(TXT_INCLUDE_HEADER, false);
-            }
-            if (!originalOptions.contains(TXT_NULL_LITERAL)) {
-                mergedOptions.set(TXT_NULL_LITERAL, "");
-            }
-        } else {
-            // Apply CSV defaults if not explicitly set
-            if (!originalOptions.contains(CSV_FIELD_DELIMITER)) {
-                mergedOptions.set(CSV_FIELD_DELIMITER, ",");
-            }
-            if (!originalOptions.contains(CSV_LINE_DELIMITER)) {
-                mergedOptions.set(CSV_LINE_DELIMITER, "\n");
-            }
-            if (!originalOptions.contains(CSV_QUOTE_CHARACTER)) {
-                mergedOptions.set(CSV_QUOTE_CHARACTER, "\"");
-            }
-            if (!originalOptions.contains(CSV_ESCAPE_CHARACTER)) {
-                mergedOptions.set(CSV_ESCAPE_CHARACTER, "\\");
-            }
-            if (!originalOptions.contains(CSV_INCLUDE_HEADER)) {
-                mergedOptions.set(CSV_INCLUDE_HEADER, false);
-            }
-            if (!originalOptions.contains(CSV_NULL_LITERAL)) {
-                mergedOptions.set(CSV_NULL_LITERAL, "");
-            }
-        }
-
-        return mergedOptions;
+        this.options = context.options();
     }
 
     @Override

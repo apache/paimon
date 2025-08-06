@@ -51,7 +51,6 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
     private final RowType rowType;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
-
     private boolean forceBufferSpill = false;
     protected final Map<BinaryRow, RecordWriter<InternalRow>> writers;
 

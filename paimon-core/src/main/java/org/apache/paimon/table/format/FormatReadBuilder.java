@@ -27,7 +27,6 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -204,7 +203,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
         for (int i = 0; i < files.size(); i++) {
             DataFileMeta file = files.get(i);
-            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+            String formatIdentifier = options.formatType();
             long schemaId = file.schemaId();
 
             Supplier<FormatReaderMapping> formatSupplier =
