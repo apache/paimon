@@ -18,11 +18,8 @@
 
 package org.apache.paimon.format.csv;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -32,7 +29,6 @@ import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -40,20 +36,16 @@ import javax.annotation.Nullable;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
+
+import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** CSV file reader implementation. */
 public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     private final RowType rowType;
     private final String fieldDelimiter;
-    private final String quoteCharacter;
-    private final String escapeCharacter;
     private final String nullLiteral;
     private final boolean includeHeader;
     private final Path filePath;
@@ -78,13 +70,9 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         this.filePath = context.filePath();
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
         if (isTxtFormat) {
-            this.quoteCharacter = options.get(CsvFileFormat.TXT_QUOTE_CHARACTER);
-            this.escapeCharacter = options.get(CsvFileFormat.TXT_ESCAPE_CHARACTER);
             this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
             this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
         } else {
-            this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
-            this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
             this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
             this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         }
@@ -162,7 +150,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     }
 
     private InternalRow parseCsvLine(String line) {
-        String[] fields = splitCsvLine(line);
+        String[] fields = line.split(fieldDelimiter);
         Object[] values = new Object[rowType.getFieldCount()];
 
         for (int i = 0; i < Math.min(fields.length, rowType.getFieldCount()); i++) {
@@ -177,65 +165,22 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         return GenericRow.of(values);
     }
 
-    private String[] splitCsvLine(String line) {
-        // Simple CSV parsing - could be enhanced for proper quote handling
-        return line.split(fieldDelimiter, -1);
-    }
-
     private Object parseField(String field, DataType dataType) {
-        if (field == null || field.equals(nullLiteral)) {
+        if (field == null || field.equals(nullLiteral) || "\"".equals(field)) {
             return null;
         }
-
         DataTypeRoot typeRoot = dataType.getTypeRoot();
-        try {
-            switch (typeRoot) {
-                case BOOLEAN:
-                    return Boolean.parseBoolean(field);
-                case TINYINT:
-                    return Byte.parseByte(field);
-                case SMALLINT:
-                    return Short.parseShort(field);
-                case INTEGER:
-                    return Integer.parseInt(field);
-                case BIGINT:
-                    return Long.parseLong(field);
-                case FLOAT:
-                    return Float.parseFloat(field);
-                case DOUBLE:
-                    return Double.parseDouble(field);
-                case DECIMAL:
-                    DecimalType decimalType = (DecimalType) dataType;
-                    return Decimal.fromBigDecimal(
-                            new BigDecimal(field),
-                            decimalType.getPrecision(),
-                            decimalType.getScale());
-                case CHAR:
-                case VARCHAR:
-                    return BinaryString.fromString(field);
-                case BINARY:
-                case VARBINARY:
-                    return field.getBytes(StandardCharsets.UTF_8);
-                case DATE:
-                    LocalDate date = LocalDate.parse(field, DATE_FORMATTER);
-                    return (int) date.toEpochDay();
-                case TIMESTAMP_WITHOUT_TIME_ZONE:
-                    LocalDateTime dateTime;
-                    try {
-                        dateTime = LocalDateTime.parse(field, TIMESTAMP_FORMATTER);
-                    } catch (DateTimeParseException e) {
-                        // Try without time part
-                        LocalDate date2 = LocalDate.parse(field, DATE_FORMATTER);
-                        dateTime = date2.atStartOfDay();
-                    }
-                    return Timestamp.fromLocalDateTime(dateTime);
-                default:
-                    // For complex types, treat as string
-                    return field;
-            }
-        } catch (Exception e) {
-            // Return as string if parsing fails
-            return BinaryString.fromString(field);
+        switch (typeRoot) {
+            case BINARY:
+            case VARBINARY:
+                // Assume base64 encoded bytes
+                try {
+                    return java.util.Base64.getDecoder().decode(field);
+                } catch (IllegalArgumentException e) {
+                    throw new RuntimeException("Failed to decode base64 binary data: " + field, e);
+                }
+            default:
+                return castFromString(field, dataType);
         }
     }
 }

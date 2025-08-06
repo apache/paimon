@@ -81,7 +81,7 @@ public class CsvFileFormat extends FileFormat {
     protected static final ConfigOption<String> CSV_NULL_LITERAL =
             ConfigOptions.key("csv.null-literal")
                     .stringType()
-                    .defaultValue("")
+                    .defaultValue("null")
                     .withDescription("The literal for null values in CSV format");
 
     protected static final ConfigOption<String> TXT_LINE_DELIMITER =
@@ -111,7 +111,7 @@ public class CsvFileFormat extends FileFormat {
     protected static final ConfigOption<String> TXT_NULL_LITERAL =
             ConfigOptions.key("txt.null-literal")
                     .stringType()
-                    .defaultValue("")
+                    .defaultValue("null")
                     .withDescription("The literal for null values in TXT format");
 
     private final Options options;

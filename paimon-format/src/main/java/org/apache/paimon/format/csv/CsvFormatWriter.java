@@ -24,11 +24,17 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.CloseShieldOutputStream;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.json.RowToJsonConverter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -36,12 +42,16 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
+import java.util.TimeZone;
+
+import static org.apache.paimon.utils.DateTimeUtils.timestampWithLocalZoneToTimestamp;
 
 /** CSV format writer implementation. */
 public class CsvFormatWriter implements FormatWriter {
 
-    private final boolean isTxtFormat;
     private final RowType rowType;
     private final String fieldDelimiter;
     private final String lineDelimiter;
@@ -54,16 +64,28 @@ public class CsvFormatWriter implements FormatWriter {
     private final PositionOutputStream outputStream;
     private boolean headerWritten = false;
 
+    private final RowToJsonConverter converter;
+    private final ObjectMapper objectMapper;
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter FORMATTER_0 =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter FORMATTER_1 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.S");
+    private static final DateTimeFormatter FORMATTER_2 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SS");
+    private static final DateTimeFormatter FORMATTER_3 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final DateTimeFormatter FORMATTER_6 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    private static final DateTimeFormatter FORMATTER_9 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSS");
 
     public CsvFormatWriter(
             PositionOutputStream out, RowType rowType, Options options, boolean isTxtFormat)
             throws IOException {
         this.rowType = rowType;
-        this.isTxtFormat = isTxtFormat;
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
         if (isTxtFormat) {
             this.lineDelimiter = options.get(CsvFileFormat.TXT_LINE_DELIMITER);
@@ -72,14 +94,15 @@ public class CsvFormatWriter implements FormatWriter {
             this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
             this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
         } else {
-            this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER.key());
+            this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER);
             this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
             this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
             this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
             this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         }
-
         this.outputStream = out;
+        this.converter = new RowToJsonConverter(rowType, options);
+        this.objectMapper = new ObjectMapper();
         this.writer =
                 new BufferedWriter(
                         new OutputStreamWriter(
@@ -103,7 +126,7 @@ public class CsvFormatWriter implements FormatWriter {
             Object value =
                     InternalRow.createFieldGetter(rowType.getTypeAt(i), i).getFieldOrNull(element);
             String fieldValue = formatField(value, rowType.getTypeAt(i));
-            sb.append(escapeField(fieldValue));
+            sb.append(fieldValue);
         }
         sb.append(lineDelimiter);
 
@@ -113,14 +136,8 @@ public class CsvFormatWriter implements FormatWriter {
     @Override
     public void close() throws IOException {
         if (writer != null) {
-            try {
-                writer.close();
-            } catch (IOException e) {
-                // If the underlying stream is already closed, ignore the exception
-                if (!e.getMessage().contains("Already closed")) {
-                    throw e;
-                }
-            }
+            writer.flush();
+            writer.close();
         }
     }
 
@@ -144,11 +161,10 @@ public class CsvFormatWriter implements FormatWriter {
         writer.write(sb.toString());
     }
 
-    private String formatField(Object value, DataType dataType) {
+    private String formatField(Object value, DataType dataType) throws JsonProcessingException {
         if (value == null) {
             return nullLiteral;
         }
-
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case BOOLEAN:
@@ -158,24 +174,58 @@ public class CsvFormatWriter implements FormatWriter {
             case BIGINT:
             case FLOAT:
             case DOUBLE:
-                return value.toString();
+                return escapeField(value.toString());
             case DECIMAL:
-                return ((Decimal) value).toBigDecimal().toString();
+                return escapeField(((Decimal) value).toBigDecimal().toString());
             case CHAR:
             case VARCHAR:
-                return ((BinaryString) value).toString();
+                return escapeField(((BinaryString) value).toString());
             case BINARY:
             case VARBINARY:
-                return new String((byte[]) value, StandardCharsets.UTF_8);
+                return Base64.getEncoder().encodeToString((byte[]) value);
             case DATE:
-                LocalDate date = LocalDate.ofEpochDay((Integer) value);
+                LocalDate date = LocalDate.ofEpochDay((int) value);
                 return date.format(DATE_FORMATTER);
+            case TIME_WITHOUT_TIME_ZONE:
+                LocalTime time = LocalTime.ofNanoOfDay((int) value * 1_000_000L);
+                return time.format(TIME_FORMATTER);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                LocalDateTime dateTime = ((Timestamp) value).toLocalDateTime();
-                return dateTime.format(TIMESTAMP_FORMATTER);
+                TimestampType timestampType = (TimestampType) dataType;
+                Timestamp timestamp = (Timestamp) value;
+                return formatTimeStampWithPrecision(
+                        timestamp.toLocalDateTime(), timestampType.getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                LocalZonedTimestampType localZonedTimestampType =
+                        (LocalZonedTimestampType) dataType;
+                timestamp = (Timestamp) value;
+                timestamp = timestampWithLocalZoneToTimestamp(timestamp, TimeZone.getDefault());
+                return formatTimeStampWithPrecision(
+                        timestamp.toLocalDateTime(), localZonedTimestampType.getPrecision());
+            case ARRAY:
+            case MAP:
+            case ROW:
+                return objectMapper.writeValueAsString(converter.convertValue(value, dataType));
             default:
-                // For complex types, convert to string representation
                 return value.toString();
+        }
+    }
+
+    private String formatTimeStampWithPrecision(LocalDateTime dateTime, int precision) {
+        switch (precision) {
+            case 0:
+                return dateTime.format(FORMATTER_0);
+            case 1:
+                return dateTime.format(FORMATTER_1);
+            case 2:
+                return dateTime.format(FORMATTER_2);
+            case 3:
+                return dateTime.format(FORMATTER_3);
+            case 6:
+                return dateTime.format(FORMATTER_6);
+            case 9:
+                return dateTime.format(FORMATTER_9);
+            default:
+                return dateTime.format(FORMATTER_0);
         }
     }
 

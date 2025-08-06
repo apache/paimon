@@ -59,7 +59,7 @@ public class RowToJsonConverter {
         return convertRow(row, rowType);
     }
 
-    private Object convertValue(Object value, DataType dataType) {
+    public Object convertValue(Object value, DataType dataType) {
         if (value == null) {
             return null;
         }
@@ -156,7 +156,7 @@ public class RowToJsonConverter {
         }
     }
 
-    private Map<String, Object> convertRow(InternalRow row, RowType rowType) {
+    public Map<String, Object> convertRow(InternalRow row, RowType rowType) {
         List<DataField> fields = rowType.getFields();
         Map<String, Object> result = new LinkedHashMap<>();
 
