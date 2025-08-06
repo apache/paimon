@@ -21,8 +21,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from pyarrow._fs import FileSystem
+
 from pypaimon.api import RESTApi
-from pypaimon.catalog.rest.RESTToken import RESTToken
+from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -39,6 +41,11 @@ class RESTTokenFileIO(FileIO):
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
         super().__init__(str(path), catalog_options)
+
+    def _initialize_oss_fs(self) -> FileSystem:
+        self.try_to_refresh_token()
+        self.properties.update(self.token.token)
+        return super()._initialize_oss_fs()
 
     def try_to_refresh_token(self):
         if self.should_refresh():
@@ -62,9 +69,6 @@ class RESTTokenFileIO(FileIO):
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
         self.token = RESTToken(response.token, response.expires_at_millis)
-
-    def get_token(self):
-        return self.token
 
     def valid_token(self):
         self.try_to_refresh_token()
