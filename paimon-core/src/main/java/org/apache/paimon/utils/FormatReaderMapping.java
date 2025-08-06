@@ -23,6 +23,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
@@ -60,6 +61,7 @@ public class FormatReaderMapping {
     private final TableSchema dataSchema;
     private final List<Predicate> dataFilters;
     private final Map<String, Integer> systemFields;
+    @Nullable private final TopN topN;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -69,7 +71,8 @@ public class FormatReaderMapping {
             FormatReaderFactory readerFactory,
             TableSchema dataSchema,
             List<Predicate> dataFilters,
-            Map<String, Integer> systemFields) {
+            Map<String, Integer> systemFields,
+            @Nullable TopN topN) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
@@ -77,6 +80,7 @@ public class FormatReaderMapping {
         this.dataSchema = dataSchema;
         this.dataFilters = dataFilters;
         this.systemFields = systemFields;
+        this.topN = topN;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -130,6 +134,11 @@ public class FormatReaderMapping {
         return dataFilters;
     }
 
+    @Nullable
+    public TopN getTopN() {
+        return topN;
+    }
+
     /** Builder for {@link FormatReaderMapping}. */
     public static class Builder {
 
@@ -137,6 +146,7 @@ public class FormatReaderMapping {
         private final List<DataField> readTableFields;
         private final Function<TableSchema, List<DataField>> fieldsExtractor;
         @Nullable private final List<Predicate> filters;
+        @Nullable private final TopN topN;
         private final boolean rowTrackingEnabled;
 
         public Builder(
@@ -144,11 +154,13 @@ public class FormatReaderMapping {
                 List<DataField> readTableFields,
                 Function<TableSchema, List<DataField>> fieldsExtractor,
                 @Nullable List<Predicate> filters,
+                @Nullable TopN topN,
                 boolean rowTrackingEnabled) {
             this.formatDiscover = formatDiscover;
             this.readTableFields = readTableFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
+            this.topN = topN;
             this.rowTrackingEnabled = rowTrackingEnabled;
         }
 
@@ -212,7 +224,8 @@ public class FormatReaderMapping {
                             .createReaderFactory(readRowType, readFilters),
                     dataSchema,
                     readFilters,
-                    systemFields);
+                    systemFields,
+                    topN);
         }
 
         private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {
