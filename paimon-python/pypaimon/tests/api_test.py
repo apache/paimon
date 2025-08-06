@@ -16,21 +16,23 @@
 # limitations under the License.
 
 import logging
-import uuid
 import unittest
+import uuid
 
 import pypaimon.api as api
-from .rest_server import RESTCatalogServer
-from ..api.api_response import (ConfigResponse)
-from ..api import RESTApi
-from ..api.auth import BearTokenAuthProvider
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.rest_json import JSON
+from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
+                                        DataField, DataTypeParser, MapType,
+                                        RowType)
 from pypaimon.schema.table_schema import TableSchema
-from ..api.token_loader import DLFTokenLoaderFactory, DLFToken
 
-from pypaimon.schema.data_types import AtomicInteger, DataTypeParser, AtomicType, ArrayType, MapType, RowType, DataField
+from ..api import RESTApi
+from ..api.api_response import ConfigResponse
+from ..api.auth import BearTokenAuthProvider
+from ..api.token_loader import DLFToken, DLFTokenLoaderFactory
 from ..catalog.table_metadata import TableMetadata
+from .rest_server import RESTCatalogServer
 
 
 class ApiTestCase(unittest.TestCase):

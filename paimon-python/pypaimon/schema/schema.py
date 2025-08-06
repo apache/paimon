@@ -16,11 +16,12 @@
 # limitations under the License.
 #################################################################################
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
 import pyarrow as pa
-from pypaimon.schema.data_types import DataField, PyarrowFieldParse
+
 from pypaimon.common.rest_json import json_field
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
 @dataclass
@@ -47,7 +48,7 @@ class Schema:
         self.comment = comment
 
     @staticmethod
-    def build_from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
-                                  primary_keys: Optional[List[str]] = None, options: Optional[Dict[str, str]] = None,
-                                  comment: Optional[str] = None):
-        return Schema(PyarrowFieldParse.parse_pyarrow_schema(pa_schema), partition_keys, primary_keys, options, comment)
+    def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
+                            primary_keys: Optional[List[str]] = None, options: Optional[Dict[str, str]] = None,
+                            comment: Optional[str] = None):
+        return Schema(PyarrowFieldParser.to_paimon_schema(pa_schema), partition_keys, primary_keys, options, comment)

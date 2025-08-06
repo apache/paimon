@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.api import Identifier
+from pypaimon.common.identifier import Identifier
 
 
 # Exception classes

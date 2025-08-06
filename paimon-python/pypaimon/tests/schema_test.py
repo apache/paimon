@@ -20,9 +20,10 @@ import unittest
 
 import pyarrow
 
-from pypaimon import Schema
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
+                                        MapType, PyarrowFieldParser)
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.schema.data_types import AtomicType, ArrayType, MapType, DataField, PyarrowFieldParse
 
 
 class SchemaTestCase(unittest.TestCase):
@@ -39,9 +40,9 @@ class SchemaTestCase(unittest.TestCase):
                                    [], [], {}, "")
         pa_fields = []
         for field in table_schema.fields:
-            pa_field = PyarrowFieldParse.to_pyarrow_field(field)
+            pa_field = PyarrowFieldParser.from_paimon_field(field)
             pa_fields.append(pa_field)
-        schema = Schema.build_from_pyarrow_schema(
+        schema = Schema.from_pyarrow_schema(
             pa_schema=pyarrow.schema(pa_fields),
             partition_keys=table_schema.partition_keys,
             primary_keys=table_schema.primary_keys,
@@ -49,7 +50,6 @@ class SchemaTestCase(unittest.TestCase):
             comment=table_schema.comment
         )
         table_schema2 = TableSchema.from_schema(len(data_fields), schema)
-        # print("table_schema2:", table_schema2)
         l1 = []
         for field in table_schema.fields:
             l1.append(field.to_dict())

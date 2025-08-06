@@ -16,12 +16,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from pathlib import Path
-from typing import Callable, Any
-
-from pypaimon.common.core_options import CoreOptions
-from pypaimon.common.identifier import Identifier
+from typing import Any, Callable
 
 from pypaimon.catalog.table_metadata import TableMetadata
+from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.identifier import Identifier
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.file_store_table_factory import FileStoreTableFactory

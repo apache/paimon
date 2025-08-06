@@ -31,10 +31,9 @@ class SimpleStats:
 SIMPLE_STATS_SCHEMA = {
     "type": "record",
     "name": "SimpleStats",
-    "namespace": "com.example.paimon",
     "fields": [
-        {"name": "null_count", "type": ["null", "long"], "default": None},
-        {"name": "min_value", "type": ["null", "bytes"], "default": None},
-        {"name": "max_value", "type": ["null", "bytes"], "default": None},
+        {"name": "_MIN_VALUES", "type": ["null", "bytes"], "default": None},
+        {"name": "_MAX_VALUES", "type": ["null", "bytes"], "default": None},
+        {"name": "_NULL_COUNTS", "type": ["null", "long"], "default": None},
     ]
 }

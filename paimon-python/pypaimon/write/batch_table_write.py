@@ -16,19 +16,24 @@
 # limitations under the License.
 ################################################################################
 
-import pyarrow as pa
 from collections import defaultdict
-
 from typing import List
 
+import pyarrow as pa
+
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
 
 class BatchTableWrite:
     def __init__(self, table):
-        self.file_store_write = FileStoreWrite(table)
-        self.row_key_extractor = table.create_row_key_extractor()
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
+        self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
+        self.file_store_write = FileStoreWrite(self.table)
+        self.row_key_extractor = self.table.create_row_key_extractor()
         self.batch_committed = False
 
     def write_arrow(self, table: pa.Table, row_kind: List[int] = None):
@@ -39,6 +44,7 @@ class BatchTableWrite:
 
     def write_arrow_batch(self, data: pa.RecordBatch, row_kind: List[int] = None):
         # TODO: support row_kind
+        self._validate_pyarrow_schema(data.schema)
         partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
         partition_bucket_groups = defaultdict(list)
@@ -51,7 +57,9 @@ class BatchTableWrite:
             self.file_store_write.write(partition, bucket, sub_table)
 
     def write_pandas(self, dataframe):
-        raise ValueError("Not implemented yet")
+        pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
+        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
+        return self.write_arrow_batch(record_batch)
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:
@@ -61,3 +69,8 @@ class BatchTableWrite:
 
     def close(self):
         self.file_store_write.close()
+
+    def _validate_pyarrow_schema(self, data_schema):
+        if data_schema != self.table_pyarrow_schema:
+            raise ValueError(f"Input schema isn't consistent with table schema. "
+                             f"Table schema is: {data_schema} Input schema is: {self.table_pyarrow_schema}")

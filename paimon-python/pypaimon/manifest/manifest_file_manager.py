@@ -17,13 +17,16 @@
 ################################################################################
 
 import uuid
-import fastavro
-from typing import List
 from io import BytesIO
+from typing import List
+
+import fastavro
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry, MANIFEST_ENTRY_SCHEMA
-from pypaimon.table.row.binary_row import BinaryRowDeserializer, BinaryRowSerializer, BinaryRow
+from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
+                                                     ManifestEntry)
+from pypaimon.table.row.binary_row import (BinaryRow, BinaryRowDeserializer,
+                                           BinaryRowSerializer)
 
 
 class ManifestFileManager:
@@ -91,8 +94,16 @@ class ManifestFileManager:
                         "_ROW_COUNT": file.row_count,
                         "_MIN_KEY": BinaryRowSerializer.to_bytes(file.min_key),
                         "_MAX_KEY": BinaryRowSerializer.to_bytes(file.max_key),
-                        "_KEY_STATS": 1,  # TODO
-                        "_VALUE_STATS": 1,
+                        "_KEY_STATS": {
+                            "_MIN_VALUES": None,
+                            "_MAX_VALUES": None,
+                            "_NULL_COUNTS": 0,
+                        },
+                        "_VALUE_STATS": {
+                            "_MIN_VALUES": None,
+                            "_MAX_VALUES": None,
+                            "_NULL_COUNTS": 0,
+                        },
                         "_MIN_SEQUENCE_NUMBER": 0,
                         "_MAX_SEQUENCE_NUMBER": 0,
                         "_SCHEMA_ID": 0,

@@ -22,7 +22,7 @@ from typing import Dict, List
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.rest_json import json_field
-from ..schema.schema import Schema
+from pypaimon.schema.schema import Schema
 
 
 class RESTRequest(ABC):

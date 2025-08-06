@@ -18,15 +18,18 @@
 
 from pathlib import Path
 
-from pypaimon import Table
 from pypaimon.common.core_options import CoreOptions
-from pypaimon.common.identifier import Identifier
-from pypaimon.schema.table_schema import TableSchema
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
+from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.table import Table
 from pypaimon.write.batch_write_builder import BatchWriteBuilder
-from pypaimon.write.row_key_extractor import RowKeyExtractor, FixedBucketRowKeyExtractor, UnawareBucketRowKeyExtractor
+from pypaimon.write.row_key_extractor import (FixedBucketRowKeyExtractor,
+                                              RowKeyExtractor,
+                                              UnawareBucketRowKeyExtractor)
 
 
 class FileStoreTable(Table):
@@ -36,12 +39,12 @@ class FileStoreTable(Table):
         self.identifier = identifier
         self.table_path = table_path
 
+        self.table_schema = table_schema
         self.fields = table_schema.fields
         self.primary_keys = table_schema.primary_keys
         self.partition_keys = table_schema.partition_keys
-
         self.options = table_schema.options
-        self.table_schema = table_schema
+
         self.schema_manager = SchemaManager(file_io, table_path)
         self.is_primary_key_table = bool(self.primary_keys)
 
@@ -60,7 +63,7 @@ class FileStoreTable(Table):
                 return BucketMode.HASH_FIXED
 
     def new_read_builder(self) -> 'ReadBuilder':
-        pass
+        return ReadBuilder(self)
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)

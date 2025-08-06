@@ -17,11 +17,11 @@
 ################################################################################
 
 import uuid
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import pyarrow as pa
-from typing import Tuple, Optional, List
-from pathlib import Path
-from abc import ABC, abstractmethod
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -40,6 +40,7 @@ class DataWriter(ABC):
 
         self.file_io = self.table.file_io
         self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
+        self.trimmed_primary_key = [field.name for field in self.trimmed_primary_key_fields]
 
         options = self.table.options
         self.target_file_size = 256 * 1024 * 1024
@@ -98,37 +99,35 @@ class DataWriter(ABC):
             return
         file_name = f"data-{uuid.uuid4()}.{self.file_format}"
         file_path = self._generate_file_path(file_name)
-        try:
-            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-                self.file_io.write_parquet(file_path, data, compression=self.compression)
-            elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-                self.file_io.write_orc(file_path, data, compression=self.compression)
-            elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-                self.file_io.write_avro(file_path, data, compression=self.compression)
-            else:
-                raise ValueError(f"Unsupported file format: {self.file_format}")
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+            self.file_io.write_parquet(file_path, data, compression=self.compression)
+        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
+            self.file_io.write_orc(file_path, data, compression=self.compression)
+        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
+            self.file_io.write_avro(file_path, data)
+        else:
+            raise ValueError(f"Unsupported file format: {self.file_format}")
 
-            key_columns_batch = data.select(self.trimmed_primary_key_fields)
-            min_key_data = key_columns_batch.slice(0, 1).to_pylist()[0]
-            max_key_data = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1).to_pylist()[0]
-            self.committed_files.append(DataFileMeta(
-                file_name=file_name,
-                file_size=self.file_io.get_file_size(file_path),
-                row_count=data.num_rows,
-                min_key=BinaryRow(min_key_data, self.trimmed_primary_key_fields),
-                max_key=BinaryRow(max_key_data, self.trimmed_primary_key_fields),
-                key_stats=None,  # TODO
-                value_stats=None,
-                min_sequence_number=0,
-                max_sequence_number=0,
-                schema_id=0,
-                level=0,
-                extra_files=None,
-                file_path=str(file_path),
-            ))
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to write {self.file_format} file {file_path}: {e}") from e
+        key_columns_batch = data.select(self.trimmed_primary_key)
+        min_key_row_batch = key_columns_batch.slice(0, 1)
+        min_key_data = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+        max_key_data = [col.to_pylist()[0] for col in max_key_row_batch.columns]
+        self.committed_files.append(DataFileMeta(
+            file_name=file_name,
+            file_size=self.file_io.get_file_size(file_path),
+            row_count=data.num_rows,
+            min_key=BinaryRow(min_key_data, self.trimmed_primary_key_fields),
+            max_key=BinaryRow(max_key_data, self.trimmed_primary_key_fields),
+            key_stats=None,  # TODO
+            value_stats=None,
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=None,
+            file_path=str(file_path),
+        ))
 
     def _generate_file_path(self, file_name: str) -> Path:
         path_builder = self.table.table_path

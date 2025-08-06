@@ -16,20 +16,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from pathlib import Path
-from typing import List, Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
-from pypaimon import Database, Catalog, Schema
-from pypaimon.api import RESTApi, CatalogOptions
-from pypaimon.api.api_response import PagedList, GetTableResponse
-from pypaimon.common.core_options import CoreOptions
-from pypaimon.common.identifier import Identifier
+from pypaimon.api import CatalogOptions, RESTApi
+from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
-
+from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_utils import CatalogUtils
+from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
-from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.catalog.table_metadata import TableMetadata
+from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.file_store_table import FileStoreTable
 

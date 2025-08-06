@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from abc import ABC
-from typing import List, Tuple, Dict, Set
+from typing import Dict, List, Set, Tuple
 
 
 class PropertyChange(ABC):

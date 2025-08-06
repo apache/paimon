@@ -15,6 +15,113 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from typing import Iterator, List, Optional
+
+import pandas
+import pyarrow
+
+from pypaimon.common.predicate import Predicate
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.split import Split
+from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
+                                      SplitRead)
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.table.row.offset_row import OffsetRow
+
 
 class TableRead:
     """Implementation of TableRead for native Python reading."""
+
+    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField]):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.table: FileStoreTable = table
+        self.predicate = predicate
+        self.read_type = read_type
+
+    def to_iterator(self, splits: List[Split]) -> Iterator:
+        def _record_generator():
+            for split in splits:
+                reader = self._create_split_read(split).create_reader()
+                try:
+                    for batch in iter(reader.read_batch, None):
+                        yield from iter(batch.next, None)
+                finally:
+                    reader.close()
+
+        return _record_generator()
+
+    def to_arrow(self, splits: List[Split]) -> Optional[pyarrow.Table]:
+        chunk_size = 65536
+        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        arrow_batches = []
+
+        for split in splits:
+            if not isinstance(split, Split):
+                raise TypeError(f"Expected Split, but got {type(split).__name__}")
+            reader = self._create_split_read(split).create_reader()
+            try:
+                if isinstance(reader, RecordBatchReader):
+                    for batch in iter(reader.read_arrow_batch, None):
+                        arrow_batches.append(batch)
+                else:
+                    row_tuple_chunk = []
+                    for iterator in iter(reader.read_batch, None):
+                        for row in iter(iterator.next, None):
+                            if not isinstance(row, OffsetRow):
+                                raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
+                            row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
+
+                            if len(row_tuple_chunk) >= chunk_size:
+                                batch = convert_rows_to_arrow_batch(row_tuple_chunk, schema)
+                                arrow_batches.append(batch)
+                                row_tuple_chunk = []
+
+                    if row_tuple_chunk:
+                        batch = convert_rows_to_arrow_batch(row_tuple_chunk, schema)
+                        arrow_batches.append(batch)
+            finally:
+                reader.close()
+
+        if not arrow_batches:
+            return pyarrow.Table.from_arrays([], schema=schema)
+
+        unified_schema = pyarrow.unify_schemas([b.schema for b in arrow_batches])
+        casted_batches = [b.cast(target_schema=unified_schema) for b in arrow_batches]
+        return pyarrow.Table.from_batches(casted_batches)
+
+    def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.RecordBatchReader:
+        raise ValueError("Unsupported to_arrow_batch_reader")
+
+    def to_pandas(self, splits: List[Split]) -> pandas.DataFrame:
+        arrow_table = self.to_arrow(splits)
+        return arrow_table.to_pandas()
+
+    def to_duckdb(self, splits: List[Split], table_name: str,
+                  connection: Optional["DuckDBPyConnection"] = None) -> "DuckDBPyConnection":
+        raise ValueError("Unsupported to_duckdb")
+
+    def to_ray(self, splits: List[Split]) -> "ray.data.dataset.Dataset":
+        raise ValueError("Unsupported to_ray")
+
+    def _create_split_read(self, split: Split) -> SplitRead:
+        if self.table.is_primary_key_table and not split.raw_convertible:
+            return MergeFileSplitRead(
+                table=self.table,
+                predicate=self.predicate,
+                read_type=self.read_type,
+                split=split
+            )
+        else:
+            return RawFileSplitRead(
+                table=self.table,
+                predicate=self.predicate,
+                read_type=self.read_type,
+                split=split
+            )
+
+
+def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
+    columns_data = zip(*row_tuples)
+    pydict = {name: list(column) for name, column in zip(schema.names, columns_data)}
+    return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)

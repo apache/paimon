@@ -22,15 +22,16 @@ import time
 import traceback
 import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, TypeVar, Callable, Any
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from .typedef import RESTAuthParameter
-from .api_response import ErrorResponse
 from pypaimon.common.rest_json import JSON
+
+from .api_response import ErrorResponse
+from .typedef import RESTAuthParameter
 
 T = TypeVar('T', bound='RESTResponse')
 

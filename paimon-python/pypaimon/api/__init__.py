@@ -16,25 +16,22 @@
 #  under the License.
 
 import logging
-from typing import Dict, List, Optional, Callable
+from typing import Callable, Dict, List, Optional
 from urllib.parse import unquote
-from pypaimon.api.auth import RESTAuthFunction, AuthProviderFactory
-from pypaimon.api.api_response import (
-    PagedList,
-    GetTableResponse,
-    ListDatabasesResponse,
-    ListTablesResponse,
-    GetDatabaseResponse,
-    ConfigResponse,
-    PagedResponse,
-    GetTableTokenResponse,
-)
-from pypaimon.api.api_resquest import CreateDatabaseRequest, AlterDatabaseRequest, RenameTableRequest, \
-    CreateTableRequest
-from pypaimon.common.config import CatalogOptions
+
+from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
+                                       GetTableResponse, GetTableTokenResponse,
+                                       ListDatabasesResponse,
+                                       ListTablesResponse, PagedList,
+                                       PagedResponse)
+from pypaimon.api.api_resquest import (AlterDatabaseRequest,
+                                       CreateDatabaseRequest,
+                                       CreateTableRequest, RenameTableRequest)
+from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
-from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import T
+from pypaimon.common.config import CatalogOptions
+from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 
 

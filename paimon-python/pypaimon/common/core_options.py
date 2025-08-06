@@ -44,5 +44,5 @@ class CoreOptions(str, Enum):
     FILE_BLOCK_SIZE = "file.block-size"
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
-    # commit options
+    # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"

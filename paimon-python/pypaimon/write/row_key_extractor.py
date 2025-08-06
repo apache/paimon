@@ -16,9 +16,10 @@
 # limitations under the License.
 ################################################################################
 
-import pyarrow as pa
-from typing import Tuple, List
 from abc import ABC, abstractmethod
+from typing import List, Tuple
+
+import pyarrow as pa
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.schema.table_schema import TableSchema
@@ -65,7 +66,7 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        self.num_buckets = table_schema.options.get(CoreOptions.BUCKET, -1)
+        self.num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
         if self.num_buckets <= 0:
             raise ValueError(f"Fixed bucket mode requires bucket > 0, got {self.num_buckets}")
 

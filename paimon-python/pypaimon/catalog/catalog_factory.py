@@ -15,10 +15,10 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pypaimon import Catalog
-from pypaimon.api import CatalogOptions
+from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+from pypaimon.common.config import CatalogOptions
 
 
 class CatalogFactory:
