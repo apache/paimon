@@ -300,7 +300,9 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
                 TraceableFileIO.SCHEME + "://" + externalPath1);
         tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
-        tableOptions.put(CoreOptions.AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS.key(), "true");
+        tableOptions.put(
+                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS.key(),
+                "data-file.external-paths,data-file.external-paths.strategy,data-file.external-paths.specific-fs");
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
 
         FileStoreTable table =
@@ -420,7 +422,9 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
                 TraceableFileIO.SCHEME + "://" + externalPath1);
         tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
-        tableOptions.put(CoreOptions.AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS.key(), "true");
+        tableOptions.put(
+                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS.key(),
+                "data-file.external-paths,data-file.external-paths.strategy,data-file.external-paths.specific-fs");
 
         FileStoreTable table =
                 prepareTable(

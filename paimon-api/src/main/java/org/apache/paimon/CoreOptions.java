@@ -206,13 +206,6 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
-    public static final ConfigOption<Boolean> AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS =
-            key("external-paths.detect-config.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to auto detected the change of data-file.external-paths when streaming writing.");
-
     public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
             key("compaction.force-rewrite-all-files")
                     .booleanType()
@@ -1973,6 +1966,18 @@ public class CoreOptions implements Serializable {
         return options.toMap();
     }
 
+    public Map<String, String> getSpecificOptions(String... keys) {
+        Map<String, String> result = new HashMap<>();
+        for (String key : keys) {
+            String value = options.get(key);
+            // if value is null, it means the key is not set explicitly
+            if (value != null) {
+                result.put(key, value);
+            }
+        }
+        return result;
+    }
+
     public int bucket() {
         return options.get(BUCKET);
     }
@@ -2680,19 +2685,6 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
-    }
-
-    public boolean autoDetectDataFileExternalPaths() {
-        return options.get(AUTO_DETECT_DATA_FILE_EXTERNAL_PATHS);
-    }
-
-    public Map<String, String> dataFileExternalPathConfig() {
-        Map<String, String> externalPathsConfig = new HashMap<>();
-        externalPathsConfig.put(DATA_FILE_EXTERNAL_PATHS.key(), dataFileExternalPaths());
-        externalPathsConfig.put(
-                DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), externalPathStrategy().toString());
-        externalPathsConfig.put(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), externalSpecificFS());
-        return externalPathsConfig;
     }
 
     public ExternalPathStrategy externalPathStrategy() {

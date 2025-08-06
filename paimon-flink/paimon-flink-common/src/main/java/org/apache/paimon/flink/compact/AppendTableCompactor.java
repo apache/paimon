@@ -22,16 +22,19 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.slf4j.Logger;
@@ -220,7 +223,12 @@ public class AppendTableCompactor {
     }
 
     protected void updateWriteWithNewSchema() {
-        if (table.coreOptions().autoDetectDataFileExternalPaths()) {
+        // the configs to be refreshed
+        String refreshedConfigs =
+                Options.fromMap(table.options())
+                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS);
+
+        if (!StringUtils.isNullOrWhitespaceOnly(refreshedConfigs)) {
             Optional<TableSchema> lastestSchema = table.schemaManager().latest();
             if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
                 LOG.info(
@@ -229,7 +237,9 @@ public class AppendTableCompactor {
                         lastestSchema.get().id());
                 try {
                     CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
-                    table = table.copy(newCoreOptions.dataFileExternalPathConfig());
+                    table =
+                            table.copy(
+                                    newCoreOptions.getSpecificOptions(refreshedConfigs.split(",")));
                     replace(table);
                 } catch (Exception e) {
                     throw new RuntimeException("update write failed.", e);

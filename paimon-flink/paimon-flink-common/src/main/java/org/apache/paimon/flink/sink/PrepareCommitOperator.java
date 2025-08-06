@@ -19,12 +19,14 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -111,7 +113,12 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
 
     protected void updateWriteWithNewSchema(
             FileStoreTable table, StoreSinkWrite write, int taskId) {
-        if (table.coreOptions().autoDetectDataFileExternalPaths()) {
+        // the configs to be refreshed
+        String refreshedConfigs =
+                Options.fromMap(table.options())
+                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS);
+
+        if (!StringUtils.isNullOrWhitespaceOnly(refreshedConfigs)) {
             Optional<TableSchema> lastestSchema = table.schemaManager().latest();
             if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
                 LOG.info(
@@ -121,7 +128,9 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
                         lastestSchema.get().id());
                 try {
                     CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
-                    table = table.copy(newCoreOptions.dataFileExternalPathConfig());
+                    table =
+                            table.copy(
+                                    newCoreOptions.getSpecificOptions(refreshedConfigs.split(",")));
                     write.replace(table);
                 } catch (Exception e) {
                     throw new RuntimeException("update write failed.", e);

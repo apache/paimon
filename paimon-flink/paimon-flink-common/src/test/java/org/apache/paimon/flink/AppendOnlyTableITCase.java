@@ -275,7 +275,8 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         + bucket
                         + "',"
                         + bucketKey
-                        + "'external-paths.detect-config.enabled' = 'true',"
+                        + "'sink.writer-refresh-detect-options' = 'data-file.external-paths,"
+                        + "data-file.external-paths.strategy,data-file.external-paths.specific-fs',"
                         + "'data-file.external-paths' = '"
                         + externalPaths1
                         + "',"
