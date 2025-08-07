@@ -29,7 +29,9 @@ import org.apache.paimon.table.source.TableScan;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
@@ -65,13 +67,9 @@ public class FormatTableScan implements InnerTableScan {
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
             try {
-                // todo: check whether need bucket
-                FileStatus[] files = table.fileIO().listStatus(new Path(table.location()));
-
+                FileStatus[] files = table.fileIO().listFiles(new Path(table.location()), true);
+                Map<String, String> partitionSpec = Collections.emptyMap();
                 for (FileStatus file : files) {
-                    if (file.getPath().getName().endsWith("schema")) {
-                        continue;
-                    }
                     FormatDataSplit split =
                             new FormatDataSplit(
                                     table.fileIO(),
@@ -79,6 +77,8 @@ public class FormatTableScan implements InnerTableScan {
                                     0,
                                     file.getLen(),
                                     table.rowType(),
+                                    partitionSpec,
+                                    file.getModificationTime(),
                                     predicate,
                                     projection);
                     splits.add(split);

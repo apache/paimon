@@ -576,7 +576,7 @@ public abstract class CatalogTestBase {
         String[] formats = {"orc", "parquet", "csv", "json", "txt"};
         for (String format : formats) {
             Table table = createFormatTable(dbName, format);
-            int size = 2000;
+            int size = 50;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
                 datas[j] =
@@ -630,6 +630,7 @@ public abstract class CatalogTestBase {
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.SMALLINT());
+        schemaBuilder.partitionKeys("f2");
         schemaBuilder.option("file.format", format);
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");

@@ -19,7 +19,6 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -30,7 +29,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -39,7 +37,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.AbstractDataTableRead;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -51,8 +48,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -160,7 +155,6 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withLimit(int limit) {
-        // TODO
         return this;
     }
 
@@ -186,13 +180,13 @@ public class FormatReadBuilder implements ReadBuilder {
 
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
-                DataSplit dataSplit = (DataSplit) split;
-                return read.createReader(dataSplit.partition(), dataSplit.dataFiles());
+                FormatDataSplit dataSplit = (FormatDataSplit) split;
+                return read.createReader(dataSplit.dataPath(), dataSplit.dataFiles());
             }
         };
     }
 
-    private RecordReader<InternalRow> createReader(BinaryRow partition, List<DataFileMeta> files)
+    private RecordReader<InternalRow> createReader(Path dataPath, List<DataFileMeta> files)
             throws IOException {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
@@ -201,38 +195,26 @@ public class FormatReadBuilder implements ReadBuilder {
                 new FormatReaderMapping.Builder(
                         formatDiscover, readTableFields, TableSchema::fields, filters, false);
 
-        for (int i = 0; i < files.size(); i++) {
-            DataFileMeta file = files.get(i);
+        for (DataFileMeta file : files) {
             String formatIdentifier = options.formatType();
-            long schemaId = file.schemaId();
-
             Supplier<FormatReaderMapping> formatSupplier =
-                    () ->
-                            formatReaderMappingBuilder.build(
-                                    formatIdentifier,
-                                    schema,
-                                    schemaId == schema.id()
-                                            ? schema
-                                            : schemaManager.schema(schemaId));
+                    () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema);
 
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> formatSupplier.get());
-            suppliers.add(() -> createFileReader(partition, file, formatReaderMapping));
+            suppliers.add(() -> createFileReader(dataPath, file, formatReaderMapping));
         }
 
         return ConcatRecordReader.create(suppliers);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
-            BinaryRow partition, DataFileMeta file, FormatReaderMapping formatReaderMapping)
+            Path dataPath, DataFileMeta file, FormatReaderMapping formatReaderMapping)
             throws IOException {
 
-        Path filePath =
-                file.externalPath()
-                        .map(Path::new)
-                        .orElse(new Path(dataPath(partition), file.fileName()));
+        Path filePath = file.externalPath().map(Path::new).orElse(dataPath);
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(fileIO, filePath, file.fileSize(), null);
         FileRecordReader<InternalRow> fileRecordReader =
@@ -242,30 +224,12 @@ public class FormatReadBuilder implements ReadBuilder {
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        null,
                         false,
                         file.firstRowId(),
                         file.maxSequenceNumber(),
                         formatReaderMapping.getSystemFields());
         return fileRecordReader;
-    }
-
-    public Path dataPath(BinaryRow partition) {
-        Path relativeBucketPath = null;
-        String partitionPath = getPartitionString(partition);
-        if (!partitionPath.isEmpty()) {
-            relativeBucketPath = new Path(partitionPath);
-        }
-        return relativeBucketPath != null
-                ? new Path(table.location(), relativeBucketPath)
-                : new Path(table.location());
-    }
-
-    public String getPartitionString(BinaryRow partition) {
-        return PartitionPathUtils.generatePartitionPath(
-                partitionComputer.generatePartValues(
-                        Preconditions.checkNotNull(
-                                partition, "Partition row data is null. This is unexpected.")));
     }
 
     // ===================== Unsupported ===============================

@@ -57,30 +57,10 @@ public class FormatDataSplit extends DataSplit {
             long offset,
             long length,
             RowType rowType,
+            Map<String, String> partitionSpec,
+            long modificationTime,
             @Nullable Predicate predicate,
             @Nullable int[] projection) {
-        this(
-                fileIO,
-                filePath,
-                offset,
-                length,
-                rowType,
-                predicate,
-                projection,
-                Collections.emptyMap(),
-                System.currentTimeMillis());
-    }
-
-    public FormatDataSplit(
-            FileIO fileIO,
-            Path filePath,
-            long offset,
-            long length,
-            RowType rowType,
-            @Nullable Predicate predicate,
-            @Nullable int[] projection,
-            Map<String, String> partitionSpec,
-            long modificationTime) {
         this.fileIO = fileIO;
         this.filePath = filePath;
         this.offset = offset;
@@ -113,9 +93,13 @@ public class FormatDataSplit extends DataSplit {
                         null));
     }
 
+    public Path filePath() {
+        return this.filePath;
+    }
+
     @Override
     public BinaryRow partition() {
-        return new BinaryRow(0);
+        throw new UnsupportedOperationException("Format Data Split does not support partition.");
     }
 
     @Override
@@ -127,7 +111,7 @@ public class FormatDataSplit extends DataSplit {
         return fileIO;
     }
 
-    public Path path() {
+    public Path dataPath() {
         return filePath;
     }
 
@@ -155,10 +139,6 @@ public class FormatDataSplit extends DataSplit {
     @Nullable
     public int[] projection() {
         return projection;
-    }
-
-    public Map<String, String> partitionSpec() {
-        return partitionSpec;
     }
 
     @Override
@@ -205,30 +185,6 @@ public class FormatDataSplit extends DataSplit {
         result = 31 * result + Arrays.hashCode(projection);
         return result;
     }
-
-    //    public BinaryRow generatePartition(Map<String, Object> partitionMap) {
-    //        return new BinaryRow(0);
-    //                if (partitionKeys.isEmpty()) {
-    //                    // Non-partitioned table returns empty BinaryRow
-    //                    return new BinaryRow(0);
-    //                }
-    //
-    //                // 1. Create GenericRow from partition map
-    //                GenericRow genericRow = new GenericRow(partitionKeys.size());
-    //
-    //                for (int i = 0; i < partitionKeys.size(); i++) {
-    //                    String partitionKey = partitionKeys.get(i);
-    //                    Object value = partitionMap.get(partitionKey);
-    //
-    //                    // Convert and validate partition value
-    //                    Object convertedValue = convertPartitionValue(value,
-    //         partitionType.getTypeAt(i));
-    //                    genericRow.setField(i, convertedValue);
-    //                }
-    //
-    //                // 2. Serialize GenericRow to BinaryRow
-    //                return serializer.toBinaryRow(genericRow);
-    //    }
 
     @Override
     public String toString() {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -195,10 +197,15 @@ public class FormatReaderMapping {
                                     dataSchema, trimmedKeyPair.getRight().getFields());
             Pair<int[], RowType> partitionMapping =
                     partitionMappingAndFieldsWithoutPartitionPair.getLeft();
-
             RowType readRowType =
                     new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight());
-
+            // for format table when csv without header, we couldn't read data by field
+            if (tableSchema
+                    .options()
+                    .get(CoreOptions.TYPE.key())
+                    .equals(TableType.FORMAT_TABLE.toString())) {
+                readRowType = dataSchema.logicalRowType();
+            }
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
 
