@@ -25,7 +25,7 @@ From this directory:
 	hugo -b "" serve
 	```
 
-The site can be viewed at http://localhost:1313/docs/master/
+The site can be viewed at http://localhost:1313/
 
 # Contribute
 

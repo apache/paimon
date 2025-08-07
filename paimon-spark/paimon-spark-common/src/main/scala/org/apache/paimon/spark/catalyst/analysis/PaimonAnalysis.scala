@@ -18,10 +18,11 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
@@ -40,12 +41,14 @@ import scala.collection.mutable
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
+
     case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table) =>
-      val newQuery = resolveQueryColumns(a.query, table, a.isByName)
-      if (newQuery != a.query) {
-        Compatibility.withNewQuery(a, newQuery)
-      } else {
-        a
+      val mergeSchemaEnabled =
+        writeOptions(a).get(SparkConnectorOptions.MERGE_SCHEMA.key()).contains("true") ||
+          OptionUtils.writeMergeSchemaEnabled()
+      resolveQueryColumns(a.query, table, a.isByName, mergeSchemaEnabled) match {
+        case Some(newQuery) if newQuery != a.query => Compatibility.withNewQuery(a, newQuery)
+        case _ => a
       }
 
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
@@ -56,6 +59,15 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
       PaimonShowColumnsCommand(table)
+  }
+
+  private def writeOptions(v2WriteCommand: V2WriteCommand): Map[String, String] = {
+    v2WriteCommand match {
+      case a: AppendData => a.writeOptions
+      case o: OverwriteByExpression => o.writeOptions
+      case op: OverwritePartitionsDynamic => op.writeOptions
+      case _ => Map.empty[String, String]
+    }
   }
 
   private def paimonWriteResolved(query: LogicalPlan, table: NamedRelation): Boolean = {
@@ -71,12 +83,25 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   private def resolveQueryColumns(
       query: LogicalPlan,
       table: NamedRelation,
-      byName: Boolean): LogicalPlan = {
+      byName: Boolean,
+      mergeSchemaEnabled: Boolean = false): Option[LogicalPlan] = {
     // More details see: `TableOutputResolver#resolveOutputColumns`
     if (byName) {
-      resolveQueryColumnsByName(query, table)
+      try {
+        Option.apply(resolveQueryColumnsByName(query, table))
+      } catch {
+        case e: Exception =>
+          // Merge schema is effective only when using byName mode.
+          // Schema validation is skipped here, because schema validation or merging will be
+          // done during insertion when mergeSchemaEnabled.
+          if (mergeSchemaEnabled) {
+            Option.empty
+          } else {
+            throw e
+          }
+      }
     } else {
-      resolveQueryColumnsByPosition(query, table)
+      Option.apply(resolveQueryColumnsByPosition(query, table))
     }
   }
 

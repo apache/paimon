@@ -306,3 +306,15 @@ Here list the configurations.
         </tr>
     </tbody>
 </table>
+
+This mode also supports Spark SQL. Here is an example:
+
+```sql
+set `spark.paimon.write.merge-schema` = true;
+
+CREATE TABLE t (a INT, b STRING);
+INSERT INTO t VALUES (1, '1'), (2, '2');
+
+-- need using by name mode
+INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
+```
