@@ -63,8 +63,8 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            // TODO: Enabled file index in merge fields read
+            boolean fileIndexReadEnabled) {
         super(
                 fileIO,
                 schemaManager,
@@ -73,7 +73,7 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                 formatDiscover,
                 pathFactory,
                 fileIndexReadEnabled,
-                rowTrackingEnabled);
+                true);
     }
 
     @Override
