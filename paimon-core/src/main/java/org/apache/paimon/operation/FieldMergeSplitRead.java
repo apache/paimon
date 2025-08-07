@@ -108,7 +108,8 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                                         needMergeFiles,
                                         partition,
                                         dataFilePathFactory,
-                                        formatReaderMappingBuilder));
+                                        formatReaderMappingBuilder,
+                                        dvFactories));
             }
         }
 
@@ -119,7 +120,8 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
-            Builder formatReaderMappingBuilder)
+            Builder formatReaderMappingBuilder,
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
         long rowCount = needMergeFiles.get(0).rowCount();
         long firstRowId = needMergeFiles.get(0).firstRowId();
@@ -195,14 +197,17 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                                     readFields.stream().mapToInt(DataField::id).toArray()),
                             key -> formatSupplier.get());
 
+            IOExceptionSupplier<DeletionVector> dvFactory =
+                    dvFactories == null ? null : dvFactories.get(file.fileName());
+
             fileRecordReaders[i] =
                     createFileReader(
                             partition,
                             file,
                             dataFilePathFactory,
                             formatReaderMapping,
-                            // TODO: enabled deletion vector
-                            null);
+                            // TODO: check for dv factory, all columns dv should be the same
+                            dvFactory);
         }
         return new CompoundFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
     }
