@@ -1969,10 +1969,8 @@ public class CoreOptions implements Serializable {
     public Map<String, String> getSpecificOptions(String... keys) {
         Map<String, String> result = new HashMap<>();
         for (String key : keys) {
-            String value = options.get(key);
-            // if value is null, it means the key is not set explicitly
-            if (value != null) {
-                result.put(key, value);
+            if (options.containsKey(key)) {
+                result.put(key, options.get(key));
             }
         }
         return result;

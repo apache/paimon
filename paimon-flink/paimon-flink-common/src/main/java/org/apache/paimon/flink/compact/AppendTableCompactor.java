@@ -18,23 +18,19 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.WriterRefresher;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.slf4j.Logger;
@@ -46,7 +42,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -198,7 +193,7 @@ public class AppendTableCompactor {
                             .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
                             .collect(Collectors.toList());
 
-            updateWriteWithNewSchema();
+            refreshWrite();
             return committables;
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
@@ -222,29 +217,7 @@ public class AppendTableCompactor {
         write.restore((List) states);
     }
 
-    protected void updateWriteWithNewSchema() {
-        // the configs to be refreshed
-        String refreshedConfigs =
-                Options.fromMap(table.options())
-                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS);
-
-        if (!StringUtils.isNullOrWhitespaceOnly(refreshedConfigs)) {
-            Optional<TableSchema> lastestSchema = table.schemaManager().latest();
-            if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
-                LOG.info(
-                        "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}.",
-                        table.schema().id(),
-                        lastestSchema.get().id());
-                try {
-                    CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
-                    table =
-                            table.copy(
-                                    newCoreOptions.getSpecificOptions(refreshedConfigs.split(",")));
-                    replace(table);
-                } catch (Exception e) {
-                    throw new RuntimeException("update write failed.", e);
-                }
-            }
-        }
+    protected void refreshWrite() {
+        WriterRefresher.doRefresh(table, write, (newTable, writer) -> replace(newTable));
     }
 }

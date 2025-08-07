@@ -18,15 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -46,7 +42,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.computeManagedMemory;
@@ -111,32 +106,13 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected void updateWriteWithNewSchema(
-            FileStoreTable table, StoreSinkWrite write, int taskId) {
-        // the configs to be refreshed
-        String refreshedConfigs =
-                Options.fromMap(table.options())
-                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS);
-
-        if (!StringUtils.isNullOrWhitespaceOnly(refreshedConfigs)) {
-            Optional<TableSchema> lastestSchema = table.schemaManager().latest();
-            if (lastestSchema.isPresent() && lastestSchema.get().id() > table.schema().id()) {
-                LOG.info(
-                        "task#{}: table schema has changed, current schema-id:{}, try to update write with new schema-id:{}.",
-                        taskId,
-                        table.schema().id(),
-                        lastestSchema.get().id());
-                try {
-                    CoreOptions newCoreOptions = new CoreOptions(lastestSchema.get().options());
-                    table =
-                            table.copy(
-                                    newCoreOptions.getSpecificOptions(refreshedConfigs.split(",")));
-                    write.replace(table);
-                } catch (Exception e) {
-                    throw new RuntimeException("update write failed.", e);
-                }
-            }
-        }
+    protected void refreshWrite(FileStoreTable table, StoreSinkWrite write) {
+        WriterRefresher.doRefresh(
+                table,
+                write,
+                (newTable, writer) -> {
+                    writer.replace(newTable);
+                });
     }
 
     protected abstract List<OUT> prepareCommit(boolean waitCompaction, long checkpointId)
