@@ -74,6 +74,11 @@ public class WriterRefresher {
         }
     }
 
+    /**
+     * Refresher for refresh write when configs changed.
+     *
+     * @param <T> the type of writer.
+     */
     public interface Refresher<T> {
         void refresh(FileStoreTable table, T writer) throws Exception;
     }
