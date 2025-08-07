@@ -145,6 +145,16 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
         Arrays.fill(rowOffsets, -1);
         Arrays.fill(fieldOffsets, -1);
 
+        IOExceptionSupplier<DeletionVector> dvFactory = null;
+        if (dvFactories != null) {
+            for (DataFileMeta file : needMergeFiles) {
+                IOExceptionSupplier<DeletionVector> temp = dvFactories.get(file.fileName());
+                if (temp != null && temp.get() != null) {
+                    dvFactory = temp;
+                }
+            }
+        }
+
         for (int i = 0; i < needMergeFiles.size(); i++) {
             DataFileMeta file = needMergeFiles.get(i);
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
@@ -197,17 +207,9 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                                     readFields.stream().mapToInt(DataField::id).toArray()),
                             key -> formatSupplier.get());
 
-            IOExceptionSupplier<DeletionVector> dvFactory =
-                    dvFactories == null ? null : dvFactories.get(file.fileName());
-
             fileRecordReaders[i] =
                     createFileReader(
-                            partition,
-                            file,
-                            dataFilePathFactory,
-                            formatReaderMapping,
-                            // TODO: check for dv factory, all columns dv should be the same
-                            dvFactory);
+                            partition, file, dataFilePathFactory, formatReaderMapping, dvFactory);
         }
         return new CompoundFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
     }
