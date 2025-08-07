@@ -271,18 +271,18 @@ public class TableSchema implements Serializable {
     }
 
     public TableSchema project(int[] fieldIds) {
+        Map<Integer, DataField> fieldMap =
+                fields.stream()
+                        .collect(Collectors.toMap(DataField::id, field -> field, (a, b) -> a));
         List<DataField> fields = new ArrayList<>();
-        List<Integer> fieldIdsList = Arrays.stream(fieldIds).boxed().collect(Collectors.toList());
-        for (DataField field : this.fields) {
-            if (fieldIdsList.contains(field.id())) {
-                fields.add(field);
+        for (int fieldId : fieldIds) {
+            DataField dataField = fieldMap.get(fieldId);
+            if (dataField == null) {
+                throw new RuntimeException(
+                        String.format(
+                                "Projecting field %s, but not found in schema %s.", fieldId, this));
             }
-        }
-        if (fields.size() != fieldIds.length) {
-            throw new RuntimeException(
-                    String.format(
-                            "Projecting fields %s, but only found %s.",
-                            Arrays.toString(fieldIds), fields.size()));
+            fields.add(dataField);
         }
         return new TableSchema(
                 version,
