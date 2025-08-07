@@ -58,10 +58,10 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
-    private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 7;
+    protected static final long MAGIC = -2394839472490812314L;
+    protected static final int VERSION = 7;
 
-    private long snapshotId = 0;
+    protected long snapshotId = 0;
     private BinaryRow partition;
     private int bucket = -1;
     private String bucketPath;

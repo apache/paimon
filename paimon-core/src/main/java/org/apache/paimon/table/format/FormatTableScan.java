@@ -21,11 +21,14 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,6 +42,7 @@ public class FormatTableScan implements InnerTableScan {
     private final FormatTable table;
     private Predicate predicate;
     private int[] projection;
+    private @Nullable PartitionPredicate partitionFilter;
 
     public FormatTableScan(FormatTable table, Predicate predicate, int[] projection) {
         this.table = table;
@@ -49,6 +53,12 @@ public class FormatTableScan implements InnerTableScan {
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         this.predicate = predicate;
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        this.partitionFilter = partitionPredicate;
         return this;
     }
 
@@ -67,6 +77,7 @@ public class FormatTableScan implements InnerTableScan {
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
             try {
+                //                partitionFilter.test()
                 FileStatus[] files = table.fileIO().listFiles(new Path(table.location()), true);
                 Map<String, String> partitionSpec = Collections.emptyMap();
                 for (FileStatus file : files) {

@@ -73,10 +73,13 @@ public class SerializationUtils {
      * that arity is also serialized here, so the deserialization is schemaless.
      */
     public static byte[] serializeBinaryRow(BinaryRow row) {
-        byte[] bytes = copyToBytes(row.getSegments(), row.getOffset(), row.getSizeInBytes());
-        ByteBuffer buffer = ByteBuffer.allocate(4 + bytes.length);
-        buffer.putInt(row.getFieldCount()).put(bytes);
-        return buffer.array();
+        if (row != null) {
+            byte[] bytes = copyToBytes(row.getSegments(), row.getOffset(), row.getSizeInBytes());
+            ByteBuffer buffer = ByteBuffer.allocate(4 + bytes.length);
+            buffer.putInt(row.getFieldCount()).put(bytes);
+            return buffer.array();
+        }
+        return null;
     }
 
     /** Schemaless deserialization for {@link BinaryRow}. */

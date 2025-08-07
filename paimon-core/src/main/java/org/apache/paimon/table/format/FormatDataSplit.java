@@ -18,29 +18,24 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 /** {@link FormatDataSplit} for format table. */
-public class FormatDataSplit extends DataSplit {
+public class FormatDataSplit implements Split {
 
-    private final FileIO fileIO;
     private final Path filePath;
     private final long offset;
     private final long length;
@@ -49,7 +44,6 @@ public class FormatDataSplit extends DataSplit {
     private final int[] projection;
     private final Map<String, String> partitionSpec;
     private final long modificationTime;
-    public List<DataFileMeta> dataFiles;
 
     public FormatDataSplit(
             FileIO fileIO,
@@ -61,7 +55,6 @@ public class FormatDataSplit extends DataSplit {
             long modificationTime,
             @Nullable Predicate predicate,
             @Nullable int[] projection) {
-        this.fileIO = fileIO;
         this.filePath = filePath;
         this.offset = offset;
         this.length = length;
@@ -70,45 +63,10 @@ public class FormatDataSplit extends DataSplit {
         this.projection = projection;
         this.partitionSpec = partitionSpec;
         this.modificationTime = modificationTime;
-        this.dataFiles = new ArrayList<>();
-        dataFiles.add(
-                new DataFileMeta(
-                        filePath.getName(),
-                        length,
-                        length,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0L,
-                        0L,
-                        0L,
-                        0,
-                        Collections.emptyList(),
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null));
     }
 
     public Path filePath() {
         return this.filePath;
-    }
-
-    @Override
-    public BinaryRow partition() {
-        throw new UnsupportedOperationException("Format Data Split does not support partition.");
-    }
-
-    @Override
-    public int bucket() {
-        throw new UnsupportedOperationException("Format Data Split does not support bucket.");
-    }
-
-    public FileIO fileIO() {
-        return fileIO;
     }
 
     public Path dataPath() {
@@ -125,10 +83,6 @@ public class FormatDataSplit extends DataSplit {
 
     public RowType rowType() {
         return rowType;
-    }
-
-    public List<DataFileMeta> dataFiles() {
-        return dataFiles;
     }
 
     @Nullable
@@ -170,6 +124,26 @@ public class FormatDataSplit extends DataSplit {
                 && Arrays.equals(projection, that.projection)
                 && Objects.equals(partitionSpec, that.partitionSpec);
     }
+
+    //    public void serialize(DataOutputView out) throws IOException {
+    //        out.writeLong(MAGIC);
+    //        out.writeInt(VERSION);
+    //        out.writeLong(snapshotId);
+    //        out.writeBoolean(true);
+    //    }
+    //
+    //    public static FormatDataSplit deserialize(DataInputView in) throws IOException {
+    //        long magic = in.readLong();
+    //        int version = magic == MAGIC ? in.readInt() : 1;
+    //        // version 1 does not write magic number in, so the first long is snapshot id.
+    //        long snapshotId = version == 1 ? magic : in.readLong();
+    //        String bucketPath = in.readUTF();
+    //        boolean rawConvertible = in.readBoolean();
+    //
+    //        FormatDataSplit split = new FormatDataSplit(null, null, 0, 0, null, null, 0, null,
+    // null);
+    //        return split;
+    //    }
 
     @Override
     public int hashCode() {

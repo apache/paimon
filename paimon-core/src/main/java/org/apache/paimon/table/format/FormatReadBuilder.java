@@ -25,7 +25,6 @@ import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -33,7 +32,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.AbstractDataTableRead;
@@ -71,7 +69,6 @@ public class FormatReadBuilder implements ReadBuilder {
     protected final RowType partitionType;
 
     private final FileIO fileIO;
-    private final SchemaManager schemaManager;
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
@@ -80,6 +77,9 @@ public class FormatReadBuilder implements ReadBuilder {
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
 
+    private Integer limit = null;
+
+    private @Nullable PartitionPredicate partitionFilter;
     private @Nullable RowType readType;
     private @Nullable Predicate predicate;
     private @Nullable int[] projection;
@@ -89,7 +89,6 @@ public class FormatReadBuilder implements ReadBuilder {
         this.options = new CoreOptions(table.options());
         this.partitionType = table.partitionType();
         this.fileIO = table.fileIO();
-        this.schemaManager = new SchemaManager(fileIO, new Path(table.location()));
         this.schema = table.schema();
         this.readRowType = schema.logicalRowType().notNull();
         this.formatDiscover = FileFormatDiscover.of(options);
@@ -134,7 +133,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withPartitionFilter(PartitionPredicate partitionPredicate) {
-        // TODO
+        this.partitionFilter = partitionPredicate;
         return this;
     }
 
@@ -155,12 +154,14 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withLimit(int limit) {
+        this.limit = limit;
         return this;
     }
 
     @Override
     public TableScan newScan() {
-        return new FormatTableScan(table, predicate, projection);
+        TableScan scan = new FormatTableScan(table, predicate, projection);
+        return scan;
     }
 
     @Override
@@ -181,13 +182,12 @@ public class FormatReadBuilder implements ReadBuilder {
             @Override
             public RecordReader<InternalRow> reader(Split split) throws IOException {
                 FormatDataSplit dataSplit = (FormatDataSplit) split;
-                return read.createReader(dataSplit.dataPath(), dataSplit.dataFiles());
+                return read.createReader(dataSplit);
             }
         };
     }
 
-    private RecordReader<InternalRow> createReader(Path dataPath, List<DataFileMeta> files)
-            throws IOException {
+    private RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
@@ -195,28 +195,24 @@ public class FormatReadBuilder implements ReadBuilder {
                 new FormatReaderMapping.Builder(
                         formatDiscover, readTableFields, TableSchema::fields, filters, false);
 
-        for (DataFileMeta file : files) {
-            String formatIdentifier = options.formatType();
-            Supplier<FormatReaderMapping> formatSupplier =
-                    () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema);
+        String formatIdentifier = options.formatType();
+        Supplier<FormatReaderMapping> formatSupplier =
+                () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema);
 
-            FormatReaderMapping formatReaderMapping =
-                    formatReaderMappings.computeIfAbsent(
-                            new FormatKey(file.schemaId(), formatIdentifier),
-                            key -> formatSupplier.get());
-            suppliers.add(() -> createFileReader(dataPath, file, formatReaderMapping));
-        }
+        FormatReaderMapping formatReaderMapping =
+                formatReaderMappings.computeIfAbsent(
+                        new FormatKey(0, formatIdentifier), key -> formatSupplier.get());
+        suppliers.add(() -> createFileReader(dataSplit, formatReaderMapping));
 
         return ConcatRecordReader.create(suppliers);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
-            Path dataPath, DataFileMeta file, FormatReaderMapping formatReaderMapping)
-            throws IOException {
+            FormatDataSplit dataSplit, FormatReaderMapping formatReaderMapping) throws IOException {
 
-        Path filePath = file.externalPath().map(Path::new).orElse(dataPath);
+        Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(fileIO, filePath, file.fileSize(), null);
+                new FormatReaderContext(fileIO, filePath, dataSplit.length(), null);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         schema.logicalRowType(),
@@ -226,8 +222,8 @@ public class FormatReadBuilder implements ReadBuilder {
                         formatReaderMapping.getCastMapping(),
                         null,
                         false,
-                        file.firstRowId(),
-                        file.maxSequenceNumber(),
+                        null,
+                        0,
                         formatReaderMapping.getSystemFields());
         return fileRecordReader;
     }
