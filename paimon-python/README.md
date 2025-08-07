@@ -23,6 +23,9 @@ pip3 install ossfs
 pip3 install pyarrow
 pip3 install polars
 pip3 install fastavro
+pip3 install pandas
+pip3 install ray
+pip3 install duckdb
 ```
 
 # Build
