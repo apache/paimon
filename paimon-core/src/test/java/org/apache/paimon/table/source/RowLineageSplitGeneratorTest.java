@@ -32,7 +32,7 @@ import java.util.List;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for {@link RowLineageSplitGenerator} */
+/** Test for {@link RowLineageSplitGenerator}. */
 public class RowLineageSplitGeneratorTest {
 
     private static DataFileMeta createFile(
