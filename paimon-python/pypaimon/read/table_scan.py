@@ -17,7 +17,7 @@
 ################################################################################
 
 from collections import defaultdict
-from typing import List, Optional, Callable
+from typing import Callable, List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager

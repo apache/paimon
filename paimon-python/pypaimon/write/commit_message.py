@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Tuple, List
+from typing import List, Tuple
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 

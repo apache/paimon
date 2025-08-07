@@ -24,6 +24,7 @@ import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.KeyFactory;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -52,6 +53,18 @@ public class ChunkedDictionaryTest {
 
         testVariableLengthChunkedDictionary(0); // test no chunked
         testVariableLengthChunkedDictionary(512); // test chunked
+    }
+
+    @Test
+    public void testBuildEmpty() throws IOException {
+        KeyFactory.IntKeyFactory factory = new KeyFactory.IntKeyFactory();
+        ChunkedDictionary.Appender appender = new ChunkedDictionary.Appender(factory, 0);
+        ChunkedDictionary dictionary =
+                new ChunkedDictionary(
+                        new ByteArraySeekableStream(appender.serialize()), 0, factory);
+        assertThat(dictionary.find(new Integer(0))).isEqualTo(-1);
+        assertThat(dictionary.find(new Integer(1))).isEqualTo(-1);
+        assertThat(dictionary.find(new Integer(3))).isEqualTo(-1);
     }
 
     private void testFixedLengthChunkedDictionary(int limitedSize) throws IOException {

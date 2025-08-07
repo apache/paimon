@@ -18,18 +18,24 @@
 
 import pyarrow as pa
 import pyarrow.compute as pc
-from typing import Tuple
 
 from pypaimon.write.writer.data_writer import DataWriter
 
 
+class SequenceGenerator:
+    def __init__(self, start: int = 0):
+        self.current = start
+
+    def next(self) -> int:
+        self.current += 1
+        return self.current
+
+
+sequence_generator = SequenceGenerator()
+
+
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting."""
-
-    def __init__(self, table, partition: Tuple, bucket: int):
-        super().__init__(table, partition, bucket)
-        self.sequence_generator = SequenceGenerator()
-        self.trimmed_primary_key = [field.name for field in self.trimmed_primary_key_fields]
 
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
         enhanced_data = self._add_system_fields(data)
@@ -49,7 +55,7 @@ class KeyValueDataWriter(DataWriter):
                 key_column = data.column(pk_key)
                 enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
 
-        sequence_column = pa.array([self.sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
+        sequence_column = pa.array([sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key), '_SEQUENCE_NUMBER', sequence_column)
 
         # TODO: support real row kind here
@@ -60,19 +66,10 @@ class KeyValueDataWriter(DataWriter):
         return enhanced_table
 
     def _sort_by_primary_key(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        sort_keys = self.trimmed_primary_key
+        sort_keys = [(key, 'ascending') for key in self.trimmed_primary_key]
         if '_SEQUENCE_NUMBER' in data.column_names:
-            sort_keys.append('_SEQUENCE_NUMBER')
+            sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
         sorted_indices = pc.sort_indices(data, sort_keys=sort_keys)
         sorted_batch = data.take(sorted_indices)
         return sorted_batch
-
-
-class SequenceGenerator:
-    def __init__(self, start: int = 0):
-        self.current = start
-
-    def next(self) -> int:
-        self.current += 1
-        return self.current

@@ -19,7 +19,7 @@
 import heapq
 from dataclasses import dataclass
 from functools import cmp_to_key
-from typing import List, Callable
+from typing import Callable, List
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.binary_row import BinaryRow

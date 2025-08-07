@@ -236,7 +236,8 @@ public class BitSliceIndexBitmap {
             this.min = min;
             this.max = max;
             this.ebm = new RoaringBitmap32();
-            this.slices = new RoaringBitmap32[Long.SIZE - Long.numberOfLeadingZeros(max)];
+            this.slices =
+                    new RoaringBitmap32[Math.max(Long.SIZE - Long.numberOfLeadingZeros(max), 1)];
             for (int i = 0; i < slices.length; i++) {
                 slices[i] = new RoaringBitmap32();
             }

@@ -17,10 +17,12 @@
 ################################################################################
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
 
+from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
+                                                   SimpleStats)
 from pypaimon.table.row.binary_row import BinaryRow
 
 
@@ -31,8 +33,8 @@ class DataFileMeta:
     row_count: int
     min_key: Optional[BinaryRow]
     max_key: Optional[BinaryRow]
-    key_stats: Optional[Dict[str, Any]]
-    value_stats: Optional[Dict[str, Any]]
+    key_stats: Optional[SimpleStats]
+    value_stats: Optional[SimpleStats]
     min_sequence_number: int
     max_sequence_number: int
     schema_id: int
@@ -69,8 +71,8 @@ DATA_FILE_META_SCHEMA = {
         {"name": "_ROW_COUNT", "type": "long"},
         {"name": "_MIN_KEY", "type": "bytes"},
         {"name": "_MAX_KEY", "type": "bytes"},
-        {"name": "_KEY_STATS", "type": "long"},  # TODO
-        {"name": "_VALUE_STATS", "type": "long"},  # TODO
+        {"name": "_KEY_STATS", "type": SIMPLE_STATS_SCHEMA},
+        {"name": "_VALUE_STATS", "type": "SimpleStats"},
         {"name": "_MIN_SEQUENCE_NUMBER", "type": "long"},
         {"name": "_MAX_SEQUENCE_NUMBER", "type": "long"},
         {"name": "_SCHEMA_ID", "type": "long"},

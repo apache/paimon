@@ -5,10 +5,35 @@
 # PyPaimon
 
 This PyPi package contains the Python APIs for using Paimon.
+
+# Version
+
+Pypaimon requires Python 3.10+ version.
+
+# Dependencies
+
+Be building, you should install python setuptools:
+
+```commandline
+brew install python-setuptools
+pip3 install readerwriterlock
+pip3 install fsspec
+pip3 install cachetools
+pip3 install ossfs
+pip3 install pyarrow
+pip3 install polars
+pip3 install fastavro
+pip3 install pandas
+pip3 install ray
+pip3 install duckdb
+```
+
 # Build
 
-You can build the source package by executing the following command
+You can build the source package by executing the following command:
+
 ```commandline
-python setup.py sdist
+python3 setup.py sdist
 ```
+
 The package is under `dist/`.

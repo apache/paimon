@@ -17,7 +17,12 @@
 ################################################################################
 
 from dataclasses import dataclass
+from functools import reduce
 from typing import Any, List, Optional
+
+import pyarrow
+from pyarrow import compute as pyarrow_compute
+from pyarrow import dataset as pyarrow_dataset
 
 from pypaimon.table.row.internal_row import InternalRow
 
@@ -73,5 +78,47 @@ class Predicate:
         elif self.method == 'or':
             t = any(p.test(record) for p in self.literals)
             return t
+        else:
+            raise ValueError(f"Unsupported predicate method: {self.method}")
+
+    def to_arrow(self) -> pyarrow_compute.Expression | bool:
+        if self.method == 'equal':
+            return pyarrow_dataset.field(self.field) == self.literals[0]
+        elif self.method == 'notEqual':
+            return pyarrow_dataset.field(self.field) != self.literals[0]
+        elif self.method == 'lessThan':
+            return pyarrow_dataset.field(self.field) < self.literals[0]
+        elif self.method == 'lessOrEqual':
+            return pyarrow_dataset.field(self.field) <= self.literals[0]
+        elif self.method == 'greaterThan':
+            return pyarrow_dataset.field(self.field) > self.literals[0]
+        elif self.method == 'greaterOrEqual':
+            return pyarrow_dataset.field(self.field) >= self.literals[0]
+        elif self.method == 'isNull':
+            return pyarrow_dataset.field(self.field).is_null()
+        elif self.method == 'isNotNull':
+            return pyarrow_dataset.field(self.field).is_valid()
+        elif self.method == 'in':
+            return pyarrow_dataset.field(self.field).isin(self.literals)
+        elif self.method == 'notIn':
+            return ~pyarrow_dataset.field(self.field).isin(self.literals)
+        elif self.method == 'startsWith':
+            pattern = self.literals[0]
+            return pyarrow_compute.starts_with(pyarrow_dataset.field(self.field).cast(pyarrow.string()), pattern)
+        elif self.method == 'endsWith':
+            pattern = self.literals[0]
+            return pyarrow_compute.ends_with(pyarrow_dataset.field(self.field).cast(pyarrow.string()), pattern)
+        elif self.method == 'contains':
+            pattern = self.literals[0]
+            return pyarrow_compute.match_substring(pyarrow_dataset.field(self.field).cast(pyarrow.string()), pattern)
+        elif self.method == 'between':
+            return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
+                (pyarrow_dataset.field(self.field) <= self.literals[1])
+        elif self.method == 'and':
+            return reduce(lambda x, y: x & y,
+                          [p.to_arrow() for p in self.literals])
+        elif self.method == 'or':
+            return reduce(lambda x, y: x | y,
+                          [p.to_arrow() for p in self.literals])
         else:
             raise ValueError(f"Unsupported predicate method: {self.method}")

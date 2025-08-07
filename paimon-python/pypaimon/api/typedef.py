@@ -16,8 +16,7 @@
 #  under the License.
 
 from dataclasses import dataclass
-from typing import TypeVar, Dict
-
+from typing import Dict, TypeVar
 
 T = TypeVar("T")
 

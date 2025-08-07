@@ -18,7 +18,8 @@
 
 from dataclasses import dataclass
 
-from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
+                                                   SimpleStats)
 
 
 @dataclass
@@ -43,7 +44,7 @@ MANIFEST_FILE_META_SCHEMA = {
         {"name": "_FILE_SIZE", "type": "long"},
         {"name": "_NUM_ADDED_FILES", "type": "long"},
         {"name": "_NUM_DELETED_FILES", "type": "long"},
-        {"name": "_PARTITION_STATS", "type": "long"},  # TODO
+        {"name": "_PARTITION_STATS", "type": SIMPLE_STATS_SCHEMA},
         {"name": "_SCHEMA_ID", "type": "long"},
     ]
 }

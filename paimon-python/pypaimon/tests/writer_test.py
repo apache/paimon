@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import glob
 import os
 import shutil
@@ -22,19 +23,20 @@ import unittest
 
 import pyarrow
 
-from pypaimon import Schema
 from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.schema import Schema
 
 
 class WriterTestCase(unittest.TestCase):
 
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
-        self.warehouse = os.path.join(self.temp_dir, 'test_dir')
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp(prefix="unittest_")
+        cls.warehouse = os.path.join(cls.temp_dir, 'test_dir')
 
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def test_writer(self):
         pa_schema = pyarrow.schema([
@@ -42,16 +44,11 @@ class WriterTestCase(unittest.TestCase):
             ('f1', pyarrow.string()),
             ('f2', pyarrow.string())
         ])
-        fields = [
-            DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
-            DataField.from_dict({"id": 2, "name": "f1", "type": "STRING"}),
-            DataField.from_dict({"id": 3, "name": "f2", "type": "STRING"}),
-        ]
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
         })
         catalog.create_database("test_db", False)
-        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+        catalog.create_table("test_db.test_table", Schema.from_pyarrow_schema(pa_schema), False)
         table = catalog.get_table("test_db.test_table")
 
         data = {
