@@ -123,12 +123,12 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
     @Override
     public InnerTableScan newScan() {
         throw new UnsupportedOperationException(
-                "LanceTable does not support InnerTableScan. Use newRead() instead.");
+                "IcebergTable does not support InnerTableScan. Use newRead() instead.");
     }
 
     @Override
     public InnerTableRead newRead() {
         throw new UnsupportedOperationException(
-                "LanceTable does not support InnerTableRead. Use newScan() instead.");
+                "IcebergTable does not support InnerTableRead. Use newScan() instead.");
     }
 }
