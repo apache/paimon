@@ -21,34 +21,21 @@ package org.apache.paimon.table.source.splitread;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
-import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.table.source.DataSplit;
 
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** A {@link SplitReadProvider} to create {@link RawFileSplitRead}. */
-public abstract class RawFileSplitReadProvider implements SplitReadProvider {
+/** Raw file split read for all append table. */
+public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvider {
 
-    private final LazyField<RawFileSplitRead> splitRead;
-
-    public RawFileSplitReadProvider(
+    public AppendTableRawFileSplitReadProvider(
             Supplier<RawFileSplitRead> supplier, Consumer<SplitRead<InternalRow>> valuesAssigner) {
-        this.splitRead =
-                new LazyField<>(
-                        () -> {
-                            RawFileSplitRead read = supplier.get();
-                            valuesAssigner.accept(read);
-                            return read;
-                        });
+        super(supplier, valuesAssigner);
     }
 
     @Override
-    public boolean initialized() {
-        return splitRead.initialized();
-    }
-
-    @Override
-    public SplitRead<InternalRow> getOrCreate() {
-        return splitRead.get();
+    public boolean match(DataSplit split, boolean forceKeepDelete) {
+        return true;
     }
 }

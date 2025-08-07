@@ -31,7 +31,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
 import org.apache.paimon.table.source.splitread.IncrementalDiffReadProvider;
 import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
-import org.apache.paimon.table.source.splitread.RawFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.PrimaryKeyTableRawFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
 
@@ -62,7 +62,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         super(schema);
         this.readProviders =
                 Arrays.asList(
-                        new RawFileSplitReadProvider(batchRawReadSupplier, this::assignValues),
+                        new PrimaryKeyTableRawFileSplitReadProvider(
+                                batchRawReadSupplier, this::assignValues),
                         new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));

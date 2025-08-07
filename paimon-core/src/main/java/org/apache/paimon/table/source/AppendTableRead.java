@@ -27,8 +27,8 @@ import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.MergeFieldSplitReadProvider;
-import org.apache.paimon.table.source.splitread.RawFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
 
@@ -62,7 +62,8 @@ public final class AppendTableRead extends AbstractDataTableRead {
                     new MergeFieldSplitReadProvider(
                             fieldMergeSplitReadSupplier, this::assignValues));
         }
-        readProviders.add(new RawFileSplitReadProvider(batchRawReadSupplier, this::assignValues));
+        readProviders.add(
+                new AppendTableRawFileSplitReadProvider(batchRawReadSupplier, this::assignValues));
     }
 
     private List<SplitRead<InternalRow>> initialized() {
