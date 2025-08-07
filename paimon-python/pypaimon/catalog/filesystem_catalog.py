@@ -20,14 +20,19 @@ from pathlib import Path
 from typing import Optional, Union
 from urllib.parse import urlparse
 
-from pypaimon import Catalog, Database, Table
-from pypaimon.api import CatalogOptions, Identifier
+from pypaimon.catalog.catalog import Catalog
+from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException)
+from pypaimon.catalog.database import Database
+from pypaimon.common.config import CatalogOptions
 from pypaimon.common.core_options import CoreOptions
-from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseNotExistException, \
-    TableAlreadyExistException, DatabaseAlreadyExistException
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):

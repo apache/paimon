@@ -17,12 +17,13 @@
 ################################################################################
 
 import uuid
-import fastavro
-from typing import List, Optional
 from io import BytesIO
+from typing import List, Optional
 
+import fastavro
 
-from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
+from pypaimon.manifest.schema.manifest_file_meta import \
+    MANIFEST_FILE_META_SCHEMA
 from pypaimon.snapshot.snapshot import Snapshot
 
 
@@ -69,7 +70,11 @@ class ManifestListManager:
                 "_FILE_SIZE": 0,  # TODO
                 "_NUM_ADDED_FILES": 0,
                 "_NUM_DELETED_FILES": 0,
-                "_PARTITION_STATS": 0,
+                "_PARTITION_STATS": {
+                    "_MIN_VALUES": None,
+                    "_MAX_VALUES": None,
+                    "_NULL_COUNTS": 0,
+                },
                 "_SCHEMA_ID": 0,
             }
             avro_records.append(avro_record)

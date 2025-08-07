@@ -18,7 +18,8 @@
 
 from dataclasses import dataclass
 
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta, DATA_FILE_META_SCHEMA
+from pypaimon.manifest.schema.data_file_meta import (DATA_FILE_META_SCHEMA,
+                                                     DataFileMeta)
 from pypaimon.table.row.binary_row import BinaryRow
 
 

@@ -17,7 +17,6 @@
 ################################################################################
 
 import uuid
-
 from typing import Optional
 
 from pypaimon.common.core_options import CoreOptions

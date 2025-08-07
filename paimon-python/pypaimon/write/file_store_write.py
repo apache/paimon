@@ -16,8 +16,9 @@
 # limitations under the License.
 ################################################################################
 
+from typing import Dict, List, Tuple
+
 import pyarrow as pa
-from typing import Dict, Tuple, List
 
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter

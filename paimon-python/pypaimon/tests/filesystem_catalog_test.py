@@ -19,11 +19,13 @@ import shutil
 import tempfile
 import unittest
 
-from pypaimon import Schema
-from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
-    DatabaseNotExistException, TableNotExistException
+from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException)
 from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.schema import Schema
 from pypaimon.table.file_store_table import FileStoreTable
 
 
@@ -81,3 +83,6 @@ class FileSystemCatalogTestCase(unittest.TestCase):
         table = catalog.get_table("test_db.test_table")
         self.assertTrue(table is not None)
         self.assertTrue(isinstance(table, FileStoreTable))
+        self.assertEqual(table.fields[2].name, "f2")
+        self.assertTrue(isinstance(table.fields[2].type, AtomicType))
+        self.assertEqual(table.fields[2].type.type, "STRING")

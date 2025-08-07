@@ -20,13 +20,13 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
-from pypaimon import Schema
-from pypaimon.common.rest_json import json_field
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.rest_json import json_field
 from pypaimon.schema.data_types import DataField
+from pypaimon.schema.schema import Schema
 
 
 @dataclass
@@ -38,7 +38,7 @@ class TableSchema:
     FIELD_VERSION = "version"
     FIELD_ID = "id"
     FIELD_FIELDS = "fields"
-    FIELD_HEIGHEST_FIELD_ID = "highestFieldId"
+    FIELD_HIGHEST_FIELD_ID = "highestFieldId"
     FIELD_PARTITION_KEYS = "partitionKeys"
     FIELD_PRIMARY_KEYS = "primaryKeys"
     FIELD_OPTIONS = "options"
@@ -80,47 +80,6 @@ class TableSchema:
         )
 
     @staticmethod
-    def from_path(file_io: FileIO, schema_path: Path):
-        try:
-            json_str = file_io.read_file_utf8(schema_path)
-            return TableSchema.from_json(json_str)
-        except FileNotFoundError as e:
-            raise RuntimeError(f"Schema file not found: {schema_path}") from e
-        except Exception as e:
-            raise RuntimeError(f"Failed to read schema from {schema_path}") from e
-
-    @staticmethod
-    def from_json(json_str: str):
-        try:
-            data = json.loads(json_str)
-
-            version = data.get("version", TableSchema.PAIMON_07_VERSION)
-            options = data["options"]
-            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET not in options:
-                options[CoreOptions.BUCKET] = "1"
-            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT not in options:
-                options[CoreOptions.FILE_FORMAT] = "orc"
-            fields = [DataField.from_dict(field) for field in data["fields"]]
-
-            return TableSchema(
-                version=version,
-                id=data["id"],
-                fields=fields,
-                highest_field_id=data["highestFieldId"],
-                partition_keys=data["partitionKeys"],
-                primary_keys=data["primaryKeys"],
-                options=options,
-                comment=data.get("comment"),
-                time_millis=data.get("timeMillis")
-            )
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Invalid JSON format: {json_str}") from e
-        except KeyError as e:
-            raise RuntimeError(f"Missing required field in schema JSON: {e}") from e
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse schema from JSON: {e}") from e
-
-    @staticmethod
     def from_schema(schema_id: int, schema: Schema) -> "TableSchema":
         fields: List[DataField] = schema.fields
         partition_keys: List[str] = schema.partition_keys
@@ -140,16 +99,57 @@ class TableSchema:
             int(time.time())
         )
 
+    @staticmethod
+    def from_path(file_io: FileIO, schema_path: Path):
+        try:
+            json_str = file_io.read_file_utf8(schema_path)
+            return TableSchema.from_json(json_str)
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Schema file not found: {schema_path}") from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to read schema from {schema_path}") from e
+
+    @staticmethod
+    def from_json(json_str: str):
+        try:
+            data = json.loads(json_str)
+            version = data.get(TableSchema.FIELD_VERSION, TableSchema.PAIMON_07_VERSION)
+            fields = [DataField.from_dict(field) for field in data[TableSchema.FIELD_FIELDS]]
+            options = data[TableSchema.FIELD_OPTIONS]
+            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET not in options:
+                options[CoreOptions.BUCKET] = "1"
+            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT not in options:
+                options[CoreOptions.FILE_FORMAT] = "orc"
+
+            return TableSchema(
+                version=version,
+                id=data[TableSchema.FIELD_ID],
+                fields=fields,
+                highest_field_id=data[TableSchema.FIELD_HIGHEST_FIELD_ID],
+                partition_keys=data[TableSchema.FIELD_PARTITION_KEYS],
+                primary_keys=data[TableSchema.FIELD_PRIMARY_KEYS],
+                options=options,
+                comment=data.get(TableSchema.FIELD_COMMENT),
+                time_millis=data.get(TableSchema.FIELD_TIME_MILLIS)
+            )
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON format: {json_str}") from e
+        except KeyError as e:
+            raise RuntimeError(f"Missing required field in schema JSON: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse schema from JSON: {e}") from e
+
     def to_json(self) -> str:
         data = {
-            "version": self.version,
-            "id": self.id,
-            "fields": [field.to_dict() for field in self.fields],
-            "highestFieldId": self.highest_field_id,
-            "partitionKeys": self.partition_keys,
-            "primaryKeys": self.primary_keys,
-            "options": self.options,
-            "timeMillis": self.time_millis
+            TableSchema.FIELD_VERSION: self.version,
+            TableSchema.FIELD_ID: self.id,
+            TableSchema.FIELD_FIELDS: [field.to_dict() for field in self.fields],
+            TableSchema.FIELD_HIGHEST_FIELD_ID: self.highest_field_id,
+            TableSchema.FIELD_PARTITION_KEYS: self.partition_keys,
+            TableSchema.FIELD_PRIMARY_KEYS: self.primary_keys,
+            TableSchema.FIELD_OPTIONS: self.options,
+            TableSchema.FIELD_COMMENT: self.comment,
+            TableSchema.FIELD_TIME_MILLIS: self.time_millis
         }
         if self.comment is not None:
             data["comment"] = self.comment

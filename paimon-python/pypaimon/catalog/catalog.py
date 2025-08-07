@@ -19,8 +19,8 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
-from pypaimon import Schema
-from pypaimon.api import Identifier
+from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema import Schema
 
 
 class Catalog(ABC):

@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 VERSION = "0.3.dev"  # noqa
 
@@ -26,8 +26,9 @@ install_requires = [
     'fsspec==2024.3.1',
     'cachetools==5.3.3',
     'ossfs==2023.12.0',
-    'fastavro==1.11.1',
-    'pyarrow==15.0.2'
+    'pyarrow==16.0.0',
+    'polars==1.32.0',
+    'fastavro==1.11.1'
 ]
 
 long_description = "See Apache Paimon Python API \
