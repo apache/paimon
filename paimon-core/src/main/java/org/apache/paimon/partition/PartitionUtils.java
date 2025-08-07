@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 /** Utils to fetch partition map information from data schema and row type. */
 public class PartitionUtils {
 
-    public static Pair<Pair<int[], RowType>, List<DataField>> constructPartitionMapping(
+    public static Pair<Pair<int[], RowType>, List<DataField>> trimPartitionFields(
             TableSchema dataSchema, List<DataField> dataFields) {
         if (dataSchema.partitionKeys().isEmpty()) {
             return Pair.of(null, dataFields);

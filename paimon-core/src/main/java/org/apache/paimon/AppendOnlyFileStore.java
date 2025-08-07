@@ -27,6 +27,7 @@ import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.BucketedAppendFileStoreWrite;
+import org.apache.paimon.operation.FieldMergeSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -75,6 +76,18 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public RawFileSplitRead newRead() {
         return new RawFileSplitRead(
+                fileIO,
+                schemaManager,
+                schema,
+                rowType,
+                FileFormatDiscover.of(options),
+                pathFactory(),
+                options.fileIndexReadEnabled(),
+                options.rowTrackingEnabled());
+    }
+
+    public FieldMergeSplitRead newFieldMergeRead() {
+        return new FieldMergeSplitRead(
                 fileIO,
                 schemaManager,
                 schema,

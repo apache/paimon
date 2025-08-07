@@ -270,6 +270,32 @@ public class TableSchema implements Serializable {
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
+    public TableSchema project(int[] fieldIds) {
+        List<DataField> fields = new ArrayList<>();
+        List<Integer> fieldIdsList = Arrays.stream(fieldIds).boxed().collect(Collectors.toList());
+        for (DataField field : this.fields) {
+            if (fieldIdsList.contains(field.id())) {
+                fields.add(field);
+            }
+        }
+        if (fields.size() != fieldIds.length) {
+            throw new RuntimeException(
+                    String.format(
+                            "Projecting fields %s, but only found %s.",
+                            Arrays.toString(fieldIds), fields.size()));
+        }
+        return new TableSchema(
+                version,
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                comment,
+                timeMillis);
+    }
+
     private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return projectedFieldNames.stream()

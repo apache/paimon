@@ -97,6 +97,7 @@ public abstract class ManifestFileMetaTestBase {
                         FileSource.APPEND,
                         null,
                         null,
+                        null,
                         null));
     }
 
@@ -281,6 +282,7 @@ public abstract class ManifestFileMetaTestBase {
                         0L,
                         null,
                         FileSource.APPEND,
+                        null,
                         null,
                         null));
     }

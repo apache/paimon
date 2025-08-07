@@ -50,8 +50,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -162,11 +162,11 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
                         partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
-        List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
+        Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
-            dvFactories = new ArrayList<>(toCompact.size());
+            dvFactories = new HashMap<>();
             for (DataFileMeta file : toCompact) {
-                dvFactories.add(() -> dvFactory.apply(file.fileName()));
+                dvFactories.put(file.fileName(), () -> dvFactory.apply(file.fileName()));
             }
         }
         try {
@@ -208,7 +208,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
-            @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
         return new RecordReaderIterator<>(
                 readForCompact.createReader(partition, bucket, files, dvFactories));

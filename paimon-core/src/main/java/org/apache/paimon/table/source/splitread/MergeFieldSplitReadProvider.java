@@ -19,42 +19,51 @@
 package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.FieldMergeSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
+/** A {@link SplitReadProvider} to create {@link MergeFieldSplitReadProvider}. */
+public class MergeFieldSplitReadProvider implements SplitReadProvider {
 
-/** A {@link SplitReadProvider} to merge fields. */
-public class MergeFileSplitReadProvider implements SplitReadProvider {
+    private final LazyField<FieldMergeSplitRead> splitRead;
 
-    private final LazyField<SplitRead<InternalRow>> splitRead;
-
-    public MergeFileSplitReadProvider(
-            Supplier<MergeFileSplitRead> supplier,
+    public MergeFieldSplitReadProvider(
+            Supplier<FieldMergeSplitRead> supplier,
             Consumer<SplitRead<InternalRow>> valuesAssigner) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
-                            SplitRead<InternalRow> read = create(supplier);
+                            FieldMergeSplitRead read = supplier.get();
                             valuesAssigner.accept(read);
                             return read;
                         });
     }
 
-    private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
-        final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
-    }
-
     @Override
     public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return split.beforeFiles().isEmpty();
+        List<DataFileMeta> files = split.dataFiles();
+        boolean onlyAppendFiles =
+                files.stream()
+                        .allMatch(
+                                f ->
+                                        f.fileSource().isPresent()
+                                                && f.fileSource().get() == FileSource.APPEND
+                                                && f.firstRowId() != null);
+        if (onlyAppendFiles) {
+            // contains same first row id, need merge fields
+            return files.stream().mapToLong(DataFileMeta::firstRowId).distinct().count()
+                    != files.size();
+        }
+        return false;
     }
 
     @Override
@@ -63,7 +72,7 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public SplitRead<InternalRow> getOrCreate() {
+    public RawFileSplitRead getOrCreate() {
         return splitRead.get();
     }
 }
