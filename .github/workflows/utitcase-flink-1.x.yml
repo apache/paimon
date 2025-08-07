@@ -24,6 +24,7 @@ on:
       - 'docs/**'
       - '**/*.md'
       - 'paimon-python/**'
+      - '.github/workflows/paimon-python-checks.yml'
 
 env:
   JDK_VERSION: 8

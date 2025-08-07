@@ -16,14 +16,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Callable, Any
+from urllib.parse import urlparse
 
-from pypaimon.api import CatalogOptions, RESTApi
-from pypaimon.api.api_response import GetTableResponse, PagedList
+
+from pypaimon.api import RESTApi, CatalogOptions
+from pypaimon.api.api_response import PagedList, GetTableResponse
+
+from pypaimon.common.file_io import FileIO
+
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon.catalog.catalog_utils import CatalogUtils
+
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -32,11 +37,13 @@ from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 
 
 class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
+        self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.api = RESTApi(context.options.to_map(), config_required)
         self.context = CatalogContext.create(Options(self.api.options), context.hadoop_conf, context.prefer_io_loader,
                                              context.fallback_io_loader)
@@ -87,7 +94,7 @@ class RESTCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]) -> FileStoreTable:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        return CatalogUtils.load_table(
+        return self.load_table(
             identifier,
             lambda path: self.file_io_for_data(path, identifier),
             self.file_io_from_options,
@@ -95,7 +102,9 @@ class RESTCatalog(Catalog):
         )
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
-        raise ValueError("Not implemented")
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        self.api.create_table(identifier, schema)
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.api.get_table(identifier)
@@ -117,8 +126,41 @@ class RESTCatalog(Catalog):
             uuid=response.get_id()
         )
 
-    def file_io_from_options(self, path: Path):
-        return None
+    def file_io_from_options(self, table_path: Path) -> FileIO:
+        return FileIO(str(table_path), self.context.options.data)
 
-    def file_io_for_data(self, path: Path, identifier: Identifier):
-        return RESTTokenFileIO(identifier, path, None, None) if self.data_token_enabled else None
+    def file_io_for_data(self, table_path: Path, identifier: Identifier):
+        return RESTTokenFileIO(identifier, table_path, self.context.options.data) \
+            if self.data_token_enabled else self.file_io_from_options(table_path)
+
+    def load_table(self,
+                   identifier: Identifier,
+                   internal_file_io: Callable[[Path], Any],
+                   external_file_io: Callable[[Path], Any],
+                   metadata_loader: Callable[[Identifier], TableMetadata],
+                   ) -> FileStoreTable:
+        metadata = metadata_loader(identifier)
+        schema = metadata.schema
+        data_file_io = external_file_io if metadata.is_external else internal_file_io
+        catalog_env = CatalogEnvironment(
+            identifier=identifier,
+            uuid=metadata.uuid,
+            catalog_loader=None,
+            supports_version_management=False
+        )
+        path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
+        path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
+        table = self.create(data_file_io(path),
+                            Path(path_parsed.netloc + "/" + path_parsed.path),
+                            schema,
+                            catalog_env)
+        return table
+
+    def create(self,
+               file_io: FileIO,
+               table_path: Path,
+               table_schema: TableSchema,
+               catalog_environment: CatalogEnvironment
+               ) -> FileStoreTable:
+        """Create FileStoreTable with dynamic options and catalog environment"""
+        return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema)

@@ -15,21 +15,24 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from pathlib import Path
-
-from pypaimon.common.file_io import FileIO
-from pypaimon.schema.table_schema import TableSchema
-from pypaimon.table.catalog_environment import CatalogEnvironment
-from pypaimon.table.file_store_table import FileStoreTable
+from typing import Dict, Optional
 
 
-class FileStoreTableFactory:
-    @staticmethod
-    def create(
-            file_io: FileIO,
-            table_path: Path,
-            table_schema: TableSchema,
-            catalog_environment: CatalogEnvironment
-    ) -> FileStoreTable:
-        """Create FileStoreTable with dynamic options and catalog environment"""
-        return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema)
+class RESTToken:
+
+    def __init__(self, token: Dict[str, str], expire_at_millis: int):
+        self.token = token
+        self.expire_at_millis = expire_at_millis
+        self.hash: Optional[int] = None
+
+    def __eq__(self, other: object) -> bool:
+        if other is None or not isinstance(other, RESTToken):
+            return False
+
+        return (self.expire_at_millis == other.expire_at_millis and
+                self.token == other.token)
+
+    def __hash__(self) -> int:
+        if self.hash is None:
+            self.hash = hash((frozenset(self.token.items()), self.expire_at_millis))
+        return self.hash

@@ -24,6 +24,7 @@ on:
     paths:
       - 'paimon-python/**'
       - '!**/*.md'
+      - '.github/workflows/paimon-python-checks.yml'
 
 env:
   PYTHON_VERSION: "3.10"

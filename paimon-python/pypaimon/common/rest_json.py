@@ -81,6 +81,8 @@ class JSON:
                 field_type = args[0]
             if is_dataclass(field_type):
                 type_mapping[json_name] = field_type
+            elif origin_type is list and is_dataclass(args[0]):
+                type_mapping[json_name] = field_info.type
 
         # Map JSON data to field names
         kwargs = {}
@@ -88,7 +90,19 @@ class JSON:
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
                 if json_name in type_mapping:
-                    kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
+                    tp = get_origin(type_mapping[json_name])
+                    if tp is list:
+                        item_type = get_args(type_mapping[json_name])[0]
+                        if is_dataclass(item_type):
+                            kwargs[field_name] = [
+                                item_type.from_dict(item)
+                                if hasattr(item_type, "to_dict")
+                                else JSON.__from_dict(item, item_type)
+                                for item in value]
+                        else:
+                            kwargs[field_name] = value
+                    else:
+                        kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
                 else:
                     kwargs[field_name] = value
 

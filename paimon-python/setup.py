@@ -28,7 +28,7 @@ install_requires = [
     'ossfs==2023.12.0',
     'pyarrow==16.0.0',
     'polars==1.32.0',
-    'fastavro==1.11.1',
+    'fastavro==1.11.1'
 ]
 
 long_description = "See Apache Paimon Python API \
