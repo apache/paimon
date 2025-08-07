@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Callable, Any
 from urllib.parse import urlparse
 
-
 from pypaimon.api import RESTApi, CatalogOptions
 from pypaimon.api.api_response import PagedList, GetTableResponse
 
@@ -156,8 +155,8 @@ class RESTCatalog(Catalog):
                             catalog_env)
         return table
 
-    def create(self,
-               file_io: FileIO,
+    @staticmethod
+    def create(file_io: FileIO,
                table_path: Path,
                table_schema: TableSchema,
                catalog_environment: CatalogEnvironment

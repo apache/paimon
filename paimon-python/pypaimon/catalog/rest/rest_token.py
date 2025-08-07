@@ -1,4 +1,3 @@
-<<<<<<<< HEAD:paimon-python/pypaimon/catalog/rest/rest_token.py
 """
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -37,5 +36,3 @@ class RESTToken:
         if self.hash is None:
             self.hash = hash((frozenset(self.token.items()), self.expire_at_millis))
         return self.hash
-========
->>>>>>>> 7dba836ed (fix):paimon-python/pypaimon/table/file_store_table_factory.py
