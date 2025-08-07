@@ -30,7 +30,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
-/** A {@link SplitReadProvider} to merge fields. */
+/** A {@link SplitReadProvider} to merge files. */
 public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     private final LazyField<SplitRead<InternalRow>> splitRead;
