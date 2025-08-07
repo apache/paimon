@@ -62,7 +62,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                new GenericArray(meta.fieldIds()));
+                meta.fieldIds() == null ? null : new GenericArray(meta.fieldIds()));
     }
 
     @Override
