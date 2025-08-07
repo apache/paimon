@@ -34,6 +34,24 @@ import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/**
+ * This is a union read which contains multiple inner reader.
+ *
+ * <p>This reader, assembling multiple reader into one big and great reader. The row it produces
+ * also come from the readers it contains. For example, the expected schema for this reader is :
+ * int, int, string, int, string, int.(Total 6 fields) It contains three inner readers, we call them
+ * reader0, reader1 and reader2. The rowOffsets and fieldOffsets are all 6 elements long the same as
+ * output schema. RowOffsets is used to indicate which inner reader the field comes from, and
+ * fieldOffsets is used to indicate the offset of the field in the inner reader. For example, if
+ * rowOffsets is {0, 2, 0, 1, 2, 1} and fieldOffsets is {0, 0, 1, 1, 1, 0}, it means: - The first
+ * field comes from reader0, and it is at offset 0 in reader1. - The second field comes from
+ * reader2, and it is at offset 0 in reader3. - The third field comes from reader0, and it is at
+ * offset 1 in reader1. - The fourth field comes from reader1, and it is at offset 1 in reader2. -
+ * The fifth field comes from reader2, and it is at offset 1 in reader3. - The sixth field comes
+ * from reader1, and it is at offset 0 in reader2.
+ *
+ * <p>These three readers work together, package out final and complete rows.
+ */
 public class CompoundFileReader implements RecordReader<InternalRow> {
 
     private final int[] rowOffsets;
@@ -79,6 +97,7 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
         }
     }
 
+    /** The batch which is made up by several batches. */
     public static class CompoundRecordIterator implements RecordIterator<InternalRow> {
 
         private final CompundInternalRow compundInternalRow;
@@ -121,6 +140,7 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
         }
     }
 
+    /** The row which is made up by several rows. */
     public static class CompundInternalRow implements InternalRow {
 
         private final InternalRow[] rows;
