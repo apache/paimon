@@ -32,8 +32,8 @@ import java.util.List;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for {@link RowLineageSplitGenerator}. */
-public class RowLineageSplitGeneratorTest {
+/** Test for {@link DataEvolutionSplitGenerator}. */
+public class DataEvolutionSplitGeneratorTest {
 
     private static DataFileMeta createFile(
             String name, @Nullable Long firstRowId, long maxSequence) {
@@ -65,7 +65,7 @@ public class RowLineageSplitGeneratorTest {
         DataFileMeta file4 = createFile("file4", null, 40);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(3, result.size());
         assertEquals(Collections.singletonList(file4), result.get(0));
@@ -80,7 +80,7 @@ public class RowLineageSplitGeneratorTest {
         DataFileMeta file3 = createFile("file3", 1L, 30);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(1, result.size());
         assertEquals(Arrays.asList(file3, file2, file1), result.get(0));
@@ -93,7 +93,7 @@ public class RowLineageSplitGeneratorTest {
         DataFileMeta file3 = createFile("file3", 3L, 30);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(3, result.size());
         assertEquals(Collections.singletonList(file1), result.get(0));
@@ -110,7 +110,7 @@ public class RowLineageSplitGeneratorTest {
         DataFileMeta file5 = createFile("file5", 3L, 50);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4, file5);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(3, result.size());
         assertEquals(Arrays.asList(file3, file1), result.get(0));
@@ -132,7 +132,7 @@ public class RowLineageSplitGeneratorTest {
 
         List<DataFileMeta> files =
                 Arrays.asList(file1, file2, file3, file4, file5, file6, file7, file8, file9);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(6, result.size());
         assertEquals(Collections.singletonList(file9), result.get(0));
@@ -150,7 +150,7 @@ public class RowLineageSplitGeneratorTest {
         DataFileMeta file3 = createFile("file3", null, 30);
 
         List<DataFileMeta> files = Arrays.asList(file2, file1, file3);
-        List<List<DataFileMeta>> result = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
 
         assertEquals(3, result.size());
         assertEquals(Collections.singletonList(file3), result.get(0));

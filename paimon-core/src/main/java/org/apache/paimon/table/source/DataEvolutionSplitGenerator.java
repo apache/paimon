@@ -32,13 +32,13 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Append only implementation of {@link SplitGenerator}. */
-public class RowLineageSplitGenerator implements SplitGenerator {
+/** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
+public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     private final long targetSplitSize;
     private final long openFileCost;
 
-    public RowLineageSplitGenerator(long targetSplitSize, long openFileCost) {
+    public DataEvolutionSplitGenerator(long targetSplitSize, long openFileCost) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
     }

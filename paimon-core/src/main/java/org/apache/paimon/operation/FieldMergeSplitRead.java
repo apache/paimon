@@ -33,8 +33,8 @@ import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.RowLineageSplitGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -91,7 +91,7 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
 
         Builder formatReaderMappingBuilder = formatBuilder();
 
-        List<List<DataFileMeta>> splitByRowId = RowLineageSplitGenerator.split(files);
+        List<List<DataFileMeta>> splitByRowId = DataEvolutionSplitGenerator.split(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
             if (needMergeFiles.size() == 1) {
                 // No need to merge fields, just create a single file reader

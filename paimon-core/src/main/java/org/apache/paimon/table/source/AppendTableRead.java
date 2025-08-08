@@ -56,7 +56,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
             CoreOptions coreOptions) {
         super(schema);
         this.readProviders = new ArrayList<>();
-        if (coreOptions.rowTrackingEnabled()) {
+        if (coreOptions.dataElolutionEnabled()) {
             // MergeFieldSplitReadProvider is used to read the field merge split
             readProviders.add(
                     new MergeFieldSplitReadProvider(

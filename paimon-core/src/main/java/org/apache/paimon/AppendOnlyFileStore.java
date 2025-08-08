@@ -87,9 +87,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     public FieldMergeSplitRead newFieldMergeRead() {
-        if (!options.rowTrackingEnabled()) {
+        if (!options.dataElolutionEnabled()) {
             throw new IllegalStateException(
-                    "Field merge read is only supported when row tracking is enabled.");
+                    "Field merge read is only supported when data-evolution.enabled is true.");
         }
         return new FieldMergeSplitRead(
                 fileIO,

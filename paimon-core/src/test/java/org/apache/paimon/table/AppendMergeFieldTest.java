@@ -54,28 +54,22 @@ public class AppendMergeFieldTest extends TableTestBase {
     public void testBasic() throws Exception {
         createTableDefault();
         Schema schema = schemaDefault();
-        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
-        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
-        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0);
-                BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
-
-            write0.write(GenericRow.of(1, BinaryString.fromString("a")));
-            write1.write(GenericRow.of(BinaryString.fromString("b")));
-
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
             BatchTableCommit commit = builder.newCommit();
-            List<CommitMessage> commitables = new ArrayList<>();
-            commitables.addAll(write0.prepareCommit());
-            commitables.addAll(write1.prepareCommit());
-            setFirstRowId(commitables, 0L);
+            List<CommitMessage> commitables = write.prepareCommit();
             commit.commit(commitables);
         }
 
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
         try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
             write1.write(GenericRow.of(BinaryString.fromString("c")));
 
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
 
@@ -109,7 +103,6 @@ public class AppendMergeFieldTest extends TableTestBase {
             }
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write.prepareCommit();
-            setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
 
@@ -186,7 +179,6 @@ public class AppendMergeFieldTest extends TableTestBase {
             write0.write(GenericRow.of(1));
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write0.prepareCommit();
-            setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
 
@@ -400,6 +392,7 @@ public class AppendMergeFieldTest extends TableTestBase {
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         return schemaBuilder.build();
     }
 }

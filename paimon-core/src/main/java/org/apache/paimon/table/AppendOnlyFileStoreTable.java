@@ -32,8 +32,8 @@ import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.AppendTableRead;
+import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.RowLineageSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.Preconditions;
 
@@ -82,8 +82,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     protected SplitGenerator splitGenerator() {
         long targetSplitSize = store().options().splitTargetSize();
         long openFileCost = store().options().splitOpenFileCost();
-        return coreOptions().rowTrackingEnabled()
-                ? new RowLineageSplitGenerator(targetSplitSize, openFileCost)
+        return coreOptions().dataElolutionEnabled()
+                ? new DataEvolutionSplitGenerator(targetSplitSize, openFileCost)
                 : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
     }
 
