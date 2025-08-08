@@ -133,7 +133,7 @@ class DataWriter(ABC):
         path_builder = self.table.table_path
 
         for i, field_name in enumerate(self.table.partition_keys):
-            path_builder = path_builder / (field_name + "=" + self.partition[i])
+            path_builder = path_builder / (field_name + "=" + str(self.partition[i]))
         path_builder = path_builder / ("bucket-" + str(self.bucket)) / file_name
 
         return path_builder

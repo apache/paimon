@@ -72,8 +72,10 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"type": self.type, "nullable": self.nullable}
+    def to_dict(self) -> str:
+        if not self.nullable:
+            return self.type + " NOT NULL"
+        return self.type
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
@@ -90,9 +92,9 @@ class ArrayType(DataType):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": f"ARRAY{'<' + str(self.element) + '>' if self.element else ''}",
+            "type": "ARRAY" + (" NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
-            "nullable": self.nullable,
+            "nullable": self.nullable
         }
 
     def __str__(self) -> str:

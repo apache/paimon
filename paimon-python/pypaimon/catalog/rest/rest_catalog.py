@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Callable, Any
 from urllib.parse import urlparse
 
-
 from pypaimon.api import RESTApi, CatalogOptions
 from pypaimon.api.api_response import PagedList, GetTableResponse
 
@@ -106,6 +105,11 @@ class RESTCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         self.api.create_table(identifier, schema)
 
+    def drop_table(self, identifier: Union[str, Identifier]):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        self.api.drop_table(identifier)
+
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.api.get_table(identifier)
         return self.to_table_metadata(identifier.get_database_name(), response)
@@ -156,8 +160,8 @@ class RESTCatalog(Catalog):
                             catalog_env)
         return table
 
-    def create(self,
-               file_io: FileIO,
+    @staticmethod
+    def create(file_io: FileIO,
                table_path: Path,
                table_schema: TableSchema,
                catalog_environment: CatalogEnvironment
