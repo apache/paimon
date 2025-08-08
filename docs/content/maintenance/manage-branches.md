@@ -77,7 +77,7 @@ Run the following sql:
 CALL sys.create_branch('default.T', 'branch1', 'tag1');
 
 -- create empty branch named 'branch1'
-CALL sys.create_branch('default.T', 'empty_branch');
+CALL sys.create_branch('default.T', 'branch1');
 ```
 {{< /tab >}}
 
