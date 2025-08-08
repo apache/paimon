@@ -28,6 +28,7 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
@@ -109,6 +110,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             @Override
             protected InnerTableRead innerWithFilter(Predicate predicate) {
                 read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public InnerTableRead withTopN(TopN topN) {
+                read.withTopN(topN);
                 return this;
             }
 

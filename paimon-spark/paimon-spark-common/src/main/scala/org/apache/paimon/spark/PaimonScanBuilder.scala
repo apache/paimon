@@ -18,16 +18,22 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.predicate._
+import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
-import org.apache.paimon.table.{FileStoreTable, InnerTable, Table}
+import org.apache.paimon.table.{FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.PaimonUtils
+import org.apache.spark.sql.connector.expressions
+import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
-import org.apache.spark.sql.connector.read.{Scan, SupportsPushDownAggregates, SupportsPushDownLimit, SupportsPushDownV2Filters}
+import org.apache.spark.sql.connector.read._
 import org.apache.spark.sql.sources.Filter
+
+import java.util.Collections
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -36,7 +42,8 @@ class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
   with SupportsPushDownV2Filters
   with SupportsPushDownLimit
-  with SupportsPushDownAggregates {
+  with SupportsPushDownAggregates
+  with SupportsPushDownTopN {
 
   private var localScan: Option[Scan] = None
 
@@ -89,6 +96,57 @@ class PaimonScanBuilder(table: InnerTable)
     // just make the best effort to push down limit
     false
   }
+
+  override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
+    if (hasPostScanPredicates) {
+      return false
+    }
+
+    if (!table.isInstanceOf[FileStoreTable]) {
+      return false
+    }
+
+    val coreOptions = CoreOptions.fromMap(table.options())
+    if (coreOptions.deletionVectorsEnabled()) {
+      return false
+    }
+
+    if (orders.length != 1) {
+      return false
+    }
+
+    val order = orders(0)
+    if (!order.expression().isInstanceOf[NamedReference]) {
+      return false
+    }
+
+    val fieldName = order.expression().asInstanceOf[NamedReference].fieldNames().mkString(".")
+    val rowType = table.rowType()
+    if (rowType.notContainsField(fieldName)) {
+      return false
+    }
+
+    val field = rowType.getField(fieldName)
+    val ref = new FieldRef(field.id(), field.name(), field.`type`())
+
+    val nullOrdering = order.nullOrdering() match {
+      case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
+      case _ => NullOrdering.NULLS_FIRST
+    }
+
+    val direction = order.direction() match {
+      case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
+      case _ => SortDirection.ASCENDING
+    }
+
+    val sort = new SortValue(ref, direction, nullOrdering)
+    pushDownTopN = Some(new TopN(Collections.singletonList(sort), limit))
+
+    // just make the best effort to push down TopN
+    false
+  }
+
+  override def isPartiallyPushed: Boolean = super.isPartiallyPushed
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
     // for now, we only support complete push down, so there is no difference with `pushAggregation`
