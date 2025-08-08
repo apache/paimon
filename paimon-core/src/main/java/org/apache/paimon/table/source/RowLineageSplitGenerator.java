@@ -30,7 +30,7 @@ import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
-import static java.lang.String.format;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Append only implementation of {@link SplitGenerator}. */
 public class RowLineageSplitGenerator implements SplitGenerator {
@@ -100,15 +100,11 @@ public class RowLineageSplitGenerator implements SplitGenerator {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }
-                if (firstRowId < checkRowIdStart) {
-                    throw new IllegalArgumentException(
-                            format(
-                                    "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
-                                    files.stream()
-                                            .map(DataFileMeta::toString)
-                                            .collect(Collectors.joining(",")),
-                                    file));
-                }
+                checkArgument(
+                        firstRowId >= checkRowIdStart,
+                        "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
+                        files.stream().map(DataFileMeta::toString).collect(Collectors.joining(",")),
+                        file);
                 currentSplit = new ArrayList<>();
                 lastRowId = firstRowId;
                 checkRowIdStart = firstRowId + file.rowCount();
