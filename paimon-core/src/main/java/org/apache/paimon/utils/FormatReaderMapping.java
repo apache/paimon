@@ -18,8 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.TableType;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -173,7 +171,10 @@ public class FormatReaderMapping {
          * the real read fields and tell us how to map it back.
          */
         public FormatReaderMapping build(
-                String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
+                String formatIdentifier,
+                TableSchema tableSchema,
+                TableSchema dataSchema,
+                boolean readIgnorePartition) {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = new ArrayList<>(fieldsExtractor.apply(dataSchema));
@@ -197,15 +198,11 @@ public class FormatReaderMapping {
                                     dataSchema, trimmedKeyPair.getRight().getFields());
             Pair<int[], RowType> partitionMapping =
                     partitionMappingAndFieldsWithoutPartitionPair.getLeft();
-            RowType readRowType =
-                    new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight());
             // for format table when csv without header, we couldn't read data by field
-            if (tableSchema
-                    .options()
-                    .get(CoreOptions.TYPE.key())
-                    .equals(TableType.FORMAT_TABLE.toString())) {
-                readRowType = dataSchema.logicalRowType();
-            }
+            RowType readRowType =
+                    readIgnorePartition
+                            ? new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight())
+                            : dataSchema.logicalRowType();
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
 

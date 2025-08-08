@@ -175,7 +175,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                     schema,
                                     schemaId == schema.id()
                                             ? schema
-                                            : schemaManager.schema(schemaId));
+                                            : schemaManager.schema(schemaId),
+                                    true);
 
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
