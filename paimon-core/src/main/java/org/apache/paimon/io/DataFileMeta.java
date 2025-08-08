@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
@@ -345,17 +344,6 @@ public class DataFileMeta {
         return level;
     }
 
-    /**
-     * Usage:
-     *
-     * <ul>
-     *   <li>Paimon 0.2
-     *       <ul>
-     *         <li>Stores changelog files for {@link CoreOptions.ChangelogProducer#INPUT}. Changelog
-     *             files are moved to {@link DataIncrement} since Paimon 0.3.
-     *       </ul>
-     * </ul>
-     */
     public List<String> extraFiles() {
         return extraFiles;
     }
