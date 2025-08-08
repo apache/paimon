@@ -160,7 +160,8 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
-        TableScan scan = new FormatTableScan(table, predicate, projection);
+        FormatTableScan scan = new FormatTableScan(table, predicate, projection);
+        scan.withPartitionFilter(partitionFilter);
         return scan;
     }
 

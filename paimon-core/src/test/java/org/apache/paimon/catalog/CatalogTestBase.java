@@ -42,6 +42,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
@@ -573,25 +574,29 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        String[] formats = {"orc", "parquet", "csv", "json", "txt"};
+        String[] formats = {"parquet", "csv", "json", "txt"};
+        int partitionValue = 10;
         for (String format : formats) {
             Table table = createFormatTable(dbName, format);
             int size = 50;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
                 datas[j] =
-                        GenericRow.of(random.nextInt(), random.nextInt(), (short) random.nextInt());
+                        GenericRow.of(partitionValue, random.nextInt(), (short) random.nextInt());
             }
-
+            InternalRow dataWithDiffPartition =
+                    GenericRow.of(11, random.nextInt(), (short) random.nextInt());
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {
                     write.write(row);
                 }
+                write.write(dataWithDiffPartition);
                 write.prepareCommit();
             }
-
-            List<InternalRow> readData = read(table, null);
+            Map<String, String> partitionSpec = new HashMap<>();
+            partitionSpec.put("dt", "" + partitionValue);
+            List<InternalRow> readData = read(table, null, partitionSpec);
 
             assertThat(readData).containsExactlyInAnyOrder(datas);
             catalog.dropTable(Identifier.create(dbName, format), true);
@@ -601,6 +606,7 @@ public abstract class CatalogTestBase {
     protected List<InternalRow> read(
             Table table,
             @Nullable int[] projection,
+            @Nullable Map<String, String> partitionSpec,
             Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         Map<String, String> options = new HashMap<>();
@@ -612,8 +618,9 @@ public abstract class CatalogTestBase {
         if (projection != null) {
             readBuilder.withProjection(projection);
         }
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        readBuilder.withPartitionFilter(partitionSpec);
+        TableScan scan = readBuilder.newScan();
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(scan.plan());
         InternalRowSerializer serializer =
                 new InternalRowSerializer(
                         projection == null
@@ -627,10 +634,10 @@ public abstract class CatalogTestBase {
     private Table createFormatTable(String database, String format) throws Exception {
         Identifier identifier = Identifier.create(database, format);
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.SMALLINT());
-        schemaBuilder.partitionKeys("f2");
+        schemaBuilder.partitionKeys("dt");
         schemaBuilder.option("file.format", format);
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");

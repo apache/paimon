@@ -18,6 +18,9 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -28,11 +31,17 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -71,11 +80,52 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
-        throw new UnsupportedOperationException();
+        List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
+                PartitionPathUtils.searchPartSpecAndPaths(
+                        table.fileIO(), new Path(table.location()), table.partitionKeys().size());
+        List<PartitionEntry> partitionEntries = new ArrayList<>();
+        for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
+            BinaryRow row = createPartitionRow(partition2Path.getKey());
+            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
+        }
+        return partitionEntries;
     }
 
     public static boolean isDataFileName(String fileName) {
         return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
+    }
+
+    private BinaryRow createPartitionRow(LinkedHashMap<String, String> partitionSpec) {
+        RowType partitionRowType = table.partitionType();
+        List<DataField> fields = partitionRowType.getFields();
+
+        // Create value setters for each field type
+        List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
+        for (DataField field : fields) {
+            valueSetters.add(BinaryWriter.createValueSetter(field.type()));
+        }
+
+        // Create binary row to hold partition values
+        BinaryRow binaryRow = new BinaryRow(fields.size());
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+
+        // Fill in partition values
+        for (int i = 0; i < fields.size(); i++) {
+            String fieldName = fields.get(i).name();
+            String partitionValue = partitionSpec.get(fieldName);
+
+            if (partitionValue == null || partitionValue.equals(table.defaultPartName())) {
+                // Set null for default partition name or missing partition
+                binaryRowWriter.setNullAt(i);
+            } else {
+                // Convert string value to appropriate type and set it
+                Object value = TypeUtils.castFromString(partitionValue, fields.get(i).type());
+                valueSetters.get(i).setValue(binaryRowWriter, i, value);
+            }
+        }
+
+        binaryRowWriter.complete();
+        return binaryRow;
     }
 
     private class FormatTableScanPlan implements Plan {
@@ -83,19 +133,33 @@ public class FormatTableScan implements InnerTableScan {
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
             try (FileIO fileIO = table.fileIO()) {
-                FileStatus[] files = fileIO.listFiles(new Path(table.location()), true);
-                for (FileStatus file : files) {
-                    if (isDataFileName(file.getPath().getName())) {
-                        FormatDataSplit split =
-                                new FormatDataSplit(
-                                        file.getPath(),
-                                        0,
-                                        file.getLen(),
-                                        table.rowType(),
-                                        file.getModificationTime(),
-                                        predicate,
-                                        projection);
-                        splits.add(split);
+                if (partitionFilter != null && !table.partitionKeys().isEmpty()) {
+                    List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
+                            PartitionPathUtils.searchPartSpecAndPaths(
+                                    fileIO,
+                                    new Path(table.location()),
+                                    table.partitionKeys().size());
+                    for (Pair<LinkedHashMap<String, String>, Path> partition2Path :
+                            partition2Paths) {
+                        LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
+                        BinaryRow partitionRow = createPartitionRow(partitionSpec);
+                        if (partitionFilter.test(partitionRow)) {
+                            FileStatus[] files = fileIO.listStatus(partition2Path.getValue());
+                            for (FileStatus file : files) {
+                                if (isDataFileName(file.getPath().getName())) {
+                                    FormatDataSplit split =
+                                            new FormatDataSplit(
+                                                    file.getPath(),
+                                                    0,
+                                                    file.getLen(),
+                                                    table.rowType(),
+                                                    file.getModificationTime(),
+                                                    predicate,
+                                                    projection);
+                                    splits.add(split);
+                                }
+                            }
+                        }
                     }
                 }
             } catch (IOException e) {
