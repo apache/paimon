@@ -30,6 +30,8 @@ import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
+import static java.lang.String.format;
+
 /** Append only implementation of {@link SplitGenerator}. */
 public class RowLineageSplitGenerator implements SplitGenerator {
 
@@ -86,6 +88,7 @@ public class RowLineageSplitGenerator implements SplitGenerator {
 
         // Split files by firstRowId
         long lastRowId = -1;
+        long checkRowIdStart = 0;
         List<DataFileMeta> currentSplit = new ArrayList<>();
         for (DataFileMeta file : files) {
             Long firstRowId = file.firstRowId();
@@ -97,8 +100,18 @@ public class RowLineageSplitGenerator implements SplitGenerator {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }
+                if (firstRowId < checkRowIdStart) {
+                    throw new IllegalArgumentException(
+                            format(
+                                    "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
+                                    files.stream()
+                                            .map(DataFileMeta::toString)
+                                            .collect(Collectors.joining(",")),
+                                    file));
+                }
                 currentSplit = new ArrayList<>();
                 lastRowId = firstRowId;
+                checkRowIdStart = firstRowId + file.rowCount();
             }
             currentSplit.add(file);
         }
