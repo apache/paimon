@@ -109,7 +109,7 @@ public class FullCompactTriggerTest {
         Optional<CompactUnit> compactUnit2 = trigger.tryFullCompact(5, createRuns(100, 200));
         assertThat(compactUnit2).isPresent();
         assertThat(compactUnit2.get().outputLevel()).isEqualTo(4);
-        assertThat(compactUnit2.get().files()).isEqualTo(2);
+        assertThat(compactUnit2.get().files()).hasSize(2);
     }
 
     @Test
