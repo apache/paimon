@@ -20,7 +20,6 @@ package org.apache.paimon.format;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -57,6 +56,6 @@ public class FormatKey {
 
     @Override
     public int hashCode() {
-        return Objects.hash(schemaId, format, Arrays.hashCode(fieldNames));
+        return Objects.hash(schemaId, format, fieldNames);
     }
 }
