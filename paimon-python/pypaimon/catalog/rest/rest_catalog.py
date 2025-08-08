@@ -105,6 +105,11 @@ class RESTCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         self.api.create_table(identifier, schema)
 
+    def drop_table(self, identifier: Union[str, Identifier]):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        self.api.drop_table(identifier)
+
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.api.get_table(identifier)
         return self.to_table_metadata(identifier.get_database_name(), response)
