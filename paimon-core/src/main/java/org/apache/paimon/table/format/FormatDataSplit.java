@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.RawFile;
@@ -29,7 +28,6 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -42,16 +40,13 @@ public class FormatDataSplit implements Split {
     private final RowType rowType;
     private final Predicate predicate;
     private final int[] projection;
-    private final Map<String, String> partitionSpec;
     private final long modificationTime;
 
     public FormatDataSplit(
-            FileIO fileIO,
             Path filePath,
             long offset,
             long length,
             RowType rowType,
-            Map<String, String> partitionSpec,
             long modificationTime,
             @Nullable Predicate predicate,
             @Nullable int[] projection) {
@@ -61,7 +56,6 @@ public class FormatDataSplit implements Split {
         this.rowType = rowType;
         this.predicate = predicate;
         this.projection = projection;
-        this.partitionSpec = partitionSpec;
         this.modificationTime = modificationTime;
     }
 
@@ -121,41 +115,12 @@ public class FormatDataSplit implements Split {
                 && Objects.equals(filePath, that.filePath)
                 && Objects.equals(rowType, that.rowType)
                 && Objects.equals(predicate, that.predicate)
-                && Arrays.equals(projection, that.projection)
-                && Objects.equals(partitionSpec, that.partitionSpec);
+                && Arrays.equals(projection, that.projection);
     }
-
-    //    public void serialize(DataOutputView out) throws IOException {
-    //        out.writeLong(MAGIC);
-    //        out.writeInt(VERSION);
-    //        out.writeLong(snapshotId);
-    //        out.writeBoolean(true);
-    //    }
-    //
-    //    public static FormatDataSplit deserialize(DataInputView in) throws IOException {
-    //        long magic = in.readLong();
-    //        int version = magic == MAGIC ? in.readInt() : 1;
-    //        // version 1 does not write magic number in, so the first long is snapshot id.
-    //        long snapshotId = version == 1 ? magic : in.readLong();
-    //        String bucketPath = in.readUTF();
-    //        boolean rawConvertible = in.readBoolean();
-    //
-    //        FormatDataSplit split = new FormatDataSplit(null, null, 0, 0, null, null, 0, null,
-    // null);
-    //        return split;
-    //    }
 
     @Override
     public int hashCode() {
-        int result =
-                Objects.hash(
-                        filePath,
-                        offset,
-                        length,
-                        rowType,
-                        predicate,
-                        partitionSpec,
-                        modificationTime);
+        int result = Objects.hash(filePath, offset, length, rowType, predicate, modificationTime);
         result = 31 * result + Arrays.hashCode(projection);
         return result;
     }
@@ -175,8 +140,6 @@ public class FormatDataSplit implements Split {
                 + predicate
                 + ", projection="
                 + Arrays.toString(projection)
-                + ", partitionSpec="
-                + partitionSpec
                 + ", modificationTime="
                 + modificationTime
                 + '}';

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -32,12 +33,13 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
+import java.util.regex.Pattern;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
+
+    private static final Pattern VALID_FILENAME_PATTERN = Pattern.compile("^[A-Za-z0-9].*");
 
     private final FormatTable table;
     private Predicate predicate;
@@ -72,27 +74,29 @@ public class FormatTableScan implements InnerTableScan {
         throw new UnsupportedOperationException();
     }
 
+    public static boolean isDataFileName(String fileName) {
+        return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
+    }
+
     private class FormatTableScanPlan implements Plan {
         @Override
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
-            try {
-                //                partitionFilter.test()
-                FileStatus[] files = table.fileIO().listFiles(new Path(table.location()), true);
-                Map<String, String> partitionSpec = Collections.emptyMap();
+            try (FileIO fileIO = table.fileIO()) {
+                FileStatus[] files = fileIO.listFiles(new Path(table.location()), true);
                 for (FileStatus file : files) {
-                    FormatDataSplit split =
-                            new FormatDataSplit(
-                                    table.fileIO(),
-                                    file.getPath(),
-                                    0,
-                                    file.getLen(),
-                                    table.rowType(),
-                                    partitionSpec,
-                                    file.getModificationTime(),
-                                    predicate,
-                                    projection);
-                    splits.add(split);
+                    if (isDataFileName(file.getPath().getName())) {
+                        FormatDataSplit split =
+                                new FormatDataSplit(
+                                        file.getPath(),
+                                        0,
+                                        file.getLen(),
+                                        table.rowType(),
+                                        file.getModificationTime(),
+                                        predicate,
+                                        projection);
+                        splits.add(split);
+                    }
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);
