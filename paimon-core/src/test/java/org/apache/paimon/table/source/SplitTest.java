@@ -625,7 +625,7 @@ public class SplitTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs:///path/to/warehouse",
                         12L,
-                        new int[] {1, 4, 6, 7, 8});
+                        Arrays.asList("a", "b", "c", "f"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);

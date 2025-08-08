@@ -78,7 +78,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
-                        new int[] {1, 2, 4, 5});
+                        Arrays.asList("asdf", "qwer", "zxcv"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();

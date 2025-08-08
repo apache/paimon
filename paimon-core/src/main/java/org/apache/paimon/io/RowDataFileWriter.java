@@ -25,7 +25,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Pair;
@@ -51,7 +50,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
-    private final int[] fieldIds;
+    @Nullable private final List<String> fieldIds;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -64,7 +63,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            @Nullable List<String> fieldIds) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
@@ -74,7 +74,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
         this.fileSource = fileSource;
-        this.fieldIds = writeSchema.getFields().stream().mapToInt(DataField::id).toArray();
+        this.fieldIds = fieldIds;
     }
 
     @Override

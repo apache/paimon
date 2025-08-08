@@ -72,6 +72,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     private final FileIndexOptions fileIndexOptions;
+    private final RowType rowType;
 
     private RowType writeType;
     private boolean forceBufferSpill = false;
@@ -80,7 +81,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             FileIO fileIO,
             RawFileSplitRead readForCompact,
             long schemaId,
-            RowType writeType,
+            RowType rowType,
             RowType partitionType,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -92,7 +93,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.fileIO = fileIO;
         this.readForCompact = readForCompact;
         this.schemaId = schemaId;
-        this.writeType = writeType;
+        this.rowType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 
@@ -114,6 +115,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
+                rowType,
                 writeType,
                 restoredMaxSeqNumber,
                 getCompactManager(partition, bucket, restoredFiles, compactExecutor, dvMaintainer),
@@ -139,7 +141,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
-        return createStatsFactories(options.statsMode(), options, writeType.getFieldNames());
+        return createStatsFactories(options.statsMode(), options, rowType.getFieldNames());
     }
 
     protected abstract CompactManager getCompactManager(
@@ -193,7 +195,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
-                writeType,
+                writeType != null ? writeType : rowType,
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 seqNumCounter,
                 options.fileCompression(),
@@ -201,7 +203,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 fileIndexOptions,
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
-                options.statsDenseStore());
+                options.statsDenseStore(),
+                writeType == null || rowType.equals(writeType) ? null : writeType.getFieldNames());
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

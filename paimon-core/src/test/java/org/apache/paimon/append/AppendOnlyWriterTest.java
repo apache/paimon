@@ -622,6 +622,7 @@ public class AppendOnlyWriterTest {
                         fileFormat,
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
+                        AppendOnlyWriterTest.SCHEMA,
                         getMaxSequenceNumber(toCompact),
                         compactManager,
                         null,

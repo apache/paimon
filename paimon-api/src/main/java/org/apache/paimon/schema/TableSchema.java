@@ -270,12 +270,15 @@ public class TableSchema implements Serializable {
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
-    public TableSchema project(int[] fieldIds) {
-        Map<Integer, DataField> fieldMap =
+    public TableSchema project(@Nullable List<String> fieldIds) {
+        if (fieldIds == null || fieldIds.isEmpty()) {
+            return this;
+        }
+        Map<String, DataField> fieldMap =
                 fields.stream()
-                        .collect(Collectors.toMap(DataField::id, field -> field, (a, b) -> a));
+                        .collect(Collectors.toMap(DataField::name, field -> field, (a, b) -> a));
         List<DataField> fields = new ArrayList<>();
-        for (int fieldId : fieldIds) {
+        for (String fieldId : fieldIds) {
             DataField dataField = fieldMap.get(fieldId);
             if (dataField == null) {
                 throw new RuntimeException(
