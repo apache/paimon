@@ -1935,7 +1935,7 @@ public class CoreOptions implements Serializable {
             key("data-evolution.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether enable data evolution for row lineage table.");
+                    .withDescription("Whether enable data evolution for row tracking table.");
 
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")

@@ -321,6 +321,12 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable data evolution for row tracking table.</td>
+        </tr>
+        <tr>
             <td><h5>data-file.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
