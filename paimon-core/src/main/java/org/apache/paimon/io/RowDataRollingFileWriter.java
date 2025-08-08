@@ -53,7 +53,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable List<String> fieldIds) {
+            @Nullable List<String> writeCols) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -69,7 +69,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
-                                fieldIds),
+                                writeCols),
                 targetFileSize);
     }
 

@@ -94,6 +94,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.readForCompact = readForCompact;
         this.schemaId = schemaId;
         this.rowType = rowType;
+        this.writeType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 

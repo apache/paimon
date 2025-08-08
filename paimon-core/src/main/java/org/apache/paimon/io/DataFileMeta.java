@@ -146,7 +146,7 @@ public class DataFileMeta {
             @Nullable List<String> valueStatsCols,
             @Nullable String externalPath,
             @Nullable Long firstRowId,
-            @Nullable List<String> fieldIds) {
+            @Nullable List<String> writeCols) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -167,7 +167,7 @@ public class DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                fieldIds);
+                writeCols);
     }
 
     public DataFileMeta(

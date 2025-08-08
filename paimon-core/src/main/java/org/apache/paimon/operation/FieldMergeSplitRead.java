@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -202,7 +203,9 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                             new FormatKey(
                                     file.schemaId(),
                                     formatIdentifier,
-                                    readFields.stream().mapToInt(DataField::id).toArray()),
+                                    readFields.stream()
+                                            .map(DataField::name)
+                                            .collect(Collectors.toList())),
                             key -> formatSupplier.get());
 
             fileRecordReaders[i] =

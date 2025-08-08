@@ -50,7 +50,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final SimpleStatsConverter statsArraySerializer;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
-    @Nullable private final List<String> fieldIds;
+    @Nullable private final List<String> writeCols;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -64,7 +64,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean isExternalPath,
-            @Nullable List<String> fieldIds) {
+            @Nullable List<String> writeCols) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
@@ -74,7 +74,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
         this.fileSource = fileSource;
-        this.fieldIds = fieldIds;
+        this.writeCols = writeCols;
     }
 
     @Override
@@ -121,6 +121,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 statsPair.getKey(),
                 externalPath,
                 null,
-                fieldIds);
+                writeCols);
     }
 }

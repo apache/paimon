@@ -295,7 +295,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 schemaId,
                 fileFormat,
                 targetFileSize,
-                writeSchema != null ? writeSchema : rowType,
+                writeSchema,
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
@@ -304,9 +304,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 FileSource.APPEND,
                 asyncFileWrite,
                 statsDenseStore,
-                writeSchema == null || writeSchema.equals(rowType)
-                        ? null
-                        : writeSchema.getFieldNames());
+                writeSchema.equals(rowType) ? null : writeSchema.getFieldNames());
     }
 
     private void trySyncLatestCompaction(boolean blocking)
