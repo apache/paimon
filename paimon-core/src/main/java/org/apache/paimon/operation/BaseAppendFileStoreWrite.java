@@ -142,7 +142,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
-        return createStatsFactories(options.statsMode(), options, rowType.getFieldNames());
+        return createStatsFactories(options.statsMode(), options, writeType.getFieldNames());
     }
 
     protected abstract CompactManager getCompactManager(

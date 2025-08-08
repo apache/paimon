@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static java.lang.String.format;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
@@ -211,6 +212,15 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
             fileRecordReaders[i] =
                     createFileReader(
                             partition, file, dataFilePathFactory, formatReaderMapping, dvFactory);
+        }
+        for (int i = 0; i < rowOffsets.length; i++) {
+            if (rowOffsets[i] == -1) {
+                checkArgument(
+                        allReadFields.get(i).type().isNullable(),
+                        format(
+                                "Field %s is not null but can't find any file contains it.",
+                                allReadFields.get(i)));
+            }
         }
         return new CompoundFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
     }

@@ -109,7 +109,7 @@ public class AppendMergeFieldTest extends TableTestBase {
             }
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write.prepareCommit();
-            setFirstRowId(commitables, 1L);
+            setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
 
