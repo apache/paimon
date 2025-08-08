@@ -151,6 +151,7 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                 IOExceptionSupplier<DeletionVector> temp = dvFactories.get(file.fileName());
                 if (temp != null && temp.get() != null) {
                     dvFactory = temp;
+                    break;
                 }
             }
         }
