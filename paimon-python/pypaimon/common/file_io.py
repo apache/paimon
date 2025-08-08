@@ -62,7 +62,6 @@ class FileIO:
 
         client_kwargs = {
             "endpoint_override": self.properties.get(OssOptions.OSS_ENDPOINT),
-            # "endpoint_override": "oss-cn-hangzhou.aliyuncs.com",
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             "session_token": self.properties.get(OssOptions.OSS_SECURITY_TOKEN),
