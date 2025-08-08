@@ -253,6 +253,12 @@ val stream = df
 
 ## Schema Evolution
 
+{{< hint info >}}
+
+Since the table schema may be updated during writing, catalog caching needs to be disabled to use this feature. Configure `spark.sql.catalog.<catalogName>.cache-enabled` to `false`.
+
+{{< /hint >}}
+
 Schema evolution is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
 
 Paimon supports automatic schema merging of source data and current table data while data is being written, and uses the merged schema as the latest schema of the table, and it only requires configuring `write.merge-schema`.
@@ -306,3 +312,15 @@ Here list the configurations.
         </tr>
     </tbody>
 </table>
+
+This mode also supports Spark SQL. Here is an example:
+
+```sql
+set `spark.paimon.write.merge-schema` = true;
+
+CREATE TABLE t (a INT, b STRING);
+INSERT INTO t VALUES (1, '1'), (2, '2');
+
+-- need using by name mode
+INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
+```

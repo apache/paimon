@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.schema.SparkSystemColumns
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -43,29 +44,8 @@ case class WriteIntoPaimonTable(
   with SchemaHelper
   with Logging {
 
-  private lazy val mergeSchema = options.get(SparkConnectorOptions.MERGE_SCHEMA)
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    var data = _data
-    if (mergeSchema) {
-      val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
-      val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST)
-      mergeAndCommitSchema(dataSchema, allowExplicitCast)
-
-      // For case that some columns is absent in data, we still allow to write once write.merge-schema is true.
-      val newTableSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
-      if (!PaimonUtils.sameType(newTableSchema, dataSchema)) {
-        val resolve = sparkSession.sessionState.conf.resolver
-        val cols = newTableSchema.map {
-          field =>
-            dataSchema.find(f => resolve(f.name, field.name)) match {
-              case Some(f) => col(f.name)
-              case _ => lit(null).as(field.name)
-            }
-        }
-        data = data.select(cols: _*)
-      }
-    }
+    val data = mergeSchema(sparkSession, _data, options)
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object
