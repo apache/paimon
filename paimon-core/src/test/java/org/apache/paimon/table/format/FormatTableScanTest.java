@@ -23,15 +23,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Unit tests for FormatTableScan.isDataFileName method */
+/** Test for {@link FormatTableScan}. */
 class FormatTableScanTest {
 
-    /**
-     * Test valid filenames that should return true These filenames start with alphanumeric
-     * characters
-     */
     @ParameterizedTest
     @ValueSource(
             strings = {
@@ -52,10 +49,6 @@ class FormatTableScanTest {
                 "Filename '" + fileName + "' should be valid");
     }
 
-    /**
-     * Test invalid filenames that should return false These filenames do not start with
-     * alphanumeric characters
-     */
     @ParameterizedTest
     @ValueSource(strings = {".hidden", "_file.txt"})
     @DisplayName("Test invalid filenames that should return false")
@@ -65,7 +58,6 @@ class FormatTableScanTest {
                 "Filename '" + fileName + "' should be invalid");
     }
 
-    /** Test null input which should return false */
     @Test
     @DisplayName("Test null input should return false")
     void testNullInput() {
