@@ -114,7 +114,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         formatReaderMappingBuilder.build(
                                 formatIdentifier,
                                 schema,
-                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
+                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId),
+                                true);
 
         FormatReaderMapping formatReaderMapping =
                 reuseFormat

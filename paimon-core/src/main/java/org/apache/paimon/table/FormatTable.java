@@ -25,7 +25,11 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatBatchWriteBuilder;
+import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -41,6 +45,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
@@ -64,12 +70,19 @@ public interface FormatTable extends Table {
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
 
+    TableSchema schema();
+
+    default int bucket() {
+        return BucketMode.UNAWARE_BUCKET;
+    }
+
     /** Currently supported formats. */
     enum Format {
         ORC,
         PARQUET,
         CSV,
-        JSON
+        JSON,
+        TXT
     }
 
     /** Parses a file format string to a corresponding {@link Format} enum constant. */
@@ -151,6 +164,8 @@ public interface FormatTable extends Table {
     /** An implementation for {@link FormatTable}. */
     class FormatTableImpl implements FormatTable {
 
+        private static final long serialVersionUID = 1L;
+
         private final FileIO fileIO;
         private final Identifier identifier;
         private final RowType rowType;
@@ -159,6 +174,7 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
+        private TableSchema schema;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -177,6 +193,15 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
+            this.schema =
+                    TableSchema.create(
+                            0L,
+                            new Schema(
+                                    rowType.getFields(),
+                                    partitionKeys,
+                                    Collections.emptyList(),
+                                    options,
+                                    comment));
         }
 
         @Override
@@ -230,6 +255,11 @@ public interface FormatTable extends Table {
         }
 
         @Override
+        public TableSchema schema() {
+            return schema;
+        }
+
+        @Override
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
@@ -243,6 +273,25 @@ public interface FormatTable extends Table {
                     newOptions,
                     comment);
         }
+    }
+
+    @Override
+    default ReadBuilder newReadBuilder() {
+        return new FormatReadBuilder(this);
+    }
+
+    @Override
+    default BatchWriteBuilder newBatchWriteBuilder() {
+        return new FormatBatchWriteBuilder(this);
+    }
+
+    default RowType partitionType() {
+        return rowType().project(partitionKeys());
+    }
+
+    default String defaultPartName() {
+        return options()
+                .getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
     }
 
     // ===================== Unsupported ===============================
@@ -349,16 +398,6 @@ public interface FormatTable extends Table {
 
     @Override
     default ExpireSnapshots newExpireChangelog() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default ReadBuilder newReadBuilder() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException();
     }
 

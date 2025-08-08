@@ -171,7 +171,10 @@ public class FormatReaderMapping {
          * the real read fields and tell us how to map it back.
          */
         public FormatReaderMapping build(
-                String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
+                String formatIdentifier,
+                TableSchema tableSchema,
+                TableSchema dataSchema,
+                boolean readIgnorePartition) {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFields = new ArrayList<>(fieldsExtractor.apply(dataSchema));
@@ -195,10 +198,11 @@ public class FormatReaderMapping {
                                     dataSchema, trimmedKeyPair.getRight().getFields());
             Pair<int[], RowType> partitionMapping =
                     partitionMappingAndFieldsWithoutPartitionPair.getLeft();
-
+            // for format table when csv without header, we couldn't read data by field
             RowType readRowType =
-                    new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight());
-
+                    readIgnorePartition
+                            ? new RowType(partitionMappingAndFieldsWithoutPartitionPair.getRight())
+                            : dataSchema.logicalRowType();
             // build read filters
             List<Predicate> readFilters = readFilters(filters, tableSchema, dataSchema);
 
