@@ -272,7 +272,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 readRowType.getFields(),
                 tableSchema -> {
                     if (rowTrackingEnabled) {
-                        return SpecialFields.rowTypeWithRowLineage(tableSchema.logicalRowType())
+                        return SpecialFields.rowTypeWithRowLineage(
+                                        tableSchema.logicalRowType(), true)
                                 .getFields();
                     }
                     return tableSchema.fields();
