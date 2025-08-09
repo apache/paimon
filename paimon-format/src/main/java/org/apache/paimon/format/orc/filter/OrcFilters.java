@@ -317,7 +317,15 @@ public class OrcFilters {
 
         @Override
         public SearchArgument.Builder add(SearchArgument.Builder builder) {
-            return builder.in(columnName, literalType, literals);
+            Object[] castedLiterals = new Object[literals.length];
+            for (int i = 0; i < literals.length; i++) {
+                if (literals[i] instanceof Serializable) {
+                    castedLiterals[i] = castLiteral((Serializable) literals[i]);
+                } else {
+                    castedLiterals[i] = literals[i];
+                }
+            }
+            return builder.in(columnName, literalType, castedLiterals);
         }
 
         @Override
