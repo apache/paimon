@@ -27,7 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.reader.CompoundFileReader;
+import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -56,9 +56,9 @@ import static java.lang.String.format;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
-public class FieldMergeSplitRead extends RawFileSplitRead {
+public class DataEvolutionSplitRead extends RawFileSplitRead {
 
-    public FieldMergeSplitRead(
+    public DataEvolutionSplitRead(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -106,7 +106,7 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
             } else {
                 suppliers.add(
                         () ->
-                                createCompoundFileReader(
+                                createFileReader(
                                         needMergeFiles,
                                         partition,
                                         dataFilePathFactory,
@@ -118,7 +118,7 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
         return ConcatRecordReader.create(suppliers);
     }
 
-    private CompoundFileReader createCompoundFileReader(
+    private DataEvolutionFileReader createFileReader(
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
@@ -222,6 +222,6 @@ public class FieldMergeSplitRead extends RawFileSplitRead {
                                 allReadFields.get(i)));
             }
         }
-        return new CompoundFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
+        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
     }
 }

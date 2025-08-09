@@ -63,23 +63,23 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         this.readProviders =
                 Arrays.asList(
                         new PrimaryKeyTableRawFileSplitReadProvider(
-                                batchRawReadSupplier, this::assignValues),
-                        new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
-                        new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
-                        new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));
+                                batchRawReadSupplier, this::config),
+                        new MergeFileSplitReadProvider(mergeReadSupplier, this::config),
+                        new IncrementalChangelogReadProvider(mergeReadSupplier, this::config),
+                        new IncrementalDiffReadProvider(mergeReadSupplier, this::config));
     }
 
     private List<SplitRead<InternalRow>> initialized() {
         List<SplitRead<InternalRow>> readers = new ArrayList<>();
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.initialized()) {
-                readers.add(readProvider.getOrCreate());
+            if (readProvider.get().initialized()) {
+                readers.add(readProvider.get().get());
             }
         }
         return readers;
     }
 
-    private void assignValues(SplitRead<InternalRow> read) {
+    private void config(SplitRead<InternalRow> read) {
         if (forceKeepDelete) {
             read = read.forceKeepDelete();
         }
@@ -121,7 +121,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(dataSplit, forceKeepDelete)) {
-                return readProvider.getOrCreate().createReader(dataSplit);
+                return readProvider.get().get().createReader(dataSplit);
             }
         }
 

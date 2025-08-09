@@ -18,45 +18,56 @@
 
 package org.apache.paimon.table.source.splitread;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.operation.MergeFileSplitRead;
-import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
+import java.util.List;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
+/** A {@link SplitReadProvider} to create {@link DataEvolutionSplitRead}. */
+public class DataEvolutionSplitReadProvider implements SplitReadProvider {
 
-/** A {@link SplitReadProvider} to merge files. */
-public class MergeFileSplitReadProvider implements SplitReadProvider {
+    private final LazyField<DataEvolutionSplitRead> splitRead;
 
-    private final LazyField<SplitRead<InternalRow>> splitRead;
-
-    public MergeFileSplitReadProvider(
-            Supplier<MergeFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
+    public DataEvolutionSplitReadProvider(
+            Supplier<DataEvolutionSplitRead> supplier, SplitReadConfig splitReadConfig) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
-                            SplitRead<InternalRow> read = create(supplier);
+                            DataEvolutionSplitRead read = supplier.get();
                             splitReadConfig.config(read);
                             return read;
                         });
     }
 
-    private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
-        final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
-    }
-
     @Override
     public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return split.beforeFiles().isEmpty();
+        List<DataFileMeta> files = split.dataFiles();
+        if (files.size() < 2) {
+            return false;
+        }
+
+        Long firstRowId = null;
+        for (DataFileMeta file : files) {
+            Long current = file.firstRowId();
+            if (current == null) {
+                return false;
+            }
+
+            if (firstRowId == null) {
+                firstRowId = current;
+            } else if (!firstRowId.equals(current)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     @Override
-    public LazyField<SplitRead<InternalRow>> get() {
+    public LazyField<DataEvolutionSplitRead> get() {
         return splitRead;
     }
 }

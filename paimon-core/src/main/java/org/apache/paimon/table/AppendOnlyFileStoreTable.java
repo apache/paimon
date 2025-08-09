@@ -35,11 +35,18 @@ import org.apache.paimon.table.source.AppendTableRead;
 import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.DataEvolutionSplitReadProvider;
+import org.apache.paimon.table.source.splitread.SplitReadConfig;
+import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 /** {@link FileStoreTable} for append table. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -82,7 +89,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     protected SplitGenerator splitGenerator() {
         long targetSplitSize = store().options().splitTargetSize();
         long openFileCost = store().options().splitOpenFileCost();
-        return coreOptions().dataElolutionEnabled()
+        return coreOptions().dataEvolutionEnabled()
                 ? new DataEvolutionSplitGenerator(targetSplitSize, openFileCost)
                 : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
     }
@@ -99,11 +106,17 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new AppendTableRead(
-                () -> store().newRead(),
-                () -> store().newFieldMergeRead(),
-                schema(),
-                coreOptions());
+        List<Function<SplitReadConfig, SplitReadProvider>> providerFactories = new ArrayList<>();
+        if (coreOptions().dataEvolutionEnabled()) {
+            // add data evolution first
+            providerFactories.add(
+                    config ->
+                            new DataEvolutionSplitReadProvider(
+                                    () -> store().newDataEvolutionRead(), config));
+        }
+        providerFactories.add(
+                config -> new AppendTableRawFileSplitReadProvider(() -> store().newRead(), config));
+        return new AppendTableRead(providerFactories, schema());
     }
 
     @Override

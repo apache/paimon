@@ -21,13 +21,12 @@ package org.apache.paimon.table.source.splitread;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.LazyField;
 
 /** Provider to create {@link SplitRead}. */
 public interface SplitReadProvider {
 
     boolean match(DataSplit split, boolean forceKeepDelete);
 
-    boolean initialized();
-
-    SplitRead<InternalRow> getOrCreate();
+    LazyField<? extends SplitRead<InternalRow>> get();
 }

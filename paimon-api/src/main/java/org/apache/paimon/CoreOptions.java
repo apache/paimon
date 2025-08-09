@@ -2901,7 +2901,7 @@ public class CoreOptions implements Serializable {
         return options.get(ROW_TRACKING_ENABLED);
     }
 
-    public boolean dataElolutionEnabled() {
+    public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
     }
 

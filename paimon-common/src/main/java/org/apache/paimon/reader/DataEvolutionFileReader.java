@@ -59,13 +59,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * </pre>
  */
-public class CompoundFileReader implements RecordReader<InternalRow> {
+public class DataEvolutionFileReader implements RecordReader<InternalRow> {
 
     private final int[] rowOffsets;
     private final int[] fieldOffsets;
     private final RecordReader<InternalRow>[] innerReaders;
 
-    public CompoundFileReader(
+    public DataEvolutionFileReader(
             int[] rowOffsets, int[] fieldOffsets, RecordReader<InternalRow>[] readers) {
         checkArgument(rowOffsets != null, "Row offsets must not be null");
         checkArgument(fieldOffsets != null, "Field offsets must not be null");
@@ -82,17 +82,17 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
     @Override
     @Nullable
     public RecordIterator<InternalRow> readBatch() throws IOException {
-        CompoundRecordIterator compundFileRecordIterator =
-                new CompoundRecordIterator(innerReaders.length, rowOffsets, fieldOffsets);
+        DataEvolutionIterator iterator =
+                new DataEvolutionIterator(innerReaders.length, rowOffsets, fieldOffsets);
         for (int i = 0; i < innerReaders.length; i++) {
             RecordIterator<InternalRow> batch = innerReaders[i].readBatch();
             if (batch == null && !(innerReaders[i] instanceof EmptyFileRecordReader)) {
                 return null;
             }
-            compundFileRecordIterator.compound(i, batch);
+            iterator.set(i, batch);
         }
 
-        return compundFileRecordIterator;
+        return iterator;
     }
 
     @Override
@@ -105,20 +105,21 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
     }
 
     /** The batch which is made up by several batches. */
-    public static class CompoundRecordIterator implements RecordIterator<InternalRow> {
+    private static class DataEvolutionIterator implements RecordIterator<InternalRow> {
 
-        private final CompundInternalRow compundInternalRow;
+        private final DataEvolutionRow dataEvolutionRow;
         private final RecordIterator<InternalRow>[] iterators;
 
-        public CompoundRecordIterator(
+        private DataEvolutionIterator(
                 int rowNumber,
                 int[] rowOffsets,
                 int[] fieldOffsets) { // Initialize with empty arrays, will be set later
-            this.compundInternalRow = new CompundInternalRow(rowNumber, rowOffsets, fieldOffsets);
+            this.dataEvolutionRow = new DataEvolutionRow(rowNumber, rowOffsets, fieldOffsets);
+            //noinspection unchecked
             this.iterators = new RecordIterator[rowNumber];
         }
 
-        public void compound(int i, RecordIterator<InternalRow> iterator) {
+        public void set(int i, RecordIterator<InternalRow> iterator) {
             iterators[i] = iterator;
         }
 
@@ -131,10 +132,10 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
                     if (next == null) {
                         return null;
                     }
-                    compundInternalRow.setRow(i, next);
+                    dataEvolutionRow.setRow(i, next);
                 }
             }
-            return compundInternalRow;
+            return dataEvolutionRow;
         }
 
         @Override
@@ -148,19 +149,19 @@ public class CompoundFileReader implements RecordReader<InternalRow> {
     }
 
     /** The row which is made up by several rows. */
-    public static class CompundInternalRow implements InternalRow {
+    private static class DataEvolutionRow implements InternalRow {
 
         private final InternalRow[] rows;
         private final int[] rowOffsets;
         private final int[] fieldOffsets;
 
-        public CompundInternalRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
+        private DataEvolutionRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
             this.rows = new InternalRow[rowNumber];
             this.rowOffsets = rowOffsets;
             this.fieldOffsets = fieldOffsets;
         }
 
-        public void setRow(int pos, InternalRow row) {
+        private void setRow(int pos, InternalRow row) {
             if (pos >= rows.length) {
                 throw new IndexOutOfBoundsException(
                         "Position " + pos + " is out of bounds for rows size " + rows.length);

@@ -70,7 +70,7 @@ public class AppendPreCommitCompactWorkerOperator extends AbstractStreamOperator
         this.write = (AppendFileStoreWrite) table.store().newWrite(null);
         if (coreOptions.rowTrackingEnabled()) {
             checkArgument(
-                    !coreOptions.dataElolutionEnabled(),
+                    !coreOptions.dataEvolutionEnabled(),
                     "Data evolution enabled table should not invoke compact yet.");
             this.write.withWriteType(SpecialFields.rowTypeWithRowLineage(table.rowType()));
         }

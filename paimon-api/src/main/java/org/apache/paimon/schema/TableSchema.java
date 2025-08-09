@@ -274,23 +274,11 @@ public class TableSchema implements Serializable {
         if (writeCols == null || writeCols.isEmpty()) {
             return this;
         }
-        Map<String, DataField> fieldMap =
-                fields.stream()
-                        .collect(Collectors.toMap(DataField::name, field -> field, (a, b) -> a));
-        List<DataField> fields = new ArrayList<>();
-        for (String fieldId : writeCols) {
-            DataField dataField = fieldMap.get(fieldId);
-            if (dataField == null) {
-                throw new RuntimeException(
-                        String.format(
-                                "Projecting field %s, but not found in schema %s.", fieldId, this));
-            }
-            fields.add(dataField);
-        }
+
         return new TableSchema(
                 version,
                 id,
-                fields,
+                new RowType(fields).project(writeCols).getFields(),
                 highestFieldId,
                 partitionKeys,
                 primaryKeys,

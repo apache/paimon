@@ -16,31 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.source.splitread;
 
-import org.apache.paimon.annotation.Public;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.operation.SplitRead;
 
-import java.util.List;
+/** Config {@link SplitRead} with projection, filter and others. */
+public interface SplitReadConfig {
 
-/**
- * A {@link TableWrite} for batch processing. Recommended for one-time committing.
- *
- * @since 0.4.0
- */
-@Public
-public interface BatchTableWrite extends TableWrite {
-
-    /**
-     * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
-     *
-     * @see BatchTableCommit#commit
-     */
-    List<CommitMessage> prepareCommit() throws Exception;
-
-    /**
-     * Specified the writing rowType, currently only work for table without primary key and row
-     * tracking enabled.
-     */
-    BatchTableWrite withWriteType(RowType writeType);
+    void config(SplitRead<InternalRow> read);
 }

@@ -18,17 +18,13 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.operation.FieldMergeSplitRead;
 import org.apache.paimon.operation.MergeFileSplitRead;
-import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
-import org.apache.paimon.table.source.splitread.MergeFieldSplitReadProvider;
+import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
 
@@ -37,7 +33,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
@@ -50,33 +47,26 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
 
     public AppendTableRead(
-            Supplier<RawFileSplitRead> batchRawReadSupplier,
-            Supplier<FieldMergeSplitRead> fieldMergeSplitReadSupplier,
-            TableSchema schema,
-            CoreOptions coreOptions) {
+            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
+            TableSchema schema) {
         super(schema);
-        this.readProviders = new ArrayList<>();
-        if (coreOptions.dataElolutionEnabled()) {
-            // MergeFieldSplitReadProvider is used to read the field merge split
-            readProviders.add(
-                    new MergeFieldSplitReadProvider(
-                            fieldMergeSplitReadSupplier, this::assignValues));
-        }
-        readProviders.add(
-                new AppendTableRawFileSplitReadProvider(batchRawReadSupplier, this::assignValues));
+        this.readProviders =
+                providerFactories.stream()
+                        .map(factory -> factory.apply(this::config))
+                        .collect(Collectors.toList());
     }
 
     private List<SplitRead<InternalRow>> initialized() {
         List<SplitRead<InternalRow>> readers = new ArrayList<>();
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.initialized()) {
-                readers.add(readProvider.getOrCreate());
+            if (readProvider.get().initialized()) {
+                readers.add(readProvider.get().get());
             }
         }
         return readers;
     }
 
-    private void assignValues(SplitRead<InternalRow> read) {
+    private void config(SplitRead<InternalRow> read) {
         if (readType != null) {
             read = read.withReadType(readType);
         }
@@ -101,7 +91,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(dataSplit, false)) {
-                return readProvider.getOrCreate().createReader(dataSplit);
+                return readProvider.get().get().createReader(dataSplit);
             }
         }
 

@@ -18,20 +18,17 @@
 
 package org.apache.paimon.table.source.splitread;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
 
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** Raw file split read for all append table. */
 public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvider {
 
     public AppendTableRawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, Consumer<SplitRead<InternalRow>> valuesAssigner) {
-        super(supplier, valuesAssigner);
+            Supplier<RawFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
+        super(supplier, splitReadConfig);
     }
 
     @Override

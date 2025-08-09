@@ -23,8 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.operation.MergeFileSplitRead;
-import org.apache.paimon.reader.CompoundFileReader;
+import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -47,8 +46,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-/** Test for {@link MergeFileSplitRead}. */
-public class AppendMergeFieldTest extends TableTestBase {
+/** Test for table with data evolution. */
+public class DataEvolutionTableTest extends TableTestBase {
 
     @Test
     public void testBasic() throws Exception {
@@ -76,7 +75,7 @@ public class AppendMergeFieldTest extends TableTestBase {
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
-        assertThat(reader).isInstanceOf(CompoundFileReader.class);
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         reader.forEachRemaining(
                 r -> {
                     assertThat(r.getInt(0)).isEqualTo(1);
@@ -203,7 +202,7 @@ public class AppendMergeFieldTest extends TableTestBase {
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
-        assertThat(reader).isInstanceOf(CompoundFileReader.class);
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
 
         reader.forEachRemaining(
                 r -> {
@@ -375,7 +374,7 @@ public class AppendMergeFieldTest extends TableTestBase {
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
-        assertThat(reader).isInstanceOf(CompoundFileReader.class);
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         AtomicInteger i = new AtomicInteger(0);
         reader.forEachRemaining(
                 r -> {

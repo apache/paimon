@@ -650,7 +650,7 @@ public class SchemaValidation {
     }
 
     private static void validateDataEvolution(CoreOptions options) {
-        if (options.dataElolutionEnabled()) {
+        if (options.dataEvolutionEnabled()) {
             checkArgument(
                     options.rowTrackingEnabled(),
                     "Data evolution config must enabled with row-tracking.enabled");

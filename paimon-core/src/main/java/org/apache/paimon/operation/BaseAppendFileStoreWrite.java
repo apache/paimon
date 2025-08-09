@@ -75,6 +75,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final RowType rowType;
 
     private RowType writeType;
+    private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
 
     public BaseAppendFileStoreWrite(
@@ -95,6 +96,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.schemaId = schemaId;
         this.rowType = rowType;
         this.writeType = rowType;
+        this.writeCols = null;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 
@@ -116,8 +118,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
-                rowType,
                 writeType,
+                writeCols,
                 restoredMaxSeqNumber,
                 getCompactManager(partition, bucket, restoredFiles, compactExecutor, dvMaintainer),
                 // it is only for new files, no dv
@@ -139,6 +141,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     public void withWriteType(RowType writeType) {
         this.writeType = writeType;
+        int fullCount = rowType.getFieldCount();
+        List<String> fullNames = rowType.getFieldNames();
+        this.writeCols = writeType.getFieldNames();
+        // optimize writeCols to null in following cases:
+        // 1. writeType contains all columns
+        // 2. writeType contains all columns and append _ROW_ID cols
+        if (writeCols.size() >= fullCount && writeCols.subList(0, fullCount).equals(fullNames)) {
+            writeCols = null;
+        }
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
