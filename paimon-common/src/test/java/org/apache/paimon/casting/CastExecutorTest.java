@@ -22,6 +22,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -54,6 +57,7 @@ import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link CastExecutor}. */
 public class CastExecutorTest {
@@ -567,6 +571,151 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new VarCharType(10), new VarBinaryType(20)),
                 BinaryString.fromString("12345678"),
                 "12345678".getBytes());
+    }
+
+    @Test
+    public void testStringToArray() {
+        CastExecutor<BinaryString, InternalArray> stringToIntArray =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(
+                                VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.INT()));
+
+        InternalArray result = stringToIntArray.cast(BinaryString.fromString("[1, 2, 3]"));
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result.getInt(0)).isEqualTo(1);
+        assertThat(result.getInt(1)).isEqualTo(2);
+        assertThat(result.getInt(2)).isEqualTo(3);
+
+        // Test empty array
+        result = stringToIntArray.cast(BinaryString.fromString("[]"));
+        assertThat(result.size()).isEqualTo(0);
+
+        // Test string to string array
+        CastExecutor<BinaryString, InternalArray> stringToStringArray =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(
+                                VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.STRING()));
+
+        result = stringToStringArray.cast(BinaryString.fromString("[hello, world, test]"));
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result.getString(0).toString()).isEqualTo("hello");
+        assertThat(result.getString(1).toString()).isEqualTo("world");
+        assertThat(result.getString(2).toString()).isEqualTo("test");
+
+        // Test array with null values
+        result = stringToIntArray.cast(BinaryString.fromString("[1, null, 3]"));
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result.getInt(0)).isEqualTo(1);
+        assertThat(result.isNullAt(1)).isTrue();
+        assertThat(result.getInt(2)).isEqualTo(3);
+    }
+
+    @Test
+    public void testStringToMap() {
+        // Test string to map<string, int>
+        CastExecutor<BinaryString, InternalMap> stringToMap =
+                (CastExecutor<BinaryString, InternalMap>)
+                        CastExecutors.resolve(
+                                VarCharType.STRING_TYPE,
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+
+        InternalMap result = stringToMap.cast(BinaryString.fromString("{key1 -> 1, key2 -> 2}"));
+        assertThat(result.size()).isEqualTo(2);
+
+        InternalArray keyArray = result.keyArray();
+        InternalArray valueArray = result.valueArray();
+        assertThat(keyArray.getString(0).toString()).isEqualTo("key2");
+        assertThat(valueArray.getInt(0)).isEqualTo(2);
+        assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
+        assertThat(valueArray.getInt(1)).isEqualTo(1);
+
+        // Test empty map
+        result = stringToMap.cast(BinaryString.fromString("{}"));
+        assertThat(result.size()).isEqualTo(0);
+
+        // Test map with null values
+        result = stringToMap.cast(BinaryString.fromString("{key1 -> null, key2 -> 42}"));
+        assertThat(result.size()).isEqualTo(2);
+        keyArray = result.keyArray();
+        valueArray = result.valueArray();
+        assertThat(keyArray.getString(0).toString()).isEqualTo("key2");
+        assertThat(valueArray.getInt(0)).isEqualTo(42);
+        assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
+        assertThat(valueArray.isNullAt(1)).isTrue();
+    }
+
+    @Test
+    public void testStringToRow() {
+        // Test string to row
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING(), DataTypes.BOOLEAN());
+        CastExecutor<BinaryString, InternalRow> stringToRow =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
+        InternalRow result = stringToRow.cast(BinaryString.fromString("{42, hello, true}"));
+        assertThat(result.getFieldCount()).isEqualTo(3);
+        assertThat(result.getInt(0)).isEqualTo(42);
+        assertThat(result.getString(1).toString()).isEqualTo("hello");
+        assertThat(result.getBoolean(2)).isTrue();
+
+        // Test empty row
+        result = stringToRow.cast(BinaryString.fromString("{}"));
+        assertThat(result.getFieldCount()).isEqualTo(3);
+        assertThat(result.isNullAt(0)).isTrue();
+        assertThat(result.isNullAt(1)).isTrue();
+        assertThat(result.isNullAt(2)).isTrue();
+
+        // Test row with null values
+        result = stringToRow.cast(BinaryString.fromString("{null, test, false}"));
+        assertThat(result.getFieldCount()).isEqualTo(3);
+        assertThat(result.isNullAt(0)).isTrue();
+        assertThat(result.getString(1).toString()).isEqualTo("test");
+        assertThat(result.getBoolean(2)).isFalse();
+    }
+
+    @Test
+    public void testStringToComplexTypesErrorHandling() {
+        // Test invalid array format
+        CastExecutor<BinaryString, InternalArray> stringToIntArray =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(
+                                VarCharType.STRING_TYPE, DataTypes.ARRAY(DataTypes.INT()));
+
+        try {
+            stringToIntArray.cast(BinaryString.fromString("[1, 2, 3")); // missing closing bracket
+            fail("Expected RuntimeException for invalid array format");
+        } catch (RuntimeException e) {
+            assertThat(e.getMessage()).contains("Cannot parse");
+            assertThat(e.getMessage()).contains("as ARRAY");
+        }
+
+        // Test invalid map format
+        CastExecutor<BinaryString, InternalMap> stringToMap =
+                (CastExecutor<BinaryString, InternalMap>)
+                        CastExecutors.resolve(
+                                VarCharType.STRING_TYPE,
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+
+        try {
+            stringToMap.cast(BinaryString.fromString("{key1 -> 1, key2")); // incomplete entry
+            fail("Expected RuntimeException for invalid map format");
+        } catch (RuntimeException e) {
+            assertThat(e.getMessage()).contains("Cannot parse");
+            assertThat(e.getMessage()).contains("as MAP");
+        }
+
+        // Test invalid row format
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        CastExecutor<BinaryString, InternalRow> stringToRow =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
+        try {
+            stringToRow.cast(BinaryString.fromString("{42, hello, extra}")); // too many fields
+            fail("Expected RuntimeException for field count mismatch");
+        } catch (RuntimeException e) {
+            assertThat(e.getMessage()).contains("field count mismatch");
+        }
     }
 
     @Test

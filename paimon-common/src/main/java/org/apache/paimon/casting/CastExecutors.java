@@ -70,6 +70,10 @@ public class CastExecutors {
                 .addRule(StringToTimeCastRule.INSTANCE)
                 .addRule(StringToTimestampCastRule.INSTANCE)
                 .addRule(StringToBinaryCastRule.INSTANCE)
+                .addRule(StringToArrayCastRule.INSTANCE)
+                .addRule(StringToMapCastRule.INSTANCE)
+                .addRule(StringToRowCastRule.INSTANCE)
+
                 // Date/Time/Timestamp rules
                 .addRule(TimestampToTimestampCastRule.INSTANCE)
                 .addRule(TimestampToDateCastRule.INSTANCE)
