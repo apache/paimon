@@ -122,12 +122,28 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+        PredicateLeaf.Type colType = toOrcType(fieldRef.type());
+        if (colType == null) {
+            return Optional.empty();
+        }
+
+        Object[] orcLiterals = new Object[literals.size()];
+        for (int i = 0; i < literals.size(); i++) {
+            Object orcLiteral = toOrcObject(colType, literals.get(i));
+            if (orcLiteral == null && literals.get(i) != null) {
+                // If conversion fails for non-null value, skip this predicate
+                return Optional.empty();
+            }
+            orcLiterals[i] = orcLiteral;
+        }
+
+        return Optional.of(new OrcFilters.In(fieldRef.name(), colType, orcLiterals));
     }
 
     @Override
     public Optional<OrcFilters.Predicate> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+        Optional<OrcFilters.Predicate> inPredicate = visitIn(fieldRef, literals);
+        return inPredicate.map(OrcFilters.Not::new);
     }
 
     @Override

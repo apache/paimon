@@ -304,4 +304,25 @@ public class OrcFilters {
             return "AND(" + Arrays.toString(preds) + ")";
         }
     }
+
+    /** An IN predicate that can be evaluated by the OrcInputFormat. */
+    public static class In extends ColumnPredicate {
+        private final Object[] literals;
+
+        /** Creates an IN predicate. */
+        public In(String columnName, PredicateLeaf.Type literalType, Object... literals) {
+            super(columnName, literalType);
+            this.literals = literals;
+        }
+
+        @Override
+        public SearchArgument.Builder add(SearchArgument.Builder builder) {
+            return builder.in(columnName, literalType, literals);
+        }
+
+        @Override
+        public String toString() {
+            return columnName + " IN " + Arrays.toString(literals);
+        }
+    }
 }
