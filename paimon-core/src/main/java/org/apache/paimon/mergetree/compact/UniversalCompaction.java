@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -164,8 +165,7 @@ public class UniversalCompaction implements CompactStrategy {
         long candidateSize = candidateSize(runs, candidateCount);
         for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
-            int offPeakRatio = offPeakHours == null ? 0 : offPeakHours.currentRatio();
-            if (candidateSize * (100.0 + sizeRatio + offPeakRatio) / 100.0
+            if (candidateSize * (100.0 + sizeRatio + ratioForOffPeak()) / 100.0
                     < next.run().totalSize()) {
                 break;
             }
@@ -179,6 +179,10 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         return null;
+    }
+
+    private int ratioForOffPeak() {
+        return offPeakHours == null ? 0 : offPeakHours.currentRatio(LocalDateTime.now().getHour());
     }
 
     private long candidateSize(List<LevelSortedRun> runs, int candidateCount) {
