@@ -221,6 +221,8 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                                                     new LogOffsetCommittable(k, v))));
         }
 
+        refreshWrite(table, write);
+
         return committables;
     }
 

@@ -54,6 +54,13 @@ public class CdcAppendTableWriteOperator extends CdcRecordStoreWriteOperator {
     }
 
     @Override
+    protected String getCommitUser(StateInitializationContext context) throws Exception {
+        // No conflicts will occur in append only unaware bucket writer, so
+        // commitUser does not matter.
+        return commitUser == null ? initialCommitUser : commitUser;
+    }
+
+    @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         // only accepts INSERT record
         if (element.getValue().kind() == RowKind.INSERT) {

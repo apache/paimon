@@ -99,7 +99,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                             throws Exception {
                         // No conflicts will occur in append only unaware bucket writer, so
                         // commitUser does not matter.
-                        return commitUser;
+                        return commitUser == null ? initialCommitUser : commitUser;
                     }
                 };
             }

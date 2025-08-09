@@ -24,7 +24,9 @@ import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.WriterRefresher;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
 import org.apache.paimon.table.FileStoreTable;
@@ -53,10 +55,10 @@ public class AppendTableCompactor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AppendTableCompactor.class);
 
-    private final FileStoreTable table;
+    private FileStoreTable table;
     private final String commitUser;
 
-    private final transient BaseAppendFileStoreWrite write;
+    private transient BaseAppendFileStoreWrite write;
 
     protected final transient Queue<Future<CommitMessage>> result;
 
@@ -192,9 +194,13 @@ public class AppendTableCompactor {
                 result.poll();
                 tempList.add(future.get());
             }
-            return tempList.stream()
-                    .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
-                    .collect(Collectors.toList());
+            List<Committable> committables =
+                    tempList.stream()
+                            .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
+                            .collect(Collectors.toList());
+
+            refreshWrite();
+            return committables;
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
         } catch (Exception e) {
@@ -204,5 +210,20 @@ public class AppendTableCompactor {
 
     public Iterable<Future<CommitMessage>> result() {
         return result;
+    }
+
+    private void replace(FileStoreTable newTable) throws Exception {
+        if (commitUser == null) {
+            return;
+        }
+
+        List<? extends FileStoreWrite.State<?>> states = write.checkpoint();
+        write.close();
+        write = (BaseAppendFileStoreWrite) newTable.store().newWrite(commitUser);
+        write.restore((List) states);
+    }
+
+    protected void refreshWrite() {
+        WriterRefresher.doRefresh(table, write, (newTable, writer) -> replace(newTable));
     }
 }
