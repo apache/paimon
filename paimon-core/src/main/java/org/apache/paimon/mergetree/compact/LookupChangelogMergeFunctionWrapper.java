@@ -114,9 +114,11 @@ public class LookupChangelogMergeFunctionWrapper<T>
             if (lookupResult != null) {
                 if (lookupStrategy.deletionVector) {
                     PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
-                    highLevel = positionedKeyValue.keyValue();
-                    deletionVectorsMaintainer.notifyNewDeletion(
-                            positionedKeyValue.fileName(), positionedKeyValue.rowPosition());
+                    // Notify and check whether the record has been deleted in the deletion vector
+                    if (deletionVectorsMaintainer.notifyNewDeletion(
+                            positionedKeyValue.fileName(), positionedKeyValue.rowPosition())) {
+                        highLevel = positionedKeyValue.keyValue();
+                    }
                 } else {
                     highLevel = (KeyValue) lookupResult;
                 }
