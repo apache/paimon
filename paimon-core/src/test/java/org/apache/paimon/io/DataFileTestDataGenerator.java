@@ -166,6 +166,7 @@ public class DataFileTestDataGenerator {
                         null,
                         FileSource.APPEND,
                         null,
+                        null,
                         null),
                 kvs);
     }

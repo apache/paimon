@@ -239,6 +239,8 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateRowLineage(schema, options);
+
+        validateDataEvolution(options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -644,6 +646,14 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for row lineage table.",
                     PRIMARY_KEY.key());
+        }
+    }
+
+    private static void validateDataEvolution(CoreOptions options) {
+        if (options.dataElolutionEnabled()) {
+            checkArgument(
+                    options.rowTrackingEnabled(),
+                    "Data evolution config must enabled with row-tracking.enabled");
         }
     }
 }

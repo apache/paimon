@@ -179,6 +179,7 @@ public abstract class KeyValueDataFileWriter
                 fileSource,
                 valueStatsPair.getKey(),
                 externalPath,
+                null,
                 null);
     }
 

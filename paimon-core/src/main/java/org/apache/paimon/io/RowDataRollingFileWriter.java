@@ -31,7 +31,10 @@ import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
+import java.util.List;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
@@ -49,7 +52,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            @Nullable List<String> writeCols) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -64,7 +68,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                pathFactory.isExternalPath()),
+                                pathFactory.isExternalPath(),
+                                writeCols),
                 targetFileSize);
     }
 

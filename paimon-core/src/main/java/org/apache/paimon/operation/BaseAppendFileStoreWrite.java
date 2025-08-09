@@ -50,8 +50,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -72,6 +72,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     private final FileIndexOptions fileIndexOptions;
+    private final RowType rowType;
 
     private RowType writeType;
     private boolean forceBufferSpill = false;
@@ -80,7 +81,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             FileIO fileIO,
             RawFileSplitRead readForCompact,
             long schemaId,
-            RowType writeType,
+            RowType rowType,
             RowType partitionType,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -92,7 +93,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.fileIO = fileIO;
         this.readForCompact = readForCompact;
         this.schemaId = schemaId;
-        this.writeType = writeType;
+        this.rowType = rowType;
+        this.writeType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
 
@@ -114,6 +116,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
+                rowType,
                 writeType,
                 restoredMaxSeqNumber,
                 getCompactManager(partition, bucket, restoredFiles, compactExecutor, dvMaintainer),
@@ -162,11 +165,11 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
                         partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
-        List<IOExceptionSupplier<DeletionVector>> dvFactories = null;
+        Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
-            dvFactories = new ArrayList<>(toCompact.size());
+            dvFactories = new HashMap<>();
             for (DataFileMeta file : toCompact) {
-                dvFactories.add(() -> dvFactory.apply(file.fileName()));
+                dvFactories.put(file.fileName(), () -> dvFactory.apply(file.fileName()));
             }
         }
         try {
@@ -201,14 +204,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 fileIndexOptions,
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
-                options.statsDenseStore());
+                options.statsDenseStore(),
+                rowType.equals(writeType) ? null : writeType.getFieldNames());
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
-            @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
         return new RecordReaderIterator<>(
                 readForCompact.createReader(partition, bucket, files, dvFactories));

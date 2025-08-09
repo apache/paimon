@@ -90,6 +90,7 @@ public class FileStoreSourceSplitSerializerTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 

@@ -244,6 +244,7 @@ public class AppendPreCommitCompactCoordinatorOperatorTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 

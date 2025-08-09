@@ -19,27 +19,51 @@
 package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.FieldMergeSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.LazyField;
 
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** A {@link SplitReadProvider} to create {@link RawFileSplitRead}. */
-public abstract class RawFileSplitReadProvider implements SplitReadProvider {
+/** A {@link SplitReadProvider} to create {@link MergeFieldSplitReadProvider}. */
+public class MergeFieldSplitReadProvider implements SplitReadProvider {
 
-    private final LazyField<RawFileSplitRead> splitRead;
+    private final LazyField<FieldMergeSplitRead> splitRead;
 
-    public RawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, Consumer<SplitRead<InternalRow>> valuesAssigner) {
+    public MergeFieldSplitReadProvider(
+            Supplier<FieldMergeSplitRead> supplier,
+            Consumer<SplitRead<InternalRow>> valuesAssigner) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
-                            RawFileSplitRead read = supplier.get();
+                            FieldMergeSplitRead read = supplier.get();
                             valuesAssigner.accept(read);
                             return read;
                         });
+    }
+
+    @Override
+    public boolean match(DataSplit split, boolean forceKeepDelete) {
+        List<DataFileMeta> files = split.dataFiles();
+        boolean onlyAppendFiles =
+                files.stream()
+                        .allMatch(
+                                f ->
+                                        f.fileSource().isPresent()
+                                                && f.fileSource().get() == FileSource.APPEND
+                                                && f.firstRowId() != null);
+        if (onlyAppendFiles) {
+            // contains same first row id, need merge fields
+            return files.stream().mapToLong(DataFileMeta::firstRowId).distinct().count()
+                    != files.size();
+        }
+        return false;
     }
 
     @Override
@@ -48,7 +72,7 @@ public abstract class RawFileSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public SplitRead<InternalRow> getOrCreate() {
+    public RawFileSplitRead getOrCreate() {
         return splitRead.get();
     }
 }

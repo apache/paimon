@@ -261,6 +261,7 @@ public class AppendCompactCoordinatorTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 }

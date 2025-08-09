@@ -55,6 +55,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
             FileSource.APPEND,
             null,
             null,
+            null,
             null)
       }
 
@@ -91,6 +92,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
         new java.util.ArrayList[String](),
         null,
         FileSource.APPEND,
+        null,
         null,
         null,
         null)
