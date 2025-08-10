@@ -44,13 +44,13 @@ data.write.format("paimon")
 ## Insert
 
 ### Insert Into
-You can achieve INSERT INTO semantics by setting the mode to `append` (by default).
+You can achieve INSERT INTO semantics by setting the mode to `append`.
 
 ```scala
 val data: DataFrame = ...
 
 data.write.format("paimon")
-  .mode("append")         // by default
+  .mode("append")
   .insertInto("test_tbl") // or .saveAsTable("test_tbl") or .save("/path/to/default.db/test_tbl")
 ```
 
@@ -93,5 +93,11 @@ data.write.format("paimon")
 ```scala
 spark.read.format("paimon")
   .table("t") // or .load("/path/to/default.db/test_tbl")
+  .show()
+
+// time travel
+spark.read.format("paimon")
+  .option("scan.snapshot-id", 1)
+  .table("t")
   .show()
 ```

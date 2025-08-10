@@ -19,18 +19,18 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.{CatalogContext, CatalogUtils, Identifier}
+import org.apache.paimon.catalog.{CatalogContext, CatalogUtils}
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.SparkSource.NAME
+import org.apache.paimon.spark.SparkSource._
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
-import org.apache.paimon.spark.util.OptionUtils.{extractCatalogName, mergeSQLConfWithIdentifier}
+import org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.table.FormatTable.Format
 import org.apache.paimon.table.system.AuditLogTable
 
-import org.apache.spark.sql.{DataFrame, PaimonSparkSession, SaveMode => SparkSaveMode, SparkSession, SQLContext}
-import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
+import org.apache.spark.sql.{DataFrame, PaimonSparkSession, SaveMode => SparkSaveMode, SQLContext}
+import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier, SessionConfigSupport, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.streaming.Sink
 import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, StreamSinkProvider}
@@ -82,24 +82,6 @@ class SparkSource
     SparkSource.toBaseRelation(table, sqlContext)
   }
 
-  private def loadTable(options: JMap[String, String]): DataTable = {
-    val path = CoreOptions.path(options)
-    val catalogContext = CatalogContext.create(
-      Options.fromMap(
-        mergeSQLConfWithIdentifier(
-          options,
-          extractCatalogName().getOrElse(NAME),
-          Identifier.create(CatalogUtils.database(path), CatalogUtils.table(path)))),
-      PaimonSparkSession.active.sessionState.newHadoopConf()
-    )
-    val table = FileStoreTableFactory.create(catalogContext)
-    if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
-      new AuditLogTable(table)
-    } else {
-      table
-    }
-  }
-
   override def createSink(
       sqlContext: SQLContext,
       parameters: Map[String, String],
@@ -113,6 +95,35 @@ class SparkSource
     new PaimonSink(sqlContext, table, partitionColumns, outputMode, options)
   }
 
+  private def loadTable(options: JMap[String, String]): DataTable = {
+    val path = CoreOptions.path(options)
+    val sessionState = PaimonSparkSession.active.sessionState
+
+    // Only if user specifies the catalog name, then use catalog to get table, otherwise
+    // use FileStoreTableFactory to get table by path
+    val table = if (options.containsKey(CATALOG)) {
+      val catalogName = options.get(CATALOG)
+      val dataBaseName = Option(options.get(DATABASE)).getOrElse(CatalogUtils.database(path))
+      val tableName = Option(options.get(TABLE)).getOrElse(CatalogUtils.table(path))
+      val sparkCatalog = sessionState.catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
+      sparkCatalog
+        .loadTable(SparkIdentifier.of(Array(dataBaseName), tableName))
+        .asInstanceOf[SparkTable]
+        .getTable
+        .asInstanceOf[FileStoreTable]
+        .copy(options)
+    } else {
+      val catalogContext =
+        CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf())
+      copyWithSQLConf(FileStoreTableFactory.create(catalogContext), extraOptions = options)
+    }
+
+    if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
+      new AuditLogTable(table)
+    } else {
+      table
+    }
+  }
 }
 
 object SparkSource {
@@ -121,7 +132,14 @@ object SparkSource {
 
   val FORMAT_NAMES: Seq[String] = Format.values.map(_.toString.toLowerCase).toSeq
 
-  def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
+  // Spark dataframe read options
+  private val CATALOG = "catalog"
+
+  private val DATABASE = "database"
+
+  private val TABLE = "table"
+
+  private def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {
       override def sqlContext: SQLContext = _sqlContext
       override def schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
