@@ -3,7 +3,7 @@ title: "Row Tracking"
 weight: 5
 type: docs
 aliases:
-- /concepts/append-table/row-tracking.html
+- /append-table/row-tracking.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
