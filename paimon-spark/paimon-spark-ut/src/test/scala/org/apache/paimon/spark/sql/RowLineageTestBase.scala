@@ -143,6 +143,48 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Lineage: merge into table with only delete") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+
+      sql("CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b FROM range(2, 4)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN DELETE
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(3, 3, 1, 1))
+      )
+    }
+  }
+
+  test("Row Lineage: merge into table with only update") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+
+      sql("CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b FROM range(2, 4)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET *
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(2, 22, 0, 2), Row(3, 3, 1, 1))
+      )
+    }
+  }
+
   test("Row Lineage: merge into table not matched by source") {
     if (gteqSpark3_4) {
       withTable("source", "target") {
