@@ -94,10 +94,28 @@ data.write.format("paimon")
 spark.read.format("paimon")
   .table("t") // or .load("/path/to/default.db/test_tbl")
   .show()
+```
 
+To specify the catalog or database, you can use
+
+```scala
+// recommend
+spark.read.format("paimon")
+  .table("<catalogName>.<databaseName>.<tableName>")
+
+// or
+spark.read.format("paimon")
+  .option("catalog", "<catalogName>")
+  .option("database", "<databaseName>")
+  .option("table", "<tableName>")
+  .load("/path/to/default.db/test_tbl")
+```
+
+You can specify other read configs through option:
+
+```scala
 // time travel
 spark.read.format("paimon")
   .option("scan.snapshot-id", 1)
   .table("t")
-  .show()
 ```
