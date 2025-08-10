@@ -46,7 +46,7 @@ WITH ('row-tracking.enabled' = 'true');
 ```
 Notice that:
 - Row tracking is only supported for unaware append tables, not for primary key tables. Which means you can't define `bucket` and `bucket-key` for the table.
-- Only spark support update and merge into (not yet) operations on row-tracking tables, Flink SQL does not support these operations yet.
+- Only spark support update and merge into operations on row-tracking tables, Flink SQL does not support these operations yet.
 - This function is experimental, this line will be removed after being stable.
 
 ## How to use row tracking
@@ -62,7 +62,7 @@ You can select the row lineage meta column with the following sql in spark:
 SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
 ```
 You will get the following result:
-```sql
+```text
 +---+----+-------+----------------+
 | id|data|_ROW_ID|_SEQUENCE_NUMBER|
 +---+----+-------+----------------+
@@ -78,13 +78,32 @@ SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
 ```
 
 You will get:
-```sql
+```text
 +---+---------------+-------+----------------+
 | id|           data|_ROW_ID|_SEQUENCE_NUMBER|
 +---+---------------+-------+----------------+
 | 22|              b|      1|               1|
 | 11|new-data-update|      0|               2|
-                 +---+---------------+-------+----------------+
++---+---------------+-------+----------------+
+```
+
+You can also merge into the table, suppose you have a source table `s` that contains (22, 'new-data-merge') and (33, 'c'):
+```sql
+MERGE INTO t USING s
+ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET t.data = s.data
+WHEN NOT MATCHED THEN INSERT *
+```
+
+You will get:
+```text
++---+---------------+-------+----------------+
+| id|           data|_ROW_ID|_SEQUENCE_NUMBER|
++---+---------------+-------+----------------+
+| 11|new-data-update|      0|               2|
+| 22| new-data-merge|      1|               3|
+| 33|              c|      2|               3|
++---+---------------+-------+----------------+
 ```
 
 ## Spec
