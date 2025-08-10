@@ -28,13 +28,13 @@ under the License.
 
 ## What is row tracking
 
-Row tracking allows Paimon to track row-level lineage in a Paimon append table. Once enabled on a Paimom table, two more hidden columns will be added to the table schema:
+Row tracking allows Paimon to track row-level lineage in a Paimon append table. Once enabled on a Paimon table, two more hidden columns will be added to the table schema:
 - `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of updates or merge into.
 - `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the lineage of the row version.
 
 ## Enable row tracking
 
-To enable row-tracking, you must config `row-tracking.enabled` to `true` in the table options when creating a append table.
+To enable row-tracking, you must config `row-tracking.enabled` to `true` in the table options when creating an append table.
 Consider an example via Flink SQL:
 ```sql
 CREATE TABLE part_t (
@@ -111,6 +111,5 @@ You will get:
 `_ROW_ID` and `_SEQUENCE_NUMBER` fields follows the following rules:
 - Whenever we read from one table with row tracking enabled, the `_ROW_ID` and `_SEQUENCE_NUMBER` will be `NOT NULL`.
 - If we append records to row-tracking table in the first time, we don't actually write them to the data file, they are lazy assigned by committer.
-- If one row moved from one file to another file for **any reasion**, the `_ROW_ID` column should be copied to the target file. The `_SEQUENCE_NUMBER` field should be set to `NULL` if the record is changed, otherwise, copy it too.
+- If one row moved from one file to another file for **any reason**, the `_ROW_ID` column should be copied to the target file. The `_SEQUENCE_NUMBER` field should be set to `NULL` if the record is changed, otherwise, copy it too.
 - Whenever we read from a row-tracking table, we firstly read `_ROW_ID` and `_SEQUENCE_NUMBER` from the data file, then we read the value columns from the data file. If they found `NULL`, we read from `DataFileMeta` to fall back to the lazy assigned values. Anyway, it has no way to be `NULL`.
-

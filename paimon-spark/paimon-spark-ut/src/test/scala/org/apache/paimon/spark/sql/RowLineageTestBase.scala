@@ -82,6 +82,20 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Lineage: update table without condition") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+      sql("UPDATE t SET data = 22")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 22, 0, 2), Row(2, 22, 1, 2), Row(3, 22, 2, 2))
+      )
+    }
+  }
+
   test("Row Lineage: merge into table") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
@@ -126,6 +140,44 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 11, 2, 2), Row(2, 2, 0, 1), Row(3, 3, 1, 1))
       )
+    }
+  }
+
+  test("Row Lineage: merge into table not matched by source") {
+    if (gteqSpark3_4) {
+      withTable("source", "target") {
+        sql(
+          "CREATE TABLE source (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        sql(
+          "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
+
+        sql(
+          "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        sql(
+          "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+        sql(s"""
+               |MERGE INTO target
+               |USING source
+               |ON target.a = source.a
+               |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+               |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET *
+               |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+               |WHEN NOT MATCHED THEN INSERT *
+               |WHEN NOT MATCHED BY SOURCE AND a = 2 THEN UPDATE SET b = b * 10
+               |WHEN NOT MATCHED BY SOURCE THEN DELETE
+               |""".stripMargin)
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+          Seq(
+            Row(1, 10, "c1", 0, 1),
+            Row(2, 200, "c2", 1, 2),
+            Row(3, 300, "c33", 2, 2),
+            Row(5, 550, "c5", 4, 2),
+            Row(7, 700, "c77", 9, 2),
+            Row(9, 990, "c99", 10, 2))
+        )
+      }
     }
   }
 }
