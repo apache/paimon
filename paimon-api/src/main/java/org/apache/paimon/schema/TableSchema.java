@@ -298,10 +298,6 @@ public class TableSchema implements Serializable {
         return new RowType(projectedDataFields(projectedFieldNames));
     }
 
-    public int[] partitionKeysMapping() {
-        return fields.stream().mapToInt(f -> partitionKeys.indexOf(f.name())).toArray();
-    }
-
     public TableSchema copy(Map<String, String> newOptions) {
         return new TableSchema(
                 version,

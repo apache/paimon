@@ -25,7 +25,6 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
@@ -957,30 +956,5 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
                 .hasSize(0);
-    }
-
-    @Test
-    public void foo() throws Exception {
-        // 'scan.partitions' = 'ds=20250810'
-        sql(
-                "CREATE TABLE test ( `item_id` BIGINT, `seller_id` BIGINT, `cate_id` BIGINT, `is_jh` VARCHAR(2147483647), `ds` VARCHAR(2147483647) ) PARTITIONED BY (`ds`) WITH ( 'maxcompute.life-cycle' = '400', 'partition.expiration-check-interval' = '12 h', 'changelog-producer' = 'none', 'partition.expiration-time' = '400d', 'bucket' = '128', 'snapshot.time-retained' = '1d', 'bucket-key' = 'item_id', 'partition.timestamp-pattern' = '$ds', 'partition.timestamp-formatter' = 'yyyyMMdd', 'file.format' = 'parquet', 'metadata.stats-mode' = 'none', 'metastore.partitioned-table' = 'true', 'consumer.expiration-time' = '1d' )");
-
-        sql("insert into test values (1, 1, 1, 'A', '20250810')");
-
-        FileStoreTable table = paimonTable("test");
-        Options options = Options.fromMap(table.options());
-
-        //        PartitionPredicate partitionPredicate =
-        //                PartitionPredicate.fromPredicate(
-        //                        table.rowType().project(table.partitionKeys()),
-        //                        PartitionPredicate.createPartitionPredicate(
-        //                                ParameterUtils.getPartitions(
-        //                                        options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
-        //                                                .split(";")),
-        //                                table.rowType(),
-        //                                options.get(CoreOptions.PARTITION_DEFAULT_NAME)));
-        System.out.println();
-
-        System.out.println(sql("SELECT * FROM test where ds = '20250810'"));
     }
 }

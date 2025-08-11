@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
+import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A Flink {@link ScanTableSource} for paimon. */
 public abstract class FlinkTableSource
@@ -71,6 +72,7 @@ public abstract class FlinkTableSource
     protected final Options options;
 
     @Nullable protected Predicate predicate;
+
     /**
      * This field is only used for normal source (not lookup source). Specified partitions in lookup
      * sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}.
@@ -139,18 +141,28 @@ public abstract class FlinkTableSource
      */
     private PartitionPredicate getPartitionPredicateWithOptions() {
         if (options.contains(FlinkConnectorOptions.SCAN_PARTITIONS)) {
-            PartitionPredicate partitionPredicate;
             try {
-                partitionPredicate =
-                        PartitionPredicate.fromPredicate(
-                                table.rowType().project(table.partitionKeys()),
-                                PartitionPredicate.createPartitionPredicate(
-                                        ParameterUtils.getPartitions(
-                                                options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
-                                                        .split(";")),
-                                        table.rowType(),
-                                        options.get(CoreOptions.PARTITION_DEFAULT_NAME)));
-                return partitionPredicate;
+                Predicate predicate =
+                        PartitionPredicate.createPartitionPredicate(
+                                ParameterUtils.getPartitions(
+                                        options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
+                                                .split(";")),
+                                table.rowType(),
+                                options.get(CoreOptions.PARTITION_DEFAULT_NAME));
+                // Partition filter will be used to filter Manifest stats, the stats schema is
+                // partition type. See SnapshotReaderImpl#withFilter
+                Predicate transformed =
+                        transformFieldMapping(
+                                        predicate,
+                                        PredicateBuilder.fieldIdxToPartitionIdx(
+                                                table.rowType(), table.partitionKeys()))
+                                .orElseThrow(
+                                        () ->
+                                                new RuntimeException(
+                                                        "Failed to transform the partition predicate "
+                                                                + predicate));
+                return PartitionPredicate.fromPredicate(
+                        table.rowType().project(table.partitionKeys()), transformed);
             } catch (IllegalArgumentException e) {
                 // In older versions of Flink, however, lookup sources will first be treated as
                 // normal sources. So this method will also be visited by lookup tables, whose

@@ -148,10 +148,6 @@ public interface PartitionPredicate extends Serializable {
             this.predicate = predicate;
         }
 
-        public Predicate predicate() {
-            return predicate;
-        }
-
         @Override
         public boolean test(BinaryRow part) {
             return predicate.test(part);
