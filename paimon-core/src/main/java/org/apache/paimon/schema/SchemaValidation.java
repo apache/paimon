@@ -238,9 +238,7 @@ public class SchemaValidation {
 
         validateMergeFunctionFactory(schema);
 
-        validateRowLineage(schema, options);
-
-        validateDataEvolution(options);
+        validateRowTracking(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -636,8 +634,9 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateRowLineage(TableSchema schema, CoreOptions options) {
-        if (options.rowTrackingEnabled()) {
+    private static void validateRowTracking(TableSchema schema, CoreOptions options) {
+        boolean rowTrackingEnabled = options.rowTrackingEnabled();
+        if (rowTrackingEnabled) {
             checkArgument(
                     options.bucket() == -1,
                     "Cannot define %s for row lineage table, it only support bucket = -1",
@@ -647,13 +646,14 @@ public class SchemaValidation {
                     "Cannot define %s for row lineage table.",
                     PRIMARY_KEY.key());
         }
-    }
 
-    private static void validateDataEvolution(CoreOptions options) {
         if (options.dataEvolutionEnabled()) {
             checkArgument(
-                    options.rowTrackingEnabled(),
+                    rowTrackingEnabled,
                     "Data evolution config must enabled with row-tracking.enabled");
+            checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Data evolution config must disabled with deletion-vectors.enabled");
         }
     }
 }
