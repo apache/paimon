@@ -95,7 +95,7 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     // query with table options
     withSparkSQLConf("spark.paimon.*.*.T.scan.snapshot-id" -> "1") {
       checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1))
-      checkAnswer(spark.read.format("paimon").load(table.location().toString), Row(1))
+      checkAnswer(spark.read.format("paimon").table("T"), Row(1))
     }
 
     // query with both global and table options
@@ -103,9 +103,7 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       "spark.paimon.scan.snapshot-id" -> "1",
       "spark.paimon.*.*.T.scan.snapshot-id" -> "2") {
       checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1) :: Row(2) :: Nil)
-      checkAnswer(
-        spark.read.format("paimon").load(table.location().toString),
-        Row(1) :: Row(2) :: Nil)
+      checkAnswer(spark.read.format("paimon").table("T"), Row(1) :: Row(2) :: Nil)
     }
   }
 
@@ -129,8 +127,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1)
       )
     }
@@ -141,8 +139,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1)
       )
     }
@@ -157,8 +155,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1) :: Row(2) :: Nil
       )
     }
@@ -170,8 +168,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1)
       )
     }
@@ -183,8 +181,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1)
       )
     }
@@ -198,8 +196,8 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.read
           .format("paimon")
-          .load(table1.location().toString)
-          .join(spark.read.format("paimon").load(table2.location().toString), "id"),
+          .table("T1")
+          .join(spark.read.format("paimon").table("T2"), "id"),
         Row(1) :: Row(2) :: Nil
       )
     }

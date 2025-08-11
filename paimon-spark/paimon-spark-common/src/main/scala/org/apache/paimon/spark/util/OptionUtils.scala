@@ -26,7 +26,7 @@ import org.apache.paimon.table.Table
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
-import java.util.{Map => JMap}
+import java.util.{HashMap => JHashMap, Map => JMap}
 import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
@@ -71,19 +71,21 @@ object OptionUtils extends SQLConfHelper {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }
 
-  def extractCatalogName(): Option[String] = {
-    val sparkCatalogTemplate = String.format("%s([^.]*)$", SPARK_CATALOG_PREFIX)
-    val sparkCatalogPattern = Pattern.compile(sparkCatalogTemplate)
-    conf.getAllConfs.filterKeys(_.startsWith(SPARK_CATALOG_PREFIX)).foreach {
-      case (key, _) =>
-        val matcher = sparkCatalogPattern.matcher(key)
-        if (matcher.find())
-          return Option(matcher.group(1))
-    }
-    Option.empty
+  private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
+    val mergedOptions = new JHashMap[String, String](
+      conf.getAllConfs
+        .filterKeys(_.startsWith(PAIMON_OPTION_PREFIX))
+        .map {
+          case (key, value) =>
+            key.stripPrefix(PAIMON_OPTION_PREFIX) -> value
+        }
+        .toMap
+        .asJava)
+    mergedOptions.putAll(extraOptions)
+    mergedOptions
   }
 
-  def mergeSQLConfWithIdentifier(
+  private def mergeSQLConfWithIdentifier(
       extraOptions: JMap[String, String],
       catalogName: String,
       ident: Identifier): JMap[String, String] = {
@@ -106,11 +108,14 @@ object OptionUtils extends SQLConfHelper {
 
   def copyWithSQLConf[T <: Table](
       table: T,
-      catalogName: String,
-      ident: Identifier,
-      extraOptions: JMap[String, String]): T = {
-    val mergedOptions: JMap[String, String] =
+      catalogName: String = null,
+      ident: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()): T = {
+    val mergedOptions = if (catalogName != null && ident != null) {
       mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
+    } else {
+      mergeSQLConf(extraOptions)
+    }
     if (mergedOptions.isEmpty) {
       table
     } else {
