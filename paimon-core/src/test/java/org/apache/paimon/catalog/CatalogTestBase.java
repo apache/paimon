@@ -577,8 +577,8 @@ public abstract class CatalogTestBase {
         String[] formats = {"orc", "parquet", "csv", "json", "txt"};
         int partitionValue = 10;
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.partitionKeys("dt");
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
@@ -592,7 +592,7 @@ public abstract class CatalogTestBase {
             for (int j = 0; j < size; j++) {
                 datas[j] = GenericRow.of(partitionValue, random.nextInt());
             }
-            InternalRow dataWithDiffPartition = GenericRow.of(11, random.nextInt());
+            InternalRow dataWithDiffPartition = GenericRow.of("11", random.nextInt());
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {
@@ -610,7 +610,8 @@ public abstract class CatalogTestBase {
         }
     }
 
-    protected List<InternalRow> read(
+    @SafeVarargs
+    protected final List<InternalRow> read(
             Table table,
             @Nullable int[] projection,
             @Nullable Map<String, String> partitionSpec,
@@ -627,15 +628,16 @@ public abstract class CatalogTestBase {
         }
         readBuilder.withPartitionFilter(partitionSpec);
         TableScan scan = readBuilder.newScan();
-        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(scan.plan());
-        InternalRowSerializer serializer =
-                new InternalRowSerializer(
-                        projection == null
-                                ? table.rowType()
-                                : Projection.of(projection).project(table.rowType()));
-        List<InternalRow> rows = new ArrayList<>();
-        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
-        return rows;
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(scan.plan())) {
+            InternalRowSerializer serializer =
+                    new InternalRowSerializer(
+                            projection == null
+                                    ? table.rowType()
+                                    : Projection.of(projection).project(table.rowType()));
+            List<InternalRow> rows = new ArrayList<>();
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            return rows;
+        }
     }
 
     @Test

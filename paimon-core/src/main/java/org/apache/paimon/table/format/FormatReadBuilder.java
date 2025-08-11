@@ -23,7 +23,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -45,7 +44,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FormatReaderMapping;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import javax.annotation.Nullable;
 
@@ -66,18 +64,12 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private final FormatTable table;
     private final CoreOptions options;
-    protected final RowType partitionType;
 
-    private final FileIO fileIO;
-    private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
-    private final InternalRowPartitionComputer partitionComputer;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
-
-    private Integer limit = null;
 
     private @Nullable PartitionPredicate partitionFilter;
     private @Nullable RowType readType;
@@ -87,18 +79,9 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.options = new CoreOptions(table.options());
-        this.partitionType = table.partitionType();
-        this.fileIO = table.fileIO();
-        this.schema = table.schema();
-        this.readRowType = schema.logicalRowType().notNull();
+        this.readRowType = table.schema().logicalRowType().notNull();
         this.formatDiscover = FileFormatDiscover.of(options);
         this.formatReaderMappings = new HashMap<>();
-        this.partitionComputer =
-                new InternalRowPartitionComputer(
-                        options.partitionDefaultName(),
-                        schema.logicalPartitionType(),
-                        schema.partitionKeys().toArray(new String[0]),
-                        options.legacyPartitionName());
     }
 
     @Override
@@ -154,7 +137,6 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withLimit(int limit) {
-        this.limit = limit;
         return this;
     }
 
@@ -200,7 +182,7 @@ public class FormatReadBuilder implements ReadBuilder {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier, schema, schema, false, false);
+                                formatIdentifier, table.schema(), table.schema(), false, false);
 
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
@@ -215,10 +197,10 @@ public class FormatReadBuilder implements ReadBuilder {
 
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(fileIO, filePath, dataSplit.length(), null);
+                new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        schema.logicalRowType(),
+                        table.schema().logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),

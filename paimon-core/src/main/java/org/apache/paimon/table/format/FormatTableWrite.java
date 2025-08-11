@@ -119,7 +119,8 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     public void write(InternalRow row) throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
-        write.write(partitionKeyExtractor.partition(row), row);
+        BinaryRow partition = partitionKeyExtractor.partition(row);
+        write.write(partition, row);
     }
 
     private void checkNullability(InternalRow row) {

@@ -43,12 +43,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
-
-    private static final Pattern VALID_FILENAME_PATTERN = Pattern.compile("^[A-Za-z0-9].*");
 
     private final FormatTable table;
     private Predicate predicate;

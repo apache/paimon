@@ -19,11 +19,7 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -44,23 +40,11 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
-    protected final FileIO fileIO;
-    protected final SchemaManager schemaManager;
-    protected final TableSchema schema;
-    protected final String tableName;
     protected final CoreOptions options;
-    protected final RowType partitionType;
-    protected final CatalogEnvironment catalogEnvironment;
 
     public FormatBatchWriteBuilder(FormatTable table) {
         this.table = table;
-        this.fileIO = table.fileIO();
-        this.schemaManager = new SchemaManager(fileIO, new Path(table.location()));
-        this.schema = table.schema();
-        this.tableName = table.name();
         this.options = new CoreOptions(table.options());
-        this.partitionType = table.partitionType();
-        this.catalogEnvironment = null;
     }
 
     @Override
@@ -83,17 +67,17 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         TableSchema tableSchema = table.schema();
         FormatTableFileWrite writer =
                 new FormatTableFileWrite(
-                        fileIO,
+                        table.fileIO(),
                         tableSchema.id(),
                         tableSchema.logicalRowType().notNull(),
                         tableSchema.logicalPartitionType(),
                         pathFactory(),
                         options,
-                        tableName);
+                        table.name());
         return new FormatTableWrite(
                 rowType(),
                 writer,
-                new RowPartitionKeyExtractor(schema),
+                new RowPartitionKeyExtractor(table.schema()),
                 CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
 
@@ -104,7 +88,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     protected FileStorePathFactory pathFactory(CoreOptions options, String format) {
         return new FileStorePathFactory(
                 options.path(),
-                partitionType,
+                table.partitionType(),
                 options.partitionDefaultName(),
                 format,
                 options.dataFilePrefix(),
