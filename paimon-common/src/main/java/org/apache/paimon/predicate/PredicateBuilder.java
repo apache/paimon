@@ -419,4 +419,8 @@ public class PredicateBuilder {
                         .map(p -> PredicateBuilder.partition(p, rowType, defaultPartValue))
                         .toArray(Predicate[]::new));
     }
+
+    public static int[] fieldIdxToPartitionIdx(RowType tableType, List<String> partitionKeys) {
+        return tableType.getFieldNames().stream().mapToInt(partitionKeys::indexOf).toArray();
+    }
 }
