@@ -590,9 +590,9 @@ public abstract class CatalogTestBase {
             int size = 50;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
-                datas[j] = GenericRow.of(partitionValue, random.nextInt());
+                datas[j] = GenericRow.of(random.nextInt(), partitionValue);
             }
-            InternalRow dataWithDiffPartition = GenericRow.of("11", random.nextInt());
+            InternalRow dataWithDiffPartition = GenericRow.of(random.nextInt(), 11);
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {

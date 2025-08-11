@@ -1088,11 +1088,60 @@ public class HiveCatalog extends AbstractCatalog {
         FormatTable.Format provider = FormatTable.parseFormat(coreOptions.formatType());
 
         Map<String, String> tblProperties = new HashMap<>();
-
+        validatePartitionKeysAtEnd(tableSchema.logicalRowType(), tableSchema.partitionKeys());
         Table table = newHmsTable(identifier, tblProperties, provider, externalTable);
         updateHmsTable(table, identifier, tableSchema, provider, location);
 
         return table;
+    }
+
+    /**
+     * Validates that partition keys are at the end of the schema.
+     *
+     * @param rowType table row type
+     * @param partitionKeys list of partition keys
+     * @throws IllegalArgumentException if partition key positions are incorrect
+     */
+    public static void validatePartitionKeysAtEnd(RowType rowType, List<String> partitionKeys) {
+        if (partitionKeys == null || partitionKeys.isEmpty()) {
+            return;
+        }
+
+        List<String> fieldNames = rowType.getFieldNames();
+        int totalFields = fieldNames.size();
+        int partitionKeyCount = partitionKeys.size();
+
+        // Check if partition key count exceeds total field count
+        if (partitionKeyCount > totalFields) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition key count (%d) exceeds total field count (%d)",
+                            partitionKeyCount, totalFields));
+        }
+
+        // Check if partition keys are at the end
+        for (int i = 0; i < partitionKeyCount; i++) {
+            int expectedIndex = totalFields - partitionKeyCount + i;
+            String expectedFieldName = fieldNames.get(expectedIndex);
+            String actualPartitionKey = partitionKeys.get(i);
+
+            if (!expectedFieldName.equals(actualPartitionKey)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition key '%s' must be at the end of schema. Expected position: %d, actual field: '%s'",
+                                actualPartitionKey, expectedIndex, expectedFieldName));
+            }
+        }
+
+        // Validate that partition keys exist in the original fields
+        Set<String> fieldNameSet = new HashSet<>(fieldNames);
+        for (String partitionKey : partitionKeys) {
+            if (!fieldNameSet.contains(partitionKey)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition key '%s' does not exist in table schema", partitionKey));
+            }
+        }
     }
 
     @Override
