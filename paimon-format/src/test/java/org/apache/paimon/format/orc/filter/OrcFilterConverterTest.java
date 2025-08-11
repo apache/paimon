@@ -53,6 +53,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -109,7 +110,7 @@ public class OrcFilterConverterTest {
                                                 .collect(Collectors.toList()))
                                 .visit(OrcPredicateFunctionVisitor.VISITOR)
                                 .isPresent())
-                .isFalse();
+                .isTrue();
 
         assertThat(
                         builder.notIn(
@@ -119,7 +120,7 @@ public class OrcFilterConverterTest {
                                                 .collect(Collectors.toList()))
                                 .visit(OrcPredicateFunctionVisitor.VISITOR)
                                 .isPresent())
-                .isFalse();
+                .isTrue();
     }
 
     @ParameterizedTest
@@ -165,6 +166,74 @@ public class OrcFilterConverterTest {
                 builder.greaterOrEqual(0, tuple4.value),
                 new OrcFilters.Not(new OrcFilters.LessThan("fieldName", tuple4.type, tuple4.value)),
                 tuple4.canPushDown);
+
+        test(
+                builder.in(0, Collections.singletonList(tuple4.value)),
+                new OrcFilters.Equals("fieldName", tuple4.type, tuple4.value),
+                tuple4.canPushDown);
+
+        test(
+                builder.notIn(0, Collections.singletonList(tuple4.value)),
+                new OrcFilters.Not(new OrcFilters.Equals("fieldName", tuple4.type, tuple4.value)),
+                tuple4.canPushDown);
+    }
+
+    @Test
+    public void testInPredicateWithMultipleValues() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "testField", new BigIntType()))));
+
+        // Test IN with multiple values (≤20 values should be converted to OR of EQUALS)
+        test(
+                builder.in(0, Arrays.asList(1L, 2L, 3L)),
+                new OrcFilters.Or(
+                        new OrcFilters.Or(
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L)),
+                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L)),
+                true);
+
+        // Test NOT IN with multiple values (should be converted to AND of NOT EQUALS)
+        test(
+                builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
+                new OrcFilters.And(
+                        new OrcFilters.And(
+                                new OrcFilters.Not(
+                                        new OrcFilters.Equals(
+                                                "testField", PredicateLeaf.Type.LONG, 1L)),
+                                new OrcFilters.Not(
+                                        new OrcFilters.Equals(
+                                                "testField", PredicateLeaf.Type.LONG, 2L))),
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
+                true);
+    }
+
+    @Test
+    public void testInPredicateWithManyValues() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "testField", new BigIntType()))));
+
+        // Test IN with >20 values (should use real IN operation)
+        List<Object> manyValues = LongStream.range(1L, 22L).boxed().collect(Collectors.toList());
+        test(
+                builder.in(0, manyValues),
+                new OrcFilters.In("testField", PredicateLeaf.Type.LONG, manyValues.toArray()),
+                true);
+
+        // Test NOT IN with >20 values (should use real NOT IN operation)
+        test(
+                builder.notIn(0, manyValues),
+                new OrcFilters.Not(
+                        new OrcFilters.In(
+                                "testField", PredicateLeaf.Type.LONG, manyValues.toArray())),
+                true);
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate, boolean canPushDown) {
