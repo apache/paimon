@@ -576,16 +576,23 @@ public abstract class CatalogTestBase {
         catalog.createDatabase(dbName, true);
         String[] formats = {"orc", "parquet", "csv", "json", "txt"};
         int partitionValue = 10;
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.partitionKeys("dt");
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("target-file-size", "1 kb");
         for (String format : formats) {
-            Table table = createFormatTable(dbName, format);
+            Identifier identifier = Identifier.create(dbName, format);
+            schemaBuilder.option("file.format", format);
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            Table table = catalog.getTable(identifier);
             int size = 50;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
-                datas[j] =
-                        GenericRow.of(partitionValue, random.nextInt(), (short) random.nextInt());
+                datas[j] = GenericRow.of(partitionValue, random.nextInt());
             }
-            InternalRow dataWithDiffPartition =
-                    GenericRow.of(11, random.nextInt(), (short) random.nextInt());
+            InternalRow dataWithDiffPartition = GenericRow.of(11, random.nextInt());
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {
@@ -629,20 +636,6 @@ public abstract class CatalogTestBase {
         List<InternalRow> rows = new ArrayList<>();
         reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
         return rows;
-    }
-
-    private Table createFormatTable(String database, String format) throws Exception {
-        Identifier identifier = Identifier.create(database, format);
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("dt", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.INT());
-        schemaBuilder.column("f2", DataTypes.SMALLINT());
-        schemaBuilder.partitionKeys("dt");
-        schemaBuilder.option("file.format", format);
-        schemaBuilder.option("type", "format-table");
-        schemaBuilder.option("target-file-size", "1 kb");
-        catalog.createTable(identifier, schemaBuilder.build(), true);
-        return catalog.getTable(identifier);
     }
 
     @Test
