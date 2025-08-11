@@ -25,7 +25,6 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-
 from pypaimon.common.config import CatalogOptions
 
 from .token_loader import DLFToken, DLFTokenLoader, DLFTokenLoaderFactory
