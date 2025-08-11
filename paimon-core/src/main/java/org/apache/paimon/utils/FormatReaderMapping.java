@@ -217,7 +217,22 @@ public class FormatReaderMapping {
 
         public FormatReaderMapping build(
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
-            return build(formatIdentifier, tableSchema, dataSchema, readFields, true, false);
+            return build(formatIdentifier, tableSchema, dataSchema, readFields, true, true);
+        }
+
+        public FormatReaderMapping build(
+                String formatIdentifier,
+                TableSchema tableSchema,
+                TableSchema dataSchema,
+                boolean enabledFilterPushDown,
+                boolean readIgnorePartition) {
+            return build(
+                    formatIdentifier,
+                    tableSchema,
+                    dataSchema,
+                    readFields,
+                    enabledFilterPushDown,
+                    readIgnorePartition);
         }
 
         private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {

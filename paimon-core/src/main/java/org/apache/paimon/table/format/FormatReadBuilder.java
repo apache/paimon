@@ -198,7 +198,9 @@ public class FormatReadBuilder implements ReadBuilder {
 
         String formatIdentifier = options.formatType();
         Supplier<FormatReaderMapping> formatSupplier =
-                () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema);
+                () ->
+                        formatReaderMappingBuilder.build(
+                                formatIdentifier, schema, schema, false, false);
 
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
