@@ -40,16 +40,9 @@ import java.util.List;
  */
 public interface CommitCallback extends AutoCloseable {
 
-    default void call(
-            List<SimpleFileEntry> baseDataFiles,
-            List<ManifestEntry> committedEntries,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
-        call(committedEntries, indexFiles, snapshot);
-    }
-
     void call(
-            List<ManifestEntry> committedEntries,
+            List<SimpleFileEntry> baseFiles,
+            List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             Snapshot snapshot);
 
