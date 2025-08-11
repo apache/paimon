@@ -138,18 +138,6 @@ public class FileSystemCatalog extends AbstractCatalog {
         }
     }
 
-    @Override
-    public void createFormatTable(Identifier identifier, Schema schema) {
-        SchemaManager schemaManager = schemaManager(identifier);
-        try {
-            runWithLock(identifier, () -> uncheck(() -> schemaManager.createTable(schema)));
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
         Optional<CatalogLockFactory> lockFactory = lockFactory();
         try (Lock lock =
