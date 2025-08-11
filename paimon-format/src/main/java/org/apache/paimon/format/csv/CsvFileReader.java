@@ -60,23 +60,13 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public CsvFileReader(
-            FormatReaderFactory.Context context,
-            RowType rowType,
-            Options options,
-            boolean isTxtFormat)
+    public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, Options options)
             throws IOException {
         this.rowType = rowType;
         this.filePath = context.filePath();
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
-        if (isTxtFormat) {
-            this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
-            this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
-        } else {
-            this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
-            this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
-        }
-
+        this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
+        this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         FileIO fileIO = context.fileIO();
         SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());
         reader = new CsvRecordIterator();

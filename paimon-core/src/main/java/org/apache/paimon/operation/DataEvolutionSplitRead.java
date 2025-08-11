@@ -222,8 +222,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                                 schema,
                                                 dataSchema,
                                                 readFields,
-                                                false,
-                                                true));
+                                                false));
                 fileRecordReaders[i] =
                         createFileReader(partition, file, dataFilePathFactory, formatReaderMapping);
             }

@@ -30,7 +30,9 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.HadoopUtils;
 
@@ -538,5 +540,118 @@ public class HiveCatalogTest extends CatalogTestBase {
     @Override
     protected boolean supportsViewDialects() {
         return false;
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEnd() {
+        // Test case 1: Valid partition keys at the end
+        RowType validRowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING(), DataTypes.INT()
+                        },
+                        new String[] {"id", "name", "dt", "hr"});
+        List<String> validPartitionKeys = Arrays.asList("dt", "hr");
+
+        // Should not throw any exception
+        HiveCatalog.validatePartitionKeysAtEnd(validRowType, validPartitionKeys);
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndWithEmptyPartitionKeys() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"id", "name"});
+
+        // Test with null partition keys
+        HiveCatalog.validatePartitionKeysAtEnd(rowType, null);
+
+        // Test with empty partition keys
+        HiveCatalog.validatePartitionKeysAtEnd(rowType, Collections.emptyList());
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndWithSinglePartitionKey() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"id", "name", "dt"});
+        List<String> partitionKeys = Collections.singletonList("dt");
+
+        // Should not throw any exception
+        HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys);
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndExceedsFieldCount() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"id", "name"});
+        List<String> partitionKeys = Arrays.asList("dt", "hr", "region");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys))
+                .withMessageContaining("Partition key count (3) exceeds total field count (2)");
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndNotAtEnd() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING(), DataTypes.INT()
+                        },
+                        new String[] {"id", "dt", "name", "hr"});
+        List<String> partitionKeys = Arrays.asList("dt", "hr");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys))
+                .withMessageContaining(
+                        "Partition key 'dt' must be at the end of schema. Expected position: 2, actual field: 'name'");
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndPartitionKeyNotExists() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"id", "name", "dt"});
+        List<String> partitionKeys = Arrays.asList("dt", "non_existing_key");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys))
+                .withMessageContaining(
+                        "Partition key 'non_existing_key' does not exist in table schema");
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndWrongOrder() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING(), DataTypes.INT()
+                        },
+                        new String[] {"id", "name", "dt", "hr"});
+        // Partition keys in wrong order
+        List<String> partitionKeys = Arrays.asList("hr", "dt");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys))
+                .withMessageContaining(
+                        "Partition key 'hr' must be at the end of schema. Expected position: 2, actual field: 'dt'");
+    }
+
+    @Test
+    public void testValidatePartitionKeysAtEndAllFieldsArePartitions() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.INT()},
+                        new String[] {"dt", "hr"});
+        List<String> partitionKeys = Arrays.asList("dt", "hr");
+
+        // Should not throw any exception when all fields are partition keys
+        HiveCatalog.validatePartitionKeysAtEnd(rowType, partitionKeys);
     }
 }

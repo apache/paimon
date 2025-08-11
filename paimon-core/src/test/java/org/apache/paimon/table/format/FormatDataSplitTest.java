@@ -52,10 +52,9 @@ public class FormatDataSplitTest {
                         100L, // offset
                         1024L, // length
                         rowType,
-                        modificationTime,
                         predicate,
-                        new int[] {0} // projection
-                        );
+                        new int[] {0}, // projection,
+                        null);
 
         // Test Java serialization
         byte[] serialized = InstantiationUtil.serializeObject(split);

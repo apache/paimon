@@ -141,28 +141,38 @@ public class FormatTableScan implements InnerTableScan {
                         LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
                         BinaryRow partitionRow = createPartitionRow(partitionSpec);
                         if (partitionFilter.test(partitionRow)) {
-                            FileStatus[] files = fileIO.listStatus(partition2Path.getValue());
-                            for (FileStatus file : files) {
-                                if (isDataFileName(file.getPath().getName())) {
-                                    FormatDataSplit split =
-                                            new FormatDataSplit(
-                                                    file.getPath(),
-                                                    0,
-                                                    file.getLen(),
-                                                    table.rowType(),
-                                                    file.getModificationTime(),
-                                                    predicate,
-                                                    projection);
-                                    splits.add(split);
-                                }
-                            }
+                            splits.addAll(
+                                    getSplits(fileIO, partition2Path.getValue(), partitionRow));
                         }
                     }
+                } else {
+                    splits.addAll(getSplits(fileIO, new Path(table.location()), null));
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);
             }
             return splits;
         }
+    }
+
+    private List<Split> getSplits(FileIO fileIO, Path path, BinaryRow partition)
+            throws IOException {
+        List<Split> splits = new ArrayList<>();
+        FileStatus[] files = fileIO.listFiles(path, true);
+        for (FileStatus file : files) {
+            if (isDataFileName(file.getPath().getName())) {
+                FormatDataSplit split =
+                        new FormatDataSplit(
+                                file.getPath(),
+                                0,
+                                file.getLen(),
+                                table.rowType(),
+                                predicate,
+                                projection,
+                                partition);
+                splits.add(split);
+            }
+        }
+        return splits;
     }
 }

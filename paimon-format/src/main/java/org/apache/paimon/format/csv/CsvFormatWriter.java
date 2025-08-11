@@ -82,24 +82,15 @@ public class CsvFormatWriter implements FormatWriter {
     private static final DateTimeFormatter FORMATTER_9 =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSS");
 
-    public CsvFormatWriter(
-            PositionOutputStream out, RowType rowType, Options options, boolean isTxtFormat)
+    public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options)
             throws IOException {
         this.rowType = rowType;
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
-        if (isTxtFormat) {
-            this.lineDelimiter = options.get(CsvFileFormat.TXT_LINE_DELIMITER);
-            this.quoteCharacter = options.get(CsvFileFormat.TXT_QUOTE_CHARACTER);
-            this.escapeCharacter = options.get(CsvFileFormat.TXT_ESCAPE_CHARACTER);
-            this.nullLiteral = options.get(CsvFileFormat.TXT_NULL_LITERAL);
-            this.includeHeader = options.get(CsvFileFormat.TXT_INCLUDE_HEADER);
-        } else {
-            this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER);
-            this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
-            this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
-            this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
-            this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
-        }
+        this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER);
+        this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
+        this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
+        this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
+        this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         this.outputStream = out;
         this.converter = new RowToJsonConverter(rowType, options);
         this.objectMapper = new ObjectMapper();

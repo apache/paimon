@@ -21,7 +21,6 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -111,9 +110,8 @@ public class SchemaValidation {
                             "Cannot define 'upsert-key' %s with 'primary-key' %s.",
                             options.upsertKey(), schema.primaryKeys()));
         }
-        if (!TableType.FORMAT_TABLE.toString().equals(schema.options().get("type"))) {
-            validateBucket(schema, options);
-        }
+
+        validateBucket(schema, options);
 
         validateStartupMode(options);
 

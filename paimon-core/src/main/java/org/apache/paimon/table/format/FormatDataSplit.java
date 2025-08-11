@@ -18,21 +18,18 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit implements Split {
+
+    private static final long serialVersionUID = 1L;
 
     private final Path filePath;
     private final long offset;
@@ -40,23 +37,23 @@ public class FormatDataSplit implements Split {
     private final RowType rowType;
     private final Predicate predicate;
     private final int[] projection;
-    private final long modificationTime;
+    private final BinaryRow partition;
 
     public FormatDataSplit(
             Path filePath,
             long offset,
             long length,
             RowType rowType,
-            long modificationTime,
             @Nullable Predicate predicate,
-            @Nullable int[] projection) {
+            @Nullable int[] projection,
+            @Nullable BinaryRow partition) {
         this.filePath = filePath;
         this.offset = offset;
         this.length = length;
         this.rowType = rowType;
         this.predicate = predicate;
         this.projection = projection;
-        this.modificationTime = modificationTime;
+        this.partition = partition;
     }
 
     public Path filePath() {
@@ -79,6 +76,10 @@ public class FormatDataSplit implements Split {
         return rowType;
     }
 
+    public BinaryRow partition() {
+        return partition;
+    }
+
     @Nullable
     public Predicate predicate() {
         return predicate;
@@ -92,56 +93,5 @@ public class FormatDataSplit implements Split {
     @Override
     public long rowCount() {
         return -1;
-    }
-
-    @Override
-    public Optional<List<RawFile>> convertToRawFiles() {
-        return Optional.empty();
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-
-        FormatDataSplit that = (FormatDataSplit) o;
-        return offset == that.offset
-                && length == that.length
-                && modificationTime == that.modificationTime
-                && Objects.equals(filePath, that.filePath)
-                && Objects.equals(rowType, that.rowType)
-                && Objects.equals(predicate, that.predicate)
-                && Arrays.equals(projection, that.projection);
-    }
-
-    @Override
-    public int hashCode() {
-        int result = Objects.hash(filePath, offset, length, rowType, predicate, modificationTime);
-        result = 31 * result + Arrays.hashCode(projection);
-        return result;
-    }
-
-    @Override
-    public String toString() {
-        return "FormatDataSplit{"
-                + "filePath="
-                + filePath
-                + ", offset="
-                + offset
-                + ", length="
-                + length
-                + ", rowType="
-                + rowType
-                + ", predicate="
-                + predicate
-                + ", projection="
-                + Arrays.toString(projection)
-                + ", modificationTime="
-                + modificationTime
-                + '}';
     }
 }

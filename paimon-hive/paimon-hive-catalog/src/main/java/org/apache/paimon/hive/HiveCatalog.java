@@ -1119,6 +1119,16 @@ public class HiveCatalog extends AbstractCatalog {
                             partitionKeyCount, totalFields));
         }
 
+        // Validate that partition keys exist in the original fields
+        Set<String> fieldNameSet = new HashSet<>(fieldNames);
+        for (String partitionKey : partitionKeys) {
+            if (!fieldNameSet.contains(partitionKey)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition key '%s' does not exist in table schema", partitionKey));
+            }
+        }
+
         // Check if partition keys are at the end
         for (int i = 0; i < partitionKeyCount; i++) {
             int expectedIndex = totalFields - partitionKeyCount + i;
@@ -1130,16 +1140,6 @@ public class HiveCatalog extends AbstractCatalog {
                         String.format(
                                 "Partition key '%s' must be at the end of schema. Expected position: %d, actual field: '%s'",
                                 actualPartitionKey, expectedIndex, expectedFieldName));
-            }
-        }
-
-        // Validate that partition keys exist in the original fields
-        Set<String> fieldNameSet = new HashSet<>(fieldNames);
-        for (String partitionKey : partitionKeys) {
-            if (!fieldNameSet.contains(partitionKey)) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Partition key '%s' does not exist in table schema", partitionKey));
             }
         }
     }

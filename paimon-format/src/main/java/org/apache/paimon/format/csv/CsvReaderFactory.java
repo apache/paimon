@@ -31,16 +31,14 @@ public class CsvReaderFactory implements FormatReaderFactory {
 
     private final RowType rowType;
     private final Options options;
-    private final boolean isTxtFormat;
 
-    public CsvReaderFactory(RowType rowType, Options options, boolean isTxtFormat) {
+    public CsvReaderFactory(RowType rowType, Options options) {
         this.rowType = rowType;
         this.options = options;
-        this.isTxtFormat = isTxtFormat;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(context, rowType, options, isTxtFormat);
+        return new CsvFileReader(context, rowType, options);
     }
 }

@@ -172,8 +172,7 @@ public class FormatReaderMapping {
                 TableSchema tableSchema,
                 TableSchema dataSchema,
                 List<DataField> expectedFields,
-                boolean enabledFilterPushDown,
-                boolean readIgnorePartition) {
+                boolean enabledFilterPushDown) {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFieldsInFile =
@@ -193,10 +192,7 @@ public class FormatReaderMapping {
                             dataSchema, trimmedKeyPair.getRight().getFields());
             Pair<int[], RowType> partitionMapping = trimmedResult.getLeft();
 
-            RowType actualReadRowType =
-                    readIgnorePartition
-                            ? new RowType(trimmedResult.getRight())
-                            : dataSchema.logicalRowType();
+            RowType actualReadRowType = new RowType(trimmedResult.getRight());
 
             // build read filters
             List<Predicate> readFilters =
@@ -217,22 +213,7 @@ public class FormatReaderMapping {
 
         public FormatReaderMapping build(
                 String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
-            return build(formatIdentifier, tableSchema, dataSchema, readFields, true, true);
-        }
-
-        public FormatReaderMapping build(
-                String formatIdentifier,
-                TableSchema tableSchema,
-                TableSchema dataSchema,
-                boolean enabledFilterPushDown,
-                boolean readIgnorePartition) {
-            return build(
-                    formatIdentifier,
-                    tableSchema,
-                    dataSchema,
-                    readFields,
-                    enabledFilterPushDown,
-                    readIgnorePartition);
+            return build(formatIdentifier, tableSchema, dataSchema, readFields, true);
         }
 
         private Map<String, Integer> findSystemFields(List<DataField> readTableFields) {

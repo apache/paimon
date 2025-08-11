@@ -42,7 +42,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
-/** CSV and TXT {@link FileFormat}. */
+/** CSV {@link FileFormat}. */
 public class CsvFileFormat extends FileFormat {
 
     public static final String CSV_IDENTIFIER = "csv";
@@ -84,38 +84,7 @@ public class CsvFileFormat extends FileFormat {
                     .defaultValue("null")
                     .withDescription("The literal for null values in CSV format");
 
-    protected static final ConfigOption<String> TXT_LINE_DELIMITER =
-            ConfigOptions.key("txt.line-delimiter")
-                    .stringType()
-                    .defaultValue("\n")
-                    .withDescription("The line delimiter for TXT format");
-
-    protected static final ConfigOption<String> TXT_QUOTE_CHARACTER =
-            ConfigOptions.key("txt.quote-character")
-                    .stringType()
-                    .defaultValue("")
-                    .withDescription("The quote character for TXT format");
-
-    protected static final ConfigOption<String> TXT_ESCAPE_CHARACTER =
-            ConfigOptions.key("txt.escape-character")
-                    .stringType()
-                    .defaultValue("")
-                    .withDescription("The escape character for TXT format");
-
-    protected static final ConfigOption<Boolean> TXT_INCLUDE_HEADER =
-            ConfigOptions.key("txt.include-header")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to include header in TXT files");
-
-    protected static final ConfigOption<String> TXT_NULL_LITERAL =
-            ConfigOptions.key("txt.null-literal")
-                    .stringType()
-                    .defaultValue("null")
-                    .withDescription("The literal for null values in TXT format");
-
     private final Options options;
-    private final boolean isTxtFormat;
 
     public CsvFileFormat(FormatContext context) {
         this(context, CSV_IDENTIFIER);
@@ -123,19 +92,18 @@ public class CsvFileFormat extends FileFormat {
 
     public CsvFileFormat(FormatContext context, String identifier) {
         super(identifier);
-        this.isTxtFormat = TXT_IDENTIFIER.equals(identifier);
         this.options = context.options();
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, options, isTxtFormat);
+        return new CsvReaderFactory(projectedRowType, options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, options, isTxtFormat);
+        return new CsvWriterFactory(type, options);
     }
 
     @Override
@@ -184,12 +152,10 @@ public class CsvFileFormat extends FileFormat {
 
         private final RowType rowType;
         private final Options options;
-        private final boolean isTxtFormat;
 
-        public CsvWriterFactory(RowType rowType, Options options, boolean isTxtFormat) {
+        public CsvWriterFactory(RowType rowType, Options options) {
             this.rowType = rowType;
             this.options = options;
-            this.isTxtFormat = isTxtFormat;
         }
 
         @Override
@@ -197,7 +163,7 @@ public class CsvFileFormat extends FileFormat {
                 throws IOException {
             // Wrap the output stream to prevent premature closing/flushing
             PositionOutputStream protectedOut = new CloseShieldPositionOutputStream(out);
-            return new CsvFormatWriter(protectedOut, rowType, options, isTxtFormat);
+            return new CsvFormatWriter(protectedOut, rowType, options);
         }
 
         @Override
@@ -205,7 +171,7 @@ public class CsvFileFormat extends FileFormat {
                 throws IOException {
             // Direct file I/O management - this bypasses SingleFileWriter's stream management
             PositionOutputStream out = fileIO.newOutputStream(path, false);
-            return new CsvFormatWriter(out, rowType, options, isTxtFormat);
+            return new CsvFormatWriter(out, rowType, options);
         }
     }
 }

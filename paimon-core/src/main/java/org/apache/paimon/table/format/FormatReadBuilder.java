@@ -20,6 +20,7 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
@@ -27,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -182,7 +184,11 @@ public class FormatReadBuilder implements ReadBuilder {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier, table.schema(), table.schema(), false, false);
+                                formatIdentifier,
+                                table.schema(),
+                                table.schema(),
+                                readTableFields,
+                                false);
 
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
@@ -198,6 +204,9 @@ public class FormatReadBuilder implements ReadBuilder {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+        PartitionInfo partitionInfo =
+                PartitionUtils.create(
+                        formatReaderMapping.getPartitionPair(), dataSplit.partition());
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         table.schema().logicalRowType(),
@@ -205,7 +214,7 @@ public class FormatReadBuilder implements ReadBuilder {
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        null,
+                        partitionInfo,
                         false,
                         null,
                         0,

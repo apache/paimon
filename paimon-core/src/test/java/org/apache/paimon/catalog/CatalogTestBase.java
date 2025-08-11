@@ -62,6 +62,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -566,28 +568,31 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    @Test
-    void testFormatTableWriteAndRead() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testFormatTableWriteAndRead(boolean partitioned) throws Exception {
         if (!supportsFormatTable()) {
             return;
         }
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        String[] formats = {"orc", "parquet", "csv", "json", "txt"};
+        String[] formats = {"orc", "parquet", "csv", "json"};
         int partitionValue = 10;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
-        schemaBuilder.partitionKeys("dt");
+        if (partitioned) {
+            schemaBuilder.partitionKeys("dt");
+        }
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
         for (String format : formats) {
-            Identifier identifier = Identifier.create(dbName, format);
+            Identifier identifier = Identifier.create(dbName, "table_" + format);
             schemaBuilder.option("file.format", format);
             catalog.createTable(identifier, schemaBuilder.build(), true);
             Table table = catalog.getTable(identifier);
-            int size = 50;
+            int size = 5;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
                 datas[j] = GenericRow.of(random.nextInt(), partitionValue);
@@ -598,12 +603,19 @@ public abstract class CatalogTestBase {
                 for (InternalRow row : datas) {
                     write.write(row);
                 }
-                write.write(dataWithDiffPartition);
+                if (partitioned) {
+                    write.write(dataWithDiffPartition);
+                }
                 write.prepareCommit();
             }
-            Map<String, String> partitionSpec = new HashMap<>();
-            partitionSpec.put("dt", "" + partitionValue);
-            List<InternalRow> readData = read(table, null, partitionSpec);
+            List<InternalRow> readData;
+            if (partitioned) {
+                Map<String, String> partitionSpec = new HashMap<>();
+                partitionSpec.put("dt", "" + partitionValue);
+                readData = read(table, null, partitionSpec);
+            } else {
+                readData = read(table, null, null);
+            }
 
             assertThat(readData).containsExactlyInAnyOrder(datas);
             catalog.dropTable(Identifier.create(dbName, format), true);
