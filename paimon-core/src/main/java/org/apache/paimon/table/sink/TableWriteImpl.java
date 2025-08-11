@@ -171,26 +171,19 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Nullable
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
+        return writeAndReturn(row, -1);
+    }
+
+    @Nullable
+    public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
         if (ignoreDelete && rowKind.isRetract()) {
             return null;
         }
-        SinkRecord record = toSinkRecord(row);
+        SinkRecord record = bucket == -1 ? toSinkRecord(row) : toSinkRecord(row, bucket);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record, rowKind));
-        return record;
-    }
-
-    @Nullable
-    public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
-        checkNullability(row);
-        RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
-        if (ignoreDelete && rowKind.isRetract()) {
-            return null;
-        }
-        SinkRecord record = toSinkRecord(row, bucket);
-        write.write(record.partition(), bucket, recordExtractor.extract(record, rowKind));
         return record;
     }
 

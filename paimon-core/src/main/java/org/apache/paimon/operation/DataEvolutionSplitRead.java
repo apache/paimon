@@ -20,15 +20,19 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
-import org.apache.paimon.reader.EmptyFileRecordReader;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -40,23 +44,36 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
-import org.apache.paimon.utils.IOExceptionSupplier;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
-public class DataEvolutionSplitRead extends RawFileSplitRead {
+/**
+ * A union {@link SplitRead} to read multiple inner files to merge columns, note that this class
+ * does not support filtering push down and deletion vectors, as they can interfere with the process
+ * of merging columns.
+ */
+public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
+
+    private final FileIO fileIO;
+    private final SchemaManager schemaManager;
+    private final TableSchema schema;
+    private final FileFormatDiscover formatDiscover;
+    private final FileStorePathFactory pathFactory;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+
+    protected RowType readRowType;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -64,66 +81,83 @@ public class DataEvolutionSplitRead extends RawFileSplitRead {
             TableSchema schema,
             RowType rowType,
             FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory,
-            // TODO: Enabled file index in merge fields read
-            boolean fileIndexReadEnabled) {
-        super(
-                fileIO,
-                schemaManager,
-                schema,
-                rowType,
-                formatDiscover,
-                pathFactory,
-                fileIndexReadEnabled,
-                true);
+            FileStorePathFactory pathFactory) {
+        this.fileIO = fileIO;
+        this.schemaManager = schemaManager;
+        this.schema = schema;
+        this.formatDiscover = formatDiscover;
+        this.pathFactory = pathFactory;
+        this.formatReaderMappings = new HashMap<>();
+        this.readRowType = rowType;
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> files,
-            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
-            throws IOException {
+    public SplitRead<InternalRow> forceKeepDelete() {
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withIOManager(@Nullable IOManager ioManager) {
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withReadType(RowType readRowType) {
+        this.readRowType = readRowType;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
+        return this;
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+        List<DataFileMeta> files = split.dataFiles();
+        BinaryRow partition = split.partition();
         DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(partition, bucket);
+                pathFactory.createDataFilePathFactory(partition, split.bucket());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
-        Builder formatReaderMappingBuilder = formatBuilder();
+        Builder formatBuilder =
+                new Builder(
+                        formatDiscover,
+                        readRowType.getFields(),
+                        schema -> rowTypeWithRowLineage(schema.logicalRowType(), true).getFields(),
+                        null);
 
         List<List<DataFileMeta>> splitByRowId = DataEvolutionSplitGenerator.split(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
             if (needMergeFiles.size() == 1) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
-                        createFileReader(
-                                partition,
-                                dataFilePathFactory,
-                                needMergeFiles.get(0),
-                                formatReaderMappingBuilder,
-                                dvFactories));
+                        () ->
+                                createFileReader(
+                                        partition,
+                                        dataFilePathFactory,
+                                        needMergeFiles.get(0),
+                                        formatBuilder));
 
             } else {
                 suppliers.add(
                         () ->
-                                createFileReader(
+                                createUnionReader(
                                         needMergeFiles,
                                         partition,
                                         dataFilePathFactory,
-                                        formatReaderMappingBuilder,
-                                        dvFactories));
+                                        formatBuilder));
             }
         }
 
         return ConcatRecordReader.create(suppliers);
     }
 
-    private DataEvolutionFileReader createFileReader(
+    private DataEvolutionFileReader createUnionReader(
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
-            Builder formatReaderMappingBuilder,
-            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
+            Builder formatBuilder)
             throws IOException {
         long rowCount = needMergeFiles.get(0).rowCount();
         long firstRowId = needMergeFiles.get(0).firstRowId();
@@ -146,17 +180,6 @@ public class DataEvolutionSplitRead extends RawFileSplitRead {
         int[] fieldOffsets = new int[allReadFields.size()];
         Arrays.fill(rowOffsets, -1);
         Arrays.fill(fieldOffsets, -1);
-
-        IOExceptionSupplier<DeletionVector> dvFactory = null;
-        if (dvFactories != null) {
-            for (DataFileMeta file : needMergeFiles) {
-                IOExceptionSupplier<DeletionVector> temp = dvFactories.get(file.fileName());
-                if (temp != null && temp.get() != null) {
-                    dvFactory = temp;
-                    break;
-                }
-            }
-        }
 
         for (int i = 0; i < needMergeFiles.size(); i++) {
             DataFileMeta file = needMergeFiles.get(i);
@@ -185,35 +208,27 @@ public class DataEvolutionSplitRead extends RawFileSplitRead {
             }
 
             if (readFields.isEmpty()) {
-                fileRecordReaders[i] = new EmptyFileRecordReader<>();
-                continue;
+                fileRecordReaders[i] = null;
+            } else {
+                // create new FormatReaderMapping for read partial fields
+                List<String> readFieldNames =
+                        readFields.stream().map(DataField::name).collect(Collectors.toList());
+                FormatReaderMapping formatReaderMapping =
+                        formatReaderMappings.computeIfAbsent(
+                                new FormatKey(file.schemaId(), formatIdentifier, readFieldNames),
+                                key ->
+                                        formatBuilder.build(
+                                                formatIdentifier,
+                                                schema,
+                                                dataSchema,
+                                                readFields,
+                                                false,
+                                                true));
+                fileRecordReaders[i] =
+                        createFileReader(partition, file, dataFilePathFactory, formatReaderMapping);
             }
-
-            Supplier<FormatReaderMapping> formatSupplier =
-                    () ->
-                            formatReaderMappingBuilder.build(
-                                    formatIdentifier,
-                                    schema,
-                                    dataSchema,
-                                    readFields,
-                                    // TODO: enabled filter push down
-                                    false,
-                                    true);
-
-            FormatReaderMapping formatReaderMapping =
-                    formatReaderMappings.computeIfAbsent(
-                            new FormatKey(
-                                    file.schemaId(),
-                                    formatIdentifier,
-                                    readFields.stream()
-                                            .map(DataField::name)
-                                            .collect(Collectors.toList())),
-                            key -> formatSupplier.get());
-
-            fileRecordReaders[i] =
-                    createFileReader(
-                            partition, file, dataFilePathFactory, formatReaderMapping, dvFactory);
         }
+
         for (int i = 0; i < rowOffsets.length; i++) {
             if (rowOffsets[i] == -1) {
                 checkArgument(
@@ -223,6 +238,50 @@ public class DataEvolutionSplitRead extends RawFileSplitRead {
                                 allReadFields.get(i)));
             }
         }
+
         return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFilePathFactory dataFilePathFactory,
+            DataFileMeta file,
+            Builder formatBuilder)
+            throws IOException {
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+        long schemaId = file.schemaId();
+        FormatReaderMapping formatReaderMapping =
+                formatReaderMappings.computeIfAbsent(
+                        new FormatKey(file.schemaId(), formatIdentifier),
+                        key ->
+                                formatBuilder.build(
+                                        formatIdentifier,
+                                        schema,
+                                        schemaId == schema.id()
+                                                ? schema
+                                                : schemaManager.schema(schemaId)));
+        return createFileReader(partition, file, dataFilePathFactory, formatReaderMapping);
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            FormatReaderMapping formatReaderMapping)
+            throws IOException {
+        FormatReaderContext formatReaderContext =
+                new FormatReaderContext(
+                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), null);
+        return new DataFileRecordReader(
+                schema.logicalRowType(),
+                formatReaderMapping.getReaderFactory(),
+                formatReaderContext,
+                formatReaderMapping.getIndexMapping(),
+                formatReaderMapping.getCastMapping(),
+                PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                true,
+                file.firstRowId(),
+                file.maxSequenceNumber(),
+                formatReaderMapping.getSystemFields());
     }
 }
