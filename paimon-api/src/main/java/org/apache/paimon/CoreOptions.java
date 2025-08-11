@@ -704,7 +704,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(-1)
                     .withDescription(
-                            "The end of off-peak hours, expressed as an integer between 0 and 23, inclusive. Set"
+                            "The end of off-peak hours, expressed as an integer between 0 and 23, exclusive. Set"
                                     + " to -1 to disable off-peak.");
 
     public static final ConfigOption<Integer> COMPACTION_OFFPEAK_RATIO =
