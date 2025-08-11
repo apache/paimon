@@ -54,7 +54,7 @@ public class OffPeakHours {
     }
 
     public static OffPeakHours create(int startHour, int endHour, int compactOffPeakRatio) {
-        if (startHour == -1 && endHour == -1) {
+        if (startHour == -1 || endHour == -1) {
             return null;
         }
 

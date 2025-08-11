@@ -70,6 +70,8 @@ class OffPeakHoursTest {
     void testCreateWithInvalidHours() {
         assertThat(OffPeakHours.create(-1, -1, RATIO)).isNull();
         assertThat(OffPeakHours.create(5, 5, RATIO)).isNull();
+        assertThat(OffPeakHours.create(2, -1, RATIO)).isNull();
+        assertThat(OffPeakHours.create(-1, 2, RATIO)).isNull();
     }
 
     @Test
