@@ -574,7 +574,7 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        String[] formats = {"parquet", "csv", "json", "txt"};
+        String[] formats = {"orc", "parquet", "csv", "json", "txt"};
         int partitionValue = 10;
         for (String format : formats) {
             Table table = createFormatTable(dbName, format);

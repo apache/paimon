@@ -197,7 +197,8 @@ public class DataEvolutionSplitRead extends RawFileSplitRead {
                                     dataSchema,
                                     readFields,
                                     // TODO: enabled filter push down
-                                    false);
+                                    false,
+                                    true);
 
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(

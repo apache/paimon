@@ -194,11 +194,11 @@ public class FormatReadBuilder implements ReadBuilder {
         List<DataField> readTableFields = readRowType.getFields();
         FormatReaderMapping.Builder formatReaderMappingBuilder =
                 new FormatReaderMapping.Builder(
-                        formatDiscover, readTableFields, TableSchema::fields, filters, false);
+                        formatDiscover, readTableFields, TableSchema::fields, filters);
 
         String formatIdentifier = options.formatType();
         Supplier<FormatReaderMapping> formatSupplier =
-                () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema, false);
+                () -> formatReaderMappingBuilder.build(formatIdentifier, schema, schema);
 
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(

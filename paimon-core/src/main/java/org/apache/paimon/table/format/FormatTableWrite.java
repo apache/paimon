@@ -27,6 +27,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableWrite;
@@ -93,7 +94,7 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
-    public TableWrite withWriteType(RowType writeType) {
+    public BatchTableWrite withWriteType(RowType writeType) {
         write.withWriteType(writeType);
         return this;
     }

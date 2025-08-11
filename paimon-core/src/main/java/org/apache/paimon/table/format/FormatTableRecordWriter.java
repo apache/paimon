@@ -189,7 +189,8 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
                 new FileIndexOptions(),
                 FileSource.APPEND,
                 false,
-                false);
+                false,
+                null);
     }
 
     @Override
