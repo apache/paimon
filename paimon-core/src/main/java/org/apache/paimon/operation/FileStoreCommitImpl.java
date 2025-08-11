@@ -1162,9 +1162,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeLastSafeSnapshot != null) {
             strictModeLastSafeSnapshot = newSnapshot.id();
         }
+        final List<SimpleFileEntry> finalBaseDataFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiels = deltaFiles;
         commitCallbacks.forEach(
-                callback -> callback.call(finalDeltaFiels, indexFiles, newSnapshot));
+                callback ->
+                        callback.call(
+                                finalBaseDataFiles, finalDeltaFiels, indexFiles, newSnapshot));
         return new SuccessResult();
     }
 

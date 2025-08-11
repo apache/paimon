@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.util.List;
@@ -38,6 +39,14 @@ import java.util.List;
  * effect.
  */
 public interface CommitCallback extends AutoCloseable {
+
+    default void call(
+            List<SimpleFileEntry> baseDataFiles,
+            List<ManifestEntry> committedEntries,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot) {
+        call(committedEntries, indexFiles, snapshot);
+    }
 
     void call(
             List<ManifestEntry> committedEntries,
