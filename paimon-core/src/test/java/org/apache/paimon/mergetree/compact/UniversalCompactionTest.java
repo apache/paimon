@@ -458,6 +458,7 @@ public class UniversalCompactionTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 

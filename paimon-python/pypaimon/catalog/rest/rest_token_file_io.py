@@ -46,6 +46,9 @@ class RESTTokenFileIO(FileIO):
         self.properties.update(self.token.token)
         return super()._initialize_oss_fs()
 
+    def new_output_stream(self, path: Path):
+        return self.filesystem.open_output_stream(str(path))
+
     def try_to_refresh_token(self):
         if self.should_refresh():
             with self.lock:

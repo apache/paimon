@@ -85,6 +85,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         fileFormat,
                         10,
                         SCHEMA,
+                        null,
                         0,
                         new BucketedAppendCompactManager(
                                 null, toCompact, null, 4, 10, false, null, null), // not used

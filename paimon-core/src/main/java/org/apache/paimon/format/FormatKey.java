@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format;
 
+import javax.annotation.Nullable;
+
+import java.util.List;
 import java.util.Objects;
 
 /** Format Key for read a file. */
@@ -25,10 +28,16 @@ public class FormatKey {
 
     public final long schemaId;
     public final String format;
+    @Nullable public final List<String> fieldNames;
 
     public FormatKey(long schemaId, String format) {
+        this(schemaId, format, null);
+    }
+
+    public FormatKey(long schemaId, String format, @Nullable List<String> fieldNames) {
         this.schemaId = schemaId;
         this.format = format;
+        this.fieldNames = fieldNames;
     }
 
     @Override
@@ -40,11 +49,13 @@ public class FormatKey {
             return false;
         }
         FormatKey formatKey = (FormatKey) o;
-        return schemaId == formatKey.schemaId && Objects.equals(format, formatKey.format);
+        return schemaId == formatKey.schemaId
+                && Objects.equals(format, formatKey.format)
+                && Objects.equals(fieldNames, formatKey.fieldNames);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(schemaId, format);
+        return Objects.hash(schemaId, format, fieldNames);
     }
 }

@@ -26,25 +26,27 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.AppendTableRead;
+import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.DataEvolutionSplitReadProvider;
+import org.apache.paimon.table.source.splitread.SplitReadConfig;
+import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 /** {@link FileStoreTable} for append table. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -85,10 +87,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected SplitGenerator splitGenerator() {
-        return new AppendOnlySplitGenerator(
-                store().options().splitTargetSize(),
-                store().options().splitOpenFileCost(),
-                bucketMode());
+        long targetSplitSize = store().options().splitTargetSize();
+        long openFileCost = store().options().splitOpenFileCost();
+        return coreOptions().dataEvolutionEnabled()
+                ? new DataEvolutionSplitGenerator(targetSplitSize, openFileCost)
+                : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
     }
 
     @Override
@@ -103,25 +106,17 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
-        RawFileSplitRead read = store().newRead();
-        return new AbstractDataTableRead(schema()) {
-
-            @Override
-            protected InnerTableRead innerWithFilter(Predicate predicate) {
-                read.withFilter(predicate);
-                return this;
-            }
-
-            @Override
-            public void applyReadType(RowType readType) {
-                read.withReadType(readType);
-            }
-
-            @Override
-            public RecordReader<InternalRow> reader(Split split) throws IOException {
-                return read.createReader((DataSplit) split);
-            }
-        };
+        List<Function<SplitReadConfig, SplitReadProvider>> providerFactories = new ArrayList<>();
+        if (coreOptions().dataEvolutionEnabled()) {
+            // add data evolution first
+            providerFactories.add(
+                    config ->
+                            new DataEvolutionSplitReadProvider(
+                                    () -> store().newDataEvolutionRead(), config));
+        }
+        providerFactories.add(
+                config -> new AppendTableRawFileSplitReadProvider(() -> store().newRead(), config));
+        return new AppendTableRead(providerFactories, schema());
     }
 
     @Override

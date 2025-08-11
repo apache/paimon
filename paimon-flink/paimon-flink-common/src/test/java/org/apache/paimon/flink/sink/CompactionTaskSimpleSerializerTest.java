@@ -80,6 +80,7 @@ public class CompactionTaskSimpleSerializerTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 }

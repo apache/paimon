@@ -70,6 +70,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileFormat fileFormat;
     private final long targetFileSize;
     private final RowType writeSchema;
+    @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
     private final IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead;
@@ -99,6 +100,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             FileFormat fileFormat,
             long targetFileSize,
             RowType writeSchema,
+            @Nullable List<String> writeCols,
             long maxSequenceNumber,
             CompactManager compactManager,
             IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead,
@@ -119,6 +121,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
         this.writeSchema = writeSchema;
+        this.writeCols = writeCols;
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
         this.dataFileRead = dataFileRead;
@@ -300,7 +303,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 fileIndexOptions,
                 FileSource.APPEND,
                 asyncFileWrite,
-                statsDenseStore);
+                statsDenseStore,
+                writeCols);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

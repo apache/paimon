@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -64,12 +63,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/**
- * An implementation for {@link KeyValueFileStore}, this class handle LSM merging and changelog row
- * kind things, it will force reading fields such as sequence and row_kind.
- *
- * @see RawFileSplitRead If in batch mode and reading raw files, it is recommended to use this read.
- */
+/** A {@link SplitRead} to read row lineage table which need field merge. */
 public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private final TableSchema tableSchema;

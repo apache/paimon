@@ -25,7 +25,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
@@ -36,13 +35,12 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
     private final LazyField<SplitRead<InternalRow>> splitRead;
 
     public MergeFileSplitReadProvider(
-            Supplier<MergeFileSplitRead> supplier,
-            Consumer<SplitRead<InternalRow>> valuesAssigner) {
+            Supplier<MergeFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
                             SplitRead<InternalRow> read = create(supplier);
-                            valuesAssigner.accept(read);
+                            splitReadConfig.config(read);
                             return read;
                         });
     }
@@ -58,12 +56,7 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean initialized() {
-        return splitRead.initialized();
-    }
-
-    @Override
-    public SplitRead<InternalRow> getOrCreate() {
-        return splitRead.get();
+    public LazyField<SplitRead<InternalRow>> get() {
+        return splitRead;
     }
 }

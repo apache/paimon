@@ -146,6 +146,7 @@ public class DataFileMeta10LegacySerializer implements Serializable {
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 null,
+                null,
                 null);
     }
 }

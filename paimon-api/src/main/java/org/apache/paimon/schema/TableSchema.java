@@ -270,6 +270,23 @@ public class TableSchema implements Serializable {
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
+    public TableSchema project(@Nullable List<String> writeCols) {
+        if (writeCols == null || writeCols.isEmpty()) {
+            return this;
+        }
+
+        return new TableSchema(
+                version,
+                id,
+                new RowType(fields).project(writeCols).getFields(),
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                comment,
+                timeMillis);
+    }
+
     private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return projectedFieldNames.stream()

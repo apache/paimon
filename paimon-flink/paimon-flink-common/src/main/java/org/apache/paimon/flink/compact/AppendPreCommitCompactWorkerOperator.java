@@ -43,6 +43,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * Receive and process the {@link AppendCompactTask}s emitted by {@link
  * AppendPreCommitCompactCoordinatorOperator}.
@@ -67,6 +69,9 @@ public class AppendPreCommitCompactWorkerOperator extends AbstractStreamOperator
         CoreOptions coreOptions = new CoreOptions(table.options());
         this.write = (AppendFileStoreWrite) table.store().newWrite(null);
         if (coreOptions.rowTrackingEnabled()) {
+            checkArgument(
+                    !coreOptions.dataEvolutionEnabled(),
+                    "Data evolution enabled table should not invoke compact yet.");
             this.write.withWriteType(SpecialFields.rowTypeWithRowLineage(table.rowType()));
         }
         this.pathFactory = table.store().pathFactory();

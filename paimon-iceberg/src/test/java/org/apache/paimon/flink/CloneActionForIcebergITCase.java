@@ -43,7 +43,7 @@ public class CloneActionForIcebergITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9089;
+    private static final int PORT = 9090;
 
     @TempDir java.nio.file.Path iceTempDir;
 

@@ -24,7 +24,6 @@ import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.LazyField;
 
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** A {@link SplitReadProvider} to batch incremental diff read. */
@@ -33,13 +32,12 @@ public class IncrementalDiffReadProvider implements SplitReadProvider {
     private final LazyField<SplitRead<InternalRow>> splitRead;
 
     public IncrementalDiffReadProvider(
-            Supplier<MergeFileSplitRead> supplier,
-            Consumer<SplitRead<InternalRow>> valuesAssigner) {
+            Supplier<MergeFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
                             SplitRead<InternalRow> read = create(supplier);
-                            valuesAssigner.accept(read);
+                            splitReadConfig.config(read);
                             return read;
                         });
     }
@@ -54,12 +52,7 @@ public class IncrementalDiffReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean initialized() {
-        return splitRead.initialized();
-    }
-
-    @Override
-    public SplitRead<InternalRow> getOrCreate() {
-        return splitRead.get();
+    public LazyField<SplitRead<InternalRow>> get() {
+        return splitRead;
     }
 }

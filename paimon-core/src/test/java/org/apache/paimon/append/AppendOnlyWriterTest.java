@@ -622,6 +622,7 @@ public class AppendOnlyWriterTest {
                         fileFormat,
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
+                        null,
                         getMaxSequenceNumber(toCompact),
                         compactManager,
                         null,
@@ -683,6 +684,7 @@ public class AppendOnlyWriterTest {
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
+                null,
                 null,
                 null,
                 null);

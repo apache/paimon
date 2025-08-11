@@ -83,6 +83,7 @@ public class ChangelogCompactTaskTest {
                                 null,
                                 null,
                                 null,
+                                null,
                                 null)));
         ChangelogCompactTask task =
                 new ChangelogCompactTask(1, BinaryRow.EMPTY_ROW, 1, files, new HashMap<>());

@@ -60,6 +60,7 @@ public class SplitGeneratorTest {
                 null,
                 FileSource.APPEND,
                 null,
+                null,
                 null);
     }
 

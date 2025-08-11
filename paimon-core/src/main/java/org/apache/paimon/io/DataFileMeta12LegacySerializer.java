@@ -148,6 +148,7 @@ public class DataFileMeta12LegacySerializer implements Serializable {
                 row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
+                null,
                 null);
     }
 }

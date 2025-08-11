@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.types.RowType;
 
 import java.util.List;
 
@@ -36,4 +37,10 @@ public interface BatchTableWrite extends TableWrite {
      * @see BatchTableCommit#commit
      */
     List<CommitMessage> prepareCommit() throws Exception;
+
+    /**
+     * Specified the writing rowType, currently only work for table without primary key and row
+     * tracking enabled.
+     */
+    BatchTableWrite withWriteType(RowType writeType);
 }

@@ -55,6 +55,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
             FileSource.APPEND,
             null,
             null,
+            null,
             null)
       }
 
@@ -93,6 +94,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
         FileSource.APPEND,
         null,
         null,
+        null,
         null)
     ).asJava
 
@@ -113,9 +115,38 @@ class ScanHelperTest extends PaimonSparkTestBase {
     Assertions.assertEquals(1, reshuffled.length)
   }
 
+  test("Paimon: set open-file-cost to 0") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, b STRING)")
+      for (i <- 1 to 100) {
+        sql(s"INSERT INTO t VALUES ($i, 'a')")
+      }
+
+      def paimonScan() = getPaimonScan("SELECT * FROM t")
+
+      // default openCostInBytes is 4m, so we will get 400 / 128 = 4 partitions
+      withSparkSQLConf("spark.sql.leafNodeDefaultParallelism" -> "1") {
+        assert(paimonScan().lazyInputPartitions.length == 4)
+      }
+
+      withSparkSQLConf(
+        "spark.sql.files.openCostInBytes" -> "0",
+        "spark.sql.leafNodeDefaultParallelism" -> "1") {
+        assert(paimonScan().lazyInputPartitions.length == 1)
+      }
+
+      // Paimon's conf takes precedence over Spark's
+      withSparkSQLConf(
+        "spark.sql.files.openCostInBytes" -> "4194304",
+        "spark.paimon.source.split.open-file-cost" -> "0",
+        "spark.sql.leafNodeDefaultParallelism" -> "1") {
+        assert(paimonScan().lazyInputPartitions.length == 1)
+      }
+    }
+  }
+
   class FakeScan extends ScanHelper {
     override val coreOptions: CoreOptions =
       CoreOptions.fromMap(new JHashMap[String, String]())
   }
-
 }

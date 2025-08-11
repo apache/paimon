@@ -63,6 +63,14 @@ object OptionUtils extends SQLConfHelper {
     getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
   }
 
+  def writeMergeSchemaEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
+  }
+
+  def writeMergeSchemaExplicitCastEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
+  }
+
   def extractCatalogName(): Option[String] = {
     val sparkCatalogTemplate = String.format("%s([^.]*)$", SPARK_CATALOG_PREFIX)
     val sparkCatalogPattern = Pattern.compile(sparkCatalogTemplate)
