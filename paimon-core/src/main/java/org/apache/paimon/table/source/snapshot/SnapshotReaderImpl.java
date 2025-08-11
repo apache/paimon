@@ -203,7 +203,22 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate) {
         if (partitionPredicate != null) {
-            scan.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate instanceof PartitionPredicate.DefaultPartitionPredicate) {
+                Predicate predicate =
+                        ((PartitionPredicate.DefaultPartitionPredicate) partitionPredicate)
+                                .predicate();
+                int[] fieldIdxToPartitionIdx = tableSchema.partitionKeysMapping();
+                Predicate transformed =
+                        transformFieldMapping(predicate, fieldIdxToPartitionIdx)
+                                .orElseThrow(
+                                        () ->
+                                                new RuntimeException(
+                                                        "Failed to transform inner predicate "
+                                                                + predicate));
+                scan.withPartitionFilter(transformed);
+            } else {
+                scan.withPartitionFilter(partitionPredicate);
+            }
         }
         return this;
     }
@@ -218,11 +233,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withFilter(Predicate predicate) {
-        List<String> partitionKeys = tableSchema.partitionKeys();
-        int[] fieldIdxToPartitionIdx =
-                tableSchema.fields().stream()
-                        .mapToInt(f -> partitionKeys.indexOf(f.name()))
-                        .toArray();
+        int[] fieldIdxToPartitionIdx = tableSchema.partitionKeysMapping();
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();

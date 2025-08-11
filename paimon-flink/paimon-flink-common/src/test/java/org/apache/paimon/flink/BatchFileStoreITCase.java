@@ -25,11 +25,14 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -48,8 +51,11 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+
+import scala.tools.cmd.Opt;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -830,6 +836,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testScanWithSpecifiedPartitionsWithFieldMapping() {
+        sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
+        sql("CREATE TABLE Q (id INT)");
+        sql(
+                "INSERT INTO P VALUES (1, 10, 'a'), (2, 20, 'a'), (1, 11, 'b'), (3, 31, 'b'), (1, 12, 'c'), (2, 22, 'c'), (3, 32, 'c')");
+        sql("INSERT INTO Q VALUES (1), (2)");
+        String query =
+                "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt=b;pt=c') */ ON Q.id = P.id ORDER BY Q.id, P.v";
+        assertThat(sql(query)).containsExactly(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
+    }
+
+    @Test
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
@@ -944,5 +962,30 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
                 .hasSize(0);
+    }
+
+    @Test
+    public void foo() throws Exception {
+        // 'scan.partitions' = 'ds=20250810'
+        sql(
+                "CREATE TABLE test ( `item_id` BIGINT, `seller_id` BIGINT, `cate_id` BIGINT, `is_jh` VARCHAR(2147483647), `ds` VARCHAR(2147483647) ) PARTITIONED BY (`ds`) WITH ( 'maxcompute.life-cycle' = '400', 'partition.expiration-check-interval' = '12 h', 'changelog-producer' = 'none', 'partition.expiration-time' = '400d', 'bucket' = '128', 'snapshot.time-retained' = '1d', 'bucket-key' = 'item_id', 'partition.timestamp-pattern' = '$ds', 'partition.timestamp-formatter' = 'yyyyMMdd', 'file.format' = 'parquet', 'metadata.stats-mode' = 'none', 'metastore.partitioned-table' = 'true', 'consumer.expiration-time' = '1d' )");
+
+        sql("insert into test values (1, 1, 1, 'A', '20250810')");
+
+        FileStoreTable table = paimonTable("test");
+        Options options = Options.fromMap(table.options());
+
+        //        PartitionPredicate partitionPredicate =
+        //                PartitionPredicate.fromPredicate(
+        //                        table.rowType().project(table.partitionKeys()),
+        //                        PartitionPredicate.createPartitionPredicate(
+        //                                ParameterUtils.getPartitions(
+        //                                        options.get(FlinkConnectorOptions.SCAN_PARTITIONS)
+        //                                                .split(";")),
+        //                                table.rowType(),
+        //                                options.get(CoreOptions.PARTITION_DEFAULT_NAME)));
+        System.out.println();
+
+        System.out.println(sql("SELECT * FROM test where ds = '20250810'"));
     }
 }
