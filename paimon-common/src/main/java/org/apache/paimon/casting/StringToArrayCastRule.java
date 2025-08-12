@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,12 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
 
     static final StringToArrayCastRule INSTANCE = new StringToArrayCastRule();
 
-    private static final Pattern ARRAY_PATTERN = Pattern.compile("^\\s*\\[(.*)\\]\\s*$");
+    // Pattern for bracket format: [element1, element2, element3]
+    private static final Pattern BRACKET_ARRAY_PATTERN = Pattern.compile("^\\s*\\[(.*)\\]\\s*$");
+
+    // Pattern for SQL function format: ARRAY(element1, element2, element3)
+    private static final Pattern FUNCTION_ARRAY_PATTERN =
+            Pattern.compile("^\\s*ARRAY\\s*\\((.*)\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
     private StringToArrayCastRule() {
         super(
@@ -67,16 +73,11 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             BinaryString value, CastExecutor<BinaryString, Object> elementCastExecutor) {
         try {
             String str = value.toString().trim();
-            if ("[]".equals(str)) {
+            if ("[]".equals(str) || "ARRAY()".equalsIgnoreCase(str)) {
                 return new GenericArray(new Object[0]);
             }
 
-            Matcher matcher = ARRAY_PATTERN.matcher(str);
-            if (!matcher.matches()) {
-                throw new RuntimeException("Invalid array format: " + str);
-            }
-
-            String content = matcher.group(1).trim();
+            String content = extractArrayContent(str);
             if (content.isEmpty()) {
                 return new GenericArray(new Object[0]);
             }
@@ -87,6 +88,27 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             throw new RuntimeException(
                     "Cannot parse '" + value + "' as ARRAY: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Extract content from array string, supporting both bracket format [a, b, c] and SQL function
+     * format ARRAY(a, b, c).
+     */
+    private String extractArrayContent(String str) {
+        // Try bracket format first: [element1, element2, element3]
+        Matcher bracketMatcher = BRACKET_ARRAY_PATTERN.matcher(str);
+        if (bracketMatcher.matches()) {
+            return bracketMatcher.group(1).trim();
+        }
+
+        // Try SQL function format: ARRAY(element1, element2, element3)
+        Matcher functionMatcher = FUNCTION_ARRAY_PATTERN.matcher(str);
+        if (functionMatcher.matches()) {
+            return functionMatcher.group(1).trim();
+        }
+
+        throw new RuntimeException(
+                "Invalid array format: " + str + ". Expected format: [a, b, c] or ARRAY(a, b, c)");
     }
 
     private List<Object> parseArrayElements(
@@ -118,9 +140,9 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             } else if (c == '"') {
                 inQuotes = !inQuotes;
             } else if (!inQuotes) {
-                if (isOpenBracket(c)) {
+                if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);
-                } else if (isCloseBracket(c) && !bracketStack.isEmpty()) {
+                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
                     bracketStack.pop();
                 } else if (c == ',' && bracketStack.isEmpty()) {
                     addCurrentElement(elements, current);
@@ -132,14 +154,6 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
 
         addCurrentElement(elements, current);
         return elements;
-    }
-
-    private boolean isOpenBracket(char c) {
-        return c == '[' || c == '{' || c == '(';
-    }
-
-    private boolean isCloseBracket(char c) {
-        return c == ']' || c == '}' || c == ')';
     }
 
     private void addCurrentElement(List<String> elements, StringBuilder current) {

@@ -554,4 +554,12 @@ public class StringUtils {
         }
         return value.toLowerCase();
     }
+
+    public static boolean isOpenBracket(char c) {
+        return c == '[' || c == '{' || c == '(';
+    }
+
+    public static boolean isCloseBracket(char c) {
+        return c == ']' || c == '}' || c == ')';
+    }
 }

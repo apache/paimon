@@ -53,6 +53,83 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testArrayDefaultValue() throws Exception {
+        sql("CREATE TABLE T_ARRAY (id INT, tags ARRAY<STRING>, numbers ARRAY<INT>)");
+        sql("CALL sys.alter_column_default_value('default.T_ARRAY', 'tags', '[tag1, tag2]')");
+        sql("CALL sys.alter_column_default_value('default.T_ARRAY', 'numbers', '[1, 2, 3]')");
+
+        sql("INSERT INTO T_ARRAY (id) VALUES (1), (2)");
+        assertThat(collectResult("SELECT * FROM T_ARRAY"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, [tag1, tag2], [1, 2, 3]]", "+I[2, [tag1, tag2], [1, 2, 3]]");
+
+        sql("CREATE TABLE T_EMPTY_ARRAY (id INT, empty_tags ARRAY<STRING>)");
+        sql("CALL sys.alter_column_default_value('default.T_EMPTY_ARRAY', 'empty_tags', '[]')");
+        sql("INSERT INTO T_EMPTY_ARRAY (id) VALUES (1)");
+        assertThat(collectResult("SELECT * FROM T_EMPTY_ARRAY"))
+                .containsExactlyInAnyOrder("+I[1, []]");
+    }
+
+    @Test
+    public void testMapDefaultValue() throws Exception {
+        sql("CREATE TABLE T_MAP (id INT, properties MAP<STRING, STRING>)");
+        sql(
+                "CALL sys.alter_column_default_value('default.T_MAP', 'properties', '{key1 -> value1, key2 -> value2}')");
+
+        sql("INSERT INTO T_MAP (id) VALUES (1), (2)");
+        assertThat(collectResult("SELECT * FROM T_MAP"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, {key1=value1, key2=value2}]", "+I[2, {key1=value1, key2=value2}]");
+
+        sql("CREATE TABLE T_EMPTY_MAP (id INT, empty_map MAP<STRING, INT>)");
+        sql("CALL sys.alter_column_default_value('default.T_EMPTY_MAP', 'empty_map', '{}')");
+        sql("INSERT INTO T_EMPTY_MAP (id) VALUES (1)");
+        assertThat(collectResult("SELECT * FROM T_EMPTY_MAP"))
+                .containsExactlyInAnyOrder("+I[1, {}]");
+    }
+
+    @Test
+    public void testRowDefaultValue() throws Exception {
+        sql("CREATE TABLE T_STRUCT (id INT, nested ROW<x INT, y STRING>)");
+        sql(
+                "CALL sys.alter_column_default_value('default.T_STRUCT', 'nested', '{42, default_value}')");
+
+        sql("INSERT INTO T_STRUCT (id) VALUES (1), (2)");
+        assertThat(collectResult("SELECT * FROM T_STRUCT"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, +I[42, default_value]]", "+I[2, +I[42, default_value]]");
+
+        sql(
+                "CREATE TABLE T_COMPLEX_STRUCT (id INT, config ROW<enabled BOOLEAN, timeout INT, name STRING>)");
+        sql(
+                "CALL sys.alter_column_default_value('default.T_COMPLEX_STRUCT', 'config', '{true, 30, config_name}')");
+        sql("INSERT INTO T_COMPLEX_STRUCT (id) VALUES (1)");
+        assertThat(collectResult("SELECT * FROM T_COMPLEX_STRUCT"))
+                .containsExactlyInAnyOrder("+I[1, +I[true, 30, config_name]]");
+    }
+
+    @Test
+    public void testNestedComplexDefaultValue() throws Exception {
+        sql(
+                "CREATE TABLE T_MIXED (id INT, name STRING, tags ARRAY<STRING>, metadata MAP<STRING, STRING>, config ROW<enabled BOOLEAN, timeout INT>)");
+        sql("CALL sys.alter_column_default_value('default.T_MIXED', 'name', 'default_name')");
+        sql("CALL sys.alter_column_default_value('default.T_MIXED', 'tags', '[default_tag]')");
+        sql(
+                "CALL sys.alter_column_default_value('default.T_MIXED', 'metadata', '{created_by -> system}')");
+        sql("CALL sys.alter_column_default_value('default.T_MIXED', 'config', '{true, 30}')");
+
+        sql("INSERT INTO T_MIXED (id) VALUES (1)");
+        assertThat(collectResult("SELECT * FROM T_MIXED"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, default_name, [default_tag], {created_by=system}, +I[true, 30]]");
+
+        sql("INSERT INTO T_MIXED (id, name) VALUES (2, 'custom_name')");
+        assertThat(collectResult("SELECT * FROM T_MIXED WHERE id = 2"))
+                .containsExactlyInAnyOrder(
+                        "+I[2, custom_name, [default_tag], {created_by=system}, +I[true, 30]]");
+    }
+
+    @Test
     public void testAlterBranchTable() throws Exception {
         sql(
                 "CREATE TABLE T ("

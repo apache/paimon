@@ -128,6 +128,191 @@ public class SparkWriteITCase {
                         "[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value], [5,3,my_value]]");
     }
 
+    @Test
+    public void testWriteWithArrayDefaultValue() {
+        // Test Array type default value - using Spark SQL function syntax
+        spark.sql(
+                "CREATE TABLE T (id INT, tags ARRAY<STRING> DEFAULT ARRAY('tag1', 'tag2'), numbers ARRAY<INT> DEFAULT ARRAY(1, 2, 3)) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        // test show create table for array
+        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
+        assertThat(show.toString())
+                .contains("tags ARRAY<STRING> DEFAULT ARRAY('tag1', 'tag2')")
+                .contains("numbers ARRAY<INT> DEFAULT ARRAY(1, 2, 3)");
+
+        // test partial write with array defaults
+        spark.sql("INSERT INTO T (id) VALUES (1), (2)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("WrappedArray('tag1', 'tag2')");
+        assertThat(rows.toString()).contains("WrappedArray(1, 2, 3)");
+        assertThat(rows.size()).isEqualTo(2);
+
+        // test write with DEFAULT keyword for arrays
+        spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("WrappedArray('tag1', 'tag2')");
+        assertThat(rows.size()).isEqualTo(3);
+
+        // test empty array default value
+        spark.sql("DROP TABLE IF EXISTS T");
+        spark.sql(
+                "CREATE TABLE T (id INT, empty_array ARRAY<STRING> DEFAULT ARRAY()) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("WrappedArray()");
+
+        // test write with DEFAULT keyword for empty array
+        spark.sql("INSERT INTO T VALUES (2, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("WrappedArray()");
+        assertThat(rows.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testWriteWithMapDefaultValue() {
+        // Test Map type default value - using Spark SQL function syntax
+        spark.sql(
+                "CREATE TABLE T (id INT, properties MAP<STRING, STRING> DEFAULT MAP('key1', 'value1', 'key2', 'value2')) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        // test show create table for map
+        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
+        assertThat(show.toString())
+                .contains(
+                        "properties MAP<STRING, STRING> DEFAULT MAP('key1', 'value1', 'key2', 'value2')");
+
+        // test partial write with map defaults
+        spark.sql("INSERT INTO T (id) VALUES (1), (2)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("'key1' -> 'value1'");
+        assertThat(rows.toString()).contains("'key2' -> 'value2'");
+        assertThat(rows.size()).isEqualTo(2);
+
+        // test write with DEFAULT keyword for map
+        spark.sql("INSERT INTO T VALUES (3, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("'key1' -> 'value1'");
+        assertThat(rows.toString()).contains("'key2' -> 'value2'");
+        assertThat(rows.size()).isEqualTo(3);
+
+        // test empty map default value
+        spark.sql("DROP TABLE IF EXISTS T");
+        spark.sql(
+                "CREATE TABLE T (id INT, empty_map MAP<STRING, INT> DEFAULT MAP()) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("Map()");
+
+        // test write with DEFAULT keyword for empty map
+        spark.sql("INSERT INTO T VALUES (2, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("Map()");
+        assertThat(rows.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testWriteWithStructDefaultValue() {
+        // Test Struct/Row type default value - using Spark SQL function syntax
+        spark.sql(
+                "CREATE TABLE T (id INT, nested STRUCT<x: INT, y: STRING> DEFAULT STRUCT(42, 'default_value')) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        // test show create table for struct
+        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
+        assertThat(show.toString())
+                .contains("nested STRUCT<x: INT, y: STRING> DEFAULT STRUCT(42, 'default_value')");
+
+        // test partial write with struct defaults
+        spark.sql("INSERT INTO T (id) VALUES (1), (2)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("[42,'default_value']");
+        assertThat(rows.size()).isEqualTo(2);
+
+        // test write with DEFAULT keyword for struct
+        spark.sql("INSERT INTO T VALUES (3, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("[42,'default_value']");
+        assertThat(rows.size()).isEqualTo(3);
+
+        // test complex struct with multiple types
+        spark.sql("DROP TABLE IF EXISTS T");
+        spark.sql(
+                "CREATE TABLE T (id INT, config STRUCT<enabled: BOOLEAN, timeout: INT, name: STRING> DEFAULT STRUCT(true, 30, 'config_name')) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("[true,30,'config_name']");
+        assertThat(rows.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testWriteWithNestedComplexDefaultValue() {
+        // Test nested complex types with default values - using Spark SQL function syntax
+        spark.sql(
+                "CREATE TABLE T (id INT, "
+                        + "nested_array ARRAY<STRUCT<name: STRING, value: INT>> DEFAULT ARRAY(STRUCT('item1', 10), STRUCT('item2', 20)), "
+                        + "map_of_arrays MAP<STRING, ARRAY<INT>> DEFAULT MAP('list1', ARRAY(1, 2), 'list2', ARRAY(3, 4))) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        // test show create table for nested complex types
+        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
+        assertThat(show.toString())
+                .contains(
+                        "nested_array ARRAY<STRUCT<name: STRING, value: INT>> DEFAULT ARRAY(STRUCT('item1', 10), STRUCT('item2', 20))")
+                .contains(
+                        "map_of_arrays MAP<STRING, ARRAY<INT>> DEFAULT MAP('list1', ARRAY(1, 2), 'list2', ARRAY(3, 4))");
+
+        // test partial write with nested complex type defaults
+        spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+
+        // test write with DEFAULT keyword for nested complex types
+        spark.sql("INSERT INTO T VALUES (2, DEFAULT, DEFAULT)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.size()).isEqualTo(2);
+
+        // test mixed simple and complex types with defaults
+        spark.sql("DROP TABLE IF EXISTS T");
+        spark.sql(
+                "CREATE TABLE T (id INT, "
+                        + "name STRING DEFAULT 'default_name', "
+                        + "tags ARRAY<STRING> DEFAULT ARRAY('default_tag'), "
+                        + "metadata MAP<STRING, STRING> DEFAULT MAP('created_by', 'system'), "
+                        + "config STRUCT<enabled: BOOLEAN, timeout: INT> DEFAULT STRUCT(true, 30)) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        // test partial write with mixed defaults
+        spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("default_name");
+        assertThat(rows.toString()).contains("WrappedArray('default_tag')");
+        assertThat(rows.toString()).contains("Map('created_by' -> 'system')");
+        assertThat(rows.toString()).contains("[true,30]");
+
+        // test selective column insertion with mixed defaults
+        spark.sql("INSERT INTO T (id, name) VALUES (2, 'custom_name')").collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("custom_name");
+        assertThat(rows.toString()).contains("WrappedArray('default_tag')");
+        assertThat(rows.size()).isEqualTo(2);
+
+        // test write with some DEFAULT keywords for mixed types
+        spark.sql("INSERT INTO T VALUES (3, DEFAULT, ARRAY('custom_tag'), DEFAULT, DEFAULT)")
+                .collectAsList();
+        rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).contains("default_name");
+        assertThat(rows.toString()).contains("WrappedArray(custom_tag)");
+        assertThat(rows.size()).isEqualTo(3);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"order", "zorder", "hilbert"})
     public void testWriteWithClustering(String clusterStrategy) {

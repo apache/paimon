@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,12 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
 
     static final StringToRowCastRule INSTANCE = new StringToRowCastRule();
 
-    private static final Pattern ROW_PATTERN = Pattern.compile("^\\s*\\{(.*)\\}\\s*$");
+    // Pattern for bracket format: {field1, field2, field3}
+    private static final Pattern BRACKET_ROW_PATTERN = Pattern.compile("^\\s*\\{(.*)\\}\\s*$");
+
+    // Pattern for SQL function format: STRUCT(field1, field2, field3)
+    private static final Pattern FUNCTION_ROW_PATTERN =
+            Pattern.compile("^\\s*STRUCT\\s*\\((.*)\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
     private StringToRowCastRule() {
         super(
@@ -80,20 +86,13 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             int fieldCount) {
         try {
             String str = value.toString().trim();
-            if ("{}".equals(str)) {
+            if ("{}".equals(str) || "STRUCT()".equalsIgnoreCase(str)) {
                 return createNullRow(fieldCount);
             }
-
-            Matcher matcher = ROW_PATTERN.matcher(str);
-            if (!matcher.matches()) {
-                throw new RuntimeException("Invalid row format: " + str);
-            }
-
-            String content = matcher.group(1).trim();
+            String content = extractRowContent(str);
             if (content.isEmpty()) {
                 return createNullRow(fieldCount);
             }
-
             List<String> fieldValues = splitRowFields(content);
             if (fieldValues.size() != fieldCount) {
                 throw new RuntimeException(
@@ -107,6 +106,26 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
         } catch (Exception e) {
             throw new RuntimeException("Cannot parse '" + value + "' as ROW: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Extract content from row string, supporting both bracket format {f1, f2} and function format
+     * STRUCT(f1, f2).
+     */
+    private String extractRowContent(String str) {
+        // Try bracket format first: {field1, field2, field3}
+        Matcher bracketMatcher = BRACKET_ROW_PATTERN.matcher(str);
+        if (bracketMatcher.matches()) {
+            return bracketMatcher.group(1).trim();
+        }
+        // Try SQL function format: STRUCT(field1, field2, field3)
+        Matcher functionMatcher = FUNCTION_ROW_PATTERN.matcher(str);
+        if (functionMatcher.matches()) {
+            return functionMatcher.group(1).trim();
+        }
+
+        throw new RuntimeException(
+                "Invalid row format: " + str + ". Expected format: {f1, f2} or STRUCT(f1, f2)");
     }
 
     private GenericRow createNullRow(int fieldCount) {
@@ -152,9 +171,9 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             } else if (c == '"') {
                 inQuotes = !inQuotes;
             } else if (!inQuotes) {
-                if (isOpenBracket(c)) {
+                if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);
-                } else if (isCloseBracket(c) && !bracketStack.isEmpty()) {
+                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
                     bracketStack.pop();
                 } else if (c == ',' && bracketStack.isEmpty()) {
                     addCurrentField(fields, current);
@@ -166,14 +185,6 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
 
         addCurrentField(fields, current);
         return fields;
-    }
-
-    private boolean isOpenBracket(char c) {
-        return c == '[' || c == '{' || c == '(';
-    }
-
-    private boolean isCloseBracket(char c) {
-        return c == ']' || c == '}' || c == ')';
     }
 
     private void addCurrentField(List<String> fields, StringBuilder current) {
