@@ -47,10 +47,10 @@ class SpotlessRegexReplacementTest {
 
     @ParameterizedTest
     @CsvSource({
-        "'import com.google.common.collect.Lists;', 'import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;'",
-        "'import com.google.common.base.Strings;', 'import org.apache.paimon.shade.guava30.com.google.common.base.Strings;'",
-        "'import com.google.common.util.concurrent.ListenableFuture;', 'import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ListenableFuture;'",
-        "'import com.google.common.cache.Cache;', 'import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;'"
+        "'import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;', 'import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;'",
+        "'import org.apache.paimon.shade.guava30.com.google.common.base.Strings;', 'import org.apache.paimon.shade.guava30.com.google.common.base.Strings;'",
+        "'import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ListenableFuture;', 'import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ListenableFuture;'",
+        "'import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;', 'import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;'"
     })
     void testGuavaImportReplacementVariations(String input, String expected) {
         String result = GUAVA_PATTERN.matcher(input).replaceAll(GUAVA_REPLACEMENT);
@@ -59,10 +59,10 @@ class SpotlessRegexReplacementTest {
 
     @ParameterizedTest
     @CsvSource({
-        "'import com.fasterxml.jackson.databind.ObjectMapper;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;'",
-        "'import com.fasterxml.jackson.core.JsonParser;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;'",
-        "'import com.fasterxml.jackson.annotation.JsonProperty;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;'",
-        "'import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;'"
+        "'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;'",
+        "'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;'",
+        "'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;'",
+        "'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;', 'import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;'"
     })
     void testJacksonImportReplacementVariations(String input, String expected) {
         String result = JACKSON_PATTERN.matcher(input).replaceAll(JACKSON_REPLACEMENT);
