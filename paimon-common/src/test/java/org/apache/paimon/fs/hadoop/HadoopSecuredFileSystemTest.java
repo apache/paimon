@@ -16,11 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fs;
+package org.apache.paimon.fs.hadoop;
 
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.fs.hadoop.HadoopFileIO;
-import org.apache.paimon.fs.hadoop.HadoopSecuredFileSystem;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;

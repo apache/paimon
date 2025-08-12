@@ -171,7 +171,7 @@ public class HadoopFileIO implements FileIO {
     }
 
     @VisibleForTesting
-    public FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+    FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         return getFileSystem(path, this::createFileSystem);
     }
 
