@@ -152,6 +152,8 @@ class PaimonScanBuilder(table: InnerTable)
     false
   }
 
+  override def isPartiallyPushed: Boolean = super.isPartiallyPushed
+
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
     // for now, we only support complete push down, so there is no difference with `pushAggregation`
     pushAggregation(aggregation)
