@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jindo;
 
+import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
@@ -96,6 +97,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
         // Misalignment can greatly affect performance, so the maximum buffer is set here
         hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
+        hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
 
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
