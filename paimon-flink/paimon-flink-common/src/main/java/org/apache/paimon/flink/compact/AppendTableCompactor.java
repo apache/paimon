@@ -197,11 +197,9 @@ public class AppendTableCompactor {
                 result.poll();
                 tempList.add(future.get());
             }
-            List<Committable> committables =
-                    tempList.stream()
-                            .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
-                            .collect(Collectors.toList());
-            return committables;
+            return tempList.stream()
+                    .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
+                    .collect(Collectors.toList());
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
         } catch (Exception e) {
