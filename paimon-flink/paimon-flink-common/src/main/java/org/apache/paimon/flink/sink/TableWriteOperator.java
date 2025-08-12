@@ -159,9 +159,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
-        tryRefreshWrite();
-        return committables;
+        return write.prepareCommit(waitCompaction, checkpointId);
     }
 
     @VisibleForTesting
@@ -169,7 +167,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         return write;
     }
 
-    private void tryRefreshWrite() {
+    protected void tryRefreshWrite() {
         if (writeRefresher != null) {
             writeRefresher.tryRefresh();
             table = writeRefresher.updatedTable();
