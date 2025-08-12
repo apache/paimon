@@ -758,6 +758,62 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon Dataframe: read write with catalog name") {
+    withTempDir {
+      tmpDir =>
+        spark.sql(s"USE $paimonHiveCatalogName")
+        val dbName = "paimon_db"
+        withDatabase(dbName) {
+          spark.sql(s"CREATE DATABASE $dbName")
+          spark.sql(s"USE $dbName")
+          withTable("t") {
+            val tblLocation = tmpDir.getCanonicalPath
+            spark.sql(s"CREATE TABLE t (a INT, b STRING) USING paimon LOCATION '$tblLocation'")
+
+            // write by path
+            Seq((1, "x1"), (2, "x2"))
+              .toDF("a", "b")
+              .write
+              .format("paimon")
+              .option("catalog", paimonHiveCatalogName)
+              .option("database", dbName)
+              .option("table", "t")
+              .mode("append")
+              .save(tblLocation)
+
+            // write by name
+            Seq((3, "x3"), (2, "x4"))
+              .toDF("a", "b")
+              .write
+              .format("paimon")
+              .mode("append")
+              .saveAsTable(s"$paimonHiveCatalogName.$dbName.t")
+
+            // read by path with time travel
+            checkAnswer(
+              spark.read
+                .format("paimon")
+                .option("catalog", paimonHiveCatalogName)
+                .option("database", dbName)
+                .option("table", "t")
+                .option("scan.snapshot-id", 1)
+                .load(tblLocation),
+              Seq(Row(1, "x1"), Row(2, "x2"))
+            )
+
+            // read by name with time travel
+            checkAnswer(
+              spark.read
+                .format("paimon")
+                .option("scan.snapshot-id", 1)
+                .table(s"$paimonHiveCatalogName.$dbName.t"),
+              Seq(Row(1, "x1"), Row(2, "x2"))
+            )
+          }
+        }
+    }
+  }
+
   def getDatabaseProp(dbName: String, propertyName: String): String = {
     spark
       .sql(s"DESC DATABASE EXTENDED $dbName")

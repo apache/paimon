@@ -44,7 +44,6 @@ import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -63,9 +62,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -73,16 +72,16 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private static final Logger LOG = LoggerFactory.getLogger(RawFileSplitRead.class);
 
     private final FileIO fileIO;
-    protected final SchemaManager schemaManager;
-    protected final TableSchema schema;
-    protected final FileFormatDiscover formatDiscover;
-    protected final FileStorePathFactory pathFactory;
-    protected final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
-    protected final boolean fileIndexReadEnabled;
-    protected final boolean rowTrackingEnabled;
+    private final SchemaManager schemaManager;
+    private final TableSchema schema;
+    private final FileFormatDiscover formatDiscover;
+    private final FileStorePathFactory pathFactory;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    private final boolean fileIndexReadEnabled;
+    private final boolean rowTrackingEnabled;
 
-    protected RowType readRowType;
-    @Nullable protected List<Predicate> filters;
+    private RowType readRowType;
+    @Nullable private List<Predicate> filters;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -130,7 +129,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
-        if (split.beforeFiles().size() > 0) {
+        if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }
 
@@ -154,7 +153,18 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 pathFactory.createDataFilePathFactory(partition, bucket);
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
-        Builder formatReaderMappingBuilder = formatBuilder();
+        Builder formatReaderMappingBuilder =
+                new Builder(
+                        formatDiscover,
+                        readRowType.getFields(),
+                        schema -> {
+                            if (rowTrackingEnabled) {
+                                return rowTypeWithRowLineage(schema.logicalRowType(), true)
+                                        .getFields();
+                            }
+                            return schema.fields();
+                        },
+                        filters);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -169,26 +179,25 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return ConcatRecordReader.create(suppliers);
     }
 
-    protected ReaderSupplier<InternalRow> createFileReader(
+    private ReaderSupplier<InternalRow> createFileReader(
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
-            Builder formatReaderMappingBuilder,
+            Builder formatBuilder,
             @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories) {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
         long schemaId = file.schemaId();
 
-        Supplier<FormatReaderMapping> formatSupplier =
-                () ->
-                        formatReaderMappingBuilder.build(
-                                formatIdentifier,
-                                schema,
-                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
-
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
                         new FormatKey(file.schemaId(), formatIdentifier),
-                        key -> formatSupplier.get());
+                        key ->
+                                formatBuilder.build(
+                                        formatIdentifier,
+                                        schema,
+                                        schemaId == schema.id()
+                                                ? schema
+                                                : schemaManager.schema(schemaId)));
 
         IOExceptionSupplier<DeletionVector> dvFactory =
                 dvFactories == null ? null : dvFactories.get(file.fileName());
@@ -197,7 +206,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         partition, file, dataFilePathFactory, formatReaderMapping, dvFactory);
     }
 
-    protected FileRecordReader<InternalRow> createFileReader(
+    private FileRecordReader<InternalRow> createFileReader(
             BinaryRow partition,
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
@@ -264,20 +273,5 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
         return fileRecordReader;
-    }
-
-    protected Builder formatBuilder() {
-        return new Builder(
-                formatDiscover,
-                readRowType.getFields(),
-                tableSchema -> {
-                    if (rowTrackingEnabled) {
-                        return SpecialFields.rowTypeWithRowLineage(
-                                        tableSchema.logicalRowType(), true)
-                                .getFields();
-                    }
-                    return tableSchema.fields();
-                },
-                filters);
     }
 }

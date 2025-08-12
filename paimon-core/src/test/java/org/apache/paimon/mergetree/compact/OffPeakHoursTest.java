@@ -18,82 +18,86 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.options.Options;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link OffPeakHours}. */
-public class OffPeakHoursTest {
+class OffPeakHoursTest {
+
+    private static final int RATIO = 10;
 
     @Test
-    public void testNormalRangeOffPeakHours() {
-        // Test normal range: 9 AM to 5 PM (9-17)
-        OffPeakHours offPeakHours = OffPeakHours.create(9, 17, 0);
+    void testCreateFromOptions() {
+        Options options = new Options();
+        options.set(CoreOptions.COMPACT_OFFPEAK_START_HOUR, 22);
+        options.set(CoreOptions.COMPACT_OFFPEAK_END_HOUR, 6);
+        options.set(CoreOptions.COMPACTION_OFFPEAK_RATIO, RATIO);
+        CoreOptions coreOptions = new CoreOptions(options);
 
-        // Hours before start should not be off-peak
-        for (int hour = 0; hour < 9; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should not be off-peak", hour)
-                    .isFalse();
-        }
+        OffPeakHours offPeakHours = OffPeakHours.create(coreOptions);
 
-        // Hours in range should be off-peak (start inclusive, end exclusive)
-        for (int hour = 9; hour < 17; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should be off-peak", hour)
-                    .isTrue();
-        }
-
-        // Hours after end should not be off-peak
-        for (int hour = 17; hour < 24; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should not be off-peak", hour)
-                    .isFalse();
-        }
+        assertThat(offPeakHours).isNotNull();
+        assertThat(offPeakHours.currentRatio(23)).isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(7)).isEqualTo(0);
     }
 
     @Test
-    public void testWrapAroundRangeOffPeakHours() {
-        OffPeakHours offPeakHours = OffPeakHours.create(22, 6, 0);
-
-        // Hours before end (0-5) should be off-peak
-        for (int hour = 0; hour < 6; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should be off-peak", hour)
-                    .isTrue();
-        }
-
-        // Hours between end and start (6-21) should not be off-peak
-        for (int hour = 6; hour < 22; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should not be off-peak", hour)
-                    .isFalse();
-        }
-
-        // Hours from start to end of day (22-23) should be off-peak
-        for (int hour = 22; hour < 24; hour++) {
-            assertThat(offPeakHours.isOffPeak(hour))
-                    .as("Hour %d should be off-peak", hour)
-                    .isTrue();
-        }
+    void testCreateFromOptionsWithDefault() {
+        Options options = new Options();
+        CoreOptions coreOptions = new CoreOptions(options);
+        OffPeakHours offPeakHours = OffPeakHours.create(coreOptions);
+        assertThat(offPeakHours).isNull();
     }
 
     @Test
-    public void testSingleHourRange() {
-        // Test single hour range: 12 to 13
-        OffPeakHours offPeakHours = OffPeakHours.create(12, 13, 0);
+    void testCreateFromOptionsWithSameHour() {
+        Options options = new Options();
+        options.set(CoreOptions.COMPACT_OFFPEAK_START_HOUR, 5);
+        options.set(CoreOptions.COMPACT_OFFPEAK_END_HOUR, 5);
+        options.set(CoreOptions.COMPACTION_OFFPEAK_RATIO, RATIO);
+        CoreOptions coreOptions = new CoreOptions(options);
 
-        // Only hour 12 should be off-peak
-        for (int hour = 0; hour < 24; hour++) {
-            if (hour == 12) {
-                assertThat(offPeakHours.isOffPeak(hour))
-                        .as("Hour %d should be off-peak", hour)
-                        .isTrue();
-            } else {
-                assertThat(offPeakHours.isOffPeak(hour))
-                        .as("Hour %d should not be off-peak", hour)
-                        .isFalse();
-            }
-        }
+        OffPeakHours offPeakHours = OffPeakHours.create(coreOptions);
+
+        assertThat(offPeakHours).isNull();
+    }
+
+    @Test
+    void testCreateWithInvalidHours() {
+        assertThat(OffPeakHours.create(-1, -1, RATIO)).isNull();
+        assertThat(OffPeakHours.create(5, 5, RATIO)).isNull();
+        assertThat(OffPeakHours.create(2, -1, RATIO)).isNull();
+        assertThat(OffPeakHours.create(-1, 2, RATIO)).isNull();
+    }
+
+    @Test
+    void testCurrentRatioNormalHours() {
+        OffPeakHours offPeakHours = OffPeakHours.create(2, 8, RATIO);
+        assertThat(offPeakHours).isNotNull();
+
+        assertThat(offPeakHours.currentRatio(1)).as("Before start").isEqualTo(0);
+        assertThat(offPeakHours.currentRatio(2)).as("At start").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(5)).as("In between").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(7)).as("Before end").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(8)).as("At end (exclusive)").isEqualTo(0);
+        assertThat(offPeakHours.currentRatio(9)).as("After end").isEqualTo(0);
+    }
+
+    @Test
+    void testCurrentRatioOvernightHours() {
+        OffPeakHours offPeakHours = OffPeakHours.create(22, 6, RATIO);
+        assertThat(offPeakHours).isNotNull();
+
+        assertThat(offPeakHours.currentRatio(21)).as("Before start").isEqualTo(0);
+        assertThat(offPeakHours.currentRatio(22)).as("At start").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(23)).as("After start").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(0)).as("After midnight, before end").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(5)).as("Before end").isEqualTo(RATIO);
+        assertThat(offPeakHours.currentRatio(6)).as("At end (exclusive)").isEqualTo(0);
+        assertThat(offPeakHours.currentRatio(10)).as("After end, before next start").isEqualTo(0);
     }
 }

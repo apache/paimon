@@ -24,3 +24,4 @@ cd "$(dirname "$SCRIPT_PATH")/.." || exit
 
 autopep8  ./ --global-config=./dev/cfg.ini
 autoflake --config=./dev/cfg.ini ./
+isort ./

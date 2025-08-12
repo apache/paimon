@@ -53,7 +53,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
-import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGCY_NAME;
+import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
@@ -165,7 +165,7 @@ public class CatalogUtils {
                         options.get(PARTITION_DEFAULT_NAME),
                         table.rowType().project(table.partitionKeys()),
                         table.partitionKeys().toArray(new String[0]),
-                        options.get(PARTITION_GENERATE_LEGCY_NAME));
+                        options.get(PARTITION_GENERATE_LEGACY_NAME));
         List<PartitionEntry> partitionEntries =
                 table.newReadBuilder().newScan().listPartitionEntries();
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());

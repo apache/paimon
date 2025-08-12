@@ -24,6 +24,7 @@ import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSpa
 import org.apache.paimon.types.{DataTypeRoot, DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.expressions.{Literal, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
@@ -54,6 +55,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
             // TODO deal with isNaN
             val index = fieldIndex(fieldName)
             builder.equal(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case EQUAL_NULL_SAFE =>
@@ -65,6 +68,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
             } else {
               builder.equal(index, convertLiteral(index, literal))
             }
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case GREATER_THAN =>
@@ -72,6 +77,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.greaterThan(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case GREATER_THAN_OR_EQUAL =>
@@ -79,6 +86,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.greaterOrEqual(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case LESS_THAN =>
@@ -86,6 +95,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.lessThan(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case LESS_THAN_OR_EQUAL =>
@@ -93,6 +104,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.lessOrEqual(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case IN =>
@@ -101,18 +114,24 @@ case class SparkV2FilterConverter(rowType: RowType) {
             val index = fieldIndex(fieldName)
             literals.map(convertLiteral(index, _)).toList.asJava
             builder.in(index, literals.map(convertLiteral(index, _)).toList.asJava)
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case IS_NULL =>
         UnaryPredicate.unapply(sparkPredicate) match {
           case Some(fieldName) =>
             builder.isNull(fieldIndex(fieldName))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case IS_NOT_NULL =>
         UnaryPredicate.unapply(sparkPredicate) match {
           case Some(fieldName) =>
             builder.isNotNull(fieldIndex(fieldName))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case AND =>
@@ -137,6 +156,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.startsWith(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case STRING_END_WITH =>
@@ -144,6 +165,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.endsWith(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       case STRING_CONTAINS =>
@@ -151,6 +174,8 @@ case class SparkV2FilterConverter(rowType: RowType) {
           case Some((fieldName, literal)) =>
             val index = fieldIndex(fieldName)
             builder.contains(index, convertLiteral(index, literal))
+          case _ =>
+            throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
       // TODO: AlwaysTrue, AlwaysFalse
@@ -201,7 +226,7 @@ case class SparkV2FilterConverter(rowType: RowType) {
   }
 }
 
-object SparkV2FilterConverter {
+object SparkV2FilterConverter extends Logging {
 
   private val EQUAL_TO = "="
   private val EQUAL_NULL_SAFE = "<=>"
@@ -258,6 +283,9 @@ object SparkV2FilterConverter {
       case IN =>
         MultiPredicate.unapply(sparkPredicate) match {
           case Some((fieldName, _)) => partitionKeys.contains(fieldName)
+          case _ =>
+            logWarning(s"Convert $sparkPredicate is unsupported.")
+            false
         }
       case _ => false
     }

@@ -71,13 +71,16 @@ class RESTCatalogTest(unittest.TestCase):
             ('user_id', pa.int64()),
             ('item_id', pa.int64()),
             ('behavior', pa.string()),
-            ('dt', pa.string())
+            ('dt', pa.string()),
+            ('long-dt', pa.string())
         ])
         self.raw_data = {
             'user_id': [1, 2, 3, 4, 5, 6, 7, 8],
             'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008],
             'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
+            'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01', '2024-10-10', '2025-01-23',
+                        'abcdefghijklmnopk', '2025-08-08']
         }
         self.expected = pa.Table.from_pydict(self.raw_data, schema=self.pa_schema)
 
@@ -167,6 +170,7 @@ class RESTCatalogTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004],
             'behavior': ['a', 'b', 'c', None],
             'dt': ['p1', 'p1', 'p2', 'p1'],
+            'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01']
         }
         expect = pa.Table.from_pydict(data, schema=self.pa_schema)
 
@@ -445,6 +449,7 @@ class RESTCatalogTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004],
             'behavior': ['a', 'b', 'c', None],
             'dt': ['p1', 'p1', 'p2', 'p1'],
+            'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01'],
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
@@ -460,6 +465,7 @@ class RESTCatalogTest(unittest.TestCase):
             'item_id': [1005, 1006, 1007, 1008],
             'behavior': ['e', 'f', 'g', 'h'],
             'dt': ['p2', 'p1', 'p2', 'p2'],
+            'long-dt': ['2024-10-10', '2025-01-23', 'abcdefghijklmnopk', '2025-08-08'],
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
         table_write.write_arrow(pa_table)

@@ -37,7 +37,7 @@ class CatalogOptions:
     WAREHOUSE = "warehouse"
     TOKEN_PROVIDER = "token.provider"
     TOKEN = "token"
-    DATA_TOKEN_ENABLED = "data.token.enabled"
+    DATA_TOKEN_ENABLED = "data-token.enabled"
     DLF_REGION = "dlf.region"
     DLF_ACCESS_KEY_ID = "dlf.access-key-id"
     DLF_ACCESS_KEY_SECRET = "dlf.access-key-secret"

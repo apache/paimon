@@ -26,10 +26,10 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Column, Row, SparkSession}
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
-import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
+import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit}
@@ -150,19 +150,15 @@ case class UpdatePaimonTableCommand(
       toUpdateScanRelation: DataSourceV2Relation): Seq[CommitMessage] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
-        val updated = if (condition == TrueLiteral) {
-          update
-        } else {
-          If(condition, update, origin)
-        }
+        val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
     if (coreOptions.rowTrackingEnabled()) {
-      updateColumns = updateColumns ++ Seq(
+      updateColumns ++= Seq(
         col(SpecialFields.ROW_ID.name()),
         toColumn(
-          If(
+          optimizedIf(
             condition,
             Literal(null),
             toExpression(sparkSession, col(SpecialFields.SEQUENCE_NUMBER.name()))))
@@ -172,5 +168,18 @@ case class UpdatePaimonTableCommand(
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
     dvSafeWriter.withRowLineage().write(data)
+  }
+
+  private def optimizedIf(
+      predicate: Expression,
+      trueValue: Expression,
+      falseValue: Expression): Expression = {
+    if (predicate == TrueLiteral) {
+      trueValue
+    } else if (predicate == FalseLiteral) {
+      falseValue
+    } else {
+      If(predicate, trueValue, falseValue)
+    }
   }
 }

@@ -15,8 +15,8 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pypaimon.catalog.catalog import Catalog
 from pypaimon.api.options import Options
+from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog

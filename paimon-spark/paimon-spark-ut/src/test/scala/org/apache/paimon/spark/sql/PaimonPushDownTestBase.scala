@@ -27,7 +27,10 @@ import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.catalyst.trees.TreePattern.DYNAMIC_PRUNING_SUBQUERY
 import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.assertj.core.api.{Assertions => assertj}
 import org.junit.jupiter.api.Assertions
+
+import java.util.UUID
 
 abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
@@ -275,6 +278,33 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
       Assertions.assertTrue(qe2.optimizedPlan.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       Assertions.assertTrue(qe2.sparkPlan.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       checkAnswer(df2, Row(5, "e", "2025", "x5") :: Nil)
+    }
+  }
+
+  test(s"Paimon pushdown: parquet in-filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g',
+                   |'parquet.filter.stats.enabled' = 'false' -- disable stats filter
+                   |)
+                   |""".stripMargin)
+
+      val data = (0 to 1000).flatMap {
+        i =>
+          val uuid = java.util.UUID.randomUUID().toString
+          List.fill(10)((i, uuid))
+      }
+      data.toDF("a", "b").createOrReplaceTempView("source")
+      spark.sql("insert into T select * from source cluster by a")
+      val rows = spark.sql(s"select * from T where a in (${(100 to 150).mkString(",")})").collect()
+      val expected =
+        spark.sql(s"select * from source where a in (${(100 to 150).mkString(",")})").collect()
+
+      assertj.assertThat(rows).containsExactlyInAnyOrder(expected: _*)
     }
   }
 
