@@ -69,6 +69,32 @@ class TableSchema:
         self.options = options or {}
         self.comment = comment
         self.time_millis = time_millis if time_millis is not None else int(time.time() * 1000)
+        self.trim_primary_keys()
+
+    from typing import List
+
+    def trim_primary_keys(self) -> List[str]:
+        if self.primary_keys:
+            # Filter out primary keys that exist in partition keys
+            adjusted = [pk for pk in self.primary_keys if pk not in self.partition_keys]
+
+            # Validate that filtered list is not empty
+            if not adjusted:
+                raise ValueError(
+                    f"Primary key constraint {self.primary_keys} "
+                    f"should not be same with partition fields {self.partition_keys}, "
+                    "this will result in only one record in a partition")
+
+            return adjusted
+        return self.primary_keys
+
+    def cross_partition_update(self) -> bool:
+        if not self.primary_keys or not self.partition_keys:
+            return False
+
+        # Check if primary keys contain all partition keys
+        # Return True if they don't contain all (cross-partition update)
+        return not all(pk in self.primary_keys for pk in self.partition_keys)
 
     def to_schema(self) -> Schema:
         return Schema(

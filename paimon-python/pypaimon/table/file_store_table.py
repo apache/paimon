@@ -27,7 +27,8 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
 from pypaimon.write.batch_write_builder import BatchWriteBuilder
-from pypaimon.write.row_key_extractor import (FixedBucketRowKeyExtractor,
+from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
+                                              FixedBucketRowKeyExtractor,
                                               RowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
 
@@ -47,13 +48,15 @@ class FileStoreTable(Table):
 
         self.schema_manager = SchemaManager(file_io, table_path)
         self.is_primary_key_table = bool(self.primary_keys)
+        self.cross_partition_update = self.table_schema.cross_partition_update()
 
     def bucket_mode(self) -> BucketMode:
         if self.is_primary_key_table:
-            if self.primary_keys == self.partition_keys:
-                return BucketMode.CROSS_PARTITION
             if self.options.get(CoreOptions.BUCKET, -1) == -1:
-                return BucketMode.HASH_DYNAMIC
+                if self.cross_partition_update:
+                    return BucketMode.CROSS_PARTITION
+                else:
+                    return BucketMode.HASH_DYNAMIC
             else:
                 return BucketMode.HASH_FIXED
         else:
@@ -75,6 +78,6 @@ class FileStoreTable(Table):
         elif bucket_mode == BucketMode.BUCKET_UNAWARE:
             return UnawareBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(f"Unsupported bucket mode {bucket_mode} yet")
+            return DynamicBucketRowKeyExtractor(self.table_schema)
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
