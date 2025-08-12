@@ -499,8 +499,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "'bucket' = '"
                         + bucket
                         + "',"
-                        + "'sink.writer-refresh-detect-options' = 'data-file.external-paths,"
-                        + "data-file.external-paths.strategy,data-file.external-paths.specific-fs',"
+                        + "'sink.writer-refresh-detectors' = 'external-paths',"
                         + "'data-file.external-paths' = '"
                         + externalPaths1
                         + "',"

@@ -22,7 +22,6 @@ import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -104,15 +103,6 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
     private void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         prepareCommit(waitCompaction, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
-    }
-
-    protected void refreshWrite(FileStoreTable table, StoreSinkWrite write) {
-        WriterRefresher.doRefresh(
-                table,
-                write,
-                (newTable, writer) -> {
-                    writer.replace(newTable);
-                });
     }
 
     protected abstract List<OUT> prepareCommit(boolean waitCompaction, long checkpointId)

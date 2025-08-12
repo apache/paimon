@@ -64,6 +64,8 @@ public class AppendTableCompactor {
     @Nullable private final transient CompactionMetrics compactionMetrics;
     @Nullable private final transient CompactionMetrics.Reporter metricsReporter;
 
+    protected final transient WriterRefresher<BaseAppendFileStoreWrite> writeRefresher;
+
     public AppendTableCompactor(
             FileStoreTable table,
             String commitUser,
@@ -83,6 +85,8 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        this.writeRefresher =
+                new WriterRefresher<>(table, write, (newTable, writer) -> replace(newTable));
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -193,7 +197,7 @@ public class AppendTableCompactor {
                             .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
                             .collect(Collectors.toList());
 
-            refreshWrite();
+            writeRefresher.tryRefresh();
             return committables;
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
@@ -215,9 +219,5 @@ public class AppendTableCompactor {
         write.close();
         write = (BaseAppendFileStoreWrite) newTable.store().newWrite(commitUser);
         write.restore((List) states);
-    }
-
-    protected void refreshWrite() {
-        WriterRefresher.doRefresh(table, write, (newTable, writer) -> replace(newTable));
     }
 }

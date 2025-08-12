@@ -60,10 +60,7 @@ public class DynamicBucketRowWriteOperator
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        List<Committable> committables = super.prepareCommit(waitCompaction, checkpointId);
-
-        refreshWrite(table, write);
-        return committables;
+        return super.prepareCommit(waitCompaction, checkpointId);
     }
 
     /** {@link StreamOperatorFactory} of {@link DynamicBucketRowWriteOperator}. */

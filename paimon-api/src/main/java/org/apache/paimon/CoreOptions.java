@@ -2694,6 +2694,18 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
     }
 
+    public Map<String, String> configGroups(Set<String> groups) {
+        Map<String, String> configs = new HashMap<>();
+        // external-paths config group
+        String externalPaths = "external-paths";
+        if (groups.contains(externalPaths)) {
+            configs.put(DATA_FILE_EXTERNAL_PATHS.key(), dataFileExternalPaths());
+            configs.put(DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), externalPathStrategy().toString());
+            configs.put(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), externalSpecificFS());
+        }
+        return configs;
+    }
+
     public Boolean forceRewriteAllFiles() {
         return options.get(COMPACTION_FORCE_REWRITE_ALL_FILES);
     }

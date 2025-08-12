@@ -23,55 +23,78 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Writer refresher for refresh write when configs changed. */
-public class WriterRefresher {
+public class WriterRefresher<T> {
 
     private static final Logger LOG = LoggerFactory.getLogger(WriterRefresher.class);
 
-    public static <T> void doRefresh(FileStoreTable table, T write, Refresher<T> refresher) {
+    @Nullable private final Set<String> configGroups;
+    private final Refresher<T> refresher;
+    private FileStoreTable table;
+    private T write;
 
-        String refreshedConfigs =
+    public WriterRefresher(FileStoreTable table, T write, Refresher<T> refresher) {
+        this.table = table;
+        this.write = write;
+        this.refresher = refresher;
+        String refreshDetectors =
                 Options.fromMap(table.options())
-                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS);
+                        .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS);
+        if (refreshDetectors == null) {
+            configGroups = null;
+        } else {
+            configGroups = Arrays.stream(refreshDetectors.split(",")).collect(Collectors.toSet());
+        }
+    }
 
-        if (!StringUtils.isNullOrWhitespaceOnly(refreshedConfigs)) {
-            Optional<TableSchema> latestSchema = table.schemaManager().latest();
-            if (latestSchema.isPresent() && latestSchema.get().id() > table.schema().id()) {
-                try {
-                    Map<String, String> currentOptions =
-                            CoreOptions.fromMap(table.schema().options())
-                                    .getSpecificOptions(refreshedConfigs.split(","));
-                    Map<String, String> newOptions =
-                            CoreOptions.fromMap(latestSchema.get().options())
-                                    .getSpecificOptions(refreshedConfigs.split(","));
+    public void tryRefresh() {
+        if (configGroups == null) {
+            return;
+        }
 
-                    if (!Objects.equals(newOptions, currentOptions)) {
-                        if (LOG.isDebugEnabled()) {
-                            LOG.debug(
-                                    "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}. "
-                                            + "current options:{}, new options:{}.",
-                                    table.schema().id(),
-                                    latestSchema.get().id(),
-                                    currentOptions,
-                                    newOptions);
-                        }
-                        FileStoreTable newTable = table.copy(newOptions);
-                        refresher.refresh(newTable, write);
+        Optional<TableSchema> latestSchema = table.schemaManager().latest();
+        if (latestSchema.isPresent() && latestSchema.get().id() > table.schema().id()) {
+            try {
+                Map<String, String> currentOptions =
+                        CoreOptions.fromMap(table.schema().options()).configGroups(configGroups);
+                Map<String, String> newOptions =
+                        CoreOptions.fromMap(latestSchema.get().options())
+                                .configGroups(configGroups);
+
+                if (!Objects.equals(newOptions, currentOptions)) {
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}. "
+                                        + "current options:{}, new options:{}.",
+                                table.schema().id(),
+                                latestSchema.get().id(),
+                                currentOptions,
+                                newOptions);
                     }
-                } catch (Exception e) {
-                    throw new RuntimeException("update write failed.", e);
+                    table = table.copy(newOptions);
+                    refresher.refresh(table, write);
                 }
+            } catch (Exception e) {
+                throw new RuntimeException("update write failed.", e);
             }
         }
+    }
+
+    public FileStoreTable updatedTable() {
+        return table;
     }
 
     /**

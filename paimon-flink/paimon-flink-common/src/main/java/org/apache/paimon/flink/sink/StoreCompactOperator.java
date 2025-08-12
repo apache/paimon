@@ -40,6 +40,8 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,6 +69,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient StoreSinkWrite write;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
+
+    protected transient @Nullable WriterRefresher<StoreSinkWrite> writeRefresher;
 
     public StoreCompactOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -115,6 +119,18 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPool,
                         getMetricGroup());
+
+        if (write.streamingMode()) {
+            writeRefresher =
+                    new WriterRefresher<>(
+                            table,
+                            write,
+                            (newTable, writer) -> {
+                                writer.replace(newTable);
+                            });
+        } else {
+            writeRefresher = null;
+        }
     }
 
     @Override
@@ -170,7 +186,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
 
-        refreshWrite(table, write);
+        tryRefreshWrite();
         return committables;
     }
 
@@ -190,6 +206,13 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     @VisibleForTesting
     public Set<Pair<BinaryRow, Integer>> compactionWaitingSet() {
         return waitToCompact;
+    }
+
+    private void tryRefreshWrite() {
+        if (writeRefresher != null) {
+            writeRefresher.tryRefresh();
+            table = writeRefresher.updatedTable();
+        }
     }
 
     /** {@link StreamOperatorFactory} of {@link StoreCompactOperator}. */

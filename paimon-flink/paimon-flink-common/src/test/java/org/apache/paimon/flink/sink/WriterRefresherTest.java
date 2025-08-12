@@ -62,7 +62,7 @@ public class WriterRefresherTest {
         String detectOptions =
                 "data-file.external-paths,data-file.external-paths.strategy,data-file.external-paths.specific-fs";
         Map<String, String> options = new HashMap<>();
-        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS.key(), detectOptions);
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectOptions);
         createTable(options);
 
         FileStoreTable table1 = getTable();
@@ -70,7 +70,7 @@ public class WriterRefresherTest {
         table1.schemaManager()
                 .commitChanges(
                         SchemaChange.setOption(
-                                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECT_OPTIONS.key(),
+                                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(),
                                 detectOptions),
                         SchemaChange.setOption(
                                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"),
@@ -80,8 +80,10 @@ public class WriterRefresherTest {
         FileStoreTable table2 = getTable();
 
         Map<String, String> refreshedOptions = new HashMap<>();
-        WriterRefresher.doRefresh(
-                table1, refreshedOptions, new TestWriteRefresher(detectOptions.split(",")));
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(
+                        table1, refreshedOptions, new TestWriteRefresher(detectOptions.split(",")));
+        writerRefresher.tryRefresh();
         assertThat(refreshedOptions)
                 .isEqualTo(table2.coreOptions().getSpecificOptions(detectOptions.split(",")));
     }

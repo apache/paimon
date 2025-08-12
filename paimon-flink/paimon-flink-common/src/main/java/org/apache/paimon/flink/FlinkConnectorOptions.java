@@ -530,13 +530,14 @@ public class FlinkConnectorOptions {
                     .defaultValue(true)
                     .withDescription("Enable pass job level filesystem settings to table file IO.");
 
-    public static final ConfigOption<String> SINK_WRITER_REFRESH_DETECT_OPTIONS =
-            key("sink.writer-refresh-detect-options")
+    public static final ConfigOption<String> SINK_WRITER_REFRESH_DETECTORS =
+            key("sink.writer-refresh-detectors")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "the options which are expected to be refreshed when streaming writing, "
-                                    + "multiple options separated by commas.");
+                            "The option groups which are expected to be refreshed when streaming writing, "
+                                    + "multiple option group separated by commas. "
+                                    + "Now only 'external-paths' is supported.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
