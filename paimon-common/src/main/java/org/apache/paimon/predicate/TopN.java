@@ -22,6 +22,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Represents the TopN predicate. */
 public class TopN implements Serializable {
@@ -46,5 +47,11 @@ public class TopN implements Serializable {
 
     public <T> T visit(TopNVisitor<T> visitor) {
         return visitor.visit(this);
+    }
+
+    @Override
+    public String toString() {
+        String sort = orders.stream().map(SortValue::toString).collect(Collectors.joining(", "));
+        return String.format("Sort(%s), Limit(%s)", sort, limit);
     }
 }
