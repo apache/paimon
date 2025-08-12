@@ -120,7 +120,7 @@ public class CombinedTableCompactorSink implements Serializable {
                         String.format("%s-%s", "Unaware-Bucket-Table", WRITER_NAME),
                         new MultiTableCommittableTypeInfo(),
                         new AppendOnlyMultiTableCompactionWorkerOperator.Factory(
-                                catalogLoader, commitUser, options));
+                                catalogLoader, commitUser, options, isStreaming));
         forwardParallelism(unawareBucketTableRewriter, unawareBucketTableSource);
 
         if (!isStreaming) {

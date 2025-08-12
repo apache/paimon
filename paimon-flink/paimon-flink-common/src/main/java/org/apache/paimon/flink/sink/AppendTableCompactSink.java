@@ -30,21 +30,25 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 public class AppendTableCompactSink extends FlinkSink<AppendCompactTask> {
 
     private final FileStoreTable table;
+    private final boolean isStreaming;
 
-    public AppendTableCompactSink(FileStoreTable table) {
+    public AppendTableCompactSink(FileStoreTable table, boolean isStreaming) {
         super(table, true);
         this.table = table;
+        this.isStreaming = isStreaming;
     }
 
     public static DataStreamSink<?> sink(
             FileStoreTable table, DataStream<AppendCompactTask> input) {
-        return new AppendTableCompactSink(table).sinkFrom(input);
+        boolean isStreaming = isStreaming(input);
+        return new AppendTableCompactSink(table, isStreaming).sinkFrom(input);
     }
 
     @Override
     protected OneInputStreamOperatorFactory<AppendCompactTask, Committable>
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new AppendOnlySingleTableCompactionWorkerOperator.Factory(table, commitUser);
+        return new AppendOnlySingleTableCompactionWorkerOperator.Factory(
+                table, commitUser, isStreaming);
     }
 
     @Override

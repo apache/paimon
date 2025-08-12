@@ -55,13 +55,17 @@ public abstract class AppendCompactWorkerOperator<IN>
 
     private transient ExecutorService lazyCompactExecutor;
 
+    private final boolean isStreaming;
+
     public AppendCompactWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
-            String commitUser) {
+            String commitUser,
+            boolean isStreaming) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
+        this.isStreaming = isStreaming;
     }
 
     @VisibleForTesting
@@ -73,13 +77,17 @@ public abstract class AppendCompactWorkerOperator<IN>
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
         this.unawareBucketCompactor =
-                new AppendTableCompactor(table, commitUser, this::workerExecutor, getMetricGroup());
+                new AppendTableCompactor(
+                        table, commitUser, this::workerExecutor, getMetricGroup(), isStreaming);
     }
 
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        return this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
+        List<Committable> committables =
+                this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
+        this.unawareBucketCompactor.tryRefreshWrite();
+        return committables;
     }
 
     private ExecutorService workerExecutor() {
@@ -111,11 +119,13 @@ public abstract class AppendCompactWorkerOperator<IN>
             extends PrepareCommitOperator.Factory<IN, Committable> {
         protected final FileStoreTable table;
         protected final String commitUser;
+        protected final boolean isStreaming;
 
-        protected Factory(FileStoreTable table, String commitUser) {
+        protected Factory(FileStoreTable table, String commitUser, boolean isStreaming) {
             super(Options.fromMap(table.options()));
             this.table = table;
             this.commitUser = commitUser;
+            this.isStreaming = isStreaming;
         }
     }
 }

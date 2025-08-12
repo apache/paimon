@@ -65,14 +65,18 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
     private transient Catalog catalog;
 
+    private final boolean isStreaming;
+
     private AppendOnlyMultiTableCompactionWorkerOperator(
             StreamOperatorParameters<MultiTableCommittable> parameters,
             CatalogLoader catalogLoader,
             String commitUser,
-            Options options) {
+            Options options,
+            boolean isStreaming) {
         super(parameters, options);
         this.commitUser = commitUser;
         this.catalogLoader = catalogLoader;
+        this.isStreaming = isStreaming;
     }
 
     @Override
@@ -119,7 +123,8 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                     (FileStoreTable) catalog.getTable(tableId).copy(options.toMap()),
                     commitUser,
                     this::workerExecutor,
-                    getMetricGroup());
+                    getMetricGroup(),
+                    isStreaming);
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -188,11 +193,17 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
         private final String commitUser;
         private final CatalogLoader catalogLoader;
+        private final boolean isStreaming;
 
-        public Factory(CatalogLoader catalogLoader, String commitUser, Options options) {
+        public Factory(
+                CatalogLoader catalogLoader,
+                String commitUser,
+                Options options,
+                boolean isStreaming) {
             super(options);
             this.commitUser = commitUser;
             this.catalogLoader = catalogLoader;
+            this.isStreaming = isStreaming;
         }
 
         @Override
@@ -201,7 +212,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                 StreamOperatorParameters<MultiTableCommittable> parameters) {
             return (T)
                     new AppendOnlyMultiTableCompactionWorkerOperator(
-                            parameters, catalogLoader, commitUser, options);
+                            parameters, catalogLoader, commitUser, options, isStreaming);
         }
 
         @Override

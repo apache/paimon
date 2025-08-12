@@ -64,13 +64,14 @@ public class AppendTableCompactor {
     @Nullable private final transient CompactionMetrics compactionMetrics;
     @Nullable private final transient CompactionMetrics.Reporter metricsReporter;
 
-    protected final transient WriterRefresher<BaseAppendFileStoreWrite> writeRefresher;
+    @Nullable protected final transient WriterRefresher<BaseAppendFileStoreWrite> writeRefresher;
 
     public AppendTableCompactor(
             FileStoreTable table,
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup metricGroup,
+            boolean isStreaming) {
         this.table = table;
         this.commitUser = commitUser;
         this.write = (BaseAppendFileStoreWrite) table.store().newWrite(commitUser);
@@ -85,8 +86,12 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
-        this.writeRefresher =
-                new WriterRefresher<>(table, write, (newTable, writer) -> replace(newTable));
+        if (isStreaming) {
+            this.writeRefresher =
+                    new WriterRefresher<>(table, write, (newTable, writer) -> replace(newTable));
+        } else {
+            this.writeRefresher = null;
+        }
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -196,8 +201,6 @@ public class AppendTableCompactor {
                     tempList.stream()
                             .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
                             .collect(Collectors.toList());
-
-            writeRefresher.tryRefresh();
             return committables;
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
@@ -211,13 +214,21 @@ public class AppendTableCompactor {
     }
 
     private void replace(FileStoreTable newTable) throws Exception {
-        if (commitUser == null) {
-            return;
-        }
 
         List<? extends FileStoreWrite.State<?>> states = write.checkpoint();
         write.close();
         write = (BaseAppendFileStoreWrite) newTable.store().newWrite(commitUser);
         write.restore((List) states);
+    }
+
+    public void tryRefreshWrite() {
+        if (commitUser == null) {
+            return;
+        }
+
+        if (writeRefresher != null) {
+            writeRefresher.tryRefresh();
+            table = writeRefresher.updatedTable();
+        }
     }
 }
