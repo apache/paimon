@@ -381,7 +381,7 @@ public class CoreOptions implements Serializable {
                             "The default partition name in case the dynamic partition"
                                     + " column value is null/empty string.");
 
-    public static final ConfigOption<Boolean> PARTITION_GENERATE_LEGCY_NAME =
+    public static final ConfigOption<Boolean> PARTITION_GENERATE_LEGACY_NAME =
             key("partition.legacy-name")
                     .booleanType()
                     .defaultValue(true)
@@ -2029,7 +2029,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean legacyPartitionName() {
-        return options.get(PARTITION_GENERATE_LEGCY_NAME);
+        return options.get(PARTITION_GENERATE_LEGACY_NAME);
     }
 
     public boolean sortBySize() {
