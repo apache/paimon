@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -35,11 +36,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -274,14 +273,7 @@ public final class RowType extends DataType {
             throw new IllegalArgumentException(
                     "Field names must contain at least one non-whitespace character.");
         }
-        final Set<String> duplicates =
-                fieldNames.stream()
-                        .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
-                        .entrySet()
-                        .stream()
-                        .filter(e -> e.getValue() > 1)
-                        .map(Map.Entry::getKey)
-                        .collect(Collectors.toSet());
+        final Set<String> duplicates = Schema.duplicateFields(fieldNames);
 
         if (!duplicates.isEmpty()) {
             throw new IllegalArgumentException(

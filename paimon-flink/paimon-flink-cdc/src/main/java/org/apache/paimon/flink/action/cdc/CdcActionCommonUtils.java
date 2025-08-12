@@ -33,9 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -249,10 +249,7 @@ public class CdcActionCommonUtils {
     }
 
     public static void checkDuplicateFields(String tableName, List<String> fieldNames) {
-        List<String> duplicates =
-                fieldNames.stream()
-                        .filter(name -> Collections.frequency(fieldNames, name) > 1)
-                        .collect(Collectors.toList());
+        Set<String> duplicates = Schema.duplicateFields(fieldNames);
         checkState(
                 duplicates.isEmpty(),
                 "Table %s contains duplicate columns: %s.\n"
