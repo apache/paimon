@@ -144,14 +144,24 @@ public class SparkWriteITCase {
         // test partial write with array defaults
         spark.sql("INSERT INTO T (id) VALUES (1), (2)").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).contains("WrappedArray('tag1', 'tag2')");
-        assertThat(rows.toString()).contains("WrappedArray(1, 2, 3)");
+        // Support both Spark 3.x (WrappedArray) and Spark 4.x (ArraySeq) formats
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray('tag1', 'tag2')"),
+                        s -> assertThat(s).contains("ArraySeq('tag1', 'tag2')"));
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray(1, 2, 3)"),
+                        s -> assertThat(s).contains("ArraySeq(1, 2, 3)"));
         assertThat(rows.size()).isEqualTo(2);
 
         // test write with DEFAULT keyword for arrays
         spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).contains("WrappedArray('tag1', 'tag2')");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray('tag1', 'tag2')"),
+                        s -> assertThat(s).contains("ArraySeq('tag1', 'tag2')"));
         assertThat(rows.size()).isEqualTo(3);
 
         // test empty array default value
@@ -162,12 +172,18 @@ public class SparkWriteITCase {
 
         spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).contains("WrappedArray()");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray()"),
+                        s -> assertThat(s).contains("ArraySeq()"));
 
         // test write with DEFAULT keyword for empty array
         spark.sql("INSERT INTO T VALUES (2, DEFAULT)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).contains("WrappedArray()");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray()"),
+                        s -> assertThat(s).contains("ArraySeq()"));
         assertThat(rows.size()).isEqualTo(2);
     }
 
@@ -293,7 +309,10 @@ public class SparkWriteITCase {
         spark.sql("INSERT INTO T (id) VALUES (1)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).contains("default_name");
-        assertThat(rows.toString()).contains("WrappedArray('default_tag')");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray('default_tag')"),
+                        s -> assertThat(s).contains("ArraySeq('default_tag')"));
         assertThat(rows.toString()).contains("Map('created_by' -> 'system')");
         assertThat(rows.toString()).contains("[true,30]");
 
@@ -301,7 +320,10 @@ public class SparkWriteITCase {
         spark.sql("INSERT INTO T (id, name) VALUES (2, 'custom_name')").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).contains("custom_name");
-        assertThat(rows.toString()).contains("WrappedArray('default_tag')");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray('default_tag')"),
+                        s -> assertThat(s).contains("ArraySeq('default_tag')"));
         assertThat(rows.size()).isEqualTo(2);
 
         // test write with some DEFAULT keywords for mixed types
@@ -309,7 +331,10 @@ public class SparkWriteITCase {
                 .collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).contains("default_name");
-        assertThat(rows.toString()).contains("WrappedArray(custom_tag)");
+        assertThat(rows.toString())
+                .satisfiesAnyOf(
+                        s -> assertThat(s).contains("WrappedArray(custom_tag)"),
+                        s -> assertThat(s).contains("ArraySeq(custom_tag)"));
         assertThat(rows.size()).isEqualTo(3);
     }
 
