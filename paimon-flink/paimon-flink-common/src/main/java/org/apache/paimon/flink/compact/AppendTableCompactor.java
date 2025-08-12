@@ -226,7 +226,6 @@ public class AppendTableCompactor {
 
         if (writeRefresher != null) {
             writeRefresher.tryRefresh();
-            table = writeRefresher.updatedTable();
         }
     }
 }

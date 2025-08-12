@@ -211,7 +211,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private void tryRefreshWrite() {
         if (writeRefresher != null) {
             writeRefresher.tryRefresh();
-            table = writeRefresher.updatedTable();
         }
     }
 

@@ -94,10 +94,6 @@ public class WriterRefresher<T> {
         }
     }
 
-    public FileStoreTable updatedTable() {
-        return table;
-    }
-
     /**
      * Refresher for refresh write when configs changed.
      *

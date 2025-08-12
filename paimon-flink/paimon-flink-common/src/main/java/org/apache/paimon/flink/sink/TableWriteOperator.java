@@ -170,7 +170,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected void tryRefreshWrite() {
         if (writeRefresher != null) {
             writeRefresher.tryRefresh();
-            table = writeRefresher.updatedTable();
         }
     }
 

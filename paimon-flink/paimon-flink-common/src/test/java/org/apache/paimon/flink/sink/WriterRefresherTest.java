@@ -84,6 +84,7 @@ public class WriterRefresherTest {
                 new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
         writerRefresher.tryRefresh();
         assertThat(refreshedOptions).isEqualTo(table2.coreOptions().configGroups(groups));
+        writerRefresher.tryRefresh();
     }
 
     @Test
@@ -235,41 +236,6 @@ public class WriterRefresherTest {
         // Options should remain unchanged
         assertThat(refreshedOptions).containsEntry("initial", "value");
         assertThat(refreshedOptions).hasSize(1);
-    }
-
-    @Test
-    public void testUpdatedTable() throws Exception {
-        String detectGroups = "external-paths";
-        Map<String, String> options = new HashMap<>();
-        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectGroups);
-        createTable(options);
-
-        FileStoreTable table1 = getTable();
-
-        table1.schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
-
-        Map<String, String> refreshedOptions = new HashMap<>();
-        Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
-
-        // Before refresh, should return original table
-        assertThat(writerRefresher.updatedTable()).isSameAs(table1);
-
-        writerRefresher.tryRefresh();
-
-        // After refresh, should return updated table with new options
-        FileStoreTable updatedTable = writerRefresher.updatedTable();
-        assertThat(updatedTable).isNotSameAs(table1);
-        assertThat(
-                        updatedTable
-                                .coreOptions()
-                                .toConfiguration()
-                                .get(CoreOptions.DATA_FILE_EXTERNAL_PATHS))
-                .isEqualTo("external-path1");
     }
 
     private void createTable(Map<String, String> options) throws Exception {
