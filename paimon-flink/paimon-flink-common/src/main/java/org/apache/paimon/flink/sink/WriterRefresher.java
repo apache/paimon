@@ -23,6 +23,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +54,7 @@ public class WriterRefresher<T> {
         String refreshDetectors =
                 Options.fromMap(table.options())
                         .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS);
-        if (refreshDetectors == null) {
+        if (StringUtils.isNullOrWhitespaceOnly(refreshDetectors)) {
             configGroups = null;
         } else {
             configGroups = Arrays.stream(refreshDetectors.split(",")).collect(Collectors.toSet());
@@ -61,7 +62,7 @@ public class WriterRefresher<T> {
     }
 
     public void tryRefresh() {
-        if (configGroups == null) {
+        if (configGroups == null || configGroups.isEmpty()) {
             return;
         }
 

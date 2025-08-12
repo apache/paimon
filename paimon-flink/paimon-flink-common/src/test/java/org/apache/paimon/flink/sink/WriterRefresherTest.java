@@ -86,6 +86,192 @@ public class WriterRefresherTest {
         assertThat(refreshedOptions).isEqualTo(table2.coreOptions().configGroups(groups));
     }
 
+    @Test
+    public void testRefreshWithNullConfigGroups() throws Exception {
+        // Create table without SINK_WRITER_REFRESH_DETECTORS option
+        Map<String, String> options = new HashMap<>();
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        // Make schema changes
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        refreshedOptions.put("initial", "value");
+
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(null));
+
+        // Should not refresh when configGroups is null
+        writerRefresher.tryRefresh();
+
+        // Options should remain unchanged
+        assertThat(refreshedOptions).containsEntry("initial", "value");
+        assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testRefreshWithEmptyConfigGroups() throws Exception {
+        // Create table with empty SINK_WRITER_REFRESH_DETECTORS option
+        Map<String, String> options = new HashMap<>();
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), "");
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        // Make schema changes
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        refreshedOptions.put("initial", "value");
+
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(null));
+
+        // Should not refresh when configGroups is empty
+        writerRefresher.tryRefresh();
+
+        // Options should remain unchanged since empty configGroups should trigger early return
+        assertThat(refreshedOptions).containsEntry("initial", "value");
+        assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testRefreshWithCommaOnlyConfigGroups() throws Exception {
+        // Create table with comma-only SINK_WRITER_REFRESH_DETECTORS option
+        Map<String, String> options = new HashMap<>();
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), ",,,");
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        // Make schema changes
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        refreshedOptions.put("initial", "value");
+
+        Set<String> emptyGroups =
+                Arrays.stream(",,,".split(","))
+                        .filter(s -> !s.trim().isEmpty())
+                        .collect(Collectors.toSet());
+
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(
+                        table1, refreshedOptions, new TestWriteRefresher(emptyGroups));
+
+        // Should not refresh when configGroups is effectively empty
+        writerRefresher.tryRefresh();
+
+        // Options should remain unchanged
+        assertThat(refreshedOptions).containsEntry("initial", "value");
+        assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testNoRefreshWhenNoSchemaChange() throws Exception {
+        String detectGroups = "external-paths";
+        Map<String, String> options = new HashMap<>();
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectGroups);
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        refreshedOptions.put("initial", "value");
+
+        Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+
+        // No schema changes made, should not refresh
+        writerRefresher.tryRefresh();
+
+        // Options should remain unchanged
+        assertThat(refreshedOptions).containsEntry("initial", "value");
+        assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testNoRefreshWhenConfigGroupsNotChanged() throws Exception {
+        String detectGroups = "external-paths";
+        Map<String, String> options = new HashMap<>();
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectGroups);
+        // Set initial external paths option
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1");
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        // Make schema changes but keep the same external paths value
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"),
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_PREFIX.key(),
+                                "data1")); // Change different option
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        refreshedOptions.put("initial", "value");
+
+        Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+
+        // Should not refresh when monitored config groups haven't changed
+        writerRefresher.tryRefresh();
+
+        // Options should remain unchanged
+        assertThat(refreshedOptions).containsEntry("initial", "value");
+        assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testUpdatedTable() throws Exception {
+        String detectGroups = "external-paths";
+        Map<String, String> options = new HashMap<>();
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectGroups);
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
+        WriterRefresher<?> writerRefresher =
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+
+        // Before refresh, should return original table
+        assertThat(writerRefresher.updatedTable()).isSameAs(table1);
+
+        writerRefresher.tryRefresh();
+
+        // After refresh, should return updated table with new options
+        FileStoreTable updatedTable = writerRefresher.updatedTable();
+        assertThat(updatedTable).isNotSameAs(table1);
+        assertThat(
+                        updatedTable
+                                .coreOptions()
+                                .toConfiguration()
+                                .get(CoreOptions.DATA_FILE_EXTERNAL_PATHS))
+                .isEqualTo("external-path1");
+    }
+
     private void createTable(Map<String, String> options) throws Exception {
         catalog.createTable(
                 Identifier.create("default", "T"),
@@ -112,7 +298,9 @@ public class WriterRefresherTest {
         @Override
         public void refresh(FileStoreTable table, Map<String, String> options) throws Exception {
             options.clear();
-            options.putAll(table.coreOptions().configGroups(groups));
+            if (groups != null) {
+                options.putAll(table.coreOptions().configGroups(groups));
+            }
         }
     }
 }
