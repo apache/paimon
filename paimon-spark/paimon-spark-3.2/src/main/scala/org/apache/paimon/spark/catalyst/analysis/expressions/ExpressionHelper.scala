@@ -23,7 +23,11 @@ import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilter}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.optimizer.ConstantFolding
+import org.apache.spark.sql.catalyst.plans.logical.Filter
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 trait ExpressionHelper extends ExpressionHelperBase {
 
@@ -50,6 +54,25 @@ trait ExpressionHelper extends ExpressionHelperBase {
       None
     } else {
       Some(PredicateBuilder.and(predicates: _*))
+    }
+  }
+
+  def resolveFilter(
+      spark: SparkSession,
+      relation: DataSourceV2Relation,
+      conditionSql: String): Expression = {
+    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
+    val filter = Filter(unResolvedExpression, relation)
+    spark.sessionState.analyzer.execute(filter) match {
+      case filter: Filter =>
+        try {
+          ConstantFolding.apply(filter).asInstanceOf[Filter].condition
+        } catch {
+          case _: Throwable => filter.condition
+        }
+      case _ =>
+        throw new RuntimeException(
+          s"Could not resolve expression $conditionSql in relation: $relation")
     }
   }
 }

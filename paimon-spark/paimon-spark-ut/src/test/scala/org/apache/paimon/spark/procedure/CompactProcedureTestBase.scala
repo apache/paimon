@@ -778,6 +778,23 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: type cast in where") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, value STRING, day_part LONG)
+            |TBLPROPERTIES ('compaction.min.file-num'='2')
+            |PARTITIONED BY (day_part)
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a', 20250810)")
+      sql("INSERT INTO t VALUES (2, 'b', 20250810)")
+      sql("INSERT INTO t VALUES (3, 'c', 20250811)")
+
+      sql("CALL sys.compact(table => 't', where => 'day_part < 20250811 and day_part > 20250809')")
+      val table = loadTable("t")
+      assert(table.snapshotManager().latestSnapshot().commitKind().equals(CommitKind.COMPACT))
+    }
+  }
+
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {
     table.snapshotManager().latestSnapshot().commitKind()
   }
