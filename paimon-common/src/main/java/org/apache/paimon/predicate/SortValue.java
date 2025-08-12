@@ -49,6 +49,12 @@ public class SortValue implements Serializable {
         return nullOrdering;
     }
 
+    @Override
+    public String toString() {
+        return String.format(
+                "%s %s %s", field.name(), direction.toString(), nullOrdering.toString());
+    }
+
     /** A null order used in sorting expressions. */
     public enum NullOrdering {
         NULLS_FIRST("NULLS FIRST"),

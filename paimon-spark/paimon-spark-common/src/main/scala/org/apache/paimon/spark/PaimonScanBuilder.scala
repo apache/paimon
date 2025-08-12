@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
-import org.apache.paimon.table.{FileStoreTable, InnerTable}
+import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.PaimonUtils
@@ -102,7 +102,7 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    if (!table.isInstanceOf[FileStoreTable]) {
+    if (!table.isInstanceOf[AppendOnlyFileStoreTable]) {
       return false
     }
 
@@ -120,7 +120,11 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    val fieldName = order.expression().asInstanceOf[NamedReference].fieldNames().mkString(".")
+    val fieldName = orders.head.expression() match {
+      case nr: NamedReference => nr.fieldNames.mkString(".")
+      case _ => return false
+    }
+
     val rowType = table.rowType()
     if (rowType.notContainsField(fieldName)) {
       return false
@@ -131,12 +135,14 @@ class PaimonScanBuilder(table: InnerTable)
 
     val nullOrdering = order.nullOrdering() match {
       case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
-      case _ => NullOrdering.NULLS_FIRST
+      case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
+      case _ => return false
     }
 
     val direction = order.direction() match {
       case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
-      case _ => SortDirection.ASCENDING
+      case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
+      case _ => return false
     }
 
     val sort = new SortValue(ref, direction, nullOrdering)
@@ -145,8 +151,6 @@ class PaimonScanBuilder(table: InnerTable)
     // just make the best effort to push down TopN
     false
   }
-
-  override def isPartiallyPushed: Boolean = super.isPartiallyPushed
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
     // for now, we only support complete push down, so there is no difference with `pushAggregation`
