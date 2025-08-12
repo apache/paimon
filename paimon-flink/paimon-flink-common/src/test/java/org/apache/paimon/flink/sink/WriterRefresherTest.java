@@ -34,8 +34,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -59,19 +62,15 @@ public class WriterRefresherTest {
 
     @Test
     public void testDoRefresh() throws Exception {
-        String detectOptions =
-                "data-file.external-paths,data-file.external-paths.strategy,data-file.external-paths.specific-fs";
+        String detectGroups = "external-paths";
         Map<String, String> options = new HashMap<>();
-        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectOptions);
+        options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), detectGroups);
         createTable(options);
 
         FileStoreTable table1 = getTable();
 
         table1.schemaManager()
                 .commitChanges(
-                        SchemaChange.setOption(
-                                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(),
-                                detectOptions),
                         SchemaChange.setOption(
                                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"),
                         SchemaChange.setOption(
@@ -80,12 +79,11 @@ public class WriterRefresherTest {
         FileStoreTable table2 = getTable();
 
         Map<String, String> refreshedOptions = new HashMap<>();
+        Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
         WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(
-                        table1, refreshedOptions, new TestWriteRefresher(detectOptions.split(",")));
+                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
         writerRefresher.tryRefresh();
-        assertThat(refreshedOptions)
-                .isEqualTo(table2.coreOptions().getSpecificOptions(detectOptions.split(",")));
+        assertThat(refreshedOptions).isEqualTo(table2.coreOptions().configGroups(groups));
     }
 
     private void createTable(Map<String, String> options) throws Exception {
@@ -105,16 +103,16 @@ public class WriterRefresherTest {
 
     private static class TestWriteRefresher
             implements WriterRefresher.Refresher<Map<String, String>> {
-        String[] specificOptions;
+        Set<String> groups;
 
-        TestWriteRefresher(String[] specificOptions) {
-            this.specificOptions = specificOptions;
+        TestWriteRefresher(Set<String> groups) {
+            this.groups = groups;
         }
 
         @Override
         public void refresh(FileStoreTable table, Map<String, String> options) throws Exception {
             options.clear();
-            options.putAll(table.coreOptions().getSpecificOptions(specificOptions));
+            options.putAll(table.coreOptions().configGroups(groups));
         }
     }
 }

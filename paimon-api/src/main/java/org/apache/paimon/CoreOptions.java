@@ -1966,16 +1966,6 @@ public class CoreOptions implements Serializable {
         return options.toMap();
     }
 
-    public Map<String, String> getSpecificOptions(String... keys) {
-        Map<String, String> result = new HashMap<>();
-        for (String key : keys) {
-            if (options.containsKey(key)) {
-                result.put(key, options.get(key));
-            }
-        }
-        return result;
-    }
-
     public int bucket() {
         return options.get(BUCKET);
     }
