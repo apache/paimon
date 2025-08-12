@@ -178,8 +178,8 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
 class TaskCommit private (
     private val serializedMessageBytes: Seq[Array[Byte]]
 ) extends WriterCommitMessage {
+  private lazy val deserializer = new CommitMessageSerializer()
   def commitMessages(): Seq[CommitMessage] = {
-    val deserializer = new CommitMessageSerializer()
     serializedMessageBytes.map {
       bytes =>
         Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
@@ -192,8 +192,9 @@ class TaskCommit private (
 }
 
 object TaskCommit {
+  private lazy val serializer = new CommitMessageSerializer()
+
   def apply(commitMessages: Seq[CommitMessage]): TaskCommit = {
-    val serializer = new CommitMessageSerializer()
     val serializedBytes: Seq[Array[Byte]] = Option(commitMessages)
       .filter(_.nonEmpty)
       .map(_.map {
