@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -61,11 +62,12 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     @Override
     public void call(
-            List<ManifestEntry> committedEntries,
+            List<SimpleFileEntry> baseFiles,
+            List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             Snapshot snapshot) {
         Set<BinaryRow> partitions =
-                committedEntries.stream()
+                deltaFiles.stream()
                         .filter(e -> FileKind.ADD.equals(e.kind()))
                         .map(ManifestEntry::partition)
                         .collect(Collectors.toSet());
