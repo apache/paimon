@@ -59,7 +59,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public Optional<WriteSelector> newWriteSelector() {
-        throw new UnsupportedOperationException();
+        return table.newBatchWriteBuilder().newWriteSelector();
     }
 
     @Override
@@ -86,6 +86,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     }
 
     protected FileStorePathFactory pathFactory(CoreOptions options, String format) {
+
         return new FileStorePathFactory(
                 options.path(),
                 table.partitionType(),
@@ -97,7 +98,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                null);
+                CoreOptions.getExternalPaths(options));
     }
 
     @Override
