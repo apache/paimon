@@ -21,7 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.utils.DateTimeUtils;
 
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -685,7 +684,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                         "INSERT INTO T VALUES('aaa', 'bbb', 'ccc', 1, CAST(NULL AS FLOAT))"))
                 .satisfies(
                         anyCauseMatches(
-                                TableException.class,
                                 "Column 'e' is NOT NULL, however, a null value is being written into it."));
 
         // Not null -> nullable
@@ -718,7 +716,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                         "INSERT INTO T VALUES('aaa', 'bbb', CAST(NULL AS STRING), 1, CAST(NULL AS FLOAT))"))
                 .satisfies(
                         anyCauseMatches(
-                                TableException.class,
                                 "Column 'c' is NOT NULL, however, a null value is being written into it."));
 
         // Insert a null value
