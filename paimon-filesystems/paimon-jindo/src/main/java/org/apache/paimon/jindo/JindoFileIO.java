@@ -18,7 +18,6 @@
 
 package org.apache.paimon.jindo;
 
-import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
@@ -28,6 +27,7 @@ import org.apache.paimon.utils.Pair;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
+import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
