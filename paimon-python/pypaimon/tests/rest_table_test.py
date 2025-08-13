@@ -44,8 +44,8 @@ class RESTTableTest(RESTCatalogBaseTest):
 
     def test_with_shard_ao_unaware_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
-        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
-        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -72,8 +72,8 @@ class RESTTableTest(RESTCatalogBaseTest):
     def test_with_shard_ao_fixed_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'],
                                             options={'bucket': '5', 'bucket-key': 'item_id'})
-        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
-        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -98,8 +98,8 @@ class RESTTableTest(RESTCatalogBaseTest):
 
     def test_with_shard_pk_dynamic_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'])
-        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
-        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -115,8 +115,8 @@ class RESTTableTest(RESTCatalogBaseTest):
     def test_with_shard_pk_fixed_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
                                             options={'bucket': '5'})
-        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
-        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
