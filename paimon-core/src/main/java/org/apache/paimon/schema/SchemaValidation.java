@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -39,7 +40,10 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -673,6 +677,33 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+        }
+    }
+
+    public static void validateChainTableOptions(
+            Map<String, String> tableOptions, @Nullable String primaryKeys, boolean partitionTbl) {
+        Options options = Options.fromMap(tableOptions);
+        if (options.get(CoreOptions.CHAIN_TABLE_ENABLED)) {
+            TableType tableType = options.get(CoreOptions.TYPE);
+            primaryKeys = primaryKeys == null ? options.get(CoreOptions.PRIMARY_KEY) : primaryKeys;
+            String sequenceField = options.get(CoreOptions.SEQUENCE_FIELD);
+            int bucket = options.get(CoreOptions.BUCKET);
+            MergeEngine mergeEngine = options.get(CoreOptions.MERGE_ENGINE);
+            ChangelogProducer changelogProducer = options.get(CoreOptions.CHANGELOG_PRODUCER);
+            Preconditions.checkArgument(
+                    tableType == TableType.TABLE, "Chain table must be table type.");
+            Preconditions.checkArgument(
+                    primaryKeys != null, "Primary key is required for chain table.");
+            Preconditions.checkArgument(
+                    sequenceField != null, "Sequence field is required for chain table.");
+            Preconditions.checkArgument(bucket > 0, "Bucket number must be greater than 0.");
+            Preconditions.checkArgument(
+                    mergeEngine == MergeEngine.DEDUPLICATE, "Merge engine must be deduplicate.");
+            Preconditions.checkArgument(partitionTbl, "Chain table must be partition table.");
+            Preconditions.checkArgument(
+                    changelogProducer != ChangelogProducer.FULL_COMPACTION
+                            && changelogProducer != ChangelogProducer.LOOKUP,
+                    "Chain table must be partition table.");
         }
     }
 }

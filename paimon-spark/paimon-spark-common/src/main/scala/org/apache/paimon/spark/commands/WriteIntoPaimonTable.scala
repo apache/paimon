@@ -20,12 +20,17 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.options.Options
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FileStoreTable, PrimaryKeyFileStoreTable}
+import org.apache.paimon.table.sink.CommitMessage
+import org.apache.paimon.utils.{ChainTableUtils, RowDataToObjectArrayConverter}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 
@@ -57,7 +62,10 @@ case class WriteIntoPaimonTable(
     }
     val commitMessages = writer.write(data)
     writer.commit(commitMessages)
-
+    truncatePartitionsForChainTable(
+      dynamicPartitionOverwriteMode,
+      overwritePartition,
+      commitMessages)
     Seq.empty
   }
 
@@ -80,6 +88,46 @@ case class WriteIntoPaimonTable(
         throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
     (dynamicPartitionOverwriteMode, overwritePartition)
+  }
+
+  private def truncatePartitionsForChainTable(
+      dynamicPartitionOverwriteMode: Boolean,
+      overwritePartition: Map[String, String],
+      commitMessages: Seq[CommitMessage]): Unit = {
+    val overwrite =
+      dynamicPartitionOverwriteMode || (overwritePartition != null && !overwritePartition.isEmpty)
+    if (ChainTableUtils.isChainScanFallbackDeltaBranch(table.coreOptions()) && overwrite) {
+      val partitionPredicate = if (!dynamicPartitionOverwriteMode) {
+        val partitionPredicate = createPartitionPredicate(
+          overwritePartition.asJava,
+          table.schema().logicalPartitionType,
+          table.coreOptions().partitionDefaultName())
+        PartitionPredicate.fromPredicate(table.schema().logicalPartitionType, partitionPredicate)
+      } else {
+        null
+      }
+      val snapshotTbl = table
+        .asInstanceOf[PrimaryKeyFileStoreTable]
+        .switchToBranch(table.coreOptions.scanFallbackSnapshotBranch())
+      val sparkTable = SparkTable(snapshotTbl)
+      val partitionConverter = new RowDataToObjectArrayConverter(
+        table.schema().logicalPartitionType)
+      val writePartitions = commitMessages
+        .map(commitMessage => commitMessage.partition())
+        .distinct
+        .filter(partition => dynamicPartitionOverwriteMode || partitionPredicate.test(partition))
+        .map(
+          partition => {
+            val result = partitionConverter.convert(partition)
+            for (i <- 0 until result.length) {
+              result(i) = DataConverter
+                .fromPaimon(result(i), partitionConverter.rowType.getFields.get(i).`type`)
+            }
+            InternalRow.fromSeq(result)
+          })
+        .toArray
+      sparkTable.dropPartitions(writePartitions)
+    }
   }
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
