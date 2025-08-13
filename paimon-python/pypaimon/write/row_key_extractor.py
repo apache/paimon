@@ -15,7 +15,8 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
@@ -84,8 +85,13 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         hashes = []
         for row_idx in range(data.num_rows):
             row_values = tuple(col[row_idx].as_py() for col in columns)
-            hashes.append(hash(row_values))
+            hashes.append(self.hash(row_values))
         return [abs(hash_val) % self.num_buckets for hash_val in hashes]
+
+    @staticmethod
+    def hash(data) -> int:
+        data_json = json.dumps(data)
+        return int(hashlib.md5(data_json.encode()).hexdigest(), 16)
 
 
 class UnawareBucketRowKeyExtractor(RowKeyExtractor):
@@ -100,3 +106,22 @@ class UnawareBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         return [0] * data.num_rows
+
+
+class DynamicBucketRowKeyExtractor(RowKeyExtractor):
+    """
+    Row key extractor for dynamic bucket mode
+    Ensures bucket configuration is set to -1 and prevents bucket extraction
+    """
+
+    def __init__(self, table_schema: 'TableSchema'):
+        super().__init__(table_schema)
+        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -1)
+
+        if num_buckets != -1:
+            raise ValueError(
+                f"Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
+            )
+
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> int:
+        raise ValueError("Can't extract bucket from row in dynamic bucket mode")
