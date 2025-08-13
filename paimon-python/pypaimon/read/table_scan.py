@@ -64,7 +64,7 @@ class TableScan:
         file_entries = []
         for manifest_file_path in manifest_files:
             manifest_entries = self.manifest_file_manager.read(manifest_file_path,
-                                                               (lambda row: self.shard_filter(row))
+                                                               (lambda row: self._shard_filter(row))
                                                                if self.idx_of_this_subtask is not None else None)
             for entry in manifest_entries:
                 if entry.kind == 0:
@@ -93,7 +93,7 @@ class TableScan:
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def shard_filter(self, entry: Optional[ManifestEntry]) -> bool:
+    def _shard_filter(self, entry: Optional[ManifestEntry]) -> bool:
         if self.table.is_primary_key_table:
             bucket = entry.bucket
             return bucket % self.number_of_para_subtasks == self.idx_of_this_subtask
