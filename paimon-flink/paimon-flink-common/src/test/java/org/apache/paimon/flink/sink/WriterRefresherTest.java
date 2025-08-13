@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.WriterRefresher.configGroups;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,10 +81,11 @@ public class WriterRefresherTest {
 
         Map<String, String> refreshedOptions = new HashMap<>();
         Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(
+                        true, table1, new TestWriteRefresher(groups, refreshedOptions));
         writerRefresher.tryRefresh();
-        assertThat(refreshedOptions).isEqualTo(table2.coreOptions().configGroups(groups));
+        assertThat(refreshedOptions).isEqualTo(configGroups(groups, table2.coreOptions()));
         writerRefresher.tryRefresh();
     }
 
@@ -92,27 +94,10 @@ public class WriterRefresherTest {
         // Create table without SINK_WRITER_REFRESH_DETECTORS option
         Map<String, String> options = new HashMap<>();
         createTable(options);
-
         FileStoreTable table1 = getTable();
-
-        // Make schema changes
-        table1.schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
-
-        Map<String, String> refreshedOptions = new HashMap<>();
-        refreshedOptions.put("initial", "value");
-
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(null));
-
-        // Should not refresh when configGroups is null
-        writerRefresher.tryRefresh();
-
-        // Options should remain unchanged
-        assertThat(refreshedOptions).containsEntry("initial", "value");
-        assertThat(refreshedOptions).hasSize(1);
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(true, table1, new TestWriteRefresher(null, null));
+        assertThat(writerRefresher).isNull();
     }
 
     @Test
@@ -121,27 +106,10 @@ public class WriterRefresherTest {
         Map<String, String> options = new HashMap<>();
         options.put(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), "");
         createTable(options);
-
         FileStoreTable table1 = getTable();
-
-        // Make schema changes
-        table1.schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
-
-        Map<String, String> refreshedOptions = new HashMap<>();
-        refreshedOptions.put("initial", "value");
-
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(null));
-
-        // Should not refresh when configGroups is empty
-        writerRefresher.tryRefresh();
-
-        // Options should remain unchanged since empty configGroups should trigger early return
-        assertThat(refreshedOptions).containsEntry("initial", "value");
-        assertThat(refreshedOptions).hasSize(1);
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(true, table1, new TestWriteRefresher(null, null));
+        assertThat(writerRefresher).isNull();
     }
 
     @Test
@@ -153,30 +121,14 @@ public class WriterRefresherTest {
 
         FileStoreTable table1 = getTable();
 
-        // Make schema changes
-        table1.schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "external-path1"));
-
-        Map<String, String> refreshedOptions = new HashMap<>();
-        refreshedOptions.put("initial", "value");
-
         Set<String> emptyGroups =
                 Arrays.stream(",,,".split(","))
                         .filter(s -> !s.trim().isEmpty())
                         .collect(Collectors.toSet());
 
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(
-                        table1, refreshedOptions, new TestWriteRefresher(emptyGroups));
-
-        // Should not refresh when configGroups is effectively empty
-        writerRefresher.tryRefresh();
-
-        // Options should remain unchanged
-        assertThat(refreshedOptions).containsEntry("initial", "value");
-        assertThat(refreshedOptions).hasSize(1);
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(true, table1, new TestWriteRefresher(emptyGroups, null));
+        assertThat(writerRefresher).isNull();
     }
 
     @Test
@@ -192,8 +144,9 @@ public class WriterRefresherTest {
         refreshedOptions.put("initial", "value");
 
         Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(
+                        true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // No schema changes made, should not refresh
         writerRefresher.tryRefresh();
@@ -227,8 +180,9 @@ public class WriterRefresherTest {
         refreshedOptions.put("initial", "value");
 
         Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        WriterRefresher<?> writerRefresher =
-                new WriterRefresher<>(table1, refreshedOptions, new TestWriteRefresher(groups));
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(
+                        true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // Should not refresh when monitored config groups haven't changed
         writerRefresher.tryRefresh();
@@ -253,19 +207,21 @@ public class WriterRefresherTest {
         return (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
     }
 
-    private static class TestWriteRefresher
-            implements WriterRefresher.Refresher<Map<String, String>> {
-        Set<String> groups;
+    private static class TestWriteRefresher implements WriterRefresher.Refresher {
 
-        TestWriteRefresher(Set<String> groups) {
+        private final Set<String> groups;
+        private final Map<String, String> options;
+
+        TestWriteRefresher(Set<String> groups, Map<String, String> options) {
             this.groups = groups;
+            this.options = options;
         }
 
         @Override
-        public void refresh(FileStoreTable table, Map<String, String> options) throws Exception {
+        public void refresh(FileStoreTable table) {
             options.clear();
             if (groups != null) {
-                options.putAll(table.coreOptions().configGroups(groups));
+                options.putAll(configGroups(groups, table.coreOptions()));
             }
         }
     }

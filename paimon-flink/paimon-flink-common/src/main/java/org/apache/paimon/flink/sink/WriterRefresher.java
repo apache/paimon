@@ -23,7 +23,6 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,49 +30,66 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS;
+import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
+import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
+
 /** Writer refresher for refresh write when configs changed. */
-public class WriterRefresher<T> {
+public class WriterRefresher {
 
     private static final Logger LOG = LoggerFactory.getLogger(WriterRefresher.class);
 
-    @Nullable private final Set<String> configGroups;
-    private final Refresher<T> refresher;
     private FileStoreTable table;
-    private T write;
+    private final Refresher refresher;
+    private final Set<String> configGroups;
 
-    public WriterRefresher(FileStoreTable table, T write, Refresher<T> refresher) {
+    private WriterRefresher(FileStoreTable table, Refresher refresher, Set<String> configGroups) {
         this.table = table;
-        this.write = write;
         this.refresher = refresher;
+        this.configGroups = configGroups;
+    }
+
+    @Nullable
+    public static WriterRefresher create(
+            boolean isStreaming, FileStoreTable table, Refresher refresher) {
+        if (!isStreaming) {
+            return null;
+        }
+
         String refreshDetectors =
                 Options.fromMap(table.options())
                         .get(FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS);
-        if (StringUtils.isNullOrWhitespaceOnly(refreshDetectors)) {
-            configGroups = null;
-        } else {
-            configGroups = Arrays.stream(refreshDetectors.split(",")).collect(Collectors.toSet());
+        Set<String> configGroups =
+                isNullOrWhitespaceOnly(refreshDetectors)
+                        ? null
+                        : Arrays.stream(refreshDetectors.split(",")).collect(Collectors.toSet());
+        if (configGroups == null || configGroups.isEmpty()) {
+            return null;
         }
+        return new WriterRefresher(table, refresher, configGroups);
     }
 
     public void tryRefresh() {
-        if (configGroups == null || configGroups.isEmpty()) {
+        Optional<TableSchema> latestSchema = table.schemaManager().latest();
+        if (!latestSchema.isPresent()) {
             return;
         }
 
-        Optional<TableSchema> latestSchema = table.schemaManager().latest();
-        if (latestSchema.isPresent() && latestSchema.get().id() > table.schema().id()) {
+        TableSchema latest = latestSchema.get();
+        if (latest.id() > table.schema().id()) {
             try {
                 Map<String, String> currentOptions =
-                        CoreOptions.fromMap(table.schema().options()).configGroups(configGroups);
+                        configGroups(configGroups, table.coreOptions());
                 Map<String, String> newOptions =
-                        CoreOptions.fromMap(latestSchema.get().options())
-                                .configGroups(configGroups);
+                        configGroups(configGroups, CoreOptions.fromMap(latest.options()));
 
                 if (!Objects.equals(newOptions, currentOptions)) {
                     if (LOG.isDebugEnabled()) {
@@ -86,7 +102,7 @@ public class WriterRefresher<T> {
                                 newOptions);
                     }
                     table = table.copy(newOptions);
-                    refresher.refresh(table, write);
+                    refresher.refresh(table);
                 }
             } catch (Exception e) {
                 throw new RuntimeException("update write failed.", e);
@@ -94,12 +110,22 @@ public class WriterRefresher<T> {
         }
     }
 
-    /**
-     * Refresher for refresh write when configs changed.
-     *
-     * @param <T> the type of writer.
-     */
-    public interface Refresher<T> {
-        void refresh(FileStoreTable table, T writer) throws Exception;
+    /** Refresher when configs changed. */
+    public interface Refresher {
+        void refresh(FileStoreTable table) throws Exception;
+    }
+
+    public static Map<String, String> configGroups(Set<String> groups, CoreOptions options) {
+        Map<String, String> configs = new HashMap<>();
+        // external-paths config group
+        String externalPaths = "external-paths";
+        if (groups.contains(externalPaths)) {
+            configs.put(DATA_FILE_EXTERNAL_PATHS.key(), options.dataFileExternalPaths());
+            configs.put(
+                    DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                    options.externalPathStrategy().toString());
+            configs.put(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS.key(), options.externalSpecificFS());
+        }
+        return configs;
     }
 }

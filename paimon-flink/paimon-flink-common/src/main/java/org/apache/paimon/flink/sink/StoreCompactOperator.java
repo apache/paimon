@@ -70,7 +70,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
 
-    protected transient @Nullable WriterRefresher<StoreSinkWrite> writeRefresher;
+    protected transient @Nullable WriterRefresher writeRefresher;
 
     public StoreCompactOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -119,18 +119,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPool,
                         getMetricGroup());
-
-        if (write.streamingMode()) {
-            writeRefresher =
-                    new WriterRefresher<>(
-                            table,
-                            write,
-                            (newTable, writer) -> {
-                                writer.replace(newTable);
-                            });
-        } else {
-            writeRefresher = null;
-        }
+        this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
     }
 
     @Override
