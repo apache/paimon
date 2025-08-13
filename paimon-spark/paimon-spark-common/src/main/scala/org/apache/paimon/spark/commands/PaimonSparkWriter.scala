@@ -293,9 +293,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    written
-      .toLocalIterator
-      .asScala
+    written.toLocalIterator.asScala
       .map(deserializeCommitMessage(serializer, _))
       .toSeq
   }
@@ -352,9 +350,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
           val serializer = new CommitMessageSerializer
           serializer.serialize(commitMessage)
       }
-    serializedCommits
-      .toLocalIterator
-      .asScala
+    serializedCommits.toLocalIterator.asScala
       .map(deserializeCommitMessage(serializer, _))
       .toSeq
   }
