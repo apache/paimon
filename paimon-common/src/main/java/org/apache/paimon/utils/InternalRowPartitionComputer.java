@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -141,5 +142,14 @@ public class InternalRowPartitionComputer {
         }
         String result = builder.toString();
         return result.substring(0, Math.min(result.length(), maxLength));
+    }
+
+    public List<String> generateOrderPartValues(InternalRow in) {
+        LinkedHashMap<String, String> partSpec = generatePartValues(in);
+        List<String> partValues = new ArrayList<>();
+        for (String columnName : partitionColumns) {
+            partValues.add(partSpec.get(columnName));
+        }
+        return partValues;
     }
 }
