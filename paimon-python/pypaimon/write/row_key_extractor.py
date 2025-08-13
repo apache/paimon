@@ -139,22 +139,3 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         return [BucketMode.POSTPONE_BUCKET.value] * data.num_rows
-
-
-class DynamicBucketRowKeyExtractor(RowKeyExtractor):
-    """
-    Row key extractor for dynamic bucket mode
-    Ensures bucket configuration is set to -1 and prevents bucket extraction
-    """
-
-    def __init__(self, table_schema: 'TableSchema'):
-        super().__init__(table_schema)
-        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -1)
-
-        if num_buckets != -1:
-            raise ValueError(
-                f"Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
-            )
-
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> int:
-        raise ValueError("Can't extract bucket from row in dynamic bucket mode")

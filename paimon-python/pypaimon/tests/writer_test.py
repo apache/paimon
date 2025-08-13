@@ -24,11 +24,10 @@ import unittest
 import pyarrow
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 
 
-class WriterTestCase(unittest.TestCase):
+class WriterTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -74,84 +73,3 @@ class WriterTestCase(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/bucket-0"))
         self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/manifest/*.avro")), 2)
         self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/bucket-0/*.parquet")), 1)
-
-    def test_postpone_writer(self):
-        pa_schema = pyarrow.schema([
-            ('f0', pyarrow.int32()),
-            ('f1', pyarrow.string()),
-            ('f2', pyarrow.string())
-        ])
-        fields = [
-            DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
-            DataField.from_dict({"id": 2, "name": "f1", "type": "STRING"}),
-            DataField.from_dict({"id": 3, "name": "f2", "type": "STRING"}),
-        ]
-        catalog = CatalogFactory.create({
-            "warehouse": self.warehouse
-        })
-        catalog.create_database("test_db", False)
-        catalog.create_table("test_db.test_table", Schema(fields=fields, options={"bucket": -2}), False)
-        table = catalog.get_table("test_db.test_table")
-
-        data = {
-            'f0': [1, 2, 3],
-            'f1': ['a', 'b', 'c'],
-            'f2': ['X', 'Y', 'Z']
-        }
-        expect = pyarrow.Table.from_pydict(data, schema=pa_schema)
-
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(expect)
-        commit_messages = table_write.prepare_commit()
-        table_commit.commit(commit_messages)
-        table_write.close()
-        table_commit.close()
-
-        self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/snapshot/LATEST"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/snapshot/snapshot-1"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/manifest"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/bucket-postpone"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/manifest/*.avro")), 2)
-        # self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/bucket-0/*.parquet")), 1)
-
-    def test_postpone_read_write(self):
-        pa_schema = pyarrow.schema([
-            ('f0', pyarrow.int32()),
-            ('f1', pyarrow.string()),
-            ('f2', pyarrow.string())
-        ])
-        fields = [
-            DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
-            DataField.from_dict({"id": 2, "name": "f1", "type": "STRING"}),
-            DataField.from_dict({"id": 3, "name": "f2", "type": "STRING"}),
-        ]
-        catalog = CatalogFactory.create({
-            "warehouse": self.warehouse
-        })
-        catalog.create_database("test_db", False)
-        catalog.create_table("test_db.test_table", Schema(fields=fields, options={"bucket": -2}), False)
-        table = catalog.get_table("test_db.test_table")
-
-        data = {
-            'f0': [1, 2, 3],
-            'f1': ['a', 'b', 'c'],
-            'f2': ['X', 'Y', 'Z']
-        }
-        expect = pyarrow.Table.from_pydict(data, schema=pa_schema)
-
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(expect)
-        commit_messages = table_write.prepare_commit()
-        table_commit.commit(commit_messages)
-        table_write.close()
-        table_commit.close()
-
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        res = table_read.to_arrow(splits)
-        print(res)

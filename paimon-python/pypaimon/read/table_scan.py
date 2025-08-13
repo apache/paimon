@@ -29,6 +29,7 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
 
 
@@ -55,7 +56,8 @@ class TableScan:
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
 
-        self.only_read_real_buckets = True if self.table.options.get('bucket', -1) else False
+        self.only_read_real_buckets = True if self.table.options.get('bucket',
+                                                                     -1) == BucketMode.POSTPONE_BUCKET.value else False
 
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
@@ -104,6 +106,7 @@ class TableScan:
             else:
                 file = entry.file.file_name
                 return FixedBucketRowKeyExtractor.hash(file) % self.number_of_para_subtasks == self.idx_of_this_subtask
+        return True
 
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:
