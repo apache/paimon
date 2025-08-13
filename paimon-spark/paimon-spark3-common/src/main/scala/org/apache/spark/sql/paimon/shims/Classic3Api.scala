@@ -19,10 +19,12 @@
 package org.apache.spark.sql.paimon.shims
 
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.catalyst.catalog.FunctionResourceLoader
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
+import org.apache.spark.sql.internal.SessionResourceLoader
 class Classic3Api extends ClassicApi {
 
   override def column(expression: Expression): Column = new Column(expression)
@@ -52,4 +54,7 @@ class Classic3Api extends ClassicApi {
       columns: Seq[Attribute]): (Long, Map[Attribute, ColumnStat]) =
     CommandUtils.computeColumnStats(spark, relation, columns)
 
+  override def sessionResourceLoader(session: SparkSession): FunctionResourceLoader = {
+    new SessionResourceLoader(session)
+  }
 }

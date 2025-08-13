@@ -16,35 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.function;
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.types.DataField;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-/** Interface for function. */
-public interface Function {
-
-    String name();
-
-    String fullName();
-
-    Identifier identifier();
-
-    Optional<List<DataField>> inputParams();
-
-    Optional<List<DataField>> returnParams();
-
-    boolean isDeterministic();
-
-    Map<String, FunctionDefinition> definitions();
-
-    FunctionDefinition definition(String name);
-
-    String comment();
-
-    Map<String, String> options();
-}
+class PaimonV1FunctionTest extends PaimonV1FunctionTestBase {}

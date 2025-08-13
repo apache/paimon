@@ -12,6 +12,7 @@ target
 *.iml
 *.swp
 *.jar
+!**/resources/**/*.jar
 *.log
 *.pyc
 *.ipr

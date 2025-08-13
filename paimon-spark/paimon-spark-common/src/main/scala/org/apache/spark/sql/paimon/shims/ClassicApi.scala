@@ -19,6 +19,7 @@
 package org.apache.spark.sql.paimon.shims
 
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.catalyst.catalog.FunctionResourceLoader
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.SparkPlan
@@ -42,4 +43,5 @@ trait ClassicApi {
       relation: LogicalPlan,
       columns: Seq[Attribute]): (Long, Map[Attribute, ColumnStat])
 
+  def sessionResourceLoader(session: SparkSession): FunctionResourceLoader
 }

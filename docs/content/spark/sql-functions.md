@@ -29,7 +29,9 @@ under the License.
 This section introduce all available Paimon Spark functions.
 
 
-## max_pt
+## Built-in Function
+
+### max_pt
 
 `max_pt($table_name)`
 
@@ -44,12 +46,69 @@ It would throw exception when:
 
 **Example**
 
-```shell
-> SELECT max_pt('t');
- 20250101
+```sql
+SELECT max_pt('t');
+-- 20250101
  
-> SELECT * FROM t where pt = max_pt('t');
- a, 20250101
+SELECT * FROM t where pt = max_pt('t');
+-- a, 20250101
 ```
 
 **Since: 1.1.0**
+
+## User-defined Function
+
+Paimon Spark supports two types of user-defined functions: lambda functions and file-based functions.
+
+This feature currently only supports the REST catalog.
+
+### Lambda Function
+
+Empowering users to define functions using Java lambda expressions, enabling inline, concise, and functional-style operations.
+
+**Example**
+
+```sql
+-- Create Function
+CALL sys.create_function(`function` => 'my_db.area_func',
+  `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',
+  `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',
+  `deterministic` => true,
+  `comment` => 'comment',
+  `options` => 'k1=v1,k2=v2'
+);
+
+-- Alter Function
+CALL sys.alter_function(`function` => 'my_db.area_func',
+  `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'
+);
+
+-- Drop Function
+CALL sys.drop_function(`function` => 'my_db.area_func');
+```
+
+### File Function
+
+Users can define functions within a file, providing flexibility and modular support for function definition.
+
+This feature currently only supports Spark 3.4 or higher.
+
+**Example**
+
+```sql
+-- Create Function
+CREATE FUNCTION mydb.simple_udf
+AS 'com.example.SimpleUdf' 
+USING JAR '/tmp/SimpleUdf.jar' [, JAR '/tmp/SimpleUdfR.jar'];
+
+-- Create or Replace Function
+CREATE OR REPLACE FUNCTION mydb.simple_udf 
+AS 'com.example.SimpleUdf'
+USING JAR '/tmp/SimpleUdf.jar';
+       
+-- Describe Function
+DESCRIBE FUNCTION [EXTENDED] mydb.simple_udf;
+
+-- Drop Function
+DROP FUNCTION mydb.simple_udf;
+```

@@ -18,13 +18,14 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.spark.PaimonRestCatalogSparkTestBase
+import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.catalog.SupportView
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions
 
-class AlterViewDialectProcedureTest extends PaimonRestCatalogSparkTestBase {
+class AlterViewDialectProcedureTest extends PaimonSparkTestWithRestCatalogBase {
+
   test(s"test alter view dialect procedure") {
     val viewName = "view_test"
     spark.sql(s"""
