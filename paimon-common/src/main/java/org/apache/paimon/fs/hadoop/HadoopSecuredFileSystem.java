@@ -70,14 +70,22 @@ public class HadoopSecuredFileSystem extends FileSystem {
     public FSDataOutputStream create(
             Path path,
             FsPermission fsPermission,
-            boolean b,
-            int i,
-            short i1,
-            long l,
+            boolean overwrite,
+            int bufferSize,
+            short replication,
+            long blockSize,
             Progressable progressable)
             throws IOException {
         return runSecuredWithIOException(
-                () -> fileSystem.create(path, fsPermission, b, i, i1, l, progressable));
+                () ->
+                        fileSystem.create(
+                                path,
+                                fsPermission,
+                                overwrite,
+                                bufferSize,
+                                replication,
+                                blockSize,
+                                progressable));
     }
 
     @Override
