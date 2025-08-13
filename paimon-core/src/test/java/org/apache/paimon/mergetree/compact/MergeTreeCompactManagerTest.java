@@ -209,6 +209,7 @@ public class MergeTreeCompactManagerTest {
                         false,
                         true,
                         null,
+                        false,
                         false);
 
         MergeTreeCompactManager defaultManager =
@@ -225,6 +226,7 @@ public class MergeTreeCompactManagerTest {
                         false,
                         false,
                         null,
+                        false,
                         false);
 
         assertThat(lookupManager.compactNotCompleted()).isTrue();
@@ -262,6 +264,7 @@ public class MergeTreeCompactManagerTest {
                         false,
                         false,
                         null,
+                        false,
                         false);
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);

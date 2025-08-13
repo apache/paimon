@@ -21,10 +21,13 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,5 +56,21 @@ public class InternalRowPartitionComputerTest {
         writer.writeInt(1, 10);
         assertThat(InternalRowPartitionComputer.partToSimpleString(rowType, binaryRow, "-", 30))
                 .isEqualTo("null-10");
+    }
+
+    @Test
+    public void testGenerateOrderPartValues() {
+        DataField dataField = new DataField(0, "date", DataTypes.STRING());
+        DataField hourField = new DataField(0, "hour", DataTypes.STRING());
+        RowType rowType = RowType.of(dataField, hourField);
+        BinaryRow binaryRow = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeString(0, BinaryString.fromString("20250812"));
+        writer.writeString(1, BinaryString.fromString("12"));
+        String[] partitionColumns = new String[] {"date", "hour"};
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer("default", rowType, partitionColumns, false);
+        List<String> result = computer.generateOrderPartValues(binaryRow);
+        assertThat(result).containsExactly("20250812", "12");
     }
 }
