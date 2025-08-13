@@ -44,7 +44,8 @@ class DataWriter(ABC):
 
         options = self.table.options
         self.target_file_size = 256 * 1024 * 1024
-        self.file_format = options.get(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET)
+        self.file_format = options.get(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET
+                                       if self.bucket != -2 else CoreOptions.FILE_FORMAT_AVRO)
         self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
 
         self.pending_data: Optional[pa.RecordBatch] = None
