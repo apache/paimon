@@ -31,19 +31,24 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
+
 import javax.annotation.Nullable;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** CSV file reader implementation. */
 public class CsvFileReader implements FileRecordReader<InternalRow> {
+
+    private static final CsvMapper CSV_MAPPER = new CsvMapper();
 
     private final RowType rowType;
     private final String fieldDelimiter;
@@ -52,6 +57,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private final String quoteCharacter;
     private final String escapeCharacter;
     private final Path filePath;
+    private final CsvSchema schema;
 
     private BufferedReader bufferedReader;
     private boolean headerSkipped = false;
@@ -72,6 +78,14 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
         this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
+        this.schema =
+                CsvSchema.emptySchema()
+                        .withQuoteChar(quoteCharacter.charAt(0))
+                        .withColumnSeparator(fieldDelimiter.charAt(0))
+                        .withEscapeChar(escapeCharacter.charAt(0));
+        if (!includeHeader) {
+            this.schema.withoutHeader();
+        }
         FileIO fileIO = context.fileIO();
         SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());
         reader = new CsvRecordIterator();
@@ -125,7 +139,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             }
 
             currentPosition++;
-            return parseCsvLine(nextLine);
+            return parseCsvLine(nextLine, schema);
         }
 
         @Override
@@ -144,19 +158,21 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         }
     }
 
-    private InternalRow parseCsvLine(String line) {
-        List<String> fields =
-                CsvParser.splitCsvLine(
-                        rowType.getFieldCount(),
-                        line,
-                        fieldDelimiter.charAt(0),
-                        quoteCharacter.charAt(0));
+    protected static String[] parseCsvLineToArray(String line, CsvSchema schema)
+            throws IOException {
+        if (line == null || line.isEmpty()) {
+            return new String[] {};
+        }
+        return CSV_MAPPER.readerFor(String[].class).with(schema).readValue(new StringReader(line));
+    }
 
-        Object[] values = new Object[rowType.getFieldCount()];
-        int fieldCount = Math.min(fields.size(), rowType.getFieldCount());
+    private InternalRow parseCsvLine(String line, CsvSchema schema) throws IOException {
+        String[] fields = parseCsvLineToArray(line, schema);
+        int fieldCount = Math.min(fields.length, rowType.getFieldCount());
+        Object[] values = new Object[fieldCount];
 
         for (int i = 0; i < fieldCount; i++) {
-            String field = fields.get(i);
+            String field = fields[i];
 
             // Handle null values early
             if (field == null || field.equals(nullLiteral) || field.isEmpty()) {
