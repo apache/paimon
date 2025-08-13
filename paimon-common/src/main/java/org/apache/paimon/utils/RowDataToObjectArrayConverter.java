@@ -18,11 +18,16 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.IntStream;
 
 /** Convert {@link InternalRow} to object array. */
@@ -62,5 +67,37 @@ public class RowDataToObjectArrayConverter implements Serializable {
             result[i] = fieldGetters[i].getFieldOrNull(rowData);
         }
         return result;
+    }
+
+    public Predicate createEqualPredicate(BinaryRow binaryRow) {
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> fieldPredicates = new ArrayList<>();
+        Object[] partitionObjects = convert(binaryRow);
+        for (int i = 0; i < getArity(); i++) {
+            Object o = partitionObjects[i];
+            fieldPredicates.add(builder.equal(i, o));
+        }
+        return PredicateBuilder.and(fieldPredicates);
+    }
+
+    public Predicate createLessThanPredicate(BinaryRow binaryRow, boolean includeEqual) {
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> fieldPredicates = new ArrayList<>();
+        Object[] partitionObjects = convert(binaryRow);
+        for (int i = 0; i < getArity(); i++) {
+            List<Predicate> andConditions = new ArrayList<>();
+            for (int j = 0; j < i; j++) {
+                Object o = partitionObjects[j];
+                andConditions.add(builder.equal(j, o));
+            }
+            Object currentValue = partitionObjects[i];
+            if (includeEqual) {
+                andConditions.add(builder.lessOrEqual(i, currentValue));
+            } else {
+                andConditions.add(builder.lessThan(i, currentValue));
+            }
+            fieldPredicates.add(PredicateBuilder.and(andConditions));
+        }
+        return PredicateBuilder.or(fieldPredicates);
     }
 }

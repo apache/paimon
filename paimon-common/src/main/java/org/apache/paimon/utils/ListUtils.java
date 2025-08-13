@@ -19,7 +19,9 @@
 package org.apache.paimon.utils;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -35,5 +37,20 @@ public class ListUtils {
 
     public static <T> boolean isNullOrEmpty(Collection<T> list) {
         return list == null || list.isEmpty();
+    }
+
+    public static Map<String, String> convertListsToMap(List<String> keys, List<String> values) {
+        if (keys.size() != values.size()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "keys and values size must be equal,"
+                                    + " but got keys %s and values %s",
+                            keys, values));
+        }
+        Map<String, String> result = new HashMap<>();
+        for (int i = 0; i < keys.size(); i++) {
+            result.put(keys.get(i), values.get(i));
+        }
+        return result;
     }
 }

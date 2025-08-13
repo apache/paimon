@@ -135,6 +135,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public InnerTableScan withPartitionFilter(Predicate predicate) {
+        snapshotReader.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
     public AbstractDataTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
         snapshotReader.withPartitionsFilter(partitions);
         return this;
