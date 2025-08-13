@@ -24,6 +24,7 @@ import unittest
 import pyarrow
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 
 
