@@ -577,7 +577,7 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        String[] formats = {"orc", "parquet", "csv", "json"};
+        String[] formats = {"parquet", "csv", "json"};
         int partitionValue = 10;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());

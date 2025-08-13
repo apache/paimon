@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
@@ -48,6 +49,8 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private final String fieldDelimiter;
     private final String nullLiteral;
     private final boolean includeHeader;
+    private final String quoteCharacter;
+    private final String escapeCharacter;
     private final Path filePath;
 
     private BufferedReader bufferedReader;
@@ -67,6 +70,8 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
         this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
         this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
+        this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
+        this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
         FileIO fileIO = context.fileIO();
         SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());
         reader = new CsvRecordIterator();
@@ -140,36 +145,57 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     }
 
     private InternalRow parseCsvLine(String line) {
-        String[] fields = line.split(fieldDelimiter);
-        Object[] values = new Object[rowType.getFieldCount()];
+        List<String> fields =
+                CsvParser.splitCsvLine(
+                        rowType.getFieldCount(),
+                        line,
+                        fieldDelimiter.charAt(0),
+                        quoteCharacter.charAt(0));
 
-        for (int i = 0; i < Math.min(fields.length, rowType.getFieldCount()); i++) {
-            String field = fields[i].trim();
-            if (field.equals(nullLiteral)) {
+        Object[] values = new Object[rowType.getFieldCount()];
+        int fieldCount = Math.min(fields.size(), rowType.getFieldCount());
+
+        for (int i = 0; i < fieldCount; i++) {
+            String field = fields.get(i);
+
+            // Handle null values early
+            if (field == null || field.equals(nullLiteral) || field.isEmpty()) {
                 values[i] = null;
-            } else {
-                values[i] = parseField(field, rowType.getTypeAt(i));
+                continue;
             }
+
+            // Trim whitespace only for non-JSON fields
+            String trimmedField = field.trim();
+            values[i] = parseField(trimmedField, rowType.getTypeAt(i));
         }
 
         return GenericRow.of(values);
     }
 
+    /**
+     * Parse a single field value according to its data type.
+     *
+     * @param field the field value as string
+     * @param dataType the target data type
+     * @return parsed value or null for null/empty fields
+     */
     private Object parseField(String field, DataType dataType) {
-        if (field == null || field.equals(nullLiteral) || "\"".equals(field)) {
+        if (field == null || field.equals(nullLiteral)) {
             return null;
         }
+
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case BINARY:
             case VARBINARY:
-                // Assume base64 encoded bytes
+                // Handle base64 encoded binary data
                 try {
                     return java.util.Base64.getDecoder().decode(field);
                 } catch (IllegalArgumentException e) {
                     throw new RuntimeException("Failed to decode base64 binary data: " + field, e);
                 }
             default:
+                // Use Paimon's built-in type casting
                 return castFromString(field, dataType);
         }
     }

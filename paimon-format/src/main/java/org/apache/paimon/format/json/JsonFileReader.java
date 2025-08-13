@@ -71,6 +71,9 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
     public void close() throws IOException {
         if (inputStream != null) {
             inputStream.close();
+        }
+        if (reader != null) {
+            reader.close();
             readerClosed = true;
         }
     }
@@ -124,10 +127,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
                     JsonNode jsonNode = objectMapper.readTree(line);
                     return converter.convert(jsonNode);
                 } catch (Exception e) {
-                    if (ignoreParseErrors) {
-                        // Skip this line and continue with next line
-                        continue;
-                    } else {
+                    if (!ignoreParseErrors) {
                         throw new IOException("Failed to parse JSON line: " + line, e);
                     }
                 }
