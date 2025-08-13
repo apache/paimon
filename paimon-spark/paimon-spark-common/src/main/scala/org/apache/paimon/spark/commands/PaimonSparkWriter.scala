@@ -294,7 +294,8 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
     }
 
     written
-      .collect()
+      .toLocalIterator
+      .asScala
       .map(deserializeCommitMessage(serializer, _))
       .toSeq
   }
@@ -352,8 +353,10 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
           serializer.serialize(commitMessage)
       }
     serializedCommits
-      .collect()
+      .toLocalIterator
+      .asScala
       .map(deserializeCommitMessage(serializer, _))
+      .toSeq
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
