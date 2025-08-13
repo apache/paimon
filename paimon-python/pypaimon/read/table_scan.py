@@ -55,6 +55,8 @@ class TableScan:
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
 
+        self.only_read_real_buckets = True if self.table.options.get('bucket', -1) else False
+
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
@@ -64,8 +66,7 @@ class TableScan:
         file_entries = []
         for manifest_file_path in manifest_files:
             manifest_entries = self.manifest_file_manager.read(manifest_file_path,
-                                                               (lambda row: self._shard_filter(row))
-                                                               if self.idx_of_this_subtask is not None else None)
+                                                               lambda row: self._bucket_filter(row))
             for entry in manifest_entries:
                 if entry.kind == 0:
                     file_entries.append(entry)
@@ -93,13 +94,16 @@ class TableScan:
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def _shard_filter(self, entry: Optional[ManifestEntry]) -> bool:
-        if self.table.is_primary_key_table:
-            bucket = entry.bucket
-            return bucket % self.number_of_para_subtasks == self.idx_of_this_subtask
-        else:
-            file = entry.file.file_name
-            return FixedBucketRowKeyExtractor.hash(file) % self.number_of_para_subtasks == self.idx_of_this_subtask
+    def _bucket_filter(self, entry: Optional[ManifestEntry]) -> bool:
+        bucket = entry.bucket
+        if self.only_read_real_buckets and bucket < 0:
+            return False
+        if self.idx_of_this_subtask is not None:
+            if self.table.is_primary_key_table:
+                return bucket % self.number_of_para_subtasks == self.idx_of_this_subtask
+            else:
+                file = entry.file.file_name
+                return FixedBucketRowKeyExtractor.hash(file) % self.number_of_para_subtasks == self.idx_of_this_subtask
 
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:

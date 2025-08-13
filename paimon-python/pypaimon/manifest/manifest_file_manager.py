@@ -73,7 +73,7 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
-            if shard_filter and not shard_filter(entry):
+            if not shard_filter(entry):
                 continue
             entries.append(entry)
         return entries
