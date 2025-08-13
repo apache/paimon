@@ -33,6 +33,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.NestedSchemaUtils;
 import org.apache.paimon.schema.Schema;
@@ -195,6 +196,7 @@ public class FlinkCatalog extends AbstractCatalog {
             ClassLoader classLoader,
             Options options) {
         super(name, defaultDatabase);
+        LOG.info("Creating Flink catalog: metastore={}", options.get(CatalogOptions.METASTORE));
         this.catalog = catalog;
         this.name = name;
         this.classLoader = classLoader;
