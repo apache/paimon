@@ -58,7 +58,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
-    protected transient @Nullable WriterRefresher<StoreSinkWrite> writeRefresher;
+    protected transient @Nullable WriterRefresher writeRefresher;
 
     public TableWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -99,18 +99,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         if (writeRestore != null) {
             write.setWriteRestore(writeRestore);
         }
-
-        if (write.streamingMode()) {
-            writeRefresher =
-                    new WriterRefresher<>(
-                            table,
-                            write,
-                            (newTable, writer) -> {
-                                writer.replace(newTable);
-                            });
-        } else {
-            writeRefresher = null;
-        }
+        this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
     }
 
     public void setWriteRestore(@Nullable WriteRestore writeRestore) {
