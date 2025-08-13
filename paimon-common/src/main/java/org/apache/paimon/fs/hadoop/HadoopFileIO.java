@@ -54,6 +54,8 @@ public class HadoopFileIO implements FileIO {
 
     protected SerializableConfiguration hadoopConf;
 
+    private org.apache.paimon.options.Options options;
+
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
     @VisibleForTesting
@@ -70,6 +72,7 @@ public class HadoopFileIO implements FileIO {
     @Override
     public void configure(CatalogContext context) {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
+        this.options = context.options();
     }
 
     public Configuration hadoopConf() {
@@ -167,7 +170,8 @@ public class HadoopFileIO implements FileIO {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 
-    private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+    @VisibleForTesting
+    FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         return getFileSystem(path, this::createFileSystem);
     }
 
@@ -198,7 +202,10 @@ public class HadoopFileIO implements FileIO {
     }
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        return path.getFileSystem(hadoopConf.get());
+        Configuration conf = hadoopConf.get();
+        FileSystem fileSystem = path.getFileSystem(conf);
+        fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
+        return fileSystem;
     }
 
     private static class HadoopSeekableInputStream extends SeekableInputStream {
