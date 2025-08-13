@@ -70,8 +70,19 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
         this.chainReadContext = chainReadContext;
         CoreOptions options = new CoreOptions(schema.options());
         this.currentBranch = options.branch();
+        String snapshotBranch = options.scanFallbackSnapshotBranch();
+        String deltaBranch = options.scanFallbackDeltaBranch();
+        SchemaManager snapshotSchemaManager =
+                snapshotBranch.equalsIgnoreCase(currentBranch)
+                        ? schemaManager
+                        : schemaManager.copyWithBranch(snapshotBranch);
+        SchemaManager deltaSchemaManager =
+                deltaBranch.equalsIgnoreCase(currentBranch)
+                        ? schemaManager
+                        : schemaManager.copyWithBranch(deltaBranch);
         this.branchSchemaManagers = new HashMap<>();
-        this.branchSchemaManagers.put(currentBranch, schemaManager);
+        this.branchSchemaManagers.put(snapshotBranch, snapshotSchemaManager);
+        this.branchSchemaManagers.put(deltaBranch, deltaSchemaManager);
     }
 
     @Override
