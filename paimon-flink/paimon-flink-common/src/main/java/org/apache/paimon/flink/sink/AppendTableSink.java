@@ -115,7 +115,7 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
                                     "Compact Worker: " + table.name(),
                                     new CommittableTypeInfo(),
                                     new AppendBypassCompactWorkerOperator.Factory(
-                                            table, initialCommitUser))
+                                            table, initialCommitUser, true))
                             .startNewChain();
             setParallelism(newWritten, written.getParallelism(), false);
             written = newWritten;

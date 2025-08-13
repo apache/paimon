@@ -58,6 +58,8 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
+    protected transient @Nullable WriterRefresher<StoreSinkWrite> writeRefresher;
+
     public TableWriteOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
@@ -96,6 +98,18 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                         getMetricGroup());
         if (writeRestore != null) {
             write.setWriteRestore(writeRestore);
+        }
+
+        if (write.streamingMode()) {
+            writeRefresher =
+                    new WriterRefresher<>(
+                            table,
+                            write,
+                            (newTable, writer) -> {
+                                writer.replace(newTable);
+                            });
+        } else {
+            writeRefresher = null;
         }
     }
 
@@ -151,6 +165,12 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @VisibleForTesting
     public StoreSinkWrite getWrite() {
         return write;
+    }
+
+    protected void tryRefreshWrite() {
+        if (writeRefresher != null) {
+            writeRefresher.tryRefresh();
+        }
     }
 
     /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */

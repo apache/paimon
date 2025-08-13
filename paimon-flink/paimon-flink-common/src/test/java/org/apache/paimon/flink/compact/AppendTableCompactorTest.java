@@ -100,7 +100,8 @@ public class AppendTableCompactorTest {
                                 counterMap.put(name, counter);
                                 return counter;
                             }
-                        });
+                        },
+                        false);
 
         for (int i = 0; i < 320; i++) {
             unawareBucketCompactor.processElement(new MockCompactTask());

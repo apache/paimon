@@ -34,8 +34,9 @@ public class AppendBypassCompactWorkerOperator
     private AppendBypassCompactWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
-            String commitUser) {
-        super(parameters, table, commitUser);
+            String commitUser,
+            boolean isStreaming) {
+        super(parameters, table, commitUser, isStreaming);
     }
 
     @Override
@@ -57,15 +58,17 @@ public class AppendBypassCompactWorkerOperator
     public static class Factory
             extends AppendCompactWorkerOperator.Factory<Either<Committable, AppendCompactTask>> {
 
-        public Factory(FileStoreTable table, String initialCommitUser) {
-            super(table, initialCommitUser);
+        public Factory(FileStoreTable table, String initialCommitUser, boolean isStreaming) {
+            super(table, initialCommitUser, isStreaming);
         }
 
         @Override
         @SuppressWarnings("unchecked")
         public <T extends StreamOperator<Committable>> T createStreamOperator(
                 StreamOperatorParameters<Committable> parameters) {
-            return (T) new AppendBypassCompactWorkerOperator(parameters, table, commitUser);
+            return (T)
+                    new AppendBypassCompactWorkerOperator(
+                            parameters, table, commitUser, isStreaming);
         }
 
         @Override

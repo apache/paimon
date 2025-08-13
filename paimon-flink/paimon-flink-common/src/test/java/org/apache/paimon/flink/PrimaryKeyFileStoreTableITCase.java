@@ -564,6 +564,76 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testTableReadWriteWithChangedExternalPath() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths1 = TraceableFileIO.SCHEME + "://" + externalPath1.toString();
+        String externalPaths2 = LocalFileIOLoader.SCHEME + "://" + externalPath2.toString();
+
+        int bucket = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '"
+                        + bucket
+                        + "',"
+                        + "'sink.writer-refresh-detectors' = 'external-paths',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths1
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'round-robin'"
+                        + ")");
+
+        // Create a datagen source table
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE datagen_source (k INT, v INT) WITH ("
+                        + "'connector' = 'datagen', "
+                        + "'rows-per-second' = '1', "
+                        + "'fields.k.kind' = 'sequence', "
+                        + "'fields.k.start' = '1', "
+                        + "'fields.k.end' = '5', "
+                        + "'fields.v.kind' = 'sequence', "
+                        + "'fields.v.start' = '1', "
+                        + "'fields.v.end' = '5'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        // Insert data from datagen source into T2
+        sEnv.executeSql("INSERT INTO T2 SELECT * FROM datagen_source");
+
+        sEnv.executeSql(
+                "ALTER TABLE T2 SET ( "
+                        + "'data-file.external-paths' = '"
+                        + externalPaths2
+                        + "'"
+                        + ")");
+
+        // Read and verify the data
+        List<String> resultRows = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            resultRows.add(it.next().toString());
+        }
+
+        assertThat(resultRows)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1]", "+I[2, 2]", "+I[3, 3]", "+I[4, 4]", "+I[5, 5]");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new Path(externalPath1))).isTrue();
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+        assertThat(fileIO.listStatus(new Path(externalPath1)).length).isGreaterThanOrEqualTo(1);
+        assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     public void testTableReadWriteBranch() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()

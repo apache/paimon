@@ -220,7 +220,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                                                     Committable.Kind.LOG_OFFSET,
                                                     new LogOffsetCommittable(k, v))));
         }
-
+        tryRefreshWrite();
         return committables;
     }
 

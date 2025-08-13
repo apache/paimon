@@ -22,12 +22,16 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -284,6 +288,84 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testStreamingCompactWithChangedExternalPath() throws Exception {
+        String externalPath1 = getTempDirPath();
+        String externalPath2 = getTempDirPath();
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        tableOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                TraceableFileIO.SCHEME + "://" + externalPath1);
+        tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
+        tableOptions.put(
+                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), "external-paths");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 1, Snapshot.CommitKind.APPEND);
+
+        // no full compaction has happened, so plan should be empty
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        TableScan.Plan plan = scan.plan();
+        assertThat(plan.splits()).isEmpty();
+
+        runAction(true);
+
+        // first full compaction
+        validateResult(
+                table,
+                ROW_TYPE,
+                scan,
+                Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
+                60_000);
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new Path(externalPath2))).isFalse();
+        assertThat(fileIO.listStatus(new Path(externalPath1)).length).isGreaterThanOrEqualTo(1);
+
+        SchemaChange schemaChange =
+                SchemaChange.setOption(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                        TraceableFileIO.SCHEME + "://" + externalPath2);
+        table.schemaManager().commitChanges(schemaChange);
+
+        // incremental records
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+        // second full compaction
+        validateResult(
+                table,
+                ROW_TYPE,
+                scan,
+                Arrays.asList(
+                        "+U[1, 101, 15, 20221208]",
+                        "+U[1, 101, 15, 20221209]",
+                        "-U[1, 100, 15, 20221208]",
+                        "-U[1, 100, 15, 20221209]"),
+                60_000);
+
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+        assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
@@ -323,6 +405,71 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         // second compaction, snapshot will be 5
         checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
+    }
+
+    @Test
+    public void testUnawareBucketStreamingCompactWithChangedExternalPath() throws Exception {
+        String externalPath1 = getTempDirPath();
+        String externalPath2 = getTempDirPath();
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                TraceableFileIO.SCHEME + "://" + externalPath1);
+        tableOptions.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
+        tableOptions.put(
+                FlinkConnectorOptions.SINK_WRITER_REFRESH_DETECTORS.key(), "external-paths");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        // repairing that the ut don't specify the real partition of table
+        runActionForUnawareTable(true);
+
+        // first compaction, snapshot will be 3
+        checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new Path(externalPath2))).isFalse();
+        assertThat(fileIO.listStatus(new Path(externalPath1)).length).isGreaterThanOrEqualTo(1);
+
+        SchemaChange schemaChange =
+                SchemaChange.setOption(
+                        CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
+                        TraceableFileIO.SCHEME + "://" + externalPath2);
+        table.schemaManager().commitChanges(schemaChange);
+        Thread.sleep(1000);
+
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+        // second compaction, snapshot will be 5
+        checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
+
+        assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
+        assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
     }
 
     @Test
