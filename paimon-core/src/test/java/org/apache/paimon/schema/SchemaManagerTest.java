@@ -509,13 +509,66 @@ public class SchemaManagerTest {
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistAddColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
 
+        // Add column f4 last
+        SchemaChange addColumnLast =
+                SchemaChange.addColumn(
+                        new String[] {"v", "f2", "f4"},
+                        DataTypes.DOUBLE(),
+                        "test column",
+                        SchemaChange.Move.last("f4"));
+        manager.commitChanges(addColumnLast);
+
+        // Verify the structure after adding f4
+        innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.INT()),
+                        new DataField(6, "f3", DataTypes.STRING(), ""),
+                        new DataField(5, "f2", DataTypes.BIGINT()),
+                        new DataField(7, "f4", DataTypes.DOUBLE(), "test column"));
+        middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+
+        // Add column f5 before f4
+        SchemaChange addColumnBefore =
+                SchemaChange.addColumn(
+                        new String[] {"v", "f2", "f5"},
+                        DataTypes.DOUBLE(),
+                        "test column",
+                        SchemaChange.Move.before("f5", "f4"));
+        manager.commitChanges(addColumnBefore);
+        // Verify the structure after adding f5
+        innerType =
+                RowType.of(
+                        new DataField(4, "f1", DataTypes.INT()),
+                        new DataField(6, "f3", DataTypes.STRING(), ""),
+                        new DataField(5, "f2", DataTypes.BIGINT()),
+                        new DataField(8, "f5", DataTypes.DOUBLE(), "test column"),
+                        new DataField(7, "f4", DataTypes.DOUBLE(), "test column"));
+        middleType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.STRING()),
+                        new DataField(3, "f2", innerType));
+        outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", middleType));
+        assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+
         SchemaChange dropColumn = SchemaChange.dropColumn(new String[] {"v", "f2", "f1"});
         manager.commitChanges(dropColumn);
 
+        // After dropping f1, the order should be: [f3, f2, f4]
         innerType =
                 RowType.of(
                         new DataField(6, "f3", DataTypes.STRING(), ""),
-                        new DataField(5, "f2", DataTypes.BIGINT()));
+                        new DataField(5, "f2", DataTypes.BIGINT()),
+                        new DataField(8, "f5", DataTypes.DOUBLE(), "test column"),
+                        new DataField(7, "f4", DataTypes.DOUBLE(), "test column"));
         middleType =
                 RowType.of(
                         new DataField(2, "f1", DataTypes.STRING()),
@@ -531,6 +584,16 @@ public class SchemaManagerTest {
                 SchemaChange.dropColumn(new String[] {"v", "invalid", "f2"});
         assertThatCode(() -> manager.commitChanges(middleColumnNotExistDropColumn))
                 .hasMessageContaining("Column v.invalid does not exist");
+
+        // Test invalid move operations for nested columns
+        SchemaChange invalidMoveColumn =
+                SchemaChange.addColumn(
+                        new String[] {"v", "f2", "f6"},
+                        DataTypes.STRING(),
+                        "",
+                        SchemaChange.Move.after("f6", "nonexistent"));
+        assertThatCode(() -> manager.commitChanges(invalidMoveColumn))
+                .hasMessageContaining("Column nonexistent does not exist");
     }
 
     @Test
