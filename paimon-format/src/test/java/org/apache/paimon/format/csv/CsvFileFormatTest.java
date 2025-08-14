@@ -70,9 +70,9 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     public void testCsvParsingWithEmptyFields() throws IOException {
         // Create test CSV content with empty fields
         String csvContent =
-                "\",25,\"Software Engineer\"\n"
+                ",25,\"Software Engineer\"\n"
                         + "\"John Doe\",,\"Developer\"\n"
-                        + "\"Jane Smith\",30,\"\n";
+                        + "\"Jane Smith\",30,\n";
 
         // Write to temporary file
         File csvFile = new File(tempDir, "test_empty.csv");
@@ -106,26 +106,26 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         FileRecordIterator<InternalRow> iterator = reader.readBatch();
         assertThat(iterator).isNotNull();
 
-        // First row: "",25,"Software Engineer"
+        // First row: ,25,"Software Engineer" (empty first field)
         InternalRow row1 = iterator.next();
         assertThat(row1).isNotNull();
-        assertThat(row1.isNullAt(0)).isTrue(); // empty string becomes null
+        assertThat(row1.isNullAt(0)).isTrue(); // empty field becomes null
         assertThat(row1.getInt(1)).isEqualTo(25);
         assertThat(row1.getString(2).toString()).isEqualTo("Software Engineer");
 
-        // Second row: "John Doe",,"Developer"
+        // Second row: "John Doe",,"Developer" (empty middle field)
         InternalRow row2 = iterator.next();
         assertThat(row2).isNotNull();
         assertThat(row2.getString(0).toString()).isEqualTo("John Doe");
         assertThat(row2.isNullAt(1)).isTrue(); // empty field becomes null
         assertThat(row2.getString(2).toString()).isEqualTo("Developer");
 
-        // Third row: "Jane Smith",30,""
+        // Third row: "Jane Smith",30, (empty last field)
         InternalRow row3 = iterator.next();
         assertThat(row3).isNotNull();
         assertThat(row3.getString(0).toString()).isEqualTo("Jane Smith");
         assertThat(row3.getInt(1)).isEqualTo(30);
-        assertThat(row3.isNullAt(2)).isTrue(); // empty string becomes null
+        assertThat(row3.isNullAt(2)).isTrue(); // empty field becomes null
 
         // No more rows
         assertThat(iterator.next()).isNull();

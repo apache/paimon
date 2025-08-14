@@ -24,7 +24,6 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -33,15 +32,13 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -113,7 +110,7 @@ public class JsonToRowConverter {
                 return (int) (LocalTime.parse(node.asText()).toNanoOfDay() / 1_000_000);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return parseTimestamp(node.asText());
+                return TypeUtils.castFromString(node.asText(), dataType);
             case ARRAY:
                 return convertArray(node, (ArrayType) dataType);
             case MAP:
@@ -122,23 +119,6 @@ public class JsonToRowConverter {
                 return convertRow(node, (RowType) dataType);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + dataType);
-        }
-    }
-
-    private Timestamp parseTimestamp(String timestampStr) {
-        try {
-            if (timestampFormatStandard) {
-                // ISO-8601 format: 2023-01-01T12:00:00
-                LocalDateTime dateTime =
-                        LocalDateTime.parse(timestampStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-                return Timestamp.fromLocalDateTime(dateTime);
-            } else {
-                // Unix timestamp in milliseconds
-                long millis = Long.parseLong(timestampStr);
-                return Timestamp.fromEpochMillis(millis);
-            }
-        } catch (DateTimeParseException | NumberFormatException e) {
-            throw new RuntimeException("Failed to parse timestamp: " + timestampStr, e);
         }
     }
 

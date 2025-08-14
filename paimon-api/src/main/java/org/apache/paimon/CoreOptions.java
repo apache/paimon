@@ -3386,7 +3386,7 @@ public class CoreOptions implements Serializable {
         return list;
     }
 
-    public static List<Path> getExternalPaths(CoreOptions options) {
+    public static List<Path> createExternalPaths(CoreOptions options) {
         String externalPaths = options.dataFileExternalPaths();
         ExternalPathStrategy strategy = options.externalPathStrategy();
         if (externalPaths == null

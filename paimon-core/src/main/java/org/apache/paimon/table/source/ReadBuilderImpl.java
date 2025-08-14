@@ -89,12 +89,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            PartitionPredicate partitionPredicate =
+            this.partitionFilter =
                     fromPredicate(
                             partitionType,
                             createPartitionPredicate(
                                     partitionSpec, partitionType, defaultPartitionName));
-            withPartitionFilter(partitionPredicate);
         }
         return this;
     }

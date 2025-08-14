@@ -88,7 +88,7 @@ public abstract class TableTestBase {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
-        assertThat(TraceableFileIO.openOutputStreams(pathPredicate).isEmpty());
+        assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     protected Identifier identifier(String tableName) {

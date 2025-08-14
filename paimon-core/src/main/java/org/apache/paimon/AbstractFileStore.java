@@ -131,7 +131,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                CoreOptions.getExternalPaths(options));
+                CoreOptions.createExternalPaths(options));
     }
 
     @Override
