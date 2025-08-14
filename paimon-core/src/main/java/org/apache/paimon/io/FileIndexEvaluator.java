@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.ListUtils;
 
 import java.io.IOException;
 import java.util.List;
@@ -42,7 +43,7 @@ public class FileIndexEvaluator {
             DataFileMeta file)
             throws IOException {
         FileIndexResult result = FileIndexResult.REMAIN;
-        if ((dataFilter == null || dataFilter.isEmpty()) && topN == null) {
+        if (ListUtils.isNullOrEmpty(dataFilter) && topN == null) {
             return result;
         }
 
@@ -74,18 +75,13 @@ public class FileIndexEvaluator {
                                 dataSchema.logicalRowType());
             }
 
-            // data filter
-            if (dataFilter != null && !dataFilter.isEmpty()) {
+            // evaluate
+            if (!ListUtils.isNullOrEmpty(dataFilter)) {
                 result =
                         predicate.evaluate(
                                 PredicateBuilder.and(dataFilter.toArray(new Predicate[0])));
-            }
-
-            // todo: We need to do more if the index filter supports pushdown.
-            //  e.g. All pushdown index filters must exist and be evaluated.
-            // topN filter
-            if (dataFilter == null && topN != null) {
-                result = predicate.evaluate(topN, result);
+            } else if (topN != null) {
+                result = predicate.evaluateTopN(topN, result);
             }
 
             return result;

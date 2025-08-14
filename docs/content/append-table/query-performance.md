@@ -83,8 +83,8 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 `Bitmap`:
 * `file-index.bitmap.columns`: specify the columns that need bitmap index. See [Index Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}).
 
-`Bit-Slice Index Bitmap`
-* `file-index.bsi.columns`: specify the columns that need bsi index.
+`Range Bitmap Index Bitmap`
+* `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index. See [Index Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}).
 
 More filter types will be supported...
 

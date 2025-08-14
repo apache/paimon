@@ -31,4 +31,8 @@ public class ListUtils {
         int index = ThreadLocalRandom.current().nextInt(list.size());
         return list.get(index);
     }
+
+    public static <T> boolean isNullOrEmpty(List<T> list) {
+        return list == null || list.isEmpty();
+    }
 }

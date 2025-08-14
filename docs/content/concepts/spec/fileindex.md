@@ -223,6 +223,7 @@ Advantage:
 1. Smaller than the bitmap index.
 2. Suitable for the point query and the range query in the high level of cardinality scenarios.
 3. Can be used conjunction with bitmap index.
+4. Support the topk/bottomk query optimization. (Currently only suitable for append-only tables.)
 
 Shortcoming:
 1. The point query evaluation maybe slower than bitmap index.

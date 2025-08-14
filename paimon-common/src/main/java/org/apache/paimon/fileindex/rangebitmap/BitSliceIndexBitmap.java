@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.paimon.utils.IOUtils.readFully;
@@ -183,7 +184,14 @@ public class BitSliceIndexBitmap {
 
         // only k results should be returned
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        f.remove(e, f.getCardinality() - k);
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
+            }
+        }
         return f;
     }
 
@@ -220,7 +228,14 @@ public class BitSliceIndexBitmap {
 
         // only k results should be returned
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        f.remove(e, f.getCardinality() - k);
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
+            }
+        }
         return f;
     }
 

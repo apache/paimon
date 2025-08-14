@@ -45,10 +45,6 @@ public class TopN implements Serializable {
         return limit;
     }
 
-    public <T> T visit(TopNVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
-
     @Override
     public String toString() {
         String sort = orders.stream().map(SortValue::toString).collect(Collectors.joining(", "));
