@@ -118,8 +118,8 @@ public class TraceableFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
-        return originalFs.rename(src, dst);
+    public boolean renameImpl(Path src, Path dst) throws IOException {
+        return originalFs.renameImpl(src, dst);
     }
 
     @Override
