@@ -25,6 +25,7 @@ import pyarrow as pa
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.binary_row import BinaryRow
 
 
@@ -44,7 +45,10 @@ class DataWriter(ABC):
 
         options = self.table.options
         self.target_file_size = 256 * 1024 * 1024
-        self.file_format = options.get(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET)
+        self.file_format = options.get(CoreOptions.FILE_FORMAT,
+                                       CoreOptions.FILE_FORMAT_PARQUET
+                                       if self.bucket != BucketMode.POSTPONE_BUCKET.value
+                                       else CoreOptions.FILE_FORMAT_AVRO)
         self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
 
         self.pending_data: Optional[pa.RecordBatch] = None
@@ -134,7 +138,11 @@ class DataWriter(ABC):
 
         for i, field_name in enumerate(self.table.partition_keys):
             path_builder = path_builder / (field_name + "=" + str(self.partition[i]))
-        path_builder = path_builder / ("bucket-" + str(self.bucket)) / file_name
+        if self.bucket == BucketMode.POSTPONE_BUCKET.value:
+            bucket_name = "postpone"
+        else:
+            bucket_name = str(self.bucket)
+        path_builder = path_builder / ("bucket-" + bucket_name) / file_name
 
         return path_builder
 

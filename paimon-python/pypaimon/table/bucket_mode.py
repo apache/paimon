@@ -27,3 +27,6 @@ class BucketMode(Enum):
     HASH_DYNAMIC = auto()
     CROSS_PARTITION = auto()
     BUCKET_UNAWARE = auto()
+    POSTPONE_MODE = auto()
+
+    POSTPONE_BUCKET = -2

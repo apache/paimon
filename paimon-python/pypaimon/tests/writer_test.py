@@ -27,7 +27,7 @@ from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 
 
-class WriterTestCase(unittest.TestCase):
+class WriterTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):

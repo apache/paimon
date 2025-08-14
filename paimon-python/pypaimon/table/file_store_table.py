@@ -29,6 +29,7 @@ from pypaimon.table.table import Table
 from pypaimon.write.batch_write_builder import BatchWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
+                                              PostponeBucketRowKeyExtractor,
                                               RowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
 
@@ -52,7 +53,9 @@ class FileStoreTable(Table):
 
     def bucket_mode(self) -> BucketMode:
         if self.is_primary_key_table:
-            if self.options.get(CoreOptions.BUCKET, -1) == -1:
+            if self.options.get(CoreOptions.BUCKET, -1) == -2:
+                return BucketMode.POSTPONE_MODE
+            elif self.options.get(CoreOptions.BUCKET, -1) == -1:
                 if self.cross_partition_update:
                     return BucketMode.CROSS_PARTITION
                 else:
@@ -77,6 +80,8 @@ class FileStoreTable(Table):
             return FixedBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.BUCKET_UNAWARE:
             return UnawareBucketRowKeyExtractor(self.table_schema)
+        elif bucket_mode == BucketMode.POSTPONE_MODE:
+            return PostponeBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
             return DynamicBucketRowKeyExtractor(self.table_schema)
         else:

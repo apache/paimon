@@ -40,7 +40,7 @@ class Schema:
 
     def __init__(self, fields: Optional[List[DataField]] = None, partition_keys: Optional[List[str]] = None,
                  primary_keys: Optional[List[str]] = None,
-                 options: Optional[Dict[str, str]] = None, comment: Optional[str] = None):
+                 options: Optional[Dict] = None, comment: Optional[str] = None):
         self.fields = fields if fields is not None else []
         self.partition_keys = partition_keys if partition_keys is not None else []
         self.primary_keys = primary_keys if primary_keys is not None else []
@@ -49,6 +49,6 @@ class Schema:
 
     @staticmethod
     def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
-                            primary_keys: Optional[List[str]] = None, options: Optional[Dict[str, str]] = None,
+                            primary_keys: Optional[List[str]] = None, options: Optional[Dict] = None,
                             comment: Optional[str] = None):
         return Schema(PyarrowFieldParser.to_paimon_schema(pa_schema), partition_keys, primary_keys, options, comment)

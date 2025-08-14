@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.table.bucket_mode import BucketMode
 
 
 class RowKeyExtractor(ABC):
@@ -125,3 +126,16 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> int:
         raise ValueError("Can't extract bucket from row in dynamic bucket mode")
+
+
+class PostponeBucketRowKeyExtractor(RowKeyExtractor):
+    """Extractor for unaware bucket mode (bucket = -1, no primary keys)."""
+
+    def __init__(self, table_schema: TableSchema):
+        super().__init__(table_schema)
+        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -2)
+        if num_buckets != BucketMode.POSTPONE_BUCKET.value:
+            raise ValueError(f"Postpone bucket mode requires bucket = -2, got {num_buckets}")
+
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+        return [BucketMode.POSTPONE_BUCKET.value] * data.num_rows
