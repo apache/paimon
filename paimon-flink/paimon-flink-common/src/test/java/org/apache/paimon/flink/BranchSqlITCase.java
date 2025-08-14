@@ -109,7 +109,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNestedComplexDefaultValue() throws Exception {
+    public void testMixedComplexDefaultValue() throws Exception {
         sql(
                 "CREATE TABLE T_MIXED (id INT, name STRING, tags ARRAY<STRING>, metadata MAP<STRING, STRING>, config ROW<enabled BOOLEAN, timeout INT>)");
         sql("CALL sys.alter_column_default_value('default.T_MIXED', 'name', 'default_name')");
@@ -127,6 +127,31 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         assertThat(collectResult("SELECT * FROM T_MIXED WHERE id = 2"))
                 .containsExactlyInAnyOrder(
                         "+I[2, custom_name, [default_tag], {created_by=system}, +I[true, 30]]");
+    }
+
+    @Test
+    public void testNestedComplexDefaultValue() throws Exception {
+        sql(
+                "CREATE TABLE T_NESTED ("
+                        + "id INT, "
+                        + "nested_array ARRAY<ROW<name STRING, val INT>>, "
+                        + "nested_struct ROW<info ROW<x INT, y STRING>, enabled BOOLEAN>"
+                        + ")");
+
+        sql(
+                "CALL sys.alter_column_default_value('default.T_NESTED', 'nested_array', '[{item1, 10}, {item2, 20}]')");
+        sql(
+                "CALL sys.alter_column_default_value('default.T_NESTED', 'nested_struct', '{{42, nested_value}, true}')");
+
+        sql("INSERT INTO T_NESTED (id) VALUES (1)");
+        assertThat(collectResult("SELECT * FROM T_NESTED"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, [+I[item1, 10], +I[item2, 20]], +I[+I[42, nested_value], true]]");
+
+        sql("INSERT INTO T_NESTED (id, nested_array) VALUES (2, ARRAY[ROW('custom', 99)])");
+        assertThat(collectResult("SELECT * FROM T_NESTED WHERE id = 2"))
+                .containsExactlyInAnyOrder(
+                        "+I[2, [+I[custom, 99]], +I[+I[42, nested_value], true]]");
     }
 
     @Test
