@@ -61,7 +61,7 @@ SELECT * FROM my_table;
 
 ## Alter Default Value
 
-Paimon supports alter column default value. In Spark, you can use the standard SQL `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` syntax to modify default values for existing columns.
+Paimon supports alter column default value.
 
 For example:
 
