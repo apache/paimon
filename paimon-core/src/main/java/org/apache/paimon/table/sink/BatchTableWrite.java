@@ -43,4 +43,11 @@ public interface BatchTableWrite extends TableWrite {
      * tracking enabled.
      */
     BatchTableWrite withWriteType(RowType writeType);
+
+    /**
+     * Flush the data in the write buffer.
+     *
+     * @throws Exception
+     */
+    void flush() throws Exception;
 }

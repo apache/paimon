@@ -115,6 +115,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
+    public void flush() throws Exception {
+        throw new UnsupportedOperationException("Flush is not supported.");
+    }
+
+    @Override
     public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;

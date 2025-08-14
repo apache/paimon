@@ -28,7 +28,6 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
@@ -39,11 +38,8 @@ import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** {@link TableWrite} implementation for format table. */
 public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<InternalRow>>> {
@@ -100,6 +96,11 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
+    public void flush() throws Exception {
+        write.flush();
+    }
+
+    @Override
     public FormatTableWrite withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;
@@ -121,20 +122,6 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
         row = wrapDefaultValue(row);
         BinaryRow partition = partitionKeyExtractor.partition(row);
         write.write(partition, row);
-    }
-
-    private void checkNullability(InternalRow row) {
-        for (int idx : notNullFieldIndex) {
-            if (row.isNullAt(idx)) {
-                String columnName = rowType.getFields().get(idx).name();
-                throw new RuntimeException(
-                        String.format("Cannot write null to non-null column(%s)", columnName));
-            }
-        }
-    }
-
-    private InternalRow wrapDefaultValue(InternalRow row) {
-        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 
     @Override
@@ -159,22 +146,19 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
+    public void close() throws Exception {
+        write.close();
+    }
+
+    @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        write.flush();
-        return new ArrayList<>();
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<CommitMessage> prepareCommit() throws Exception {
-        checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
-        batchCommitted = true;
-        return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
-    }
-
-    @Override
-    public void close() throws Exception {
-        write.close();
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -185,5 +169,19 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     @Override
     public void restore(List<State<InternalRow>> state) {
         throw new UnsupportedOperationException();
+    }
+
+    private void checkNullability(InternalRow row) {
+        for (int idx : notNullFieldIndex) {
+            if (row.isNullAt(idx)) {
+                String columnName = rowType.getFields().get(idx).name();
+                throw new RuntimeException(
+                        String.format("Cannot write null to non-null column(%s)", columnName));
+            }
+        }
+    }
+
+    private InternalRow wrapDefaultValue(InternalRow row) {
+        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 }

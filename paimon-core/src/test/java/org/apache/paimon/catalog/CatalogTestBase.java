@@ -606,7 +606,7 @@ public abstract class CatalogTestBase {
                 if (partitioned) {
                     write.write(dataWithDiffPartition);
                 }
-                write.prepareCommit();
+                write.flush();
             }
             List<InternalRow> readData;
             if (partitioned) {
