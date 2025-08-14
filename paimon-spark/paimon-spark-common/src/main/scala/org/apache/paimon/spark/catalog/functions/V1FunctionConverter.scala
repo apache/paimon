@@ -49,7 +49,7 @@ object V1FunctionConverter {
 
     val functionDefinition: FunctionDefinition = FunctionDefinition.file(
       fileResources.asJava,
-      "",
+      "JAVA", // Apache Spark only supports JAR persistent function now.
       v1Function.className,
       functionIdentifier.funcName)
     val definitions = Map(FUNCTION_DEFINITION_NAME -> functionDefinition).asJava

@@ -24,6 +24,7 @@ import org.apache.paimon.spark.SparkCatalog.FUNCTION_DEFINITION_NAME
 import org.apache.paimon.spark.catalog.SupportV1Function
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.execution.{CreatePaimonV1FunctionCommand, DescribePaimonV1FunctionCommand, DropPaimonV1FunctionCommand}
+import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
@@ -42,63 +43,69 @@ case class RewritePaimonFunctionCommends(spark: SparkSession)
 
   protected lazy val catalogManager: CatalogManager = spark.sessionState.catalogManager
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsUp {
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    // Add a global switch to enable/disable v1 function.
+    if (!OptionUtils.v1FunctionEnabled()) {
+      return plan
+    }
 
-    case CreateFunction(
-          CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
-          className,
-          resources,
-          ifExists,
-          replace) =>
-      if (isPaimonBuildInFunction(funcIdent)) {
-        throw new UnsupportedOperationException(s"Can't create build-in function: $funcIdent")
-      }
-      val v1Function = CatalogFunction(funcIdent, className, resources)
-      CreatePaimonV1FunctionCommand(v1FunctionCatalog, v1Function, ifExists, replace)
+    plan.resolveOperatorsUp {
+      case CreateFunction(
+            CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
+            className,
+            resources,
+            ifExists,
+            replace) =>
+        if (isPaimonBuildInFunction(funcIdent)) {
+          throw new UnsupportedOperationException(s"Can't create build-in function: $funcIdent")
+        }
+        val v1Function = CatalogFunction(funcIdent, className, resources)
+        CreatePaimonV1FunctionCommand(v1FunctionCatalog, v1Function, ifExists, replace)
 
-    case DropFunction(
-          CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
-          ifExists) =>
-      if (isPaimonBuildInFunction(funcIdent)) {
-        throw new UnsupportedOperationException(s"Can't drop build-in function: $funcIdent")
-      }
-      DropPaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, ifExists)
+      case DropFunction(
+            CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
+            ifExists) =>
+        if (isPaimonBuildInFunction(funcIdent)) {
+          throw new UnsupportedOperationException(s"Can't drop build-in function: $funcIdent")
+        }
+        DropPaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, ifExists)
 
-    case DescribeFunction(
-          CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
-          isExtended) if !isPaimonBuildInFunction(funcIdent) =>
-      DescribePaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, isExtended)
+      case DescribeFunction(
+            CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
+            isExtended) if !isPaimonBuildInFunction(funcIdent) =>
+        DescribePaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, isExtended)
 
-    // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer will resolve
-    // the 'arguments' without throwing an exception, saying that function is not supported.
-    case l: LogicalPlan =>
-      l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
-        case u: UnresolvedFunction =>
-          CatalogAndFunctionIdentifier.unapply(u.nameParts) match {
-            case Some((v1FunctionCatalog: SupportV1Function, funcIdent))
-                if !isPaimonBuildInFunction(funcIdent) =>
-              // If the function is already registered, avoid redundant lookup in the catalog to reduce overhead.
-              if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
-                UnResolvedPaimonV1Function(v1FunctionCatalog, funcIdent, None, u.arguments)
-              } else {
-                val function = v1FunctionCatalog.getV1Function(funcIdent)
-                function.definition(FUNCTION_DEFINITION_NAME) match {
-                  case _: FunctionDefinition.FileFunctionDefinition =>
-                    if (u.isDistinct && u.filter.isDefined) {
-                      throw new UnsupportedOperationException(
-                        s"DISTINCT with FILTER is not supported, func name: $funcIdent")
-                    }
-                    UnResolvedPaimonV1Function(
-                      v1FunctionCatalog,
-                      funcIdent,
-                      Some(function),
-                      u.arguments)
-                  case _ => u
+      // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer will resolve
+      // the 'arguments' without throwing an exception, saying that function is not supported.
+      case l: LogicalPlan =>
+        l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+          case u: UnresolvedFunction =>
+            CatalogAndFunctionIdentifier.unapply(u.nameParts) match {
+              case Some((v1FunctionCatalog: SupportV1Function, funcIdent))
+                  if !isPaimonBuildInFunction(funcIdent) =>
+                // If the function is already registered, avoid redundant lookup in the catalog to reduce overhead.
+                if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
+                  UnResolvedPaimonV1Function(v1FunctionCatalog, funcIdent, None, u.arguments)
+                } else {
+                  val function = v1FunctionCatalog.getV1Function(funcIdent)
+                  function.definition(FUNCTION_DEFINITION_NAME) match {
+                    case _: FunctionDefinition.FileFunctionDefinition =>
+                      if (u.isDistinct && u.filter.isDefined) {
+                        throw new UnsupportedOperationException(
+                          s"DISTINCT with FILTER is not supported, func name: $funcIdent")
+                      }
+                      UnResolvedPaimonV1Function(
+                        v1FunctionCatalog,
+                        funcIdent,
+                        Some(function),
+                        u.arguments)
+                    case _ => u
+                  }
                 }
-              }
-            case _ => u
-          }
-      }
+              case _ => u
+            }
+        }
+    }
   }
 
   private object CatalogAndFunctionIdentifier {
