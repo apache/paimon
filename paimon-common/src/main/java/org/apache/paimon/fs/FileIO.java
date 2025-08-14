@@ -252,7 +252,7 @@ public interface FileIO extends Serializable, Closeable {
             return true;
         }
 
-        if (dst.getParent().equals(src.getParent()) && dst.equals(src.getParent())) {
+        if (dst.getParent().equals(src.getParent()) || dst.equals(src.getParent())) {
             return renameImpl(src, dst);
         }
         throw new InvalidParameterException("src: " + src + ", dst: " + dst);
