@@ -62,8 +62,8 @@ public class HadoopSecuredFileSystem extends FileSystem {
     }
 
     @Override
-    public FSDataInputStream open(Path path, int i) throws IOException {
-        return runSecuredWithIOException(() -> fileSystem.open(path, i));
+    public FSDataInputStream open(Path path, int bufferSize) throws IOException {
+        return runSecuredWithIOException(() -> fileSystem.open(path, bufferSize));
     }
 
     @Override
@@ -94,19 +94,19 @@ public class HadoopSecuredFileSystem extends FileSystem {
     }
 
     @Override
-    public FSDataOutputStream append(Path path, int i, Progressable progressable)
+    public FSDataOutputStream append(Path path, int bufferSize, Progressable progressable)
             throws IOException {
-        return runSecuredWithIOException(() -> fileSystem.append(path, i, progressable));
+        return runSecuredWithIOException(() -> fileSystem.append(path, bufferSize, progressable));
     }
 
     @Override
-    public boolean rename(Path path, Path path1) throws IOException {
-        return runSecuredWithIOException(() -> fileSystem.rename(path, path1));
+    public boolean rename(Path src, Path dst) throws IOException {
+        return runSecuredWithIOException(() -> fileSystem.rename(src, dst));
     }
 
     @Override
-    public boolean delete(Path path, boolean b) throws IOException {
-        return runSecuredWithIOException(() -> fileSystem.delete(path, b));
+    public boolean delete(Path path, boolean recursive) throws IOException {
+        return runSecuredWithIOException(() -> fileSystem.delete(path, recursive));
     }
 
     @Override
