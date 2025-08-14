@@ -171,23 +171,6 @@ INSERT INTO paimon_table SELECT * FROM kakfa_table;
 SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 ```
 
-## Batch
+## Bucketed Join
 
-Bucketed table can be used to avoid shuffle if necessary in batch query, for example, you can use the following Spark
-SQL to read a Paimon table:
-
-```sql
-SET spark.sql.sources.v2.bucketing.enabled = true;
-
-CREATE TABLE FACT_TABLE (order_id INT, f1 STRING) TBLPROPERTIES ('bucket'='10', 'bucket-key' = 'order_id');
-
-CREATE TABLE DIM_TABLE (order_id INT, f2 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
-
-SELECT * FROM FACT_TABLE JOIN DIM_TABLE on t1.order_id = t4.order_id;
-```
-
-The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing for V2 data sources. When turned on,
-Spark will recognize the specific distribution reported by a V2 data source through SupportsReportPartitioning, and
-will try to avoid shuffle if necessary.
-
-The costly join shuffle will be avoided if two tables have the same bucketing strategy and same number of buckets.
+Bucketed table can be used to avoid shuffle if necessary in batch query, see [Bucketed Join]({{< ref "append-table/query-performance#bucketed-join" >}}).
