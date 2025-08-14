@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataField;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,7 +44,7 @@ public class FunctionImpl implements Function {
 
     @Nullable private final String comment;
 
-    @Nullable private final Map<String, String> options;
+    private final Map<String, String> options;
 
     public FunctionImpl(
             Identifier identifier,
@@ -52,7 +53,7 @@ public class FunctionImpl implements Function {
             boolean deterministic,
             Map<String, FunctionDefinition> definitions,
             @Nullable String comment,
-            @Nullable Map<String, String> options) {
+            Map<String, String> options) {
         this.identifier = identifier;
         this.inputParams = inputParams;
         this.returnParams = returnParams;
@@ -69,7 +70,7 @@ public class FunctionImpl implements Function {
         this.deterministic = true;
         this.definitions = definitions;
         this.comment = null;
-        this.options = null;
+        this.options = Collections.emptyMap();
     }
 
     @Override

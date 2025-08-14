@@ -95,7 +95,7 @@ case class V1FunctionRegistry(session: SparkSession) extends SQLConfHelper {
         // The function has not been loaded to the function registry, which means
         // that the function is a persistent function (if it actually has been registered
         // in the metastore). We need to first put the function in the function registry.
-        assert(func.isDefined)
+        require(func.isDefined, "Function must be defined")
         val catalogFunction = V1FunctionConverter.toV1Function(func.get)
         loadFunctionResources(catalogFunction.resources)
         // Please note that qualifiedName is provided by the user. However,

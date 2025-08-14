@@ -19,40 +19,37 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
+import org.apache.paimon.spark.sql.FunctionResources._
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 
 abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBase {
 
-  val testUDFJarPath: String =
-    getClass.getClassLoader.getResource("function/hive-test-udfs.jar").getPath
-
   test("Paimon V1 Function: create or replace function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT udf_add2(1, 2)"), Seq(Row(3)))
 
       // create again should throw exception
       intercept[Exception] {
-        sql(
-          s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
-             |USING JAR '$testUDFJarPath'
-             |""".stripMargin)
+        sql(s"""
+               |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+               |USING JAR '$testUDFJarPath'
+               |""".stripMargin)
       }
 
       sql(s"""
-             |CREATE FUNCTION IF NOT EXISTS udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION IF NOT EXISTS udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
 
       // create or replace
       sql(s"""
-             |CREATE OR REPLACE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE OR REPLACE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT udf_add2(3, 4)"), Seq(Row(7)))
@@ -62,21 +59,21 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   test("Paimon V1 Function: use function with catalog name and database name") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT udf_add2(3, 4)"), Seq(Row(7)))
       sql("DROP FUNCTION udf_add2")
 
       sql(s"""
-             |CREATE FUNCTION test.udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION test.udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT test.udf_add2(3, 4)"), Seq(Row(7)))
       sql("DROP FUNCTION test.udf_add2")
 
       sql(s"""
-             |CREATE FUNCTION paimon.test.udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION paimon.test.udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT paimon.test.udf_add2(3, 4)"), Seq(Row(7)))
@@ -87,7 +84,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   test("Paimon V1 Function: select with attribute") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       withTable("t") {
@@ -101,7 +98,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   test("Paimon V1 Function: select with build-in function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       withTable("t") {
@@ -119,7 +116,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   test("Paimon V1 Function: drop function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
       checkAnswer(sql("SELECT udf_add2(1, 2)"), Seq(Row(3)))
@@ -135,15 +132,13 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   test("Paimon V1 Function: describe function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
 
       checkAnswer(
         sql("DESCRIBE FUNCTION udf_add2"),
-        Seq(
-          Row("Function: test.udf_add2"),
-          Row("Class: org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2"))
+        Seq(Row("Function: test.udf_add2"), Row(s"Class: $UDFExampleAdd2Class"))
       )
     }
   }
@@ -152,7 +147,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
     // create a build-in function
     intercept[Exception] {
       sql(s"""
-             |CREATE FUNCTION max_pt AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION max_pt AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
     }
@@ -170,15 +165,20 @@ class DisablePaimonV1FunctionTest extends PaimonSparkTestWithRestCatalogBase {
     super.sparkConf.set("spark.sql.catalog.paimon.v1Function.enabled", "false")
   }
 
-  val testUDFJarPath: String =
-    getClass.getClassLoader.getResource("function/hive-test-udfs.jar").getPath
-
   test("Paimon V1 Function: disable paimon v1 function") {
     intercept[Exception] {
       sql(s"""
-             |CREATE FUNCTION udf_add2 AS 'org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2'
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
     }
   }
+}
+
+object FunctionResources {
+
+  val testUDFJarPath: String =
+    getClass.getClassLoader.getResource("function/hive-test-udfs.jar").getPath
+
+  val UDFExampleAdd2Class: String = "org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2"
 }
