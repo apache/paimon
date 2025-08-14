@@ -22,7 +22,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 
-case class RewritePaimonFunctionCommends(spark: SparkSession) extends Rule[LogicalPlan] {
+case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
 
   // do nothing
   override def apply(plan: LogicalPlan): LogicalPlan = plan

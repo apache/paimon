@@ -79,7 +79,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
     Seq(
       RewritePaimonViewCommands(sparkSession),
-      RewritePaimonFunctionCommends(sparkSession)
+      RewritePaimonFunctionCommands(sparkSession)
     )
   }
 

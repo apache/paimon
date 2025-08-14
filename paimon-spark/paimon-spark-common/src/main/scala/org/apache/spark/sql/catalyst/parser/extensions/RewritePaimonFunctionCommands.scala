@@ -37,7 +37,7 @@ import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_
 import org.apache.spark.sql.connector.catalog.{CatalogManager, CatalogPlugin, LookupCatalog}
 import org.apache.spark.sql.types.DataType
 
-case class RewritePaimonFunctionCommends(spark: SparkSession)
+case class RewritePaimonFunctionCommands(spark: SparkSession)
   extends Rule[LogicalPlan]
   with LookupCatalog {
 
@@ -72,16 +72,19 @@ case class RewritePaimonFunctionCommends(spark: SparkSession)
 
       case DescribeFunction(
             CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
-            isExtended) if !isPaimonBuildInFunction(funcIdent) =>
+            isExtended)
+          // For Paimon built-in functions, Spark will resolve them by itself.
+          if !isPaimonBuildInFunction(funcIdent) =>
         DescribePaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, isExtended)
 
-      // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer will resolve
+      // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer can resolve
       // the 'arguments' without throwing an exception, saying that function is not supported.
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
           case u: UnresolvedFunction =>
             CatalogAndFunctionIdentifier.unapply(u.nameParts) match {
               case Some((v1FunctionCatalog: SupportV1Function, funcIdent))
+                  // For Paimon built-in functions, Spark will resolve them by itself.
                   if !isPaimonBuildInFunction(funcIdent) =>
                 // If the function is already registered, avoid redundant lookup in the catalog to reduce overhead.
                 if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
@@ -143,7 +146,7 @@ case class RewritePaimonFunctionCommends(spark: SparkSession)
   }
 }
 
-/** An unresolved Paimon V1 function. */
+/** An unresolved Paimon V1 function to let Spark resolve the necessary variables. */
 case class UnResolvedPaimonV1Function(
     v1FunctionCatalog: SupportV1Function,
     funcIdent: FunctionIdentifier,

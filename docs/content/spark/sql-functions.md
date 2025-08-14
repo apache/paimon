@@ -89,9 +89,9 @@ CALL sys.drop_function(`function` => 'my_db.area_func');
 
 ### File Function
 
-Users can define functions within a file, providing flexibility and modular support for function definition.
+Users can define functions within a file, providing flexibility and modular support for function definition, only supports jar files now.
 
-This feature currently only supports Spark 3.4 or higher.
+This feature requires Spark 3.4 or higher.
 
 **Example**
 

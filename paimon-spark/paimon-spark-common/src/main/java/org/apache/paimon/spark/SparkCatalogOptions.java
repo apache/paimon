@@ -42,5 +42,5 @@ public class SparkCatalogOptions {
             key("v1Function.enabled")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription("Weather enable v1 function.");
+                    .withDescription("Whether to enable v1 function.");
 }
