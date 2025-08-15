@@ -150,6 +150,10 @@ class FileStoreCommit:
         """
         Generate partition statistics from commit messages.
 
+        This method follows the Java implementation pattern from
+        org.apache.paimon.manifest.PartitionEntry.fromManifestEntry() and
+        PartitionEntry.merge() methods.
+
         Args:
             commit_messages: List of commit messages to analyze
 
@@ -187,28 +191,46 @@ class FileStoreCommit:
                 partition_stats[partition_key] = {
                     'partition_spec': partition_spec,
                     'record_count': 0,
-                    'file_count': 0
+                    'file_count': 0,
+                    'file_size_in_bytes': 0,
+                    'last_file_creation_time': 0
                 }
 
-            # Count files and estimate records
+            # Process each file in the commit message
+            # Following Java implementation: PartitionEntry.fromDataFile()
             new_files = message.new_files()
-            partition_stats[partition_key]['file_count'] += len(new_files)
+            for file_meta in new_files:
+                # Extract actual file metadata (following Java DataFileMeta pattern)
+                record_count = file_meta.row_count
+                file_size_in_bytes = file_meta.file_size
+                file_count = 1
 
-            # Estimate record count (this is a simplification)
-            # In a real implementation, this should come from file metadata
-            for file_entry in new_files:
-                # Estimate records per file (this could be improved with actual metadata)
-                estimated_records = getattr(file_entry, 'record_count', 1000)  # Default estimate
-                partition_stats[partition_key]['record_count'] += estimated_records
+                # Convert creation_time to milliseconds (Java uses epoch millis)
+                if file_meta.creation_time:
+                    file_creation_time = int(file_meta.creation_time.timestamp() * 1000)
+                else:
+                    file_creation_time = int(time.time() * 1000)
+
+                # Accumulate statistics (following Java PartitionEntry.merge() logic)
+                partition_stats[partition_key]['record_count'] += record_count
+                partition_stats[partition_key]['file_size_in_bytes'] += file_size_in_bytes
+                partition_stats[partition_key]['file_count'] += file_count
+
+                # Keep the latest creation time
+                partition_stats[partition_key]['last_file_creation_time'] = max(
+                    partition_stats[partition_key]['last_file_creation_time'],
+                    file_creation_time
+                )
 
         # Convert to PartitionStatistics objects
+        # Following Java PartitionEntry.toPartitionStatistics() pattern
         return [
             PartitionStatistics.create(
                 partition_spec=stats['partition_spec'],
                 record_count=stats['record_count'],
                 file_count=stats['file_count'],
-                file_size_in_bytes=stats.get('file_size_in_bytes', 0),
-                last_file_creation_time=int(time.time() * 1000)
+                file_size_in_bytes=stats['file_size_in_bytes'],
+                last_file_creation_time=stats['last_file_creation_time']
             )
             for stats in partition_stats.values()
         ]
