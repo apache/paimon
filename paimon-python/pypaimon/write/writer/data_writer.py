@@ -112,7 +112,14 @@ class DataWriter(ABC):
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
-        key_columns_batch = data.select(self.trimmed_primary_key)
+        # Select only the key columns from the data
+        if self.trimmed_primary_key:
+            key_columns = [data.column(col_name) for col_name in self.trimmed_primary_key
+                           if col_name in data.schema.names
+                           ]
+            key_columns_batch = pa.record_batch(key_columns, names=self.trimmed_primary_key)
+        else:
+            key_columns_batch = data
         min_key_row_batch = key_columns_batch.slice(0, 1)
         min_key_data = [col.to_pylist()[0] for col in min_key_row_batch.columns]
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
