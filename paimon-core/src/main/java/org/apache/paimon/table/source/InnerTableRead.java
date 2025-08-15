@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
@@ -48,6 +49,10 @@ public interface InnerTableRead extends TableRead {
 
     default InnerTableRead withReadType(RowType readType) {
         throw new UnsupportedOperationException();
+    }
+
+    default InnerTableRead withTopN(TopN topN) {
+        return this;
     }
 
     default InnerTableRead forceKeepDelete() {

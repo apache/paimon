@@ -24,8 +24,8 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
-import org.apache.spark.sql.catalyst.trees.TreePattern.DYNAMIC_PRUNING_SUBQUERY
-import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit}
+import org.apache.spark.sql.catalyst.trees.TreePattern.{DYNAMIC_PRUNING_SUBQUERY, LIMIT, SORT}
+import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit, SupportsPushDownTopN}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.assertj.core.api.{Assertions => assertj}
 import org.junit.jupiter.api.Assertions
@@ -279,6 +279,68 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
       Assertions.assertTrue(qe2.sparkPlan.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       checkAnswer(df2, Row(5, "e", "2025", "x5") :: Nil)
     }
+  }
+
+  test("Paimon pushDown: topN for append-only tables") {
+    assume(gteqSpark3_3)
+    spark.sql("""
+                |CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)
+                |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
+                |""".stripMargin)
+    Assertions.assertTrue(getScanBuilder().isInstanceOf[SupportsPushDownTopN])
+
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |(1, "a1", "2023"),
+                |(1, "a1", "2023"),
+                |(3, "d1", "2023"),
+                |(4, "e1", "2023")
+                |""".stripMargin)
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |(5, "a2", "2025"),
+                |(NULL, "b2", "2025"),
+                |(6, "c2", "2025"),
+                |(7, "d2", "2025"),
+                |(8, "e2", "2025")
+                |""".stripMargin)
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |(5, "a3", "2023"),
+                |(9, "a3", "2023"),
+                |(2, "c3", "2025"),
+                |(NULL, "b2", "2025")
+                |""".stripMargin)
+
+    // test ASC
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id ASC NULLS LAST LIMIT 3"),
+      Row(1, "a1", "2023") :: Row(1, "a1", "2023") :: Row(2, "c3", "2025") :: Nil)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id ASC NULLS FIRST LIMIT 3"),
+      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(1, "a1", "2023") :: Nil)
+
+    // test DESC
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id DESC NULLS LAST LIMIT 3"),
+      Row(9, "a3", "2023") :: Row(8, "e2", "2025") :: Row(7, "d2", "2025") :: Nil)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id DESC NULLS FIRST LIMIT 3"),
+      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(9, "a3", "2023") :: Nil)
+
+    // test with partition
+    checkAnswer(
+      spark.sql("SELECT * FROM T WHERE pt='2023' ORDER BY id DESC LIMIT 3"),
+      Row(9, "a3", "2023") :: Row(5, "a3", "2023") :: Row(4, "e1", "2023") :: Nil)
+    checkAnswer(
+      spark.sql("SELECT * FROM T WHERE pt='2025' ORDER BY id ASC LIMIT 3"),
+      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(2, "c3", "2025") :: Nil)
+
+    // test plan
+    val df1 = spark.sql("SELECT * FROM T ORDER BY id DESC LIMIT 1")
+    val qe1 = df1.queryExecution
+    Assertions.assertTrue(qe1.optimizedPlan.containsPattern(SORT))
+    Assertions.assertTrue(qe1.optimizedPlan.containsPattern(LIMIT))
   }
 
   test(s"Paimon pushdown: parquet in-filter") {
