@@ -58,6 +58,39 @@ If you set `write-only` to true, the `Compact Coordinator` and `Compact Worker` 
 The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in Flink by
 Flink action in Paimon and disable all the other compactions by setting `write-only`.
 
+The following options control the strategy of compaction:
+
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>write-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.min.file-num</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.delete-ratio-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Double</td>
+            <td>Ratio of the deleted rows in a data file to be forced compacted.</td>
+        </tr>
+    </tbody>
+</table>
+
 ## Streaming Query
 
 You can stream the Append table and use it like a Message Queue. As with primary key tables, there are two options
