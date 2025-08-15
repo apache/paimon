@@ -57,6 +57,8 @@ public interface HiveCloneExtractor {
 
     Map<String, String> extractOptions(Table table);
 
+    boolean supportCloneSplits(String format);
+
     List<HiveCloneExtractor> EXTRACTORS =
             FactoryUtil.discoverFactories(
                     HiveCloneExtractor.class.getClassLoader(), HiveCloneExtractor.class);
