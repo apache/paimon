@@ -16,35 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.function;
+package org.apache.spark.sql.catalyst.parser.extensions
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.types.DataField;
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
 
-/** Interface for function. */
-public interface Function {
-
-    String name();
-
-    String fullName();
-
-    Identifier identifier();
-
-    Optional<List<DataField>> inputParams();
-
-    Optional<List<DataField>> returnParams();
-
-    boolean isDeterministic();
-
-    Map<String, FunctionDefinition> definitions();
-
-    FunctionDefinition definition(String name);
-
-    String comment();
-
-    Map<String, String> options();
+  // do nothing
+  override def apply(plan: LogicalPlan): LogicalPlan = plan
 }

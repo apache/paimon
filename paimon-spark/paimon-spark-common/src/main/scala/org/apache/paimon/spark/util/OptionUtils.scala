@@ -20,7 +20,7 @@ package org.apache.paimon.spark.util
 
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.options.ConfigOption
-import org.apache.paimon.spark.SparkConnectorOptions
+import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -69,6 +69,10 @@ object OptionUtils extends SQLConfHelper {
 
   def writeMergeSchemaExplicitCastEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
+  }
+
+  def v1FunctionEnabled(): Boolean = {
+    getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }
 
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {

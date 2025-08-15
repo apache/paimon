@@ -126,4 +126,12 @@ object PaimonUtils {
   def sameType(left: DataType, right: DataType): Boolean = {
     left.sameType(right)
   }
+
+  def classIsLoadable(clazz: String): Boolean = {
+    SparkUtils.classIsLoadable(clazz)
+  }
+
+  def classForName(clazz: String): Class[_] = {
+    SparkUtils.classForName(clazz)
+  }
 }

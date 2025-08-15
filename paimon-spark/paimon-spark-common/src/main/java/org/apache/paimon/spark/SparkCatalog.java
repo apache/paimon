@@ -22,16 +22,21 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.catalog.SupportV1Function;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
+import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
+import org.apache.paimon.spark.catalog.functions.V1FunctionRegistry;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
@@ -42,11 +47,14 @@ import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.FunctionIdentifier;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.catalyst.catalog.CatalogFunction;
+import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
@@ -73,6 +81,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,6 +90,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import scala.Option;
+import scala.collection.Seq;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -98,29 +111,41 @@ import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultVa
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
-        implements SupportView, FunctionCatalog, SupportsNamespaces, FormatTableCatalog {
+        implements SupportView,
+                SupportV1Function,
+                FunctionCatalog,
+                SupportsNamespaces,
+                FormatTableCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     public static final String FUNCTION_DEFINITION_NAME = "spark";
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
-    protected Catalog catalog = null;
-
+    private Catalog catalog;
     private String defaultDatabase;
+    private boolean v1FunctionEnabled;
+    @Nullable private V1FunctionRegistry v1FunctionRegistry;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         checkRequiredConfigurations();
-
+        SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
-                        Options.fromMap(options),
-                        PaimonSparkSession$.MODULE$.active().sessionState().newHadoopConf());
+                        Options.fromMap(options), sparkSession.sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
+        this.v1FunctionEnabled =
+                options.getBoolean(
+                                SparkCatalogOptions.V1FUNCTION_ENABLED.key(),
+                                SparkCatalogOptions.V1FUNCTION_ENABLED.defaultValue())
+                        && DelegateCatalog.rootCatalog(catalog) instanceof RESTCatalog;
+        if (v1FunctionEnabled) {
+            this.v1FunctionRegistry = new V1FunctionRegistry(sparkSession);
+        }
         try {
             catalog.getDatabase(defaultDatabase);
         } catch (Catalog.DatabaseNotExistException e) {
@@ -616,9 +641,7 @@ public class SparkCatalog extends SparkBaseCatalog
                 Function paimonFunction = catalog.getFunction(toIdentifier(ident));
                 FunctionDefinition functionDefinition =
                         paimonFunction.definition(FUNCTION_DEFINITION_NAME);
-                if (functionDefinition != null
-                        && functionDefinition
-                                instanceof FunctionDefinition.LambdaFunctionDefinition) {
+                if (functionDefinition instanceof FunctionDefinition.LambdaFunctionDefinition) {
                     FunctionDefinition.LambdaFunctionDefinition lambdaFunctionDefinition =
                             (FunctionDefinition.LambdaFunctionDefinition) functionDefinition;
                     if (paimonFunction.returnParams().isPresent()) {
@@ -649,6 +672,50 @@ public class SparkCatalog extends SparkBaseCatalog
         // namespace to generate transforms for partitioning.
         // Otherwise, check if it is paimon namespace.
         return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
+    }
+
+    private V1FunctionRegistry v1FunctionRegistry() {
+        assert v1FunctionRegistry != null;
+        return v1FunctionRegistry;
+    }
+
+    @Override
+    public boolean v1FunctionEnabled() {
+        return v1FunctionEnabled;
+    }
+
+    @Override
+    public Function getV1Function(FunctionIdentifier funcIdent) throws Exception {
+        return paimonCatalog().getFunction(V1FunctionConverter.fromFunctionIdentifier(funcIdent));
+    }
+
+    @Override
+    public void createV1Function(CatalogFunction v1Function, boolean ignoreIfExists)
+            throws Exception {
+        Function paimonFunction = V1FunctionConverter.fromV1Function(v1Function);
+        paimonCatalog()
+                .createFunction(
+                        V1FunctionConverter.fromFunctionIdentifier(v1Function.identifier()),
+                        paimonFunction,
+                        ignoreIfExists);
+    }
+
+    @Override
+    public boolean v1FunctionRegistered(FunctionIdentifier funcIdent) {
+        return v1FunctionRegistry().isRegistered(funcIdent);
+    }
+
+    @Override
+    public Expression registerAndResolveV1Function(
+            FunctionIdentifier funcIdent, Option<Function> func, Seq<Expression> arguments) {
+        return v1FunctionRegistry().registerAndResolveFunction(funcIdent, func, arguments.toSeq());
+    }
+
+    @Override
+    public void dropV1Function(FunctionIdentifier funcIdent, boolean ifExists) throws Exception {
+        v1FunctionRegistry().unregisterFunction(funcIdent);
+        paimonCatalog()
+                .dropFunction(V1FunctionConverter.fromFunctionIdentifier(funcIdent), ifExists);
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {

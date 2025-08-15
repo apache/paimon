@@ -31,6 +31,7 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{NonReservedContext, QuotedIdentifierContext}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.internal.VariableSubstitution
 import org.apache.spark.sql.types.{DataType, StructType}
 
@@ -65,8 +66,21 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
     } else {
-      RewritePaimonViewCommands(PaimonSparkSession.active).apply(delegate.parsePlan(sqlText))
+      var plan = delegate.parsePlan(sqlText)
+      val sparkSession = PaimonSparkSession.active
+      parserRules(sparkSession).foreach(
+        rule => {
+          plan = rule.apply(plan)
+        })
+      plan
     }
+  }
+
+  private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
+    Seq(
+      RewritePaimonViewCommands(sparkSession),
+      RewritePaimonFunctionCommands(sparkSession)
+    )
   }
 
   /** Parses a string to an Expression. */

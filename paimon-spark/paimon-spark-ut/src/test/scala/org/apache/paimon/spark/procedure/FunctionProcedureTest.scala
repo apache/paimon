@@ -18,13 +18,14 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.spark.PaimonRestCatalogSparkTestBase
+import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
 /** Test for Function Procedure. */
-class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
+class FunctionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
+
   test(s"test function procedure") {
     val functionName = "function_test"
     checkAnswer(
@@ -32,14 +33,13 @@ class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
         "'[{\"id\": 0, \"name\":\"length\", \"type\":\"INT\"}, {\"id\": 1, \"name\":\"width\", \"type\":\"INT\"}]'," +
         " '[{\"id\": 0, \"name\":\"area\", \"type\":\"BIGINT\"}]', true, 'comment', 'k1=v1,k2=v2')"),
       Row(true)
-    );
+    )
     assertThat(
       spark
         .sql("SHOW FUNCTIONS")
         .collect()
         .map(r => r.getString(0))
-        .filter(v => v == s"paimon.test.$functionName")
-        .size).isEqualTo(1)
+        .count(v => v == s"paimon.test.$functionName")).isEqualTo(1)
     checkAnswer(
       spark.sql(s"CALL sys.alter_function('$functionName', " +
         "'{\"action\" : \"addDefinition\", \"name\" : \"spark\", \"definition\" : {\"type\" : \"lambda\", \"definition\" : \"(Integer length, Integer width) -> { return (long) length * width; }\", \"language\": \"JAVA\" } }')"),
@@ -48,17 +48,16 @@ class FunctionProcedureTest extends PaimonRestCatalogSparkTestBase {
     checkAnswer(
       spark.sql(s"select paimon.test.$functionName(1, 2)"),
       Row(2)
-    );
+    )
     checkAnswer(
       spark.sql(s"CALL sys.drop_function('$functionName')"),
       Row(true)
-    );
+    )
     assertThat(
       spark
         .sql("SHOW FUNCTIONS")
         .collect()
         .map(r => r.getString(0))
-        .filter(v => v == s"paimon.test.$functionName")
-        .size).isEqualTo(0);
+        .count(v => v == s"paimon.test.$functionName")).isEqualTo(0);
   }
 }

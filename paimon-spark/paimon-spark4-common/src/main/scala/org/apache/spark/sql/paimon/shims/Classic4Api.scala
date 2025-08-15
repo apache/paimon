@@ -19,11 +19,13 @@
 package org.apache.spark.sql.paimon.shims
 
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.catalyst.catalog.FunctionResourceLoader
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.classic.{ClassicConversions, Dataset => ClassicDataset, ExpressionUtils}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
+import org.apache.spark.sql.internal.SessionResourceLoader
 
 /**
  * This class is used to implement the conversion from sql-api to classic one. Make sure this is the
@@ -59,5 +61,9 @@ class Classic4Api extends ClassicApi with ClassicConversions {
       relation: LogicalPlan,
       columns: Seq[Attribute]): (Long, Map[Attribute, ColumnStat]) = {
     CommandUtils.computeColumnStats(spark, relation, columns.toSeq)
+  }
+
+  override def sessionResourceLoader(session: SparkSession): FunctionResourceLoader = {
+    new SessionResourceLoader(session)
   }
 }
