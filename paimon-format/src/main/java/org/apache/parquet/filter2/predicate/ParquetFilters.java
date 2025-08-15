@@ -48,7 +48,9 @@ import org.apache.paimon.types.VariantType;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
 public class ParquetFilters {
@@ -154,13 +156,62 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
+            Operators.Column<?> column = toParquetColumn(fieldRef);
+            if (column instanceof Operators.LongColumn) {
+                return FilterApi.in(
+                        (Operators.LongColumn) column, convertSets(literals, Long.class));
+            } else if (column instanceof Operators.IntColumn) {
+                return FilterApi.in(
+                        (Operators.IntColumn) column, convertSets(literals, Integer.class));
+            } else if (column instanceof Operators.DoubleColumn) {
+                return FilterApi.in(
+                        (Operators.DoubleColumn) column, convertSets(literals, Double.class));
+            } else if (column instanceof Operators.FloatColumn) {
+                return FilterApi.in(
+                        (Operators.FloatColumn) column, convertSets(literals, Float.class));
+            } else if (column instanceof Operators.BinaryColumn) {
+                return FilterApi.in(
+                        (Operators.BinaryColumn) column, convertSets(literals, Binary.class));
+            }
+
             throw new UnsupportedOperationException();
         }
 
         @Override
         public FilterPredicate visitNotIn(FieldRef fieldRef, List<Object> literals) {
+            Operators.Column<?> column = toParquetColumn(fieldRef);
+            if (column instanceof Operators.LongColumn) {
+                return FilterApi.notIn(
+                        (Operators.LongColumn) column, convertSets(literals, Long.class));
+            } else if (column instanceof Operators.IntColumn) {
+                return FilterApi.notIn(
+                        (Operators.IntColumn) column, convertSets(literals, Integer.class));
+            } else if (column instanceof Operators.DoubleColumn) {
+                return FilterApi.notIn(
+                        (Operators.DoubleColumn) column, convertSets(literals, Double.class));
+            } else if (column instanceof Operators.FloatColumn) {
+                return FilterApi.notIn(
+                        (Operators.FloatColumn) column, convertSets(literals, Float.class));
+            } else if (column instanceof Operators.BinaryColumn) {
+                return FilterApi.notIn(
+                        (Operators.BinaryColumn) column, convertSets(literals, Binary.class));
+            }
+
             throw new UnsupportedOperationException();
         }
+    }
+
+    private static <T> Set<T> convertSets(List<Object> values, Class<T> kclass) {
+        Set<T> converted = new HashSet<>();
+        for (Object value : values) {
+            Comparable<?> cmp = toParquetObject(value);
+            if (kclass.isInstance(cmp)) {
+                converted.add((T) cmp);
+            } else {
+                throw new UnsupportedOperationException();
+            }
+        }
+        return converted;
     }
 
     private static Operators.Column<?> toParquetColumn(FieldRef fieldRef) {

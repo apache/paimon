@@ -29,6 +29,8 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
 
 
 class TableScan:
@@ -39,7 +41,6 @@ class TableScan:
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
-        self.predicate = predicate
         self.predicate = predicate
         self.limit = limit
         self.read_type = read_type
@@ -52,6 +53,12 @@ class TableScan:
         self.target_split_size = 128 * 1024 * 1024
         self.open_file_cost = 4 * 1024 * 1024
 
+        self.idx_of_this_subtask = None
+        self.number_of_para_subtasks = None
+
+        self.only_read_real_buckets = True if self.table.options.get('bucket',
+                                                                     -1) == BucketMode.POSTPONE_BUCKET.value else False
+
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
@@ -60,7 +67,8 @@ class TableScan:
 
         file_entries = []
         for manifest_file_path in manifest_files:
-            manifest_entries = self.manifest_file_manager.read(manifest_file_path)
+            manifest_entries = self.manifest_file_manager.read(manifest_file_path,
+                                                               lambda row: self._bucket_filter(row))
             for entry in manifest_entries:
                 if entry.kind == 0:
                     file_entries.append(entry)
@@ -82,6 +90,23 @@ class TableScan:
         splits = self._apply_push_down_limit(splits)
 
         return Plan(splits)
+
+    def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
+        self.idx_of_this_subtask = idx_of_this_subtask
+        self.number_of_para_subtasks = number_of_para_subtasks
+        return self
+
+    def _bucket_filter(self, entry: Optional[ManifestEntry]) -> bool:
+        bucket = entry.bucket
+        if self.only_read_real_buckets and bucket < 0:
+            return False
+        if self.idx_of_this_subtask is not None:
+            if self.table.is_primary_key_table:
+                return bucket % self.number_of_para_subtasks == self.idx_of_this_subtask
+            else:
+                file = entry.file.file_name
+                return FixedBucketRowKeyExtractor.hash(file) % self.number_of_para_subtasks == self.idx_of_this_subtask
+        return True
 
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:

@@ -22,9 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.WriterRefresher;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
 import org.apache.paimon.table.FileStoreTable;
@@ -53,22 +56,23 @@ public class AppendTableCompactor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AppendTableCompactor.class);
 
-    private final FileStoreTable table;
+    private FileStoreTable table;
+    private BaseAppendFileStoreWrite write;
+
     private final String commitUser;
+    protected final Queue<Future<CommitMessage>> result;
+    private final Supplier<ExecutorService> compactExecutorsupplier;
+    @Nullable private final CompactionMetrics compactionMetrics;
+    @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    private final transient BaseAppendFileStoreWrite write;
-
-    protected final transient Queue<Future<CommitMessage>> result;
-
-    private final transient Supplier<ExecutorService> compactExecutorsupplier;
-    @Nullable private final transient CompactionMetrics compactionMetrics;
-    @Nullable private final transient CompactionMetrics.Reporter metricsReporter;
+    @Nullable protected final WriterRefresher writeRefresher;
 
     public AppendTableCompactor(
             FileStoreTable table,
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup metricGroup,
+            boolean isStreaming) {
         this.table = table;
         this.commitUser = commitUser;
         CoreOptions coreOptions = table.coreOptions();
@@ -87,6 +91,7 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        this.writeRefresher = WriterRefresher.create(isStreaming, table, this::replace);
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -204,5 +209,22 @@ public class AppendTableCompactor {
 
     public Iterable<Future<CommitMessage>> result() {
         return result;
+    }
+
+    private void replace(FileStoreTable newTable) throws Exception {
+        this.table = newTable;
+        List<State<InternalRow>> states = write.checkpoint();
+        this.write.close();
+        this.write = (BaseAppendFileStoreWrite) newTable.store().newWrite(commitUser);
+        this.write.restore(states);
+    }
+
+    public void tryRefreshWrite() {
+        if (commitUser == null) {
+            return;
+        }
+        if (writeRefresher != null) {
+            writeRefresher.tryRefresh();
+        }
     }
 }

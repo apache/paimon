@@ -37,4 +37,10 @@ public class SparkCatalogOptions {
                     .stringType()
                     .defaultValue(Catalog.DEFAULT_DATABASE)
                     .withDescription("The default database name.");
+
+    public static final ConfigOption<Boolean> V1FUNCTION_ENABLED =
+            key("v1Function.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable v1 function.");
 }

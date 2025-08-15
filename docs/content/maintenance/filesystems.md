@@ -125,7 +125,16 @@ For Alluxio support add the following entry into the core-site.xml file:
 
 {{< tab "Flink" >}}
 
-It is recommended to use [Flink Kerberos Keytab](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/security/security-kerberos/).
+Configure the following options in your catalog configuration:
+
+- security.kerberos.login.keytab: Absolute path to a Kerberos keytab file that contains the user credentials.
+  Please make sure it is copied to each machine.
+- security.kerberos.login.principal: Kerberos principal name associated with the keytab.
+
+And configure the following option in the program's java property:
+
+- java.security.krb5.conf: Absolute path to the Kerberos configuration file.
+  Please make sure it is copied to each machine.
 
 {{< /tab >}}
 

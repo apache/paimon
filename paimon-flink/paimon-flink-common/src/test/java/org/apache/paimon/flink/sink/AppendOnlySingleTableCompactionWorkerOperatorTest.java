@@ -57,7 +57,8 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
-                new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")
+                new AppendOnlySingleTableCompactionWorkerOperator.Factory(
+                                getTableDefault(), "user", false)
                         .createStreamOperator(
                                 new StreamOperatorParameters<>(
                                         new SourceOperatorStreamTask<Integer>(
@@ -124,7 +125,8 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     public void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
-                new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")
+                new AppendOnlySingleTableCompactionWorkerOperator.Factory(
+                                getTableDefault(), "user", false)
                         .createStreamOperator(
                                 new StreamOperatorParameters<>(
                                         new SourceOperatorStreamTask<Integer>(

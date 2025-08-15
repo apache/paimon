@@ -37,8 +37,9 @@ public class AppendOnlySingleTableCompactionWorkerOperator
     private AppendOnlySingleTableCompactionWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
-            String commitUser) {
-        super(parameters, table, commitUser);
+            String commitUser,
+            boolean isStreaming) {
+        super(parameters, table, commitUser, isStreaming);
     }
 
     @Override
@@ -49,8 +50,8 @@ public class AppendOnlySingleTableCompactionWorkerOperator
     /** {@link StreamOperatorFactory} of {@link AppendOnlySingleTableCompactionWorkerOperator}. */
     public static class Factory extends AppendCompactWorkerOperator.Factory<AppendCompactTask> {
 
-        public Factory(FileStoreTable table, String initialCommitUser) {
-            super(table, initialCommitUser);
+        public Factory(FileStoreTable table, String initialCommitUser, boolean isStreaming) {
+            super(table, initialCommitUser, isStreaming);
         }
 
         @Override
@@ -59,7 +60,7 @@ public class AppendOnlySingleTableCompactionWorkerOperator
                 StreamOperatorParameters<Committable> parameters) {
             return (T)
                     new AppendOnlySingleTableCompactionWorkerOperator(
-                            parameters, table, commitUser);
+                            parameters, table, commitUser, isStreaming);
         }
 
         @Override

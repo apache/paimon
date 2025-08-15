@@ -18,6 +18,7 @@
 
 package org.apache.paimon.function;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -30,6 +31,8 @@ public interface Function {
     String name();
 
     String fullName();
+
+    Identifier identifier();
 
     Optional<List<DataField>> inputParams();
 

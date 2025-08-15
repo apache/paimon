@@ -30,11 +30,11 @@ import org.assertj.core.api.Assertions
 
 import java.util.UUID
 
-class PaimonRestCatalogSparkTestBase extends PaimonSparkTestBase {
+class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
 
-  private var restCatalogServer: RESTCatalogServer = null
-  private var serverUrl: String = null
-  private var warehouse: String = null
+  private var restCatalogServer: RESTCatalogServer = _
+  private var serverUrl: String = _
+  private var warehouse: String = _
   private val initToken = "init_token"
 
   override protected def beforeAll(): Unit = {

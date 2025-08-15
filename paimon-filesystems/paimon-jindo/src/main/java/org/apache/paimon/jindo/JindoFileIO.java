@@ -27,6 +27,7 @@ import org.apache.paimon.utils.Pair;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
+import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
@@ -96,6 +97,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
         // Misalignment can greatly affect performance, so the maximum buffer is set here
         hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
+        hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
 
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {

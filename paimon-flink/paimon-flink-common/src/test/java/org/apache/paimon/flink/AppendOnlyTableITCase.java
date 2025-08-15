@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -28,6 +29,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,9 +37,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -255,6 +259,78 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+    }
+
+    @Test
+    public void testTableReadWriteWithChangedExternalPath() throws Exception {
+        String externalPaths1 = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
+        String externalPaths2 = TraceableFileIO.SCHEME + "://" + tempExternalPath2.toString();
+
+        int bucket = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+        String bucketKey = bucket == 1 ? "'bucket-key' = 'k'," : "";
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v INT) "
+                        + "WITH ( "
+                        + "'bucket' = '"
+                        + bucket
+                        + "',"
+                        + bucketKey
+                        + "'sink.writer-refresh-detectors' = 'external-paths',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths1
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'round-robin'"
+                        + ")");
+
+        // Create a datagen source table
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE datagen_source (k INT, v INT) WITH ("
+                        + "'connector' = 'datagen', "
+                        + "'rows-per-second' = '1', "
+                        + "'fields.k.kind' = 'sequence', "
+                        + "'fields.k.start' = '1', "
+                        + "'fields.k.end' = '5', "
+                        + "'fields.v.kind' = 'sequence', "
+                        + "'fields.v.start' = '1', "
+                        + "'fields.v.end' = '5'"
+                        + ")");
+
+        CloseableIterator<Row> it = streamSqlIter("SELECT * FROM T2");
+
+        // Insert data from datagen source into T2
+        sEnv.executeSql("INSERT INTO T2 SELECT * FROM datagen_source");
+        sEnv.executeSql(
+                "ALTER TABLE T2 SET ( "
+                        + "'data-file.external-paths' = '"
+                        + externalPaths2
+                        + "'"
+                        + ")");
+
+        // Read and verify the data
+        List<String> resultRows = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            resultRows.add(it.next().toString());
+        }
+
+        assertThat(resultRows)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1]", "+I[2, 2]", "+I[3, 3]", "+I[4, 4]", "+I[5, 5]");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(new org.apache.paimon.fs.Path(tempExternalPath1.toString())))
+                .isTrue();
+        assertThat(fileIO.exists(new org.apache.paimon.fs.Path(tempExternalPath2.toString())))
+                .isTrue();
+        assertThat(
+                        fileIO.listStatus(
+                                        new org.apache.paimon.fs.Path(tempExternalPath1.toString()))
+                                .length)
+                .isGreaterThanOrEqualTo(1);
+        assertThat(
+                        fileIO.listStatus(
+                                        new org.apache.paimon.fs.Path(tempExternalPath2.toString()))
+                                .length)
+                .isGreaterThanOrEqualTo(1);
     }
 
     @Test

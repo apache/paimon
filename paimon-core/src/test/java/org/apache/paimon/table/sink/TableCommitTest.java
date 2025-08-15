@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -184,7 +185,8 @@ public class TableCommitTest {
 
         @Override
         public void call(
-                List<ManifestEntry> entries,
+                List<SimpleFileEntry> baseFiles,
+                List<ManifestEntry> deltaFiles,
                 List<IndexManifestEntry> indexFiles,
                 Snapshot snapshot) {
             commitCallbackResult.get(testId).add(snapshot.commitIdentifier());

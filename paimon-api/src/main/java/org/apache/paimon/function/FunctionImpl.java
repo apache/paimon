@@ -21,8 +21,12 @@ package org.apache.paimon.function;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
+import javax.annotation.Nullable;
+
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /** Function implementation. */
@@ -30,25 +34,25 @@ public class FunctionImpl implements Function {
 
     private final Identifier identifier;
 
-    private final List<DataField> inputParams;
+    @Nullable private final List<DataField> inputParams;
 
-    private final List<DataField> returnParams;
+    @Nullable private final List<DataField> returnParams;
 
     private final boolean deterministic;
 
     private final Map<String, FunctionDefinition> definitions;
 
-    private final String comment;
+    @Nullable private final String comment;
 
     private final Map<String, String> options;
 
     public FunctionImpl(
             Identifier identifier,
-            List<DataField> inputParams,
-            List<DataField> returnParams,
+            @Nullable List<DataField> inputParams,
+            @Nullable List<DataField> returnParams,
             boolean deterministic,
             Map<String, FunctionDefinition> definitions,
-            String comment,
+            @Nullable String comment,
             Map<String, String> options) {
         this.identifier = identifier;
         this.inputParams = inputParams;
@@ -66,7 +70,7 @@ public class FunctionImpl implements Function {
         this.deterministic = true;
         this.definitions = definitions;
         this.comment = null;
-        this.options = null;
+        this.options = Collections.emptyMap();
     }
 
     @Override
@@ -77,6 +81,10 @@ public class FunctionImpl implements Function {
     @Override
     public String fullName() {
         return identifier.getFullName();
+    }
+
+    public Identifier identifier() {
+        return identifier;
     }
 
     @Override
@@ -112,5 +120,32 @@ public class FunctionImpl implements Function {
     @Override
     public Map<String, String> options() {
         return options;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        FunctionImpl function = (FunctionImpl) o;
+        return deterministic == function.deterministic
+                && Objects.equals(identifier, function.identifier)
+                && Objects.equals(inputParams, function.inputParams)
+                && Objects.equals(returnParams, function.returnParams)
+                && Objects.equals(definitions, function.definitions)
+                && Objects.equals(comment, function.comment)
+                && Objects.equals(options, function.options);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                identifier,
+                inputParams,
+                returnParams,
+                deterministic,
+                definitions,
+                comment,
+                options);
     }
 }

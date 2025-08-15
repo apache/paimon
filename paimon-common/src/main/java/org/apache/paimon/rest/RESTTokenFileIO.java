@@ -167,7 +167,10 @@ public class RESTTokenFileIO implements FileIO {
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
-                            options, catalogContext.preferIO(), catalogContext.fallbackIO());
+                            options,
+                            catalogContext.hadoopConf(),
+                            catalogContext.preferIO(),
+                            catalogContext.fallbackIO());
             try {
                 fileIO = FileIO.get(path, context);
             } catch (IOException e) {

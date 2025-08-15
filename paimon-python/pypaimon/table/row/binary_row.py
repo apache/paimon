@@ -258,7 +258,7 @@ class BinaryRowSerializer:
 
         variable_data = []
         variable_offsets = []
-        current_offset = 0
+        current_offset = fixed_part_size
 
         for i, (value, field) in enumerate(zip(binary_row.values, binary_row.fields)):
             if value is None:

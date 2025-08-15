@@ -218,11 +218,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withFilter(Predicate predicate) {
-        List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =
-                tableSchema.fields().stream()
-                        .mapToInt(f -> partitionKeys.indexOf(f.name()))
-                        .toArray();
+                PredicateBuilder.fieldIdxToPartitionIdx(
+                        tableSchema.logicalRowType(), tableSchema.partitionKeys());
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();

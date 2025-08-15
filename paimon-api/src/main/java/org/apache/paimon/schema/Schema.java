@@ -36,7 +36,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,6 +43,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -129,7 +129,7 @@ public class Schema {
             List<DataField> fields, List<String> primaryKeys, List<String> partitionKeys) {
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
 
-        Set<String> duplicateColumns = duplicate(fieldNames);
+        Set<String> duplicateColumns = duplicateFields(fieldNames);
         Preconditions.checkState(
                 duplicateColumns.isEmpty(),
                 "Table column %s must not contain duplicate fields. Found: %s",
@@ -138,7 +138,7 @@ public class Schema {
 
         Set<String> allFields = new HashSet<>(fieldNames);
 
-        duplicateColumns = duplicate(partitionKeys);
+        duplicateColumns = duplicateFields(partitionKeys);
         Preconditions.checkState(
                 duplicateColumns.isEmpty(),
                 "Partition key constraint %s must not contain duplicate columns. Found: %s",
@@ -153,7 +153,7 @@ public class Schema {
         if (primaryKeys.isEmpty()) {
             return fields;
         }
-        duplicateColumns = duplicate(primaryKeys);
+        duplicateColumns = duplicateFields(primaryKeys);
         Preconditions.checkState(
                 duplicateColumns.isEmpty(),
                 "Primary key constraint %s must not contain duplicate columns. Found: %s",
@@ -218,9 +218,13 @@ public class Schema {
         return partitionKeys;
     }
 
-    private static Set<String> duplicate(List<String> names) {
+    public static Set<String> duplicateFields(List<String> names) {
         return names.stream()
-                .filter(name -> Collections.frequency(names, name) > 1)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+                .entrySet()
+                .stream()
+                .filter(e -> e.getValue() > 1)
+                .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
 

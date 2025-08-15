@@ -958,6 +958,19 @@ under the License.
                                 <order>org.apache.paimon,org.apache.paimon.shade,,javax,java,scala,\#</order>
                             </importOrder>
 
+                            <!-- Replace illegal imports with shaded versions -->
+                            <replaceRegex>
+                                <name>Replace Guava imports</name>
+                                <searchRegex>import com\.google\.common\.([^;]+);</searchRegex>
+                                <replacement>import org.apache.paimon.shade.guava30.com.google.common.$1;</replacement>
+                            </replaceRegex>
+
+                            <replaceRegex>
+                                <name>Replace Jackson imports</name>
+                                <searchRegex>import com\.fasterxml\.jackson\.([^;]+);</searchRegex>
+                                <replacement>import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.$1;</replacement>
+                            </replaceRegex>
+
                             <licenseHeader>
                                 <!-- replace it with ${project.rootDirectory} after maven 4.0.0, see MNG-7038 -->
                                 <file>${maven.multiModuleProjectDirectory}/copyright.txt</file>

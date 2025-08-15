@@ -830,6 +830,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testScanWithSpecifiedPartitionsWithFieldMapping() {
+        sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
+        sql("CREATE TABLE Q (id INT)");
+        sql(
+                "INSERT INTO P VALUES (1, 10, 'a'), (2, 20, 'a'), (1, 11, 'b'), (3, 31, 'b'), (1, 12, 'c'), (2, 22, 'c'), (3, 32, 'c')");
+        sql("INSERT INTO Q VALUES (1), (2)");
+        String query =
+                "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt=b;pt=c') */ ON Q.id = P.id ORDER BY Q.id, P.v";
+        assertThat(sql(query)).containsExactly(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
+    }
+
+    @Test
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();

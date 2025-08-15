@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalog.functions
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.bucket
 import org.apache.paimon.data.serializer.InternalRowSerializer
-import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableList, ImmutableMap}
+import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableMap, ImmutableSet}
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
@@ -61,7 +61,7 @@ object PaimonFunctions {
     MOD_BUCKET
   )
 
-  val names: ImmutableList[String] = FUNCTIONS.keySet.asList()
+  val names: ImmutableSet[String] = FUNCTIONS.keySet
 
   def bucketFunctionName(funcType: BucketFunctionType): String = TYPE_FUNC_MAPPING.get(funcType)
 

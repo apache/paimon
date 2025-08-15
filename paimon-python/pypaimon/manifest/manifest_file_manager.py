@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 import uuid
 from io import BytesIO
 from typing import List
@@ -42,7 +41,7 @@ class ManifestFileManager:
         self.primary_key_fields = self.table.table_schema.get_primary_key_fields()
         self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
 
-    def read(self, manifest_file_name: str) -> List[ManifestEntry]:
+    def read(self, manifest_file_name: str, shard_filter=None) -> List[ManifestEntry]:
         manifest_file_path = self.manifest_path / manifest_file_name
 
         entries = []
@@ -74,6 +73,8 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
+            if not shard_filter(entry):
+                continue
             entries.append(entry)
         return entries
 

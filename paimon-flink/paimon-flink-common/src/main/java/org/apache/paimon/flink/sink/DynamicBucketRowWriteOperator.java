@@ -27,6 +27,9 @@ import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import java.io.IOException;
+import java.util.List;
+
 /**
  * A {@link PrepareCommitOperator} to write {@link InternalRow} with bucket. Record schema is fixed.
  */
@@ -52,6 +55,14 @@ public class DynamicBucketRowWriteOperator
     public void processElement(StreamRecord<Tuple2<InternalRow, Integer>> element)
             throws Exception {
         write.write(element.getValue().f0, element.getValue().f1);
+    }
+
+    @Override
+    protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
+            throws IOException {
+        List<Committable> committables = super.prepareCommit(waitCompaction, checkpointId);
+        tryRefreshWrite();
+        return committables;
     }
 
     /** {@link StreamOperatorFactory} of {@link DynamicBucketRowWriteOperator}. */

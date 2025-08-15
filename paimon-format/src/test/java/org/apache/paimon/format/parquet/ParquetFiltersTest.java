@@ -22,12 +22,17 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.compat.FilterCompat.FilterPredicateCompat;
+import org.apache.parquet.filter2.predicate.FilterApi;
+import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.filter2.predicate.ParquetFilters;
+import org.apache.parquet.io.api.Binary;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -66,16 +71,6 @@ class ParquetFiltersTest {
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 "and(and(noteq(long1, 1), noteq(long1, 2)), noteq(long1, 3))",
                 true);
-
-        test(
-                builder.in(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
-                "",
-                false);
-
-        test(
-                builder.notIn(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
-                "",
-                false);
     }
 
     @Test
@@ -97,6 +92,153 @@ class ParquetFiltersTest {
                 builder.notIn(0, Arrays.asList("1", "2", "3")),
                 "and(and(noteq(string1, Binary{\"1\"}), noteq(string1, Binary{\"2\"})), noteq(string1, Binary{\"3\"}))",
                 true);
+    }
+
+    @Test
+    public void testInFilterLong() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "col1", new BigIntType()))));
+        test(
+                builder.in(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
+                FilterApi.in(
+                        FilterApi.longColumn("col1"),
+                        LongStream.range(1L, 22L).boxed().collect(Collectors.toSet())),
+                true);
+
+        test(
+                builder.notIn(0, LongStream.range(1L, 22L).boxed().collect(Collectors.toList())),
+                FilterApi.notIn(
+                        FilterApi.longColumn("col1"),
+                        LongStream.range(1L, 22L).boxed().collect(Collectors.toSet())),
+                true);
+    }
+
+    @Test
+    public void testInFilterDouble() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "col1", new DoubleType()))));
+        test(
+                builder.in(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Double::new)
+                                .collect(Collectors.toList())),
+                FilterApi.in(
+                        FilterApi.doubleColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Double::new)
+                                .collect(Collectors.toSet())),
+                true);
+
+        test(
+                builder.notIn(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Double::new)
+                                .collect(Collectors.toList())),
+                FilterApi.notIn(
+                        FilterApi.doubleColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Double::new)
+                                .collect(Collectors.toSet())),
+                true);
+    }
+
+    @Test
+    public void testInFilterString() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "col1", new VarCharType()))));
+        test(
+                builder.in(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(String::valueOf)
+                                .collect(Collectors.toList())),
+                FilterApi.in(
+                        FilterApi.binaryColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(s -> Binary.fromString(String.valueOf(s)))
+                                .collect(Collectors.toSet())),
+                true);
+
+        test(
+                builder.notIn(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(String::valueOf)
+                                .collect(Collectors.toList())),
+                FilterApi.notIn(
+                        FilterApi.binaryColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(s -> Binary.fromString(String.valueOf(s)))
+                                .collect(Collectors.toSet())),
+                true);
+    }
+
+    @Test
+    public void testInFilterFloat() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "col1", new FloatType()))));
+
+        test(
+                builder.in(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Float::new)
+                                .collect(Collectors.toList())),
+                FilterApi.in(
+                        FilterApi.floatColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Float::new)
+                                .collect(Collectors.toSet())),
+                true);
+
+        test(
+                builder.notIn(
+                        0,
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Float::new)
+                                .collect(Collectors.toList())),
+                FilterApi.notIn(
+                        FilterApi.floatColumn("col1"),
+                        LongStream.range(1L, 22L)
+                                .boxed()
+                                .map(Float::new)
+                                .collect(Collectors.toSet())),
+                true);
+    }
+
+    private void test(Predicate predicate, FilterPredicate parquetPredicate, boolean canPushDown) {
+        FilterCompat.Filter filter = ParquetFilters.convert(PredicateBuilder.splitAnd(predicate));
+        if (canPushDown) {
+            FilterPredicateCompat compat = (FilterPredicateCompat) filter;
+            assertThat(compat.getFilterPredicate()).isEqualTo(parquetPredicate);
+        } else {
+            assertThat(filter).isEqualTo(FilterCompat.NOOP);
+        }
     }
 
     private void test(Predicate predicate, String expected, boolean canPushDown) {

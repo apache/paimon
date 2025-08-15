@@ -52,7 +52,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
 
         AppendOnlyMultiTableCompactionWorkerOperator workerOperator =
                 new AppendOnlyMultiTableCompactionWorkerOperator.Factory(
-                                () -> catalog, "user", new Options())
+                                () -> catalog, "user", new Options(), false)
                         .createStreamOperator(
                                 new StreamOperatorParameters<>(
                                         new SourceOperatorStreamTask<Integer>(

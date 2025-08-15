@@ -26,9 +26,12 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilterV2}
+import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
+import org.apache.spark.sql.catalyst.optimizer.ConstantFolding
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.sources.{AlwaysTrue, And => SourceAnd, EqualNullSafe, EqualTo, Filter => SourceFilter}
@@ -64,6 +67,25 @@ trait ExpressionHelper extends ExpressionHelperBase {
       None
     } else {
       Some(PredicateBuilder.and(predicates: _*))
+    }
+  }
+
+  def resolveFilter(
+      spark: SparkSession,
+      relation: DataSourceV2Relation,
+      conditionSql: String): Expression = {
+    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
+    val filter = Filter(unResolvedExpression, relation)
+    spark.sessionState.analyzer.executeAndCheck(filter, new QueryPlanningTracker) match {
+      case filter: Filter =>
+        try {
+          ConstantFolding.apply(filter).asInstanceOf[Filter].condition
+        } catch {
+          case _: Throwable => filter.condition
+        }
+      case _ =>
+        throw new RuntimeException(
+          s"Could not resolve expression $conditionSql in relation: $relation")
     }
   }
 }
@@ -186,16 +208,6 @@ trait ExpressionHelperBase extends PredicateHelper {
     case other =>
       throw new UnsupportedOperationException(
         s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
-  }
-
-  def resolveFilter(spark: SparkSession, plan: LogicalPlan, conditionSql: String): Expression = {
-    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
-    val filter = Filter(unResolvedExpression, plan)
-    spark.sessionState.analyzer.execute(filter) match {
-      case filter: Filter => filter.condition
-      case _ =>
-        throw new RuntimeException(s"Could not resolve expression $conditionSql in plan: $plan")
-    }
   }
 
   def splitPruePartitionAndOtherPredicates(

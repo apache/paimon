@@ -84,37 +84,6 @@ DROP FUNCTION mydb.parse_str;
 
 This statement deletes the existing `parse_str` function from the `mydb` database, relinquishing its functionality.
 
-## Lambda Function Usage in Spark
+## Functions in Spark
 
-### Create Function
-
-```sql
--- Spark SQL
-CALL sys.create_function(`function` => 'my_db.area_func',
-  `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',
-  `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',
-  `deterministic` => true,
-  `comment` => 'comment',
-  `options` => 'k1=v1,k2=v2'
-);
-```
-
-### Alter Function
-
-```sql
--- Spark SQL
-CALL sys.alter_function(`function` => 'my_db.area_func',
-  `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'
-);
-```
-```sql
--- Spark SQL
-select paimon.my_db.area_func(1, 2);
-```
-
-### Drop Function
-
-```sql
--- Spark SQL
-CALL sys.drop_function(`function` => 'my_db.area_func');
-```
+see [SQL Functions]({{< ref "spark/sql-functions#user-defined-function" >}})
