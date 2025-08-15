@@ -16,10 +16,10 @@
 # limitations under the License.
 ################################################################################
 
-import json
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.rest_json import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 
 
@@ -46,5 +46,4 @@ class SnapshotManager:
             return None
 
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
-        snapshot_data = json.loads(snapshot_content)
-        return Snapshot.from_json(snapshot_data)
+        return JSON.from_json(snapshot_content, Snapshot)
