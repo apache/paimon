@@ -39,9 +39,7 @@ import javax.annotation.Nullable;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
-import java.time.format.DateTimeFormatter;
 
 import static org.apache.paimon.utils.TypeUtils.castFromString;
 
@@ -63,11 +61,6 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private boolean headerSkipped = false;
     private boolean readerClosed = false;
     private CsvRecordIterator reader;
-
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, Options options)
             throws IOException {
@@ -163,7 +156,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         if (line == null || line.isEmpty()) {
             return new String[] {};
         }
-        return CSV_MAPPER.readerFor(String[].class).with(schema).readValue(new StringReader(line));
+        return CSV_MAPPER.readerFor(String[].class).with(schema).readValue(line);
     }
 
     private InternalRow parseCsvLine(String line, CsvSchema schema) throws IOException {

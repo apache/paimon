@@ -78,7 +78,7 @@ public class CsvFormatWriter implements FormatWriter {
 
             Object value =
                     InternalRow.createFieldGetter(rowType.getTypeAt(i), i).getFieldOrNull(element);
-            String fieldValue = TypeUtils.castToString(value, rowType.getTypeAt(i));
+            String fieldValue = escapeField(TypeUtils.castToString(value, rowType.getTypeAt(i)));
             sb.append(fieldValue);
         }
         sb.append(lineDelimiter);

@@ -1102,7 +1102,7 @@ public class HiveCatalog extends AbstractCatalog {
      * @param partitionKeys list of partition keys
      * @throws IllegalArgumentException if partition key positions are incorrect
      */
-    public static void validatePartitionKeysAtEnd(RowType rowType, List<String> partitionKeys) {
+    static void validatePartitionKeysAtEnd(RowType rowType, List<String> partitionKeys) {
         if (partitionKeys == null || partitionKeys.isEmpty()) {
             return;
         }

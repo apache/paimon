@@ -51,7 +51,7 @@ public class CsvFileFormat extends FileFormat {
     protected static final ConfigOption<String> FIELD_DELIMITER =
             ConfigOptions.key("field-delimiter")
                     .stringType()
-                    .defaultValue("\001")
+                    .defaultValue(",")
                     .withDescription("The field delimiter for CSV or TXT format");
 
     protected static final ConfigOption<String> CSV_LINE_DELIMITER =

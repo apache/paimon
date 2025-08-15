@@ -49,15 +49,11 @@ import java.util.Map;
 public class JsonToRowConverter {
 
     private final RowType rowType;
-    private final Options options;
-    private final boolean timestampFormatStandard;
     private final String mapNullKeyMode;
     private final String mapNullKeyLiteral;
 
     public JsonToRowConverter(RowType rowType, Options options) {
         this.rowType = rowType;
-        this.options = options;
-        this.timestampFormatStandard = options.get(JsonFileFormat.JSON_TIMESTAMP_FORMAT_STANDARD);
         this.mapNullKeyMode = options.get(JsonFileFormat.JSON_MAP_NULL_KEY_MODE);
         this.mapNullKeyLiteral = options.get(JsonFileFormat.JSON_MAP_NULL_KEY_LITERAL);
     }
@@ -156,7 +152,10 @@ public class JsonToRowConverter {
             if (keyStr == null) {
                 switch (mapNullKeyMode) {
                     case "FAIL":
-                        throw new RuntimeException("Map key is null and map-null-key-mode is FAIL");
+                        throw new RuntimeException(
+                                "Null map key encountered and map-null-key-mode is set to FAIL. "
+                                        + "To resolve this, set map-null-key-mode to 'DROP' to skip null keys, "
+                                        + "or 'LITERAL' and provide a replacement value using map-null-key-literal.");
                     case "DROP":
                         continue; // Skip this entry
                     case "LITERAL":
