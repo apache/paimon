@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import glob
 import logging
 import os
 import shutil
@@ -185,7 +186,7 @@ class RESTCatalogBaseTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/snapshot/snapshot-1"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/manifest"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/dt=p1"))
-        # self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*.avro")), 2)
+        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*.avro")), 2)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()

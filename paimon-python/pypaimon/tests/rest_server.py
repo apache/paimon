@@ -504,10 +504,8 @@ class RESTCatalogServer:
 
         # Create directory structure
         snapshot_dir = os.path.join(table_path, "snapshot")
-        manifest_dir = os.path.join(table_path, "manifest")
 
         os.makedirs(snapshot_dir, exist_ok=True)
-        os.makedirs(manifest_dir, exist_ok=True)
 
         # Write snapshot file (snapshot-{id})
         snapshot_file = os.path.join(snapshot_dir, f"snapshot-{snapshot.id}")
@@ -532,18 +530,6 @@ class RESTCatalogServer:
         with open(latest_file, 'w') as f:
             f.write(str(snapshot.id))
 
-        # Create mock manifest files (need 2 for the test)
-        manifest_files = []
-        for i in range(2):
-            manifest_filename = f"manifest-{uuid.uuid4()}.avro"
-            manifest_file_path = os.path.join(manifest_dir, manifest_filename)
-            manifest_files.append(manifest_filename)
-
-            # Create a minimal avro file (empty but valid)
-            # For testing purposes, we'll create a simple text file with .avro extension
-            with open(manifest_file_path, 'w') as f:
-                f.write(f"# Mock manifest file {i}\n")
-
         # Create partition directories based on statistics
         if statistics:
             for stat in statistics:
@@ -566,8 +552,6 @@ class RESTCatalogServer:
                 os.makedirs(partition_dir, exist_ok=True)
 
         self.logger.info(f"Created snapshot files at: {snapshot_dir}")
-        self.logger.info(f"Created manifest directory at: {manifest_dir}")
-        self.logger.info(f"Created {len(manifest_files)} manifest files")
 
     # Utility methods
     def _mock_response(self, response: Union[RESTResponse, str], http_code: int) -> Tuple[str, int]:
