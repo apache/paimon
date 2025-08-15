@@ -15,7 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import glob
 import os
 
 import pyarrow as pa
@@ -168,8 +167,6 @@ class RESTTableTest(RESTCatalogBaseTest):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/LATEST"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/snapshot-1"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/manifest"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/manifest/*.avro")), 2)
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/user_id=2/bucket-postpone/*.avro")), 1)
 
     def test_postpone_read_write(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],

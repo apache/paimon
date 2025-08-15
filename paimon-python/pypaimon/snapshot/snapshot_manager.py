@@ -48,21 +48,3 @@ class SnapshotManager:
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
         snapshot_data = json.loads(snapshot_content)
         return Snapshot.from_json(snapshot_data)
-
-    def commit_snapshot(self, snapshot_id: int, snapshot_data: Snapshot):
-        snapshot_file = self.snapshot_dir / f"snapshot-{snapshot_id}"
-        latest_file = self.snapshot_dir / "LATEST"
-
-        try:
-            snapshot_json = json.dumps(snapshot_data.to_json(), indent=2)
-            snapshot_success = self.file_io.try_to_write_atomic(snapshot_file, snapshot_json)
-            if not snapshot_success:
-                self.file_io.write_file(snapshot_file, snapshot_json, overwrite=True)
-
-            latest_success = self.file_io.try_to_write_atomic(latest_file, str(snapshot_id))
-            if not latest_success:
-                self.file_io.write_file(latest_file, str(snapshot_id), overwrite=True)
-
-        except Exception as e:
-            self.file_io.delete_quietly(snapshot_file)
-            raise RuntimeError(f"Failed to commit snapshot {snapshot_id}: {e}") from e
