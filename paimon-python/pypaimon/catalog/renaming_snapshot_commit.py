@@ -16,13 +16,13 @@
 # limitations under the License.
 ################################################################################
 
-import json
 from pathlib import Path
 from typing import List
 
 from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.lock import Lock
+from pypaimon.common.rest_json import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
@@ -73,7 +73,7 @@ class RenamingSnapshotCommit(SnapshotCommit):
         def commit_callable() -> bool:
             """Internal function to perform the actual commit."""
             # Try to write atomically using the file IO
-            committed = self.file_io.try_to_write_atomic(new_snapshot_path, json.dumps(snapshot.to_json()))
+            committed = self.file_io.try_to_write_atomic(new_snapshot_path, JSON.to_json(snapshot))
             if committed:
                 # Update the latest hint
                 self._commit_latest_hint(snapshot.id)
