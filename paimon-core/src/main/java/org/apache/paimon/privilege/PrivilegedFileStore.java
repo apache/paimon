@@ -44,6 +44,7 @@ import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -231,5 +232,10 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         wrapped.setSnapshotCache(cache);
+    }
+
+    @Override
+    public void setDVMetaCache(DVMetaCache dvMetaCache) {
+        wrapped.setDVMetaCache(dvMetaCache);
     }
 }

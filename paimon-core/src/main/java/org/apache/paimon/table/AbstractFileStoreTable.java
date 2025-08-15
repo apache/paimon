@@ -55,6 +55,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -93,6 +94,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Nullable protected transient SegmentsCache<Path> manifestCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
     @Nullable protected transient Cache<String, Statistics> statsCache;
+    @Nullable protected transient DVMetaCache dvmetaCache;
 
     protected AbstractFileStoreTable(
             FileIO fileIO,
@@ -136,6 +138,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void setStatsCache(Cache<String, Statistics> cache) {
         this.statsCache = cache;
+    }
+
+    @Override
+    public void setDVMetaCache(DVMetaCache cache) {
+        this.dvmetaCache = cache;
+        store().setDVMetaCache(cache);
     }
 
     @Override

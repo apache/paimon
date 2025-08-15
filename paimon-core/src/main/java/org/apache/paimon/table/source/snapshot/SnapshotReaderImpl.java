@@ -286,7 +286,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public SnapshotReader withMetricRegistry(MetricRegistry registry) {
-        scan.withMetrics(new ScanMetrics(registry, tableName));
+        ScanMetrics scanMetrics = new ScanMetrics(registry, tableName);
+        scan.withMetrics(scanMetrics);
+        indexFileHandler.withCacheMetrics(scanMetrics.getDvMetaCacheMetrics());
         return this;
     }
 
@@ -349,15 +351,32 @@ public class SnapshotReaderImpl implements SnapshotReader {
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> groupedManifestEntries) {
         List<DataSplit> splits = new ArrayList<>();
         // Read deletion indexes at once to reduce file IO
-        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap = null;
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFilesMap = null;
         if (!isStreaming) {
-            deletionIndexFilesMap =
-                    deletionVectors && snapshot != null
-                            ? indexFileHandler.scan(
-                                    snapshot,
-                                    DELETION_VECTORS_INDEX,
-                                    groupedManifestEntries.keySet())
-                            : Collections.emptyMap();
+            Set<Pair<BinaryRow, Integer>> partitionBuckets =
+                    groupedManifestEntries.entrySet().stream()
+                            .flatMap(
+                                    e ->
+                                            e.getValue().keySet().stream()
+                                                    .map(bucket -> Pair.of(e.getKey(), bucket)))
+                            .collect(Collectors.toSet());
+            // TODO: to avoid cache being frequently evicted,
+            //  currently we only read from cache when bucket number is 1
+            if (indexFileHandler.isEnableDVMetaCache() && partitionBuckets.size() == 1) {
+                Pair<BinaryRow, Integer> partitionBucket = partitionBuckets.iterator().next();
+                Map<String, DeletionFile> deletionFiles =
+                        indexFileHandler.scanDVIndexWithCache(
+                                snapshot, partitionBucket.getLeft(), partitionBucket.getRight());
+                if (deletionFiles != null && deletionFiles.size() > 0) {
+                    deletionFilesMap = new HashMap<>();
+                    deletionFilesMap.put(partitionBucket, deletionFiles);
+                }
+            } else {
+                deletionFilesMap =
+                        deletionVectors && snapshot != null
+                                ? indexFileHandler.scanDVIndex(snapshot, partitionBuckets)
+                                : Collections.emptyMap();
+            }
         }
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
                 groupedManifestEntries.entrySet()) {
@@ -387,16 +406,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
-                    if (deletionVectors && deletionIndexFilesMap != null) {
+                    if (deletionVectors && deletionFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(
-                                        indexFileHandler.dvIndex(partition, bucket),
                                         dataFiles,
-                                        deletionIndexFilesMap.getOrDefault(
+                                        deletionFilesMap.getOrDefault(
                                                 Pair.of(partition, bucket),
-                                                Collections.emptyList())));
+                                                Collections.emptyMap())));
                     }
-
                     splits.add(builder.build());
                 }
             }
@@ -586,6 +603,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
             deletionFiles.add(null);
         }
 
+        return deletionFiles;
+    }
+
+    public List<DeletionFile> getDeletionFiles(
+            List<DataFileMeta> dataFiles, Map<String, DeletionFile> deletionFilesMap) {
+        List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
+        dataFiles.stream()
+                .map(DataFileMeta::fileName)
+                .map(f -> deletionFilesMap == null ? null : deletionFilesMap.get(f))
+                .forEach(deletionFiles::add);
         return deletionFiles;
     }
 }

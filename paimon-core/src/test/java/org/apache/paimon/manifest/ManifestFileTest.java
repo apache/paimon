@@ -32,6 +32,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -57,6 +58,7 @@ public class ManifestFileTest {
     public void testWriteAndReadManifestFile() {
         List<ManifestEntry> entries = generateData();
         ManifestFileMeta meta = gen.createManifestFileMeta(entries);
+        System.out.println(tempDir.toString());
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 
         List<ManifestFileMeta> actualMetas = manifestFile.write(entries);
@@ -66,6 +68,17 @@ public class ManifestFileTest {
                         .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
+    }
+
+    @Test
+    public void testReadLocalManifestFile() {
+        ManifestFile manifestFile = createManifestFile("/Users/langu/repos/scripts/paimon");
+        List<ManifestEntry> actualEntries =
+                new ArrayList<>(
+                        manifestFile.read("manifest-3b512107-8bb2-4d30-ad17-64f1750de290-1"));
+        for (ManifestEntry entry : actualEntries) {
+            System.out.println(entry);
+        }
     }
 
     @RepeatedTest(10)
