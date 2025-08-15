@@ -176,6 +176,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schemaManager,
                 schema,
                 manifestFileFactory(),
+                fileIO,
+                pathFactory(),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled());
     }
