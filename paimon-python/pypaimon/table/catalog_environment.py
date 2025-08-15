@@ -18,7 +18,11 @@ limitations under the License.
 from typing import Optional
 
 from pypaimon.catalog.catalog_loader import CatalogLoader
+from pypaimon.catalog.catalog_snapshot_commit import CatalogSnapshotCommit
+from pypaimon.catalog.renaming_snapshot_commit import RenamingSnapshotCommit
+from pypaimon.catalog.snapshot_commit import SnapshotCommit
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.lock import EmptyLock
 
 
 class CatalogEnvironment:
@@ -34,3 +38,57 @@ class CatalogEnvironment:
         self.uuid = uuid
         self.catalog_loader = catalog_loader
         self.supports_version_management = supports_version_management
+
+    def snapshot_commit(self, snapshot_manager) -> Optional[SnapshotCommit]:
+        """
+        Create a SnapshotCommit instance based on the catalog environment configuration.
+
+        Args:
+            snapshot_manager: The SnapshotManager instance
+
+        Returns:
+            SnapshotCommit instance or None
+        """
+        if self.catalog_loader is not None and self.supports_version_management:
+            # Use catalog-based snapshot commit when catalog loader is available
+            # and version management is supported
+            catalog = self.catalog_loader.load()
+            return CatalogSnapshotCommit(catalog, self.identifier, self.uuid)
+        else:
+            # Use file renaming-based snapshot commit with empty lock
+            # In a full implementation, this would use a proper lock factory
+            # to create locks based on the catalog lock context
+            lock = EmptyLock.empty()
+            return RenamingSnapshotCommit(snapshot_manager, lock)
+
+    def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
+        """
+        Create a copy of this CatalogEnvironment with a different identifier.
+
+        Args:
+            identifier: The new identifier
+
+        Returns:
+            A new CatalogEnvironment instance
+        """
+        return CatalogEnvironment(
+            identifier=identifier,
+            uuid=self.uuid,
+            catalog_loader=self.catalog_loader,
+            supports_version_management=self.supports_version_management
+        )
+
+    @staticmethod
+    def empty() -> 'CatalogEnvironment':
+        """
+        Create an empty CatalogEnvironment with default values.
+
+        Returns:
+            An empty CatalogEnvironment instance
+        """
+        return CatalogEnvironment(
+            identifier=None,
+            uuid=None,
+            catalog_loader=None,
+            supports_version_management=False
+        )

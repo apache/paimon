@@ -57,7 +57,9 @@ class JSON:
                 result[json_name] = field_value.to_dict()
             elif isinstance(field_value, list):
                 result[json_name] = [
-                    item.to_dict() if hasattr(item, "to_dict") else item
+                    JSON.__to_dict(item) if is_dataclass(item)
+                    else item.to_dict() if hasattr(item, "to_dict")
+                    else item
                     for item in field_value
                 ]
             else:

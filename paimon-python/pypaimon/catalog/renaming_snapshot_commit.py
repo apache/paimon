@@ -1,0 +1,120 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+import json
+from pathlib import Path
+from typing import List
+
+from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.lock import Lock
+from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+
+class RenamingSnapshotCommit(SnapshotCommit):
+    """
+    A SnapshotCommit using file renaming to commit.
+
+    Note that when the file system is local or HDFS, rename is atomic.
+    But if the file system is object storage, we need additional lock protection.
+    """
+
+    def __init__(self, snapshot_manager: SnapshotManager, lock: Lock):
+        """
+        Initialize RenamingSnapshotCommit.
+
+        Args:
+            snapshot_manager: The snapshot manager to use
+            lock: The lock for synchronization
+        """
+        self.snapshot_manager = snapshot_manager
+        self.file_io: FileIO = snapshot_manager.file_io
+        self.lock = lock
+
+    def commit(self, snapshot: Snapshot, branch: str, statistics: List[PartitionStatistics]) -> bool:
+        """
+        Commit the snapshot using file renaming.
+
+        Args:
+            snapshot: The snapshot to commit
+            branch: The branch name to commit to
+            statistics: List of partition statistics (currently unused but kept for interface compatibility)
+
+        Returns:
+            True if commit was successful, False otherwise
+
+        Raises:
+            Exception: If commit fails
+        """
+        # Determine the correct snapshot path based on branch
+        if hasattr(self.snapshot_manager, 'branch') and self.snapshot_manager.branch == branch:
+            new_snapshot_path = self._get_snapshot_path(snapshot.id)
+        else:
+            # For different branches, we would need to copy with branch
+            # For now, use the main branch path as a simplification
+            new_snapshot_path = self._get_snapshot_path(snapshot.id)
+
+        def commit_callable() -> bool:
+            """Internal function to perform the actual commit."""
+            # Try to write atomically using the file IO
+            committed = self.file_io.try_to_write_atomic(new_snapshot_path, json.dumps(snapshot.to_json()))
+            if committed:
+                # Update the latest hint
+                self._commit_latest_hint(snapshot.id)
+            return committed
+
+        # Use lock to ensure atomic operation
+        return self.lock.run_with_lock(
+            lambda: not self.file_io.exists(new_snapshot_path) and commit_callable()
+        )
+
+    def close(self):
+        """Close the lock and release resources."""
+        self.lock.close()
+
+    def _get_snapshot_path(self, snapshot_id: int) -> Path:
+        """
+        Get the path for a snapshot file.
+
+        Args:
+            snapshot_id: The snapshot ID
+
+        Returns:
+            Path to the snapshot file
+        """
+        return self.snapshot_manager.snapshot_dir / f"snapshot-{snapshot_id}"
+
+    def _commit_latest_hint(self, snapshot_id: int):
+        """
+        Update the latest snapshot hint.
+
+        Args:
+            snapshot_id: The latest snapshot ID
+        """
+        latest_file = self.snapshot_manager.snapshot_dir / "LATEST"
+        try:
+            # Try atomic write first
+            success = self.file_io.try_to_write_atomic(latest_file, str(snapshot_id))
+            if not success:
+                # Fallback to regular write
+                self.file_io.write_file(latest_file, str(snapshot_id), overwrite=True)
+        except Exception as e:
+            # Log the error but don't fail the commit for this
+            # In a production system, you might want to use proper logging
+            print(f"Warning: Failed to update LATEST hint: {e}")

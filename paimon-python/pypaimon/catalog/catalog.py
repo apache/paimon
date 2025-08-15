@@ -17,10 +17,12 @@
 #################################################################################
 
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import List, Optional, Union
 
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot import Snapshot
 
 
 class Catalog(ABC):
@@ -51,3 +53,38 @@ class Catalog(ABC):
     @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         """Create table with schema."""
+
+    def supports_version_management(self) -> bool:
+        """
+        Whether this catalog supports version management for tables.
+
+        Returns:
+            True if the catalog supports version management, False otherwise
+        """
+        return False
+
+    def commit_snapshot(
+            self,
+            identifier: Identifier,
+            table_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics]
+    ) -> bool:
+        """
+        Commit the Snapshot for table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+            table_uuid: UUID of the table to avoid wrong commit
+            snapshot: Snapshot to be committed
+            statistics: Statistics information of this change
+
+        Returns:
+            True if commit was successful, False otherwise
+
+        Raises:
+            UnsupportedOperationException: If the catalog does not support version management
+        """
+        if not self.supports_version_management():
+            raise NotImplementedError("This catalog does not support version management")
+        raise NotImplementedError("commit_snapshot method must be implemented by subclasses")
