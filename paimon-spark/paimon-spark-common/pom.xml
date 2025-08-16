@@ -67,11 +67,6 @@ under the License.
             <artifactId>antlr4-runtime</artifactId>
             <version>${antlr4.version}</version>
         </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-bundle</artifactId>
-        </dependency>
     </dependencies>
 
     <build>
