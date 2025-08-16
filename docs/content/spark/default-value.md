@@ -37,7 +37,10 @@ You can create a table with columns with default values using the following SQL:
 CREATE TABLE my_table (
     a BIGINT,
     b STRING DEFAULT 'my_value',
-    c INT DEFAULT 5 
+    c INT DEFAULT 5,
+    tags ARRAY<STRING> DEFAULT ARRAY('tag1', 'tag2', 'tag3'),
+    properties MAP<STRING, STRING> DEFAULT MAP('key1', 'value1', 'key2', 'value2'),
+    nested STRUCT<x: INT, y: STRING> DEFAULT STRUCT(42, 'default_value')
 );
 ```
 
@@ -45,6 +48,16 @@ CREATE TABLE my_table (
 
 For SQL commands that execute table writes, such as the `INSERT`, `UPDATE`, and `MERGE` commands, the `DEFAULT` keyword
 or `NULL` value is parsed into the default value specified for the corresponding column.
+
+For example:
+
+```sql
+INSERT INTO my_table (a) VALUES (1), (2);
+
+SELECT * FROM my_table;
+-- result: [[1, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [2, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}]]
+```
 
 ## Alter Default Value
 
@@ -64,7 +77,24 @@ INSERT INTO T (a) VALUES (2);
 -- result: [[1, 2], [2, 3]]
 ```
 
-The default value of `'b'` column has been changed to 3 from 2.
+The default value of `'b'` column has been changed to 3 from 2. You can also alter default values for complex types:
+
+```sql
+ALTER TABLE my_table ALTER COLUMN tags SET DEFAULT ARRAY('new_tag1', 'new_tag2');
+
+INSERT INTO my_table (a) VALUES (3);
+-- result: [[1, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [2, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [3, my_value, 5, [new_tag1, new_tag2], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}]]
+
+ALTER TABLE my_table ALTER COLUMN properties SET DEFAULT MAP('new_key', 'new_value');
+
+INSERT INTO my_table (a) VALUES (4);
+-- result: [[1, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [2, my_value, 5, [tag1, tag2, tag3], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [3, my_value, 5, [new_tag1, new_tag2], {'key1' -> 'value1', 'key2' -> 'value2'}, {42, default_value}],
+--          [4, my_value, 5, [new_tag1, new_tag2], {'new_key' -> 'new_value'}, {42, default_value}]]
+```
 
 ## Limitation
 
