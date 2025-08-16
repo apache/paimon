@@ -19,20 +19,24 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
-from pypaimon.api import CatalogOptions, RESTApi
+from pypaimon.api import (CatalogOptions,
+                          NoSuchResourceException, RESTApi)
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -44,6 +48,55 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(Options(self.api.options), context.hadoop_conf, context.prefer_io_loader,
                                              context.fallback_io_loader)
         self.data_token_enabled = self.api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
+
+    def catalog_loader(self):
+        """
+        Create and return a RESTCatalogLoader for this catalog.
+
+        Returns:
+            A RESTCatalogLoader instance configured with this catalog's context
+        """
+        from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+        return RESTCatalogLoader(self.context)
+
+    def supports_version_management(self) -> bool:
+        """
+        Return whether this catalog supports version management for tables.
+
+        Returns:
+            True since REST catalogs support version management
+        """
+        return True
+
+    def commit_snapshot(
+            self,
+            identifier: Identifier,
+            table_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics]
+    ) -> bool:
+        """
+        Commit the Snapshot for table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+            table_uuid: UUID of the table to avoid wrong commit
+            snapshot: Snapshot to be committed
+            statistics: Statistics information of this change
+
+        Returns:
+            True if commit was successful, False otherwise
+
+        Raises:
+            TableNotExistException: If the target table does not exist
+        """
+        try:
+            return self.api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except Exception as e:
+            # Handle other exceptions that might be thrown by the API
+            raise RuntimeError(f"Failed to commit snapshot for table {identifier.get_full_name()}: {e}") from e
 
     def list_databases(self) -> List[str]:
         return self.api.list_databases()
@@ -146,8 +199,8 @@ class RESTCatalog(Catalog):
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
-            catalog_loader=None,
-            supports_version_management=False
+            catalog_loader=self.catalog_loader(),
+            supports_version_management=True  # REST catalogs support version management
         )
         path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
         path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
@@ -164,4 +217,4 @@ class RESTCatalog(Catalog):
                catalog_environment: CatalogEnvironment
                ) -> FileStoreTable:
         """Create FileStoreTable with dynamic options and catalog environment"""
-        return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema)
+        return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)

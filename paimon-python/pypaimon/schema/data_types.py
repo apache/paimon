@@ -77,6 +77,10 @@ class AtomicType(DataType):
             return self.type + " NOT NULL"
         return self.type
 
+    @classmethod
+    def from_dict(cls, data: str) -> "AtomicType":
+        return DataTypeParser.parse_data_type(data)
+
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
         return f"{self.type}{null_suffix}"
@@ -97,6 +101,10 @@ class ArrayType(DataType):
             "nullable": self.nullable
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ArrayType":
+        return DataTypeParser.parse_data_type(data)
+
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
         return f"ARRAY<{self.element}>{null_suffix}"
@@ -116,6 +124,10 @@ class MultisetType(DataType):
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MultisetType":
+        return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
@@ -143,6 +155,10 @@ class MapType(DataType):
             "value": self.value.to_dict() if self.value else None,
             "nullable": self.nullable,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MapType":
+        return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
@@ -211,6 +227,10 @@ class RowType(DataType):
             "fields": [field.to_dict() for field in self.fields],
             "nullable": self.nullable,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RowType":
+        return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
         field_strs = [f"{field.name}: {field.type}" for field in self.fields]

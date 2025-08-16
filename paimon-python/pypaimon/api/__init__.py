@@ -19,20 +19,24 @@ import logging
 from typing import Callable, Dict, List, Optional
 from urllib.parse import unquote
 
-from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
-                                       GetTableResponse, GetTableTokenResponse,
+from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
+                                       GetDatabaseResponse, GetTableResponse,
+                                       GetTableTokenResponse,
                                        ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
                                        PagedResponse)
 from pypaimon.api.api_resquest import (AlterDatabaseRequest,
+                                       CommitTableRequest,
                                        CreateDatabaseRequest,
                                        CreateTableRequest, RenameTableRequest)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.typedef import T
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot import Snapshot
 
 
 class RESTException(Exception):
@@ -118,6 +122,10 @@ class ResourcePaths:
 
     def rename_table(self) -> str:
         return f"{self.base_path}/{self.TABLES}/rename"
+
+    def commit_table(self, database_name: str, table_name: str) -> str:
+        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
+                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/commit")
 
 
 class RESTApi:
@@ -336,3 +344,36 @@ class RESTApi:
             GetTableTokenResponse,
             self.rest_auth_function,
         )
+
+    def commit_snapshot(
+            self,
+            identifier: Identifier,
+            table_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics]
+    ) -> bool:
+        """
+        Commit snapshot for table.
+
+        Args:
+            identifier: Database name and table name
+            table_uuid: UUID of the table to avoid wrong commit
+            snapshot: Snapshot for committing
+            statistics: Statistics for this snapshot incremental
+
+        Returns:
+            True if commit success
+
+        Raises:
+            NoSuchResourceException: Exception thrown on HTTP 404 means the table not exists
+            ForbiddenException: Exception thrown on HTTP 403 means don't have the permission for this table
+        """
+        request = CommitTableRequest(table_uuid, snapshot, statistics)
+        response = self.client.post_with_response_type(
+            self.resource_paths.commit_table(
+                identifier.database_name, identifier.object_name),
+            request,
+            CommitTableResponse,
+            self.rest_auth_function
+        )
+        return response.is_success()

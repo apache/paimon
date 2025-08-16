@@ -18,11 +18,13 @@ limitations under the License.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.rest_json import json_field
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot import Snapshot
 
 
 class RESTRequest(ABC):
@@ -63,3 +65,14 @@ class CreateTableRequest(RESTRequest):
 
     identifier: Identifier = json_field(FIELD_IDENTIFIER)
     schema: Schema = json_field(FIELD_SCHEMA)
+
+
+@dataclass
+class CommitTableRequest(RESTRequest):
+    FIELD_TABLE_UUID = "tableUuid"
+    FIELD_SNAPSHOT = "snapshot"
+    FIELD_STATISTICS = "statistics"
+
+    table_uuid: Optional[str] = json_field(FIELD_TABLE_UUID)
+    snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
+    statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)

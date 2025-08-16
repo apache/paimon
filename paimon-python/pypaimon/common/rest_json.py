@@ -43,6 +43,11 @@ class JSON:
     @staticmethod
     def __to_dict(obj: Any) -> Dict[str, Any]:
         """Convert to dictionary with custom field names"""
+        # If object has custom to_dict method, use it
+        if hasattr(obj, "to_dict") and callable(getattr(obj, "to_dict")):
+            return obj.to_dict()
+
+        # Otherwise, use dataclass field-by-field serialization
         result = {}
         for field_info in fields(obj):
             field_value = getattr(obj, field_info.name)
@@ -51,13 +56,15 @@ class JSON:
             json_name = field_info.metadata.get("json_name", field_info.name)
 
             # Handle nested objects
-            if is_dataclass(field_value):
-                result[json_name] = JSON.__to_dict(field_value)
-            elif hasattr(field_value, "to_dict"):
+            if hasattr(field_value, "to_dict"):
                 result[json_name] = field_value.to_dict()
+            elif is_dataclass(field_value):
+                result[json_name] = JSON.__to_dict(field_value)
             elif isinstance(field_value, list):
                 result[json_name] = [
-                    item.to_dict() if hasattr(item, "to_dict") else item
+                    item.to_dict() if hasattr(item, "to_dict")
+                    else JSON.__to_dict(item) if is_dataclass(item)
+                    else item
                     for item in field_value
                 ]
             else:
@@ -68,6 +75,11 @@ class JSON:
     @staticmethod
     def __from_dict(data: Dict[str, Any], target_class: Type[T]) -> T:
         """Create instance from dictionary"""
+        # If target class has custom from_dict method, use it
+        if hasattr(target_class, "from_dict") and callable(getattr(target_class, "from_dict")):
+            return target_class.from_dict(data)
+
+        # Otherwise, use dataclass field-by-field deserialization
         # Create field name mapping (json_name -> field_name)
         field_mapping = {}
         type_mapping = {}

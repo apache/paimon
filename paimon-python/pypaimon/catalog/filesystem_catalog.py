@@ -31,6 +31,7 @@ from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
@@ -67,7 +68,17 @@ class FileSystemCatalog(Catalog):
             raise ValueError(CoreOptions.SCAN_FALLBACK_BRANCH)
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
-        return FileStoreTable(self.file_io, identifier, table_path, table_schema)
+
+        # Create catalog environment for filesystem catalog
+        # Filesystem catalog doesn't support version management by default
+        catalog_environment = CatalogEnvironment(
+            identifier=identifier,
+            uuid=None,  # Filesystem catalog doesn't track table UUIDs
+            catalog_loader=None,  # No catalog loader for filesystem
+            supports_version_management=False
+        )
+
+        return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE):

@@ -32,7 +32,13 @@ class BatchTableCommit:
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.overwrite_partition = static_partition
-        self.file_store_commit = FileStoreCommit(table, commit_user)
+
+        # Get SnapshotCommit from table's catalog environment
+        snapshot_commit = table.new_snapshot_commit()
+        if snapshot_commit is None:
+            raise RuntimeError("Table does not provide a SnapshotCommit instance")
+
+        self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
         self.batch_committed = False
 
     def commit(self, commit_messages: List[CommitMessage]):
