@@ -29,6 +29,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.types.variant.Variant;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -152,5 +153,10 @@ public class SerializableRowData implements RowData, Serializable {
     @Override
     public RowData getRow(int i, int rowArity) {
         return row.getRow(i, rowArity);
+    }
+
+    @Override
+    public Variant getVariant(int i) {
+        return row.getVariant(i);
     }
 }

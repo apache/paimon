@@ -28,6 +28,7 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.types.variant.Variant;
 
 import javax.annotation.Nullable;
 
@@ -193,6 +194,10 @@ public class NestedProjectedRowData implements RowData, Serializable {
     @Override
     public RowData getRow(int pos, int numFields) {
         return getFieldAs(pos, (rowData, internalPos) -> rowData.getRow(internalPos, numFields));
+    }
+
+    public Variant getVariant(int pos) {
+        return getFieldAs(pos, RowData::getVariant);
     }
 
     private @Nullable RowData extractInternalRow(int pos) {
