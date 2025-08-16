@@ -16,23 +16,38 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.predicate;
 
+import org.apache.paimon.utils.Preconditions;
+
+import java.io.Serializable;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+/** Represents the TopN predicate. */
+public class TopN implements Serializable {
 
-/** Utils for {@link List}. */
-public class ListUtils {
+    private static final long serialVersionUID = 1L;
 
-    public static <T> T pickRandomly(List<T> list) {
-        checkArgument(!list.isEmpty(), "list is empty");
-        int index = ThreadLocalRandom.current().nextInt(list.size());
-        return list.get(index);
+    private final List<SortValue> orders;
+    private final int limit;
+
+    public TopN(List<SortValue> orders, int limit) {
+        this.orders = Preconditions.checkNotNull(orders);
+        this.limit = limit;
     }
 
-    public static <T> boolean isNullOrEmpty(List<T> list) {
-        return list == null || list.isEmpty();
+    public List<SortValue> orders() {
+        return orders;
+    }
+
+    public int limit() {
+        return limit;
+    }
+
+    @Override
+    public String toString() {
+        String sort = orders.stream().map(SortValue::toString).collect(Collectors.joining(", "));
+        return String.format("Sort(%s), Limit(%s)", sort, limit);
     }
 }

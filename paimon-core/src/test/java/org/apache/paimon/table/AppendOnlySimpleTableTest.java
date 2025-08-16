@@ -30,6 +30,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
+import org.apache.paimon.fileindex.rangebitmap.RangeBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -37,9 +38,12 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -56,8 +60,10 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
 
@@ -74,6 +80,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -812,6 +819,103 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             .map(Map.Entry::getValue)
                             .reduce(Integer::sum);
             assertThat(cnt.get()).isEqualTo(reduce.orElse(0));
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testRangeBitmapIndexTopNFilter() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.STRING())
+                        .field("event", DataTypes.STRING())
+                        .field("price", DataTypes.INT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + RangeBitmapFileIndexFactory.RANGE_BITMAP
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "price");
+                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            options.set(
+                                    ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int bound = 300000;
+        int rowCount = 1000000;
+        Random random = new Random();
+        int k = random.nextInt(100) + 1;
+        PriorityQueue<Integer> expected = new PriorityQueue<>(k, Integer::compareTo);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int j = 0; j < rowCount; j++) {
+            int next = random.nextInt(bound);
+            BinaryString uuid = BinaryString.fromString(UUID.randomUUID().toString());
+            write.write(GenericRow.of(uuid, uuid, next));
+
+            // TopK expected
+            if (expected.size() < k) {
+                expected.offer(next);
+            } else if (expected.peek() <= next) {
+                expected.poll();
+                expected.offer(next);
+            }
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // test TopK index
+        {
+            RoaringBitmap32 bitmap = new RoaringBitmap32();
+            expected.forEach(bitmap::add);
+            DataField field = rowType.getField("price");
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            RoaringBitmap32 actual = new RoaringBitmap32();
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        actual.add(row.getInt(2));
+                    });
+            assertThat(cnt.get()).isEqualTo(k);
+            assertThat(actual).isEqualTo(bitmap);
+            reader.close();
+        }
+
+        // test TopK without index
+        {
+            DataField field = rowType.getField("id");
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(rowCount);
             reader.close();
         }
     }

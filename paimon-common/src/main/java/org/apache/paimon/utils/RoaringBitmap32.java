@@ -105,6 +105,14 @@ public class RoaringBitmap32 {
         return roaringBitmap.intersects(minimum, supremum);
     }
 
+    public RoaringBitmap32 limit(int k) {
+        return new RoaringBitmap32(roaringBitmap.limit(k));
+    }
+
+    public void remove(int position) {
+        roaringBitmap.remove(position);
+    }
+
     public RoaringBitmap32 clone() {
         return new RoaringBitmap32(roaringBitmap.clone());
     }

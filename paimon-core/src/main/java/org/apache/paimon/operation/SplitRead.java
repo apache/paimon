@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
@@ -43,6 +44,10 @@ public interface SplitRead<T> {
     SplitRead<T> withReadType(RowType readType);
 
     SplitRead<T> withFilter(@Nullable Predicate predicate);
+
+    default SplitRead<T> withTopN(@Nullable TopN topN) {
+        return this;
+    }
 
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(DataSplit split) throws IOException;

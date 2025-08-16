@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.paimon.utils.IOUtils.readFully;
@@ -151,7 +152,98 @@ public class BitSliceIndexBitmap {
         return gt(code - 1);
     }
 
+    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet) {
+        if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
+            return new RoaringBitmap32();
+        }
+
+        if (k < 0) {
+            throw new IllegalArgumentException("the k param can not be negative in topK, k=" + k);
+        }
+
+        RoaringBitmap32 g = new RoaringBitmap32();
+        RoaringBitmap32 e = isNotNull(foundSet);
+        if (e.getCardinality() <= k) {
+            return e;
+        }
+
+        loadSlices(0, slices.length);
+        for (int i = slices.length - 1; i >= 0; i--) {
+            RoaringBitmap32 x = RoaringBitmap32.or(g, RoaringBitmap32.and(e, getSlice(i)));
+            long n = x.getCardinality();
+            if (n > k) {
+                e = RoaringBitmap32.and(e, getSlice(i));
+            } else if (n < k) {
+                g = x;
+                e = RoaringBitmap32.andNot(e, getSlice(i));
+            } else {
+                e = RoaringBitmap32.and(e, getSlice(i));
+                break;
+            }
+        }
+
+        // only k results should be returned
+        RoaringBitmap32 f = RoaringBitmap32.or(g, e);
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
+            }
+        }
+        return f;
+    }
+
+    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet) {
+        if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
+            return new RoaringBitmap32();
+        }
+
+        if (k < 0) {
+            throw new IllegalArgumentException(
+                    "the k param can not be negative in bottomK, k=" + k);
+        }
+
+        RoaringBitmap32 g = new RoaringBitmap32();
+        RoaringBitmap32 e = isNotNull(foundSet);
+        if (e.getCardinality() <= k) {
+            return e;
+        }
+
+        loadSlices(0, slices.length);
+        for (int i = slices.length - 1; i >= 0; i--) {
+            RoaringBitmap32 x = RoaringBitmap32.or(g, RoaringBitmap32.andNot(e, getSlice(i)));
+            long n = x.getCardinality();
+            if (n > k) {
+                e = RoaringBitmap32.andNot(e, getSlice(i));
+            } else if (n < k) {
+                g = x;
+                e = RoaringBitmap32.and(e, getSlice(i));
+            } else {
+                e = RoaringBitmap32.andNot(e, getSlice(i));
+                break;
+            }
+        }
+
+        // only k results should be returned
+        RoaringBitmap32 f = RoaringBitmap32.or(g, e);
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
+            }
+        }
+        return f;
+    }
+
     public RoaringBitmap32 isNotNull() {
+        return isNotNull(null);
+    }
+
+    private RoaringBitmap32 isNotNull(@Nullable RoaringBitmap32 foundSet) {
         if (ebm == null) {
             try {
                 in.seek(bodyOffset);
@@ -164,7 +256,7 @@ public class BitSliceIndexBitmap {
                 throw new RuntimeException(e);
             }
         }
-        return ebm.clone();
+        return foundSet == null ? ebm.clone() : RoaringBitmap32.and(ebm, foundSet);
     }
 
     private void loadSlices(int begin, int end) {
