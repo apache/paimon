@@ -16,38 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.format.csv;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
-import java.util.List;
+import java.io.IOException;
 
-/**
- * A {@link TableWrite} for batch processing. Recommended for one-time committing.
- *
- * @since 0.4.0
- */
-@Public
-public interface BatchTableWrite extends TableWrite {
+/** CSV {@link FormatReaderFactory} implementation. */
+public class CsvReaderFactory implements FormatReaderFactory {
 
-    /**
-     * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
-     *
-     * @see BatchTableCommit#commit
-     */
-    List<CommitMessage> prepareCommit() throws Exception;
+    private final RowType rowType;
+    private final Options options;
 
-    /**
-     * Specified the writing rowType, currently only work for table without primary key and row
-     * tracking enabled.
-     */
-    BatchTableWrite withWriteType(RowType writeType);
+    public CsvReaderFactory(RowType rowType, Options options) {
+        this.rowType = rowType;
+        this.options = options;
+    }
 
-    /**
-     * Flush the data in the write buffer.
-     *
-     * @throws Exception
-     */
-    void flush() throws Exception;
+    @Override
+    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+        return new CsvFileReader(context, rowType, options);
+    }
 }

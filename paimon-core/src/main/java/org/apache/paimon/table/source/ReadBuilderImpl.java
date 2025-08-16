@@ -73,11 +73,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        if (readType != null) {
-            return readType;
-        } else {
-            return table.rowType();
-        }
+        return readType != null ? readType : table.rowType();
     }
 
     @Override
