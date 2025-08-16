@@ -86,6 +86,41 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 `Range Bitmap Index Bitmap`
 * `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index. See [Index Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}).
 
+
+Append Table supports using range-bitmap file index to optimize the `EQUALS`, `RANGE`, `AND/OR` and `TOPN` predicate. The bitmap and range-bitmap file index result will be merged and pushed down to the DataFile for filtering rowgroups and pages.
+
+In the following query examples, the `class_id` and the `score` has been created with range-bitmap file index. And the partition key `dt` is not necessary.
+
+**Optimize the `EQUALS` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND score = 100;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND score IN (60, 80);
+```
+
+**Optimize the `RANGE` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND score > 60;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND score < 60;
+```
+
+**Optimize the `AND/OR` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60 OR score > 80;
+```
+
+**Optimize the `TOPN` predicate:**
+
+For now, the `TOPN` predicate optimization can not using with other predicates, only support in Apache Spark.
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC LIMIT 10;
+
+SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score DESC LIMIT 10;
+```
+
 More filter types will be supported...
 
 If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
