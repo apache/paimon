@@ -72,6 +72,10 @@ object PaimonMetadataColumn {
   val SEQUENCE_NUMBER: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 105, SpecialFields.SEQUENCE_NUMBER.name(), LongType)
 
+  def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
+
+  def rowLineageMetaCols: Seq[PaimonMetadataColumn] = Seq(ROW_ID, SEQUENCE_NUMBER)
+
   def get(metadataColumn: String, partitionType: StructType): PaimonMetadataColumn = {
     metadataColumn match {
       case ROW_INDEX_COLUMN => ROW_INDEX

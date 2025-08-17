@@ -30,7 +30,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, LogicalPlan, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit}
 
@@ -77,7 +77,7 @@ case class UpdatePaimonTableCommand(
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (candidateDataSplits.isEmpty) {
-      // no data spilt need to be rewrote
+      // no data spilt need to be rewritten
       logDebug("No file need to rewrote. It's an empty Commit.")
       Seq.empty[CommitMessage]
     } else {
@@ -113,8 +113,9 @@ case class UpdatePaimonTableCommand(
           findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
 
         // Step3: the smallest range of data files that need to be rewritten.
-        val (touchedFiles, touchedFileRelation) =
-          createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+        val (touchedFiles, touchedSplits) =
+          extractFilesAndBuildSplits(touchedFilePaths, dataFilePathToMeta)
+        val touchedFileRelation = createNewScanPlan(touchedSplits, relation)
 
         // Step4: build a dataframe that contains the unchanged and updated data, and write out them.
         val addCommitMessage = writeUpdatedAndUnchangedData(sparkSession, touchedFileRelation)
@@ -135,7 +136,7 @@ case class UpdatePaimonTableCommand(
         toColumn(update).as(origin.name, origin.metadata)
     }
 
-    val toUpdateScanRelation = createNewRelation(touchedDataSplits, relation)
+    val toUpdateScanRelation = createNewScanPlan(touchedDataSplits, relation)
     val newPlan = if (condition == TrueLiteral) {
       toUpdateScanRelation
     } else {
@@ -147,7 +148,7 @@ case class UpdatePaimonTableCommand(
 
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
-      toUpdateScanRelation: DataSourceV2Relation): Seq[CommitMessage] = {
+      toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)

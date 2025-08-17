@@ -22,7 +22,7 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, FILE_PATH_COLUMN, ROW_INDEX, ROW_INDEX_COLUMN}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.CommitMessage
@@ -102,19 +102,18 @@ case class MergeIntoPaimonTable(
 
     if (deletionVectorsEnabled) {
       // Step2: generate dataset that should contains ROW_KIND, FILE_PATH, ROW_INDEX columns
-      val metadataCols = Seq(FILE_PATH, ROW_INDEX)
       val filteredRelation = createDataset(
         sparkSession,
         createNewScanPlan(
           candidateDataSplits,
-          targetOnlyCondition.getOrElse(TrueLiteral),
           relation,
-          metadataCols))
+          Some(targetOnlyCondition.getOrElse(TrueLiteral)),
+          Some(dvMetaCols)))
       val ds = constructChangedRows(
         sparkSession,
         filteredRelation,
         remainDeletedRow = true,
-        extraMetadataCols = metadataCols)
+        extraMetadataCols = dvMetaCols)
 
       ds.cache()
       try {
@@ -168,10 +167,24 @@ case class MergeIntoPaimonTable(
         filePathsToRead --= noMatchedBySourceFilePaths
       }
 
-      val (filesToRewritten, touchedFileRelation) =
-        createNewRelation(filePathsToRewritten.toArray, dataFilePathToMeta, relation)
-      val (_, unTouchedFileRelation) =
-        createNewRelation(filePathsToRead.toArray, dataFilePathToMeta, relation)
+      val (filesToRewritten, filesToRewrittenSplits) =
+        extractFilesAndBuildSplits(filePathsToRewritten.toArray, dataFilePathToMeta)
+
+      // If no files need to be rewritten, no need to write row lineage
+      val writeRowLineage = coreOptions.rowTrackingEnabled() && filesToRewritten.nonEmpty
+      val metadataColumns = if (writeRowLineage) {
+        Some(rowLineageMetaCols)
+      } else {
+        Option.empty
+      }
+
+      val touchedFileRelation =
+        createNewScanPlan(filesToRewrittenSplits, relation, metadataColumns = metadataColumns)
+
+      val (_, filesToReadSplits) =
+        extractFilesAndBuildSplits(filePathsToRead.toArray, dataFilePathToMeta)
+      val unTouchedFileRelation =
+        createNewScanPlan(filesToReadSplits, relation, metadataColumns = metadataColumns)
 
       // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
       // modified and was from touched file, it should be kept too.
@@ -179,9 +192,6 @@ case class MergeIntoPaimonTable(
         .withColumn(FILE_TOUCHED_COL, lit(true))
         .union(createDataset(sparkSession, unTouchedFileRelation)
           .withColumn(FILE_TOUCHED_COL, lit(false)))
-
-      // If no files need to be rewritten, no need to write row lineage
-      val writeRowLineage = coreOptions.rowTrackingEnabled() && filesToRewritten.nonEmpty
 
       val toWriteDS = constructChangedRows(
         sparkSession,

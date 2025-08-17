@@ -142,8 +142,9 @@ case class DeleteFromPaimonTableCommand(
         findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
 
       // Step3: the smallest range of data files that need to be rewritten.
-      val (touchedFiles, newRelation) =
-        createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+      val (touchedFiles, touchedSplits) =
+        extractFilesAndBuildSplits(touchedFilePaths, dataFilePathToMeta)
+      val newRelation = createNewScanPlan(touchedSplits, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
       val toRewriteScanRelation = Filter(Not(condition), newRelation)
