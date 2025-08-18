@@ -98,7 +98,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -803,57 +802,40 @@ public class ParquetFileReader implements Closeable {
 
         RowRanges rowRanges = blockRowRanges.get(blockIndex);
         if (rowRanges == null) {
-            BlockMetaData block = blocks.get(blockIndex);
-            rowRanges = RowRanges.createSingle(block.getRowCount());
-            if (selection != null) {
-                RowRanges result = calculateRowRanges(blockIndex, selection);
-                rowRanges = RowRanges.intersection(result, rowRanges);
-            }
-
-            if (filteringRequired) {
-                RowRanges result =
-                        ColumnIndexFilter.calculateRowRanges(
-                                options.getRecordFilter(),
-                                getColumnIndexStore(blockIndex),
-                                paths.keySet(),
-                                block.getRowCount());
-                rowRanges = RowRanges.intersection(result, rowRanges);
-            }
+            rowRanges = calculateRowRanges(blockIndex);
             blockRowRanges.set(blockIndex, rowRanges);
         }
         return rowRanges;
     }
 
-    private RowRanges calculateRowRanges(int blockIndex, RoaringBitmap32 selection) {
-        List<OffsetIndex> offsets;
+    private RowRanges calculateRowRanges(int blockIndex) {
         BlockMetaData block = blocks.get(blockIndex);
-        if (paths.isEmpty()) {
-            Optional<ColumnChunkMetaData> first = block.getColumns().stream().findFirst();
-            if (first.isPresent()) {
-                ColumnPath path = first.get().getPath();
-                OffsetIndex index =
-                        ColumnIndexStoreImpl.create(this, block, Collections.singleton(path))
-                                .getOffsetIndex(path);
-                offsets = Collections.singletonList(index);
-            } else {
-                offsets = Collections.emptyList();
-            }
-        } else {
+        RowRanges rowRanges = RowRanges.createSingle(block.getRowCount());
+        if (selection != null) {
             ColumnIndexStore store = getColumnIndexStore(blockIndex);
-            offsets =
-                    paths.keySet().stream().map(store::getOffsetIndex).collect(Collectors.toList());
-        }
-
-        long rowCount = block.getRowCount();
-        long rowIndexOffset = block.getRowIndexOffset();
-        RowRanges rowRanges = RowRanges.createSingle(rowCount);
-        for (OffsetIndex offset : offsets) {
-            if (offset != null) {
+            List<OffsetIndex> offsets =
+                    paths.keySet().stream()
+                            .map(store::getOffsetIndex)
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+            long rowCount = block.getRowCount();
+            long rowIndexOffset = block.getRowIndexOffset();
+            for (OffsetIndex offset : offsets) {
+                // avoiding creating too many ranges, just filter columns pages
                 RowRanges result = RowRanges.create(rowCount, rowIndexOffset, offset, selection);
                 rowRanges = RowRanges.intersection(result, rowRanges);
             }
         }
 
+        if (FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+            RowRanges result =
+                    ColumnIndexFilter.calculateRowRanges(
+                            options.getRecordFilter(),
+                            getColumnIndexStore(blockIndex),
+                            paths.keySet(),
+                            block.getRowCount());
+            rowRanges = RowRanges.intersection(result, rowRanges);
+        }
         return rowRanges;
     }
 
