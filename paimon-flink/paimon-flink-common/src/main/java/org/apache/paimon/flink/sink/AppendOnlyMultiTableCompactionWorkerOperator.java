@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.AppendTableCompactor;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -104,6 +105,11 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                                 committable.kind(),
                                 committable.wrappedCommittable()));
             }
+        }
+
+        for (AppendTableCompactor compactor : compactorContainer.values()) {
+            FileStoreTable table = compactor.table();
+            flushDataFileCache(table, waitCompaction);
         }
 
         return result;

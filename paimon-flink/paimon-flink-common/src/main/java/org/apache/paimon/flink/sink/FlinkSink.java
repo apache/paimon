@@ -225,6 +225,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                     committerOperator,
                             table);
         }
+
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " : " + table.name(),

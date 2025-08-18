@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.flink.compact.AppendTableCompactor;
 import org.apache.paimon.flink.source.AppendTableCompactSource;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -87,6 +88,8 @@ public abstract class AppendCompactWorkerOperator<IN>
         List<Committable> committables =
                 this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
         this.unawareBucketCompactor.tryRefreshWrite();
+        flushDataFileCache(table, waitCompaction);
+
         return committables;
     }
 

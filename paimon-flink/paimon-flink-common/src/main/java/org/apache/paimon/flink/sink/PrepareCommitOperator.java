@@ -20,8 +20,10 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -40,6 +42,7 @@ import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
@@ -116,6 +119,17 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
         protected Factory(Options options) {
             this.options = options;
             this.chainingStrategy = ChainingStrategy.ALWAYS;
+        }
+    }
+
+    protected void flushDataFileCache(FileStoreTable table, boolean waitCompaction)
+            throws IOException {
+        if (table.coreOptions().dataFileLocalCacheEnabled()) {
+            DataFileLocalCachingFileIO fileIO = (DataFileLocalCachingFileIO) table.fileIO();
+            fileIO.flush();
+            if (waitCompaction || table.coreOptions().writeOnly()) {
+                fileIO.expire();
+            }
         }
     }
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -175,6 +176,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
 
+        flushDataFileCache(table, waitCompaction);
         tryRefreshWrite();
         return committables;
     }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -230,8 +231,18 @@ public class CatalogUtils {
                         lockContext,
                         catalog.supportsVersionManagement());
         Path path = new Path(schema.options().get(PATH.key()));
-        FileStoreTable table =
-                FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
+
+        FileIO fileIO = dataFileIO.apply(path);
+        if (options.dataFileLocalCacheEnabled()) {
+            fileIO =
+                    new DataFileLocalCachingFileIO(
+                            fileIO,
+                            options.dataFileLocalCacheTempDirs(),
+                            options.dataFileLocalCacheSize(),
+                            options.dataFileLocalCacheEvictionRatio());
+        }
+
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, path, schema, catalogEnv);
 
         if (identifier.isSystemTable()) {
             return CatalogUtils.createSystemTable(identifier, table);

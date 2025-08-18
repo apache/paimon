@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
@@ -42,6 +43,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -663,5 +665,30 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         anyCauseMatches(
                                 RuntimeException.class,
                                 "Caught NullPointerException, the possible reason is you have set following options together"));
+    }
+
+    @Test
+    public void testDataFileCache() throws TimeoutException {
+        sql(
+                "CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('data-file.local-cache.enabled'='true', 'changelog-producer'='lookup')");
+
+        BlockingIterator<Row, Row> iter =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM test /*+ OPTIONS('continuous.discovery-interval' = '10ms') */"));
+
+        sql("INSERT INTO test VALUES (1, 'A')");
+        sql("INSERT INTO test VALUES (2, 'B')");
+        sql("INSERT INTO test VALUES (1, 'C')");
+
+        assertThat(iter.collect(4))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, "A"),
+                        Row.ofKind(RowKind.INSERT, 2, "B"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "A"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "C"));
+
+        assertThat(sql("SELECT * FROM test"))
+                .containsExactlyInAnyOrder(Row.of(1, "C"), Row.of(2, "B"));
     }
 }

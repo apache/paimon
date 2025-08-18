@@ -227,4 +227,13 @@ public class AppendTableCompactor {
             writeRefresher.tryRefresh();
         }
     }
+
+    /**
+     * Get the table associated with this compactor.
+     *
+     * @return the table
+     */
+    public FileStoreTable table() {
+        return table;
+    }
 }

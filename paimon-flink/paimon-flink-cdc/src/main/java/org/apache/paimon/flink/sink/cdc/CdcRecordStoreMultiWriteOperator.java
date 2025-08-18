@@ -31,6 +31,7 @@ import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.flink.sink.StoreSinkWriteStateImpl;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
@@ -273,6 +274,11 @@ public class CdcRecordStoreMultiWriteOperator
                 throw new IOException("Failed to prepare commit for table: " + key.toString(), e);
             }
         }
+
+        for (FileStoreTable table : tables.values()) {
+            flushDataFileCache(table, waitCompaction);
+        }
+
         return committables;
     }
 

@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -196,6 +197,11 @@ public class MultiTablesStoreCompactOperator
                                             MultiTableCommittable.fromCommittable(key, committable))
                             .collect(Collectors.toList()));
         }
+
+        for (FileStoreTable table : tables.values()) {
+            flushDataFileCache(table, waitCompaction);
+        }
+
         return committables;
     }
 

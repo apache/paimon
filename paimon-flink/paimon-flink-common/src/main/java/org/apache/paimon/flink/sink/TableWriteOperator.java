@@ -23,6 +23,7 @@ import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
 import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.io.DataFileLocalCachingFileIO;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -148,7 +149,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        return write.prepareCommit(waitCompaction, checkpointId);
+        List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
+        flushDataFileCache(table, waitCompaction);
+        return committables;
     }
 
     @VisibleForTesting

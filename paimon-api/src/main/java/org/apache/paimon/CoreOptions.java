@@ -206,6 +206,31 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
+    public static final ConfigOption<Boolean> DATA_FILE_LOCAL_CACHE_ENABLED =
+            key("data-file.local-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("");
+
+    public static final ConfigOption<String> DATA_FILE_LOCAL_CACHE_TMP_DIRS =
+            key("data-file.local-cache.tmp.dirs")
+                    .stringType()
+                    .defaultValue(System.getProperty("java.io.tmpdir"))
+                    .withDescription(
+                            "Directories for temporary files, separated by\",\", \"|\", or the system's java.io.File.pathSeparator.");
+
+    public static final ConfigOption<MemorySize> DATA_FILE_LOCAL_CACHE_SIZE =
+            key("data-file.local-cache.size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription("");
+
+    public static final ConfigOption<Double> DATA_FILE_LOCAL_CACHE_EVICTION_RATIO =
+            key("data-file.local-cache.eviction-ratio")
+                    .doubleType()
+                    .defaultValue(0.5)
+                    .withDescription("");
+
     public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
             key("compaction.force-rewrite-all-files")
                     .booleanType()
@@ -2681,6 +2706,22 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String externalSpecificFS() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
+    }
+
+    public boolean dataFileLocalCacheEnabled() {
+        return options.get(DATA_FILE_LOCAL_CACHE_ENABLED);
+    }
+
+    public String dataFileLocalCacheTempDirs() {
+        return options.get(DATA_FILE_LOCAL_CACHE_TMP_DIRS);
+    }
+
+    public MemorySize dataFileLocalCacheSize() {
+        return options.get(DATA_FILE_LOCAL_CACHE_SIZE);
+    }
+
+    public double dataFileLocalCacheEvictionRatio() {
+        return options.get(DATA_FILE_LOCAL_CACHE_EVICTION_RATIO);
     }
 
     public Boolean forceRewriteAllFiles() {

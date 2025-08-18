@@ -957,4 +957,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
                 .hasSize(0);
     }
+
+    @Test
+    public void testDataFileCache() {
+        sql("CREATE TABLE test (a int, b string) WITH ('data-file.local-cache.enabled'='true')");
+
+        sql("INSERT INTO test VALUES (1, 'A')");
+
+        assertThat(sql("SELECT * FROM test")).containsExactly(Row.of(1, "A"));
+    }
 }
