@@ -23,6 +23,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -41,6 +42,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
@@ -221,7 +223,25 @@ public class FormatReaderMapping {
                     dataSchema,
                     readFilters,
                     systemFields,
-                    topN);
+                    evolutionTopN(tableSchema, dataSchema));
+        }
+
+        @Nullable
+        private TopN evolutionTopN(TableSchema tableSchema, TableSchema dataSchema) {
+            TopN pushTopN = topN;
+            if (pushTopN != null) {
+                Map<String, DataField> tableFields = tableSchema.nameToFieldMap();
+                Map<Integer, DataField> dataFields = dataSchema.idToFieldMap();
+                for (SortValue value : pushTopN.orders()) {
+                    DataField tableField = tableFields.get(value.field().name());
+                    DataField dataField = dataFields.get(tableField.id());
+                    if (!Objects.equals(tableField, dataField)) {
+                        pushTopN = null;
+                        break;
+                    }
+                }
+            }
+            return pushTopN;
         }
 
         public FormatReaderMapping build(
