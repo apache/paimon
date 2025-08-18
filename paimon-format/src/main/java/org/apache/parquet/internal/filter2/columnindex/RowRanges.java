@@ -20,7 +20,6 @@ package org.apache.parquet.internal.filter2.columnindex;
 
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.apache.parquet.filter2.compat.FilterCompat.Filter;
 import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 
 import javax.annotation.Nullable;
@@ -31,7 +30,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
-import java.util.Set;
 
 /**
  * Class representing row ranges in a row-group. These row ranges are calculated as a result of the
@@ -39,11 +37,8 @@ import java.util.Set;
  * row-group, retrieve the count of the matching rows or check overlapping of a row index range.
  *
  * <p>Note: The class was copied over to support using selected position to filter or narrow the
- * {@link RowRanges}. Added a new method {@link RowRanges#create(long, long,
- * PrimitiveIterator.OfInt, OffsetIndex, RoaringBitmap32)}
- *
- * @see ColumnIndexFilter#calculateRowRanges(Filter, ColumnIndexStore, Set, long, long,
- *     RoaringBitmap32)
+ * {@link RowRanges}. Added a new method {@link RowRanges#create(long, long, OffsetIndex,
+ * RoaringBitmap32)}
  */
 public class RowRanges {
 
@@ -165,14 +160,12 @@ public class RowRanges {
     public static RowRanges create(
             long rowCount,
             long rowIndexOffset,
-            PrimitiveIterator.OfInt pageIndexes,
             OffsetIndex offsetIndex,
             @Nullable RoaringBitmap32 selection) {
         RowRanges ranges = new RowRanges();
-        while (pageIndexes.hasNext()) {
-            int pageIndex = pageIndexes.nextInt();
-            long firstRowIndex = offsetIndex.getFirstRowIndex(pageIndex);
-            long lastRowIndex = offsetIndex.getLastRowIndex(pageIndex, rowCount);
+        for (int i = 0; i < offsetIndex.getPageCount(); i++) {
+            long firstRowIndex = offsetIndex.getFirstRowIndex(i);
+            long lastRowIndex = offsetIndex.getLastRowIndex(i, rowCount);
 
             // using selected position to filter or narrow the row ranges
             if (selection != null) {

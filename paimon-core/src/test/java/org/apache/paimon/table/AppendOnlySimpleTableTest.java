@@ -824,7 +824,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testRangeBitmapIndexTopNFilter() throws Exception {
+    public void testTopNResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.STRING())
@@ -851,7 +851,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
                         });
 
-        int bound = 300000;
+        int bound = 30000000;
         int rowCount = 1000000;
         Random random = new Random();
         int k = random.nextInt(100) + 1;
