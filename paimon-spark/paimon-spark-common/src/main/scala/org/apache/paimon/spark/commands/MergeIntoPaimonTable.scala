@@ -173,23 +173,18 @@ case class MergeIntoPaimonTable(
 
       // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
       // modified and was from touched file, it should be kept too.
-      val filesToRewrittenDS = {
-        var _ds =
-          createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
-        if (writeRowLineage) {
-          _ds = selectWithRowLineageMetaCols(_ds)
-        }
-        _ds
+      var filesToRewrittenDS =
+        createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
+      if (writeRowLineage) {
+        filesToRewrittenDS = selectWithRowLineageMetaCols(filesToRewrittenDS)
       }
 
-      val filesToReadDS = {
-        var _ds =
-          createDataset(sparkSession, filesToReadScan).withColumn(FILE_TOUCHED_COL, lit(false))
-        if (writeRowLineage) {
-          // For filesToReadScan we don't need to read row lineage meta cols, just add placeholders
-          ROW_LINEAGE_META_COLUMNS.foreach(c => _ds = _ds.withColumn(c, lit(null)))
-        }
-        _ds
+      var filesToReadDS =
+        createDataset(sparkSession, filesToReadScan).withColumn(FILE_TOUCHED_COL, lit(false))
+      if (writeRowLineage) {
+        // For filesToReadScan we don't need to read row lineage meta cols, just add placeholders
+        ROW_LINEAGE_META_COLUMNS.foreach(
+          c => filesToReadDS = filesToReadDS.withColumn(c, lit(null)))
       }
 
       val toWriteDS = constructChangedRows(
