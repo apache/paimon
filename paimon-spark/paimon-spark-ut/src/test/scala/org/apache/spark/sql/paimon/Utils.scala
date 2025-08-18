@@ -18,9 +18,7 @@
 
 package org.apache.spark.sql.paimon
 
-import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.util.{Utils => SparkUtils}
 
 import java.io.File
@@ -35,9 +33,4 @@ object Utils {
   def waitUntilEventEmpty(spark: SparkSession): Unit = {
     spark.sparkContext.listenerBus.waitUntilEmpty()
   }
-
-  def createDataFrame(sparkSession: SparkSession, plan: LogicalPlan): DataFrame = {
-    SparkShimLoader.shim.classicApi.createDataset(sparkSession, plan)
-  }
-
 }

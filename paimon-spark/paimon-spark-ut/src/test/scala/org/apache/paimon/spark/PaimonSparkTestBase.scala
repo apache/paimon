@@ -175,7 +175,7 @@ class PaimonSparkTestBase
     paimonCatalog.getTable(Identifier.create(dbName, tableName)).asInstanceOf[FileStoreTable]
   }
 
-  protected def createRelationV2(tableName: String): LogicalPlan = {
+  protected def createRelationV2(tableName: String): DataSourceV2Relation = {
     val sparkTable = SparkTable(loadTable(tableName))
     DataSourceV2Relation.create(
       sparkTable,

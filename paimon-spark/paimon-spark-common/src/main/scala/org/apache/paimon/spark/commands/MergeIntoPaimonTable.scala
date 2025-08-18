@@ -22,7 +22,7 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, FILE_PATH_COLUMN, ROW_INDEX, ROW_INDEX_COLUMN}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.CommitMessage
@@ -102,19 +102,14 @@ case class MergeIntoPaimonTable(
 
     if (deletionVectorsEnabled) {
       // Step2: generate dataset that should contains ROW_KIND, FILE_PATH, ROW_INDEX columns
-      val metadataCols = Seq(FILE_PATH, ROW_INDEX)
-      val filteredRelation = createDataset(
+      val filteredDf = createDataset(
         sparkSession,
-        createNewScanPlan(
-          candidateDataSplits,
-          targetOnlyCondition.getOrElse(TrueLiteral),
-          relation,
-          metadataCols))
+        createNewScanPlan(candidateDataSplits, relation, targetOnlyCondition))
       val ds = constructChangedRows(
         sparkSession,
-        filteredRelation,
+        selectWithDvMetaCols(filteredDf),
         remainDeletedRow = true,
-        extraMetadataCols = metadataCols)
+        extraMetadataCols = dvMetaCols)
 
       ds.cache()
       try {
@@ -168,24 +163,33 @@ case class MergeIntoPaimonTable(
         filePathsToRead --= noMatchedBySourceFilePaths
       }
 
-      val (filesToRewritten, touchedFileRelation) =
-        createNewRelation(filePathsToRewritten.toArray, dataFilePathToMeta, relation)
-      val (_, unTouchedFileRelation) =
-        createNewRelation(filePathsToRead.toArray, dataFilePathToMeta, relation)
-
-      // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
-      // modified and was from touched file, it should be kept too.
-      val targetDSWithFileTouchedCol = createDataset(sparkSession, touchedFileRelation)
-        .withColumn(FILE_TOUCHED_COL, lit(true))
-        .union(createDataset(sparkSession, unTouchedFileRelation)
-          .withColumn(FILE_TOUCHED_COL, lit(false)))
+      val (filesToRewritten, filesToRewrittenScan) =
+        extractFilesAndCreateNewScan(filePathsToRewritten.toArray, dataFilePathToMeta, relation)
+      val (_, filesToReadScan) =
+        extractFilesAndCreateNewScan(filePathsToRead.toArray, dataFilePathToMeta, relation)
 
       // If no files need to be rewritten, no need to write row lineage
       val writeRowLineage = coreOptions.rowTrackingEnabled() && filesToRewritten.nonEmpty
 
+      // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
+      // modified and was from touched file, it should be kept too.
+      var filesToRewrittenDS =
+        createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
+      if (writeRowLineage) {
+        filesToRewrittenDS = selectWithRowLineageMetaCols(filesToRewrittenDS)
+      }
+
+      var filesToReadDS =
+        createDataset(sparkSession, filesToReadScan).withColumn(FILE_TOUCHED_COL, lit(false))
+      if (writeRowLineage) {
+        // For filesToReadScan we don't need to read row lineage meta cols, just add placeholders
+        ROW_LINEAGE_META_COLUMNS.foreach(
+          c => filesToReadDS = filesToReadDS.withColumn(c, lit(null)))
+      }
+
       val toWriteDS = constructChangedRows(
         sparkSession,
-        targetDSWithFileTouchedCol,
+        filesToRewrittenDS.union(filesToReadDS),
         writeRowLineage = writeRowLineage).drop(ROW_KIND_COL)
 
       val writer = if (writeRowLineage) {

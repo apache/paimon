@@ -59,10 +59,3 @@ case class PaimonSplitScan(
     s"PaimonSplitScan: [${table.name}]" + pushedFiltersStr
   }
 }
-
-object PaimonSplitScan {
-  def apply(table: InnerTable, dataSplits: Array[DataSplit]): PaimonSplitScan = {
-    val requiredSchema = SparkTypeUtils.fromPaimonRowType(table.rowType)
-    new PaimonSplitScan(table, dataSplits, requiredSchema, Seq.empty)
-  }
-}

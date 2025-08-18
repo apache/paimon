@@ -48,14 +48,19 @@ object PaimonMetadataColumn {
   val FILE_PATH_COLUMN = "__paimon_file_path"
   val PARTITION_COLUMN = "__paimon_partition"
   val BUCKET_COLUMN = "__paimon_bucket"
+  val ROW_ID_COLUMN = SpecialFields.ROW_ID.name()
+  val SEQUENCE_NUMBER_COLUMN = SpecialFields.SEQUENCE_NUMBER.name()
+
+  val DV_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
+  val ROW_LINEAGE_META_COLUMNS: Seq[String] = Seq(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN)
 
   val SUPPORTED_METADATA_COLUMNS: Seq[String] = Seq(
     ROW_INDEX_COLUMN,
     FILE_PATH_COLUMN,
     PARTITION_COLUMN,
     BUCKET_COLUMN,
-    SpecialFields.ROW_ID.name(),
-    SpecialFields.SEQUENCE_NUMBER.name()
+    ROW_ID_COLUMN,
+    SEQUENCE_NUMBER_COLUMN
   )
 
   val ROW_INDEX: PaimonMetadataColumn =
@@ -68,9 +73,13 @@ object PaimonMetadataColumn {
   val BUCKET: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 103, BUCKET_COLUMN, IntegerType)
   val ROW_ID: PaimonMetadataColumn =
-    PaimonMetadataColumn(Int.MaxValue - 104, SpecialFields.ROW_ID.name(), LongType)
+    PaimonMetadataColumn(Int.MaxValue - 104, ROW_ID_COLUMN, LongType)
   val SEQUENCE_NUMBER: PaimonMetadataColumn =
-    PaimonMetadataColumn(Int.MaxValue - 105, SpecialFields.SEQUENCE_NUMBER.name(), LongType)
+    PaimonMetadataColumn(Int.MaxValue - 105, SEQUENCE_NUMBER_COLUMN, LongType)
+
+  def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
+
+  def rowLineageMetaCols: Seq[PaimonMetadataColumn] = Seq(ROW_ID, SEQUENCE_NUMBER)
 
   def get(metadataColumn: String, partitionType: StructType): PaimonMetadataColumn = {
     metadataColumn match {
@@ -78,8 +87,8 @@ object PaimonMetadataColumn {
       case FILE_PATH_COLUMN => FILE_PATH
       case PARTITION_COLUMN => PARTITION(partitionType)
       case BUCKET_COLUMN => BUCKET
-      case ROW_ID.name => ROW_ID
-      case SEQUENCE_NUMBER.name => SEQUENCE_NUMBER
+      case ROW_ID_COLUMN => ROW_ID
+      case SEQUENCE_NUMBER_COLUMN => SEQUENCE_NUMBER
       case _ =>
         throw new IllegalArgumentException(s"$metadataColumn metadata column is not supported.")
     }

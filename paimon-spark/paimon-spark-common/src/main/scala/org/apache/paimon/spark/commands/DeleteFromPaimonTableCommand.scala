@@ -143,7 +143,7 @@ case class DeleteFromPaimonTableCommand(
 
       // Step3: the smallest range of data files that need to be rewritten.
       val (touchedFiles, newRelation) =
-        createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+        extractFilesAndCreateNewScan(touchedFilePaths, dataFilePathToMeta, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
       val toRewriteScanRelation = Filter(Not(condition), newRelation)
