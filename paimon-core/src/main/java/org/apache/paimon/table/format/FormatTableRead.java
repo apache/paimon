@@ -24,6 +24,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -33,6 +34,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+/** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
 
     private RowType readType;

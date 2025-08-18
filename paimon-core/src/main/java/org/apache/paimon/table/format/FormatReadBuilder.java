@@ -22,8 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -33,29 +33,22 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.FormatReaderMapping;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
-import static com.sun.xml.internal.fastinfoset.alphabet.BuiltInRestrictedAlphabets.table;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 
@@ -68,7 +61,6 @@ public class FormatReadBuilder implements ReadBuilder {
     private CoreOptions options;
 
     private final FileFormatDiscover formatDiscover;
-    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
 
     private RowType readRowType;
     private List<String> partitionKeys;
@@ -91,7 +83,6 @@ public class FormatReadBuilder implements ReadBuilder {
         this.partitionKeys = table.partitionKeys();
         this.tableName = table.name();
         this.formatDiscover = FileFormatDiscover.of(this.options);
-        this.formatReaderMappings = new HashMap<>();
         this.defaultPartName = table.defaultPartName();
     }
 
@@ -165,57 +156,43 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
-        TableSchema schema =
-                TableSchema.create(
-                        0L,
-                        new Schema(
-                                readRowType.getFields(),
-                                partitionKeys,
-                                Collections.emptyList(),
-                                this.tableOptions,
-                                ""));
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
-        List<DataField> readTableFields = readRowType.getFields();
-        FormatReaderMapping.Builder formatReaderMappingBuilder =
-                new FormatReaderMapping.Builder(
-                        formatDiscover, readTableFields, TableSchema::fields, filters);
-
         String formatIdentifier = options.formatType();
-        Supplier<FormatReaderMapping> formatSupplier =
-                () ->
-                        formatReaderMappingBuilder.build(
-                                formatIdentifier, schema, schema, readTableFields, false);
-
-        FormatReaderMapping formatReaderMapping =
-                formatReaderMappings.computeIfAbsent(
-                        new FormatKey(0, formatIdentifier), key -> formatSupplier.get());
-        suppliers.add(() -> createFileReader(dataSplit, formatReaderMapping));
+        suppliers.add(() -> createFileReader(dataSplit, formatIdentifier));
 
         return ConcatRecordReader.create(suppliers);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
-            FormatDataSplit dataSplit, FormatReaderMapping formatReaderMapping) throws IOException {
+            FormatDataSplit dataSplit, String formatIdentifier) throws IOException {
 
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
-        PartitionInfo partitionInfo =
-                PartitionUtils.create(
-                        formatReaderMapping.getPartitionPair(), dataSplit.partition());
+
+        // Create FormatReaderFactory directly
+        RowType actualReadRowType = readRowType;
+        FormatReaderFactory readerFactory =
+                formatDiscover
+                        .discover(formatIdentifier)
+                        .createReaderFactory(actualReadRowType, filters);
+
+        // Create empty partition info since we're removing the mapping
+        PartitionInfo partitionInfo = PartitionUtils.create(null, dataSplit.partition());
+
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,
-                        formatReaderMapping.getReaderFactory(),
+                        readerFactory,
                         formatReaderContext,
-                        formatReaderMapping.getIndexMapping(),
-                        formatReaderMapping.getCastMapping(),
+                        null, // indexMapping
+                        null, // castMapping
                         partitionInfo,
                         false,
                         null,
                         0,
-                        formatReaderMapping.getSystemFields());
+                        Collections.emptyMap()); // systemFields
         return fileRecordReader;
     }
 

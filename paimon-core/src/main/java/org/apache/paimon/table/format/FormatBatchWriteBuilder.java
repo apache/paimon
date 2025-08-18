@@ -19,7 +19,6 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -64,21 +63,20 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableWrite newWrite() {
-        TableSchema tableSchema = table.schema();
         FormatTableFileWrite writer =
                 new FormatTableFileWrite(
                         table.fileIO(),
-                        tableSchema.id(),
-                        tableSchema.logicalRowType().notNull(),
-                        tableSchema.logicalPartitionType(),
+                        0,
+                        table.rowType().notNull(),
+                        table.partitionType(),
                         pathFactory(),
                         options,
                         table.name());
         return new FormatTableWrite(
                 rowType(),
                 writer,
-                new RowPartitionKeyExtractor(table.schema()),
-                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
+                new RowPartitionKeyExtractor(table.rowType(), table.partitionKeys()),
+                CoreOptions.fromMap(table.options()).ignoreDelete());
     }
 
     public FileStorePathFactory pathFactory() {

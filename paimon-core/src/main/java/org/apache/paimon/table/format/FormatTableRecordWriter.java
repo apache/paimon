@@ -61,7 +61,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
     private final @Nullable IOManager ioManager;
     private final CompressOptions spillCompression;
     private final MemorySize maxDiskSize;
-    private final long schemaId;
     private final RowType writeSchema;
     private final String fileCompression;
     private final FileFormat fileFormat;
@@ -74,7 +73,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
     public FormatTableRecordWriter(
             FileIO fileIO,
             @Nullable IOManager ioManager,
-            long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
             DataFilePathFactory pathFactory,
@@ -88,7 +86,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.spillCompression = spillCompression;
-        this.schemaId = schemaId;
         this.fileCompression = fileCompression;
         this.maxDiskSize = maxDiskSize;
         this.files = new ArrayList<>();
@@ -178,7 +175,7 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
                 fileIO,
-                schemaId,
+                0L,
                 fileFormat,
                 targetFileSize,
                 writeSchema,

@@ -46,7 +46,6 @@ import java.util.List;
 public class CsvFileFormat extends FileFormat {
 
     public static final String CSV_IDENTIFIER = "csv";
-    public static final String TXT_IDENTIFIER = "txt";
 
     protected static final ConfigOption<String> FIELD_DELIMITER =
             ConfigOptions.key("field-delimiter")

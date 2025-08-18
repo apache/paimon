@@ -47,7 +47,6 @@ import static org.apache.paimon.format.FileFormat.fileFormat;
 public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
-    private final long schemaId;
     private final RowType rowType;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
@@ -64,7 +63,6 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
             String tableName) {
         super(null, null, options, partitionType, null, null, tableName);
         this.fileIO = fileIO;
-        this.schemaId = schemaId;
         this.rowType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
@@ -112,7 +110,6 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
         return new FormatTableRecordWriter(
                 fileIO,
                 ioManager,
-                schemaId,
                 fileFormat,
                 options.targetFileSize(false),
                 pathFactory.createFormatTableDataFilePathFactory(partition),
