@@ -826,7 +826,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testRangeBitmapIndexTopNFilter() throws Exception {
+    public void testTopNResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.STRING())
@@ -851,7 +851,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         // in unaware-bucket mode, we split files into splits all the time
         FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
 
-        int bound = 300000;
+        int bound = 30000000;
         int rowCount = 1000000;
         Random random = new Random();
         int k = random.nextInt(100) + 1;
