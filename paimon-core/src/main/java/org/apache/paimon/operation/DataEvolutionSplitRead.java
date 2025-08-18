@@ -125,6 +125,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         formatDiscover,
                         readRowType.getFields(),
                         schema -> rowTypeWithRowLineage(schema.logicalRowType(), true).getFields(),
+                        null,
                         null);
 
         List<List<DataFileMeta>> splitByRowId = DataEvolutionSplitGenerator.split(files);
