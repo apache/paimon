@@ -15,15 +15,3 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-
-from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
-from pypaimon.catalog.rest.rest_token import RESTToken
-from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-
-__all__ = [
-    'RESTCatalog',
-    'RESTCatalogLoader',
-    'RESTToken',
-    'RESTTokenFileIO'
-]

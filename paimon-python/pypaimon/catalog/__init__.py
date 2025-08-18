@@ -15,16 +15,3 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-from pypaimon.catalog.catalog import Catalog
-from pypaimon.catalog.catalog_snapshot_commit import CatalogSnapshotCommit
-from pypaimon.catalog.renaming_snapshot_commit import RenamingSnapshotCommit
-from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
-
-__all__ = [
-    'Catalog',
-    'SnapshotCommit',
-    'CatalogSnapshotCommit',
-    'RenamingSnapshotCommit',
-    'PartitionStatistics'
-]
