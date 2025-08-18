@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.CommitMessage
@@ -30,7 +31,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, LogicalPlan, Project, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit}
 
@@ -77,7 +78,7 @@ case class UpdatePaimonTableCommand(
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (candidateDataSplits.isEmpty) {
-      // no data spilt need to be rewrote
+      // no data spilt need to be rewritten
       logDebug("No file need to rewrote. It's an empty Commit.")
       Seq.empty[CommitMessage]
     } else {
@@ -114,12 +115,12 @@ case class UpdatePaimonTableCommand(
 
         // Step3: the smallest range of data files that need to be rewritten.
         val (touchedFiles, touchedFileRelation) =
-          createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+          extractFilesAndCreateNewScan(touchedFilePaths, dataFilePathToMeta, relation)
 
         // Step4: build a dataframe that contains the unchanged and updated data, and write out them.
         val addCommitMessage = writeUpdatedAndUnchangedData(sparkSession, touchedFileRelation)
 
-        // Step5: convert the deleted files that need to be wrote to commit message.
+        // Step5: convert the deleted files that need to be written to commit message.
         val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
 
         addCommitMessage ++ deletedCommitMessage
@@ -135,19 +136,14 @@ case class UpdatePaimonTableCommand(
         toColumn(update).as(origin.name, origin.metadata)
     }
 
-    val toUpdateScanRelation = createNewRelation(touchedDataSplits, relation)
-    val newPlan = if (condition == TrueLiteral) {
-      toUpdateScanRelation
-    } else {
-      Filter(condition, toUpdateScanRelation)
-    }
-    val data = createDataset(sparkSession, newPlan).select(updateColumns: _*)
+    val toUpdateScanRelation = createNewScanPlan(touchedDataSplits, relation, Some(condition))
+    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
     dvSafeWriter.write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
-      toUpdateScanRelation: DataSourceV2Relation): Seq[CommitMessage] = {
+      toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
@@ -156,13 +152,13 @@ case class UpdatePaimonTableCommand(
 
     if (coreOptions.rowTrackingEnabled()) {
       updateColumns ++= Seq(
-        col(SpecialFields.ROW_ID.name()),
+        col(ROW_ID_COLUMN),
         toColumn(
           optimizedIf(
             condition,
             Literal(null),
-            toExpression(sparkSession, col(SpecialFields.SEQUENCE_NUMBER.name()))))
-          .as(SpecialFields.SEQUENCE_NUMBER.name())
+            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+          .as(SEQUENCE_NUMBER_COLUMN)
       )
     }
 
