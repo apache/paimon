@@ -108,6 +108,96 @@ public class BitSliceIndexBitmapTest {
         for (Pair<Integer, Integer> pair : pairs) {
             assertThat(bsi.get(pair.getKey())).isEqualTo(pair.getValue());
         }
+
+        // test topK
+        for (int i = 0; i < 10; i++) {
+            int k = random.nextInt(CARDINALITY);
+
+            // without found set
+            RoaringBitmap32 expected = new RoaringBitmap32();
+            pairs.stream()
+                    .filter(pair -> pair.getValue() != null)
+                    .sorted(
+                            (x, y) -> {
+                                int result = y.getValue().compareTo(x.getValue());
+                                if (result == 0) {
+                                    return y.getKey().compareTo(x.getKey());
+                                }
+                                return result;
+                            })
+                    .map(Pair::getKey)
+                    .limit(k)
+                    .forEach(expected::add);
+            RoaringBitmap32 actual = bsi.topK(k, null);
+            assertThat(actual).isEqualTo(expected);
+
+            // with found set
+            expected = new RoaringBitmap32();
+            RoaringBitmap32 foundSet = new RoaringBitmap32();
+            for (int j = 0; j < random.nextInt(CARDINALITY); j++) {
+                foundSet.add(random.nextInt(ROW_COUNT));
+            }
+            pairs.stream()
+                    .filter(pair -> pair.getValue() != null)
+                    .filter(pair -> foundSet.contains(pair.getKey()))
+                    .sorted(
+                            (x, y) -> {
+                                int result = y.getValue().compareTo(x.getValue());
+                                if (result == 0) {
+                                    return y.getKey().compareTo(x.getKey());
+                                }
+                                return result;
+                            })
+                    .map(Pair::getKey)
+                    .limit(k)
+                    .forEach(expected::add);
+            actual = bsi.topK(k, foundSet);
+            assertThat(actual).isEqualTo(expected);
+        }
+
+        // test bottomK
+        for (int i = 0; i < 10; i++) {
+            int k = random.nextInt(CARDINALITY);
+            RoaringBitmap32 expected = new RoaringBitmap32();
+            pairs.stream()
+                    .filter(pair -> pair.getValue() != null)
+                    .sorted(
+                            (x, y) -> {
+                                int result = x.getValue().compareTo(y.getValue());
+                                if (result == 0) {
+                                    return y.getKey().compareTo(x.getKey());
+                                }
+                                return result;
+                            })
+                    .map(Pair::getKey)
+                    .limit(k)
+                    .forEach(expected::add);
+            RoaringBitmap32 actual = bsi.bottomK(k, null);
+            assertThat(actual).isEqualTo(expected);
+
+            // with found set
+            expected = new RoaringBitmap32();
+            RoaringBitmap32 foundSet = new RoaringBitmap32();
+            for (int j = 0; j < random.nextInt(CARDINALITY); j++) {
+                foundSet.add(random.nextInt(ROW_COUNT));
+            }
+            pairs.stream()
+                    .filter(pair -> pair.getValue() != null)
+                    .filter(pair -> foundSet.contains(pair.getKey()))
+                    .sorted(
+                            (x, y) -> {
+                                int result = x.getValue().compareTo(y.getValue());
+                                if (result == 0) {
+                                    return y.getKey().compareTo(x.getKey());
+                                }
+                                return result;
+                            })
+                    .map(Pair::getKey)
+                    .limit(k)
+                    .forEach(expected::add);
+            actual = bsi.bottomK(k, foundSet);
+            assertThat(actual).isEqualTo(expected);
+        }
     }
 
     @Test

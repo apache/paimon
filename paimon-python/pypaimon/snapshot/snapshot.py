@@ -16,55 +16,30 @@
 # limitations under the License.
 ################################################################################
 
-import re
-from dataclasses import asdict, dataclass, fields
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+from pypaimon.common.rest_json import json_field
 
 
 @dataclass
 class Snapshot:
-    version: int
-    id: int
-    schema_id: int
-    base_manifest_list: str
-    delta_manifest_list: str
-    commit_user: str
-    commit_identifier: int
-    commit_kind: str
-    time_millis: int
-    log_offsets: Dict[int, int]
-
-    changelog_manifest_list: Optional[str] = None
-    index_manifest: Optional[str] = None
-    total_record_count: Optional[int] = None
-    delta_record_count: Optional[int] = None
-    changelog_record_count: Optional[int] = None
-    watermark: Optional[int] = None
-    statistics: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]):
-        known_fields = {field.name for field in fields(Snapshot)}
-        processed_data = {
-            camel_to_snake(key): value
-            for key, value in data.items()
-            if camel_to_snake(key) in known_fields
-        }
-        return Snapshot(**processed_data)
-
-    def to_json(self) -> Dict[str, Any]:
-        snake_case_dict = asdict(self)
-        return {
-            snake_to_camel(key): value
-            for key, value in snake_case_dict.items()
-        }
-
-
-def camel_to_snake(name: str) -> str:
-    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-
-
-def snake_to_camel(name: str) -> str:
-    parts = name.split('_')
-    return parts[0] + ''.join(word.capitalize() for word in parts[1:])
+    # Required fields
+    id: int = json_field("id")
+    schema_id: int = json_field("schemaId")
+    base_manifest_list: str = json_field("baseManifestList")
+    delta_manifest_list: str = json_field("deltaManifestList")
+    commit_user: str = json_field("commitUser")
+    commit_identifier: int = json_field("commitIdentifier")
+    commit_kind: str = json_field("commitKind")
+    time_millis: int = json_field("timeMillis")
+    # Optional fields with defaults
+    version: Optional[int] = json_field("version", default=None)
+    log_offsets: Optional[Dict[int, int]] = json_field("logOffsets", default_factory=dict)
+    changelog_manifest_list: Optional[str] = json_field("changelogManifestList", default=None)
+    index_manifest: Optional[str] = json_field("indexManifest", default=None)
+    total_record_count: Optional[int] = json_field("totalRecordCount", default=None)
+    delta_record_count: Optional[int] = json_field("deltaRecordCount", default=None)
+    changelog_record_count: Optional[int] = json_field("changelogRecordCount", default=None)
+    watermark: Optional[int] = json_field("watermark", default=None)
+    statistics: Optional[str] = json_field("statistics", default=None)

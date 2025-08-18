@@ -22,6 +22,7 @@ import org.apache.paimon.fileindex.rangebitmap.dictionary.Dictionary;
 import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.ChunkedDictionary;
 import org.apache.paimon.fileindex.rangebitmap.dictionary.chunked.KeyFactory;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -34,6 +35,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.BiFunction;
+
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 
 /** Implementation of range-bitmap. */
 public class RangeBitmap {
@@ -208,13 +212,7 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 isNull() {
-        if (cardinality <= 0) {
-            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
-        }
-
-        RoaringBitmap32 bitmap = isNotNull();
-        bitmap.flip(0, rid);
-        return bitmap;
+        return isNull(null);
     }
 
     public RoaringBitmap32 isNotNull() {
@@ -223,6 +221,23 @@ public class RangeBitmap {
         }
 
         return getBitSliceIndexBitmap().isNotNull();
+    }
+
+    private RoaringBitmap32 isNull(@Nullable RoaringBitmap32 foundSet) {
+        if (cardinality <= 0) {
+            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
+        }
+
+        if (foundSet != null && foundSet.isEmpty()) {
+            return foundSet;
+        }
+
+        RoaringBitmap32 bitmap = isNotNull();
+        bitmap.flip(0, rid);
+        if (foundSet != null) {
+            bitmap.and(foundSet);
+        }
+        return bitmap;
     }
 
     public Object get(int position) {
@@ -262,6 +277,45 @@ public class RangeBitmap {
             }
         }
         return bsi;
+    }
+
+    public RoaringBitmap32 topK(
+            int k, SortValue.NullOrdering nullOrdering, @Nullable RoaringBitmap32 foundSet) {
+        return fillNulls(k, nullOrdering, foundSet, (l, r) -> getBitSliceIndexBitmap().topK(l, r));
+    }
+
+    public RoaringBitmap32 bottomK(
+            int k, SortValue.NullOrdering nullOrdering, @Nullable RoaringBitmap32 foundSet) {
+        return fillNulls(
+                k, nullOrdering, foundSet, (l, r) -> getBitSliceIndexBitmap().bottomK(l, r));
+    }
+
+    private RoaringBitmap32 fillNulls(
+            int k,
+            SortValue.NullOrdering nullOrdering,
+            @Nullable RoaringBitmap32 foundSet,
+            BiFunction<Integer, RoaringBitmap32, RoaringBitmap32> function) {
+        if (cardinality <= 0) {
+            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
+        }
+
+        RoaringBitmap32 bitmap;
+        if (NULLS_LAST.equals(nullOrdering)) {
+            bitmap = function.apply(k, foundSet);
+            long cardinality = bitmap.getCardinality();
+            if (cardinality >= k) {
+                return bitmap;
+            }
+            bitmap.or(isNull(foundSet).limit((int) (k - cardinality)));
+        } else {
+            bitmap = isNull(foundSet);
+            long cardinality = bitmap.getCardinality();
+            if (cardinality >= k) {
+                return bitmap.limit(k);
+            }
+            bitmap.or(function.apply((int) (k - cardinality), foundSet));
+        }
+        return bitmap;
     }
 
     /** A Builder for {@link RangeBitmap}. */

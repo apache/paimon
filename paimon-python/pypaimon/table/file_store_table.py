@@ -17,6 +17,7 @@
 ################################################################################
 
 from pathlib import Path
+from typing import Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
@@ -25,6 +26,7 @@ from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.table import Table
 from pypaimon.write.batch_write_builder import BatchWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
@@ -36,10 +38,11 @@ from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
 
 class FileStoreTable(Table):
     def __init__(self, file_io: FileIO, identifier: Identifier, table_path: Path,
-                 table_schema: TableSchema):
+                 table_schema: TableSchema, catalog_environment: Optional[CatalogEnvironment] = None):
         self.file_io = file_io
         self.identifier = identifier
         self.table_path = table_path
+        self.catalog_environment = catalog_environment or CatalogEnvironment.empty()
 
         self.table_schema = table_schema
         self.fields = table_schema.fields
@@ -50,6 +53,19 @@ class FileStoreTable(Table):
         self.schema_manager = SchemaManager(file_io, table_path)
         self.is_primary_key_table = bool(self.primary_keys)
         self.cross_partition_update = self.table_schema.cross_partition_update()
+
+    def current_branch(self) -> str:
+        """Get the current branch name from options."""
+        return self.options.get(CoreOptions.BRANCH, "main")
+
+    def snapshot_manager(self):
+        """Get the snapshot manager for this table."""
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+        return SnapshotManager(self)
+
+    def new_snapshot_commit(self):
+        """Create a new SnapshotCommit instance using the catalog environment."""
+        return self.catalog_environment.snapshot_commit(self.snapshot_manager())
 
     def bucket_mode(self) -> BucketMode:
         if self.is_primary_key_table:

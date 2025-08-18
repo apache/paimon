@@ -128,7 +128,12 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
-    s"PaimonScan: [${table.name}]" + pushedFiltersStr +
+    val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
+      s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
+    } else {
+      ""
+    }
+    s"PaimonScan: [${table.name}]" + pushedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

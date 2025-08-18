@@ -143,14 +143,17 @@ case class DeleteFromPaimonTableCommand(
 
       // Step3: the smallest range of data files that need to be rewritten.
       val (touchedFiles, newRelation) =
-        createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+        extractFilesAndCreateNewScan(touchedFilePaths, dataFilePathToMeta, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
       val toRewriteScanRelation = Filter(Not(condition), newRelation)
-      val data = createDataset(sparkSession, toRewriteScanRelation)
+      var data = createDataset(sparkSession, toRewriteScanRelation)
+      if (coreOptions.rowTrackingEnabled()) {
+        data = selectWithRowLineage(data)
+      }
 
       // only write new files, should have no compaction
-      val addCommitMessage = dvSafeWriter.writeOnly().write(data)
+      val addCommitMessage = dvSafeWriter.writeOnly().withRowLineage().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

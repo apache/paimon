@@ -75,18 +75,9 @@ definition and can contain different types of indexes with multiple columns.
 Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
 
-`Bloom Filter`:
-* `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
-* `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
-* `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
-
-`Bitmap`:
-* `file-index.bitmap.columns`: specify the columns that need bitmap index. See [Index Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}).
-
-`Bit-Slice Index Bitmap`
-* `file-index.bsi.columns`: specify the columns that need bsi index.
-
-More filter types will be supported...
+* [BloomFilter]({{< ref "concepts/spec/fileindex#index-bloomfilter" >}}): `file-index.bloom-filter.columns`.
+* [Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}): `file-index.bitmap.columns`.
+* [Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}): `file-index.range-bitmap.columns`.
 
 If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
 we use the procedure, you should config appropriate configurations in target table. You can use ALTER clause to config

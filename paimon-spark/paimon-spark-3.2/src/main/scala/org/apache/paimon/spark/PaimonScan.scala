@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
@@ -36,6 +36,7 @@ case class PaimonScan(
     reservedFilters: Seq[Filter],
     override val pushDownLimit: Option[Int],
     // no usage, just for compile compatibility
+    override val pushDownTopN: Option[TopN],
     bucketedScanDisabled: Boolean = true)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
   with SupportsRuntimeFiltering {

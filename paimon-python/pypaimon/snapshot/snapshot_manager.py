@@ -15,11 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-import json
+from pathlib import Path
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.rest_json import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 
 
@@ -32,13 +32,13 @@ class SnapshotManager:
         self.table: FileStoreTable = table
         self.file_io: FileIO = self.table.file_io
         self.snapshot_dir = self.table.table_path / "snapshot"
+        self.latest_file = self.snapshot_dir / "LATEST"
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
-        latest_file = self.snapshot_dir / "LATEST"
-        if not self.file_io.exists(latest_file):
+        if not self.file_io.exists(self.latest_file):
             return None
 
-        latest_content = self.file_io.read_file_utf8(latest_file)
+        latest_content = self.file_io.read_file_utf8(self.latest_file)
         latest_snapshot_id = int(latest_content.strip())
 
         snapshot_file = self.snapshot_dir / f"snapshot-{latest_snapshot_id}"
@@ -46,23 +46,16 @@ class SnapshotManager:
             return None
 
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
-        snapshot_data = json.loads(snapshot_content)
-        return Snapshot.from_json(snapshot_data)
+        return JSON.from_json(snapshot_content, Snapshot)
 
-    def commit_snapshot(self, snapshot_id: int, snapshot_data: Snapshot):
-        snapshot_file = self.snapshot_dir / f"snapshot-{snapshot_id}"
-        latest_file = self.snapshot_dir / "LATEST"
+    def get_snapshot_path(self, snapshot_id: int) -> Path:
+        """
+        Get the path for a snapshot file.
 
-        try:
-            snapshot_json = json.dumps(snapshot_data.to_json(), indent=2)
-            snapshot_success = self.file_io.try_to_write_atomic(snapshot_file, snapshot_json)
-            if not snapshot_success:
-                self.file_io.write_file(snapshot_file, snapshot_json, overwrite=True)
+        Args:
+            snapshot_id: The snapshot ID
 
-            latest_success = self.file_io.try_to_write_atomic(latest_file, str(snapshot_id))
-            if not latest_success:
-                self.file_io.write_file(latest_file, str(snapshot_id), overwrite=True)
-
-        except Exception as e:
-            self.file_io.delete_quietly(snapshot_file)
-            raise RuntimeError(f"Failed to commit snapshot {snapshot_id}: {e}") from e
+        Returns:
+            Path to the snapshot file
+        """
+        return self.snapshot_dir / f"snapshot-{snapshot_id}"

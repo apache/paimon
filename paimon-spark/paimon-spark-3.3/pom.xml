@@ -38,15 +38,13 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark3-common</artifactId>
-            <version>${project.version}</version>
+            <artifactId>paimon-format</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
+            <artifactId>paimon-spark3-common</artifactId>
             <version>${project.version}</version>
-            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -71,11 +69,6 @@ under the License.
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-hive_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-bundle</artifactId>
         </dependency>
 
         <!-- test -->
@@ -89,13 +82,6 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-format</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
@@ -116,20 +102,6 @@ under the License.
             <artifactId>spark-core_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-hive_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
-            <version>${okhttp.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

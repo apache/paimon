@@ -143,6 +143,16 @@ public class TableSchema implements Serializable {
         return fields.stream().map(DataField::name).collect(Collectors.toList());
     }
 
+    public Map<String, DataField> nameToFieldMap() {
+        return fields.stream()
+                .collect(Collectors.toMap(DataField::name, field -> field, (a, b) -> b));
+    }
+
+    public Map<Integer, DataField> idToFieldMap() {
+        return fields.stream()
+                .collect(Collectors.toMap(DataField::id, field -> field, (a, b) -> b));
+    }
+
     public int highestFieldId() {
         return highestFieldId;
     }
@@ -156,14 +166,14 @@ public class TableSchema implements Serializable {
     }
 
     public List<String> trimmedPrimaryKeys() {
-        if (primaryKeys.size() > 0) {
+        if (!primaryKeys.isEmpty()) {
             List<String> adjusted =
                     primaryKeys.stream()
                             .filter(pk -> !partitionKeys.contains(pk))
                             .collect(Collectors.toList());
 
             Preconditions.checkState(
-                    adjusted.size() > 0,
+                    !adjusted.isEmpty(),
                     String.format(
                             "Primary key constraint %s should not be same with partition fields %s,"
                                     + " this will result in only one record in a partition",
@@ -192,7 +202,7 @@ public class TableSchema implements Serializable {
             return false;
         }
 
-        return !primaryKeys.containsAll(partitionKeys);
+        return notContainsAll(primaryKeys, partitionKeys);
     }
 
     /** Original bucket keys, maybe empty. */
@@ -202,7 +212,7 @@ public class TableSchema implements Serializable {
             return Collections.emptyList();
         }
         List<String> bucketKeys = Arrays.asList(key.split(","));
-        if (!containsAll(fieldNames(), bucketKeys)) {
+        if (notContainsAll(fieldNames(), bucketKeys)) {
             throw new RuntimeException(
                     String.format(
                             "Field names %s should contains all bucket keys %s.",
@@ -214,8 +224,8 @@ public class TableSchema implements Serializable {
                             "Bucket keys %s should not in partition keys %s.",
                             bucketKeys, partitionKeys));
         }
-        if (primaryKeys.size() > 0) {
-            if (!containsAll(primaryKeys, bucketKeys)) {
+        if (!primaryKeys.isEmpty()) {
+            if (notContainsAll(primaryKeys, bucketKeys)) {
                 throw new RuntimeException(
                         String.format(
                                 "Primary keys %s should contains all bucket keys %s.",
@@ -225,8 +235,8 @@ public class TableSchema implements Serializable {
         return bucketKeys;
     }
 
-    private boolean containsAll(List<String> all, List<String> contains) {
-        return new HashSet<>(all).containsAll(new HashSet<>(contains));
+    private boolean notContainsAll(List<String> all, List<String> contains) {
+        return !new HashSet<>(all).containsAll(new HashSet<>(contains));
     }
 
     public @Nullable String comment() {

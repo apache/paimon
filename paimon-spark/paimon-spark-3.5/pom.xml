@@ -38,13 +38,12 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark3-common</artifactId>
-            <version>${project.version}</version>
+            <artifactId>paimon-format</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
+            <artifactId>paimon-spark3-common</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -70,11 +69,6 @@ under the License.
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-hive_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-bundle</artifactId>
         </dependency>
 
         <!-- test -->
@@ -93,16 +87,6 @@ under the License.
             <version>${spark.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <artifactId>parquet-hadoop</artifactId>
-                    <groupId>org.apache.parquet</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>parquet-column</artifactId>
-                    <groupId>org.apache.parquet</groupId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -118,44 +102,6 @@ under the License.
             <artifactId>spark-core_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-hive_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-format</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.parquet</groupId>
-            <artifactId>parquet-hadoop</artifactId>
-            <version>${parquet.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.xerial.snappy</groupId>
-                    <artifactId>snappy-java</artifactId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>zstd-jni</artifactId>
-                    <groupId>com.github.luben</groupId>
-                </exclusion>
-            </exclusions>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
-            <version>${okhttp.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

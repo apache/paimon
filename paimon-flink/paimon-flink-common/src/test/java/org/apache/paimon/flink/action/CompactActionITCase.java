@@ -342,6 +342,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(),
                         TraceableFileIO.SCHEME + "://" + externalPath2);
         table.schemaManager().commitChanges(schemaChange);
+        // wait a checkpoint at least to wait the writer refresh
+        Thread.sleep(1000);
 
         // incremental records
         writeData(

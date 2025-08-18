@@ -38,6 +38,7 @@ import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -76,12 +77,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
+    private final boolean deletionVectorsEnabled;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
+    @Nullable private TopN topN;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -91,12 +94,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            boolean rowTrackingEnabled,
+            boolean deletionVectorsEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.rowTrackingEnabled = rowTrackingEnabled;
@@ -123,6 +128,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     public RawFileSplitRead withFilter(Predicate predicate) {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
+        }
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withTopN(@Nullable TopN topN) {
+        if (!deletionVectorsEnabled) {
+            this.topN = topN;
         }
         return this;
     }
@@ -164,7 +177,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             }
                             return schema.fields();
                         },
-                        filters);
+                        filters,
+                        topN);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -220,6 +234,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             fileIO,
                             formatReaderMapping.getDataSchema(),
                             formatReaderMapping.getDataFilters(),
+                            formatReaderMapping.getTopN(),
                             dataFilePathFactory,
                             file);
             if (!fileIndexResult.remain()) {

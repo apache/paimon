@@ -37,7 +37,10 @@ Flink SQL does not have native support for default values, so we can only create
 CREATE TABLE my_table (
     a BIGINT,
     b STRING,
-    c INT
+    c INT,
+    tags ARRAY<STRING>,
+    properties MAP<STRING, STRING>,
+    nested ROW<x INT, y STRING>
 );
 ```
 
@@ -45,8 +48,14 @@ We support the procedure of modifying column default values in Flink. You can ad
 creating the table:
 
 ```sql
+-- Set simple type default values
 CALL sys.alter_column_default_value('default.my_table', 'b', 'my_value');
 CALL sys.alter_column_default_value('default.my_table', 'c', '5');
+
+-- Set complex type default values
+CALL sys.alter_column_default_value('default.my_table', 'tags', '[tag1, tag2, tag3]');
+CALL sys.alter_column_default_value('default.my_table', 'properties', '{key1 -> value1, key2 -> value2}');
+CALL sys.alter_column_default_value('default.my_table', 'nested', '{42, default_value}');
 ```
 
 ## Insert Table
@@ -60,5 +69,6 @@ For example:
 INSERT INTO my_table (a) VALUES (1), (2);
 
 SELECT * FROM my_table;
--- result: [[1, 5, my_value], [2, 5, my_value]]
+-- result: [[1, my_value, 5, [tag1, tag2, tag3], {key1=value1, key2=value2}, +I[42, default_value]],
+--          [2, my_value, 5, [tag1, tag2, tag3], {key1=value1, key2=value2}, +I[42, default_value]]]
 ```

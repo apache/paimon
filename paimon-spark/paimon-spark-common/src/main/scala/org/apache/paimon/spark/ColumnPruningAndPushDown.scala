@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{InnerTable, SpecialFields}
 import org.apache.paimon.table.source.ReadBuilder
@@ -35,6 +35,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
   def requiredSchema: StructType
   def filters: Seq[Predicate]
   def pushDownLimit: Option[Int] = None
+  def pushDownTopN: Option[TopN] = None
 
   lazy val tableRowType: RowType = {
     val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
@@ -71,6 +72,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
       _readBuilder.withFilter(pushedPredicate)
     }
     pushDownLimit.foreach(_readBuilder.withLimit)
+    pushDownTopN.foreach(_readBuilder.withTopN)
     _readBuilder.dropStats()
   }
 

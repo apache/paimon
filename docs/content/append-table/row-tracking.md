@@ -29,7 +29,7 @@ under the License.
 ## What is row tracking
 
 Row tracking allows Paimon to track row-level lineage in a Paimon append table. Once enabled on a Paimon table, two more hidden columns will be added to the table schema:
-- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of updates or merge into.
+- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of update, merge into or delete.
 - `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the lineage of the row version.
 
 ## Enable row tracking
@@ -46,7 +46,7 @@ WITH ('row-tracking.enabled' = 'true');
 ```
 Notice that:
 - Row tracking is only supported for unaware append tables, not for primary key tables. Which means you can't define `bucket` and `bucket-key` for the table.
-- Only spark support update and merge into operations on row-tracking tables, Flink SQL does not support these operations yet.
+- Only spark support update, merge into and delete operations on row-tracking tables, Flink SQL does not support these operations yet.
 - This function is experimental, this line will be removed after being stable.
 
 ## How to use row tracking
@@ -92,7 +92,7 @@ You can also merge into the table, suppose you have a source table `s` that cont
 MERGE INTO t USING s
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET t.data = s.data
-WHEN NOT MATCHED THEN INSERT *
+WHEN NOT MATCHED THEN INSERT *;
 ```
 
 You will get:
@@ -101,6 +101,22 @@ You will get:
 | id|           data|_ROW_ID|_SEQUENCE_NUMBER|
 +---+---------------+-------+----------------+
 | 11|new-data-update|      0|               2|
+| 22| new-data-merge|      1|               3|
+| 33|              c|      2|               3|
++---+---------------+-------+----------------+
+```
+
+You can also delete from the table:
+
+```sql
+DELETE FROM t WHERE id = 11;
+```
+
+You will get:
+```text
++---+---------------+-------+----------------+
+| id|           data|_ROW_ID|_SEQUENCE_NUMBER|
++---+---------------+-------+----------------+
 | 22| new-data-merge|      1|               3|
 | 33|              c|      2|               3|
 +---+---------------+-------+----------------+

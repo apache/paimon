@@ -64,6 +64,19 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Lineage: delete table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+      sql("DELETE FROM t WHERE id = 2")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
+      )
+    }
+  }
+
   test("Row Lineage: update table") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")

@@ -45,6 +45,23 @@ under the License.
     <dependencyManagement>
         <dependencies>
             <dependency>
+                <groupId>org.apache.paimon</groupId>
+                <artifactId>paimon-format</artifactId>
+                <version>${project.version}</version>
+                <exclusions>
+                    <!-- todo(fix me): we should use the jackson libraries shaded by Paimon. -->
+                    <exclusion>
+                        <groupId>com.fasterxml.jackson.core</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.apache.hadoop</groupId>
+                        <artifactId>hadoop-common</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+
+            <dependency>
                 <groupId>org.apache.spark</groupId>
                 <artifactId>spark-sql_${scala.binary.version}</artifactId>
                 <exclusions>
@@ -59,22 +76,6 @@ under the License.
                     <exclusion>
                         <groupId>org.apache.logging.log4j</groupId>
                         <artifactId>log4j-slf4j2-impl</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.orc</groupId>
-                        <artifactId>orc-core</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.orc</groupId>
-                        <artifactId>orc-mapreduce</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.parquet</groupId>
-                        <artifactId>parquet-column</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.parquet</groupId>
-                        <artifactId>parquet-hadoop</artifactId>
                     </exclusion>
                 </exclusions>
             </dependency>
@@ -95,18 +96,6 @@ under the License.
                     <exclusion>
                         <groupId>org.apache.logging.log4j</groupId>
                         <artifactId>log4j-slf4j2-impl</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.orc</groupId>
-                        <artifactId>orc-core</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.orc</groupId>
-                        <artifactId>orc-mapreduce</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.parquet</groupId>
-                        <artifactId>parquet-column</artifactId>
                     </exclusion>
                     <exclusion>
                         <groupId>com.google.protobuf</groupId>
@@ -143,12 +132,6 @@ under the License.
                         <artifactId>slf4j-log4j12</artifactId>
                     </exclusion>
                 </exclusions>
-            </dependency>
-
-            <dependency>
-                <groupId>org.apache.paimon</groupId>
-                <artifactId>paimon-bundle</artifactId>
-                <version>${project.version}</version>
             </dependency>
 
             <!-- test -->
@@ -215,6 +198,8 @@ under the License.
     </dependencyManagement>
 
     <dependencies>
+        <!-- Common dependencies -->
+
         <dependency>
             <groupId>org.scala-lang</groupId>
             <artifactId>scala-library</artifactId>
@@ -233,44 +218,25 @@ under the License.
             <version>${scala.version}</version>
         </dependency>
 
-        <!-- Test -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-bundle</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Below are common test dependencies, place them in this parent module to facilitate
+             reuse by all downstream test modules. -->
 
         <dependency>
             <groupId>org.scalatest</groupId>
             <artifactId>scalatest_${scala.binary.version}</artifactId>
             <version>3.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-common</artifactId>
-            <version>${project.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-core</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-            <type>test-jar</type>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hive-common</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hive-common</artifactId>
-            <version>${project.version}</version>
-            <classifier>tests</classifier>
-            <type>test-jar</type>
             <scope>test</scope>
         </dependency>
 
@@ -283,16 +249,40 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-s3</artifactId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
+            <classifier>tests</classifier>
             <scope>test</scope>
-            <type>test-jar</type>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-core</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-common</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-s3</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
 
@@ -313,6 +303,20 @@ under the License.
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-s3</artifactId>
             <version>${aws.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf-java.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>${okhttp.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
