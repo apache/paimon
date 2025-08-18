@@ -38,6 +38,7 @@ import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -215,14 +216,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
-            fileIndexResult =
-                    FileIndexEvaluator.evaluate(
-                            fileIO,
-                            formatReaderMapping.getDataSchema(),
-                            formatReaderMapping.getDataFilters(),
-                            dataFilePathFactory,
-                            file);
-            if (!fileIndexResult.remain()) {
+            List<Predicate> dataFilters = formatReaderMapping.getDataFilters();
+            if (dataFilters != null && !dataFilters.isEmpty()) {
+                Predicate dataPredicate =
+                        PredicateBuilder.and(
+                                formatReaderMapping.getDataFilters().toArray(new Predicate[0]));
+                fileIndexResult =
+                        FileIndexEvaluator.evaluate(
+                                fileIO,
+                                formatReaderMapping.getDataSchema(),
+                                dataPredicate,
+                                dataFilePathFactory,
+                                file);
+            }
+            if (fileIndexResult != null && !fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
         }

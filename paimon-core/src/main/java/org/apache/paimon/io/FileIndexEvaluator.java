@@ -22,7 +22,6 @@ import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 
 import java.io.IOException;
@@ -35,17 +34,16 @@ public class FileIndexEvaluator {
     public static FileIndexResult evaluate(
             FileIO fileIO,
             TableSchema dataSchema,
-            List<Predicate> dataFilter,
+            Predicate dataPredicate,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file)
             throws IOException {
-        if (dataFilter != null && !dataFilter.isEmpty()) {
+        if (dataPredicate != null) {
             byte[] embeddedIndex = file.embeddedIndex();
             if (embeddedIndex != null) {
                 try (FileIndexPredicate predicate =
                         new FileIndexPredicate(embeddedIndex, dataSchema.logicalRowType())) {
-                    return predicate.evaluate(
-                            PredicateBuilder.and(dataFilter.toArray(new Predicate[0])));
+                    return predicate.evaluate(dataPredicate);
                 }
             }
 
@@ -65,8 +63,7 @@ public class FileIndexEvaluator {
                                 dataFilePathFactory.toAlignedPath(indexFiles.get(0), file),
                                 fileIO,
                                 dataSchema.logicalRowType())) {
-                    return predicate.evaluate(
-                            PredicateBuilder.and(dataFilter.toArray(new Predicate[0])));
+                    return predicate.evaluate(dataPredicate);
                 }
             }
         }
