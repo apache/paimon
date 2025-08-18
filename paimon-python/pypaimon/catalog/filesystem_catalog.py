@@ -17,7 +17,7 @@
 #################################################################################
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 from urllib.parse import urlparse
 
 from pypaimon.catalog.catalog import Catalog
@@ -26,11 +26,13 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.catalog.database import Database
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
@@ -118,3 +120,12 @@ class FileSystemCatalog(Catalog):
         bucket = parsed.netloc
         warehouse_dir = parsed.path.lstrip('/')
         return Path(f"{bucket}/{warehouse_dir}" if warehouse_dir else bucket)
+
+    def commit_snapshot(
+            self,
+            identifier: Identifier,
+            table_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics]
+    ) -> bool:
+        raise NotImplementedError("This catalog does not support commit catalog")

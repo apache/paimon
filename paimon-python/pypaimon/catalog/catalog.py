@@ -63,6 +63,7 @@ class Catalog(ABC):
         """
         return False
 
+    @abstractmethod
     def commit_snapshot(
             self,
             identifier: Identifier,
@@ -82,9 +83,4 @@ class Catalog(ABC):
         Returns:
             True if commit was successful, False otherwise
 
-        Raises:
-            UnsupportedOperationException: If the catalog does not support version management
         """
-        if not self.supports_version_management():
-            raise NotImplementedError("This catalog does not support version management")
-        raise NotImplementedError("commit_snapshot method must be implemented by subclasses")

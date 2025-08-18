@@ -161,7 +161,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
     def test_commit_table_request_creation(self):
         """Test CommitTableRequest creation."""
-        from pypaimon.api.api_resquest import CommitTableRequest
+        from pypaimon.api.api_request import CommitTableRequest
 
         request = CommitTableRequest(
             table_uuid="test-uuid",

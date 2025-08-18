@@ -25,10 +25,10 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
                                        PagedResponse)
-from pypaimon.api.api_resquest import (AlterDatabaseRequest,
-                                       CommitTableRequest,
-                                       CreateDatabaseRequest,
-                                       CreateTableRequest, RenameTableRequest)
+from pypaimon.api.api_request import (AlterDatabaseRequest,
+                                      CommitTableRequest,
+                                      CreateDatabaseRequest,
+                                      CreateTableRequest, RenameTableRequest)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.typedef import T

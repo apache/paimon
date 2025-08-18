@@ -462,7 +462,7 @@ class RESTCatalogServer:
 
         try:
             # Parse the commit request
-            from pypaimon.api.api_resquest import CommitTableRequest
+            from pypaimon.api.api_request import CommitTableRequest
             from pypaimon.api.api_response import CommitTableResponse
 
             commit_request = JSON.from_json(data, CommitTableRequest)
