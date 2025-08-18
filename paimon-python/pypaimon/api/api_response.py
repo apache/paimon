@@ -258,3 +258,13 @@ class GetTableTokenResponse(RESTResponse):
 
     token: Dict[str, str] = json_field(FIELD_TOKEN, default=None)
     expires_at_millis: Optional[int] = json_field(FIELD_EXPIRES_AT_MILLIS, default=None)
+
+
+@dataclass
+class CommitTableResponse(RESTResponse):
+    FIELD_SUCCESS = "success"
+
+    success: bool = json_field(FIELD_SUCCESS, default=False)
+
+    def is_success(self) -> bool:
+        return self.success
