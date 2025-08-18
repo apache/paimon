@@ -77,6 +77,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
+    private final boolean deletionVectorsEnabled;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
@@ -93,12 +94,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            boolean rowTrackingEnabled,
+            boolean deletionVectorsEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.rowTrackingEnabled = rowTrackingEnabled;
@@ -131,7 +134,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> withTopN(@Nullable TopN topN) {
-        this.topN = topN;
+        if (!deletionVectorsEnabled) {
+            this.topN = topN;
+        }
         return this;
     }
 
