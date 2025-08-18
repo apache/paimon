@@ -85,7 +85,10 @@ BODY:                             column index bytes + column index bytes + colu
 
 ## Index: BloomFilter 
 
-Define `'file-index.bloom-filter.columns'`.
+Options are:
+* `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
+* `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
+* `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
 
 Content of bloom filter index is simple: 
 - numHashFunctions 4 bytes int, BIG_ENDIAN
@@ -231,6 +234,40 @@ Shortcoming:
 Options:
 * `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index.
 * `file-index.range-bitmap.<column_name>.chunk-size`: to config the chunk size, default value is 16kb.
+
+Table supports using range-bitmap file index to optimize the `EQUALS`, `RANGE`, `AND/OR` and `TOPN` predicate. The bitmap and range-bitmap file index result will be merged and pushed down to the DataFile for filtering rowgroups and pages.
+
+In the following query examples, the `class_id` and the `score` has been created with range-bitmap file index. And the partition key `dt` is not necessary.
+
+**Optimize the `EQUALS` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND score = 100;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND score IN (60, 80);
+```
+
+**Optimize the `RANGE` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND score > 60;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND score < 60;
+```
+
+**Optimize the `AND/OR` predicate:**
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60;
+
+SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60 OR score > 80;
+```
+
+**Optimize the `TOPN` predicate:**
+
+For now, the `TOPN` predicate optimization can not using with other predicates, only support in Apache Spark.
+```sql
+SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC LIMIT 10;
+
+SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score DESC LIMIT 10;
+```
 
 <pre>
 Range Bitmap file index format (V1)

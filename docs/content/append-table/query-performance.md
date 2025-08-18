@@ -75,53 +75,9 @@ definition and can contain different types of indexes with multiple columns.
 Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
 
-`Bloom Filter`:
-* `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
-* `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
-* `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
-
-`Bitmap`:
-* `file-index.bitmap.columns`: specify the columns that need bitmap index. See [Index Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}).
-
-`Range Bitmap Index Bitmap`
-* `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index. See [Index Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}).
-
-
-Append Table supports using range-bitmap file index to optimize the `EQUALS`, `RANGE`, `AND/OR` and `TOPN` predicate. The bitmap and range-bitmap file index result will be merged and pushed down to the DataFile for filtering rowgroups and pages.
-
-In the following query examples, the `class_id` and the `score` has been created with range-bitmap file index. And the partition key `dt` is not necessary.
-
-**Optimize the `EQUALS` predicate:**
-```sql
-SELECT * FROM TABLE WHERE dt = '20250801' AND score = 100;
-
-SELECT * FROM TABLE WHERE dt = '20250801' AND score IN (60, 80);
-```
-
-**Optimize the `RANGE` predicate:**
-```sql
-SELECT * FROM TABLE WHERE dt = '20250801' AND score > 60;
-
-SELECT * FROM TABLE WHERE dt = '20250801' AND score < 60;
-```
-
-**Optimize the `AND/OR` predicate:**
-```sql
-SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60;
-
-SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60 OR score > 80;
-```
-
-**Optimize the `TOPN` predicate:**
-
-For now, the `TOPN` predicate optimization can not using with other predicates, only support in Apache Spark.
-```sql
-SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC LIMIT 10;
-
-SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score DESC LIMIT 10;
-```
-
-More filter types will be supported...
+* [BloomFilter]({{< ref "concepts/spec/fileindex#index-bloomfilter" >}}): `file-index.bloom-filter.columns`.
+* [Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}): `file-index.bitmap.columns`.
+* [Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}): `file-index.range-bitmap.columns`.
 
 If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
 we use the procedure, you should config appropriate configurations in target table. You can use ALTER clause to config

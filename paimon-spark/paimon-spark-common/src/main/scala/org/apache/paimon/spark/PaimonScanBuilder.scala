@@ -116,10 +116,6 @@ class PaimonScanBuilder(table: InnerTable)
     }
 
     val order = orders(0)
-    if (!order.expression().isInstanceOf[NamedReference]) {
-      return false
-    }
-
     val fieldName = orders.head.expression() match {
       case nr: NamedReference => nr.fieldNames.mkString(".")
       case _ => return false
