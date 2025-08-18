@@ -27,6 +27,8 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.ListUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -38,7 +40,7 @@ public class FileIndexEvaluator {
             FileIO fileIO,
             TableSchema dataSchema,
             List<Predicate> dataFilter,
-            TopN topN,
+            @Nullable TopN topN,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file)
             throws IOException {

@@ -46,6 +46,7 @@ import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
@@ -91,6 +92,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
@@ -831,25 +833,23 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .field("event", DataTypes.STRING())
                         .field("price", DataTypes.INT())
                         .build();
+        Consumer<Options> configure =
+                options -> {
+                    options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                    options.set(WRITE_ONLY, true);
+                    options.set(
+                            FileIndexOptions.FILE_INDEX
+                                    + "."
+                                    + RangeBitmapFileIndexFactory.RANGE_BITMAP
+                                    + "."
+                                    + CoreOptions.COLUMNS,
+                            "price");
+                    options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                    options.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                    options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                };
         // in unaware-bucket mode, we split files into splits all the time
-        FileStoreTable table =
-                createUnawareBucketFileStoreTable(
-                        rowType,
-                        options -> {
-                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
-                            options.set(WRITE_ONLY, true);
-                            options.set(
-                                    FileIndexOptions.FILE_INDEX
-                                            + "."
-                                            + RangeBitmapFileIndexFactory.RANGE_BITMAP
-                                            + "."
-                                            + CoreOptions.COLUMNS,
-                                    "price");
-                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
-                            options.set(
-                                    ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
-                        });
+        FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
 
         int bound = 300000;
         int rowCount = 1000000;
@@ -904,6 +904,65 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         // test TopK without index
         {
             DataField field = rowType.getField("id");
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(rowCount);
+            reader.close();
+        }
+
+        // test should not push topN with index and evolution
+        {
+            table.schemaManager()
+                    .commitChanges(SchemaChange.updateColumnType("price", DataTypes.BIGINT()));
+            rowType =
+                    RowType.builder()
+                            .field("id", DataTypes.STRING())
+                            .field("event", DataTypes.STRING())
+                            .field("price", DataTypes.BIGINT())
+                            .build();
+            table = createUnawareBucketFileStoreTable(rowType, configure);
+            DataField field = rowType.getField("price");
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(rowCount);
+            reader.close();
+        }
+
+        // test should not push topN with dv modes
+        {
+            table.schemaManager()
+                    .commitChanges(SchemaChange.updateColumnType("price", DataTypes.INT()));
+            rowType =
+                    RowType.builder()
+                            .field("id", DataTypes.STRING())
+                            .field("event", DataTypes.STRING())
+                            .field("price", DataTypes.INT())
+                            .build();
+            Consumer<Options> newConfigure =
+                    options -> {
+                        configure.accept(options);
+                        options.set(DELETION_VECTORS_ENABLED, true);
+                    };
+            table = createUnawareBucketFileStoreTable(rowType, newConfigure);
+            DataField field = rowType.getField("price");
             SortValue sort =
                     new SortValue(
                             new FieldRef(field.id(), field.name(), field.type()),
