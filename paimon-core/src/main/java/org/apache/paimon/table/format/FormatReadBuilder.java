@@ -33,12 +33,10 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.source.AbstractDataTableRead;
-import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -51,11 +49,13 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static com.sun.xml.internal.fastinfoset.alphabet.BuiltInRestrictedAlphabets.table;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 
@@ -64,13 +64,18 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final FormatTable table;
-    private final CoreOptions options;
+    private final Map<String, String> tableOptions;
+    private CoreOptions options;
 
     private final FileFormatDiscover formatDiscover;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
 
     private RowType readRowType;
+    private List<String> partitionKeys;
+    private String tableName;
+    private String defaultPartName;
+    private FormatTable table;
+
     @Nullable private List<Predicate> filters;
 
     private @Nullable PartitionPredicate partitionFilter;
@@ -80,20 +85,24 @@ public class FormatReadBuilder implements ReadBuilder {
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
-        this.options = new CoreOptions(table.options());
-        this.readRowType = table.schema().logicalRowType().notNull();
-        this.formatDiscover = FileFormatDiscover.of(options);
+        this.tableOptions = table.options();
+        this.options = new CoreOptions(tableOptions);
+        this.readRowType = table.rowType();
+        this.partitionKeys = table.partitionKeys();
+        this.tableName = table.name();
+        this.formatDiscover = FileFormatDiscover.of(this.options);
         this.formatReaderMappings = new HashMap<>();
+        this.defaultPartName = table.defaultPartName();
     }
 
     @Override
     public String tableName() {
-        return table.name();
+        return this.tableName;
     }
 
     @Override
     public RowType readType() {
-        return readType != null ? readType : table.rowType();
+        return readType;
     }
 
     @Override
@@ -105,12 +114,12 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            RowType partitionType = table.partitionType();
+            RowType partitionType = readRowType.project(partitionKeys);
             PartitionPredicate partitionPredicate =
                     fromPredicate(
                             partitionType,
                             createPartitionPredicate(
-                                    partitionSpec, partitionType, table.defaultPartName()));
+                                    partitionSpec, partitionType, this.defaultPartName));
             withPartitionFilter(partitionPredicate);
         }
         return this;
@@ -134,7 +143,7 @@ public class FormatReadBuilder implements ReadBuilder {
             return this;
         }
         this.projection = projection;
-        return withReadType(table.rowType().project(projection));
+        return withReadType(readRowType.project(projection));
     }
 
     @Override
@@ -152,27 +161,19 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public TableRead newRead() {
         FormatReadBuilder read = this;
-        return new AbstractDataTableRead(table.schema()) {
-            @Override
-            protected InnerTableRead innerWithFilter(Predicate predicate) {
-                this.withFilter(predicate);
-                return this;
-            }
-
-            @Override
-            public void applyReadType(RowType readType) {
-                this.withReadType(readType);
-            }
-
-            @Override
-            public RecordReader<InternalRow> reader(Split split) throws IOException {
-                FormatDataSplit dataSplit = (FormatDataSplit) split;
-                return read.createReader(dataSplit);
-            }
-        };
+        return new FormatTableRead(readRowType, read, predicate);
     }
 
-    private RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
+    RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
+        TableSchema schema =
+                TableSchema.create(
+                        0L,
+                        new Schema(
+                                readRowType.getFields(),
+                                partitionKeys,
+                                Collections.emptyList(),
+                                this.tableOptions,
+                                ""));
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         List<DataField> readTableFields = readRowType.getFields();
@@ -184,11 +185,7 @@ public class FormatReadBuilder implements ReadBuilder {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier,
-                                table.schema(),
-                                table.schema(),
-                                readTableFields,
-                                false);
+                                formatIdentifier, schema, schema, readTableFields, false);
 
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
@@ -209,7 +206,7 @@ public class FormatReadBuilder implements ReadBuilder {
                         formatReaderMapping.getPartitionPair(), dataSplit.partition());
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        table.schema().logicalRowType(),
+                        readRowType,
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
                         formatReaderMapping.getIndexMapping(),
