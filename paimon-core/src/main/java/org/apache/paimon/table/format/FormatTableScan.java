@@ -130,7 +130,7 @@ public class FormatTableScan implements InnerTableScan {
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
             try (FileIO fileIO = table.fileIO()) {
-                if (partitionFilter != null && !table.partitionKeys().isEmpty()) {
+                if (!table.partitionKeys().isEmpty()) {
                     List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                             PartitionPathUtils.searchPartSpecAndPaths(
                                     fileIO,
@@ -140,7 +140,7 @@ public class FormatTableScan implements InnerTableScan {
                             partition2Paths) {
                         LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
                         BinaryRow partitionRow = createPartitionRow(partitionSpec);
-                        if (partitionFilter.test(partitionRow)) {
+                        if (partitionFilter != null && partitionFilter.test(partitionRow)) {
                             splits.addAll(
                                     getSplits(fileIO, partition2Path.getValue(), partitionRow));
                         }

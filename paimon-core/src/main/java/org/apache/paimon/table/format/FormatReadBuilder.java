@@ -20,7 +20,6 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -28,7 +27,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -178,9 +176,6 @@ public class FormatReadBuilder implements ReadBuilder {
                         .discover(formatIdentifier)
                         .createReaderFactory(actualReadRowType, filters);
 
-        // Create empty partition info since we're removing the mapping
-        PartitionInfo partitionInfo = PartitionUtils.create(null, dataSplit.partition());
-
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,
@@ -188,7 +183,7 @@ public class FormatReadBuilder implements ReadBuilder {
                         formatReaderContext,
                         null, // indexMapping
                         null, // castMapping
-                        partitionInfo,
+                        null,
                         false,
                         null,
                         0,
