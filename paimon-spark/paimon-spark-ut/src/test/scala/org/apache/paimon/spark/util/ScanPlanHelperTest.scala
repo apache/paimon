@@ -39,16 +39,16 @@ class ScanPlanHelperTest extends PaimonSparkTestBase with ScanPlanHelper {
       checkAnswer(newDf, Seq(Row(11, "a"), Row(22, "b")))
 
       // select df with row lineage meta cols
-      checkAnswer(selectWithRowLineageMetaCols(newDf), Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
+      checkAnswer(selectWithRowLineage(newDf), Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
 
       // select with row lineage meta cols twice should not add new more meta cols
       checkAnswer(
-        selectWithRowLineageMetaCols(selectWithRowLineageMetaCols(newDf)),
+        selectWithRowLineage(selectWithRowLineage(newDf)),
         Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
 
       // select df already contains meta cols with row lineage
       checkAnswer(
-        selectWithRowLineageMetaCols(newDf.select("_ROW_ID", "id")),
+        selectWithRowLineage(newDf.select("_ROW_ID", "id")),
         Seq(Row(0, 11, 1), Row(1, 22, 1)))
     }
   }
