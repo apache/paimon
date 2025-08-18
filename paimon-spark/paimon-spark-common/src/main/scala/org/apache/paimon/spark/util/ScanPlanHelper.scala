@@ -51,11 +51,11 @@ trait ScanPlanHelper extends SQLConfHelper {
     }
   }
 
-  def selectWithDvMetaCols(data: DataFrame): DataFrame = {
+  def selectWithDvMeta(data: DataFrame): DataFrame = {
     selectWithAdditionalCols(data, DV_META_COLUMNS)
   }
 
-  def selectWithRowLineageMetaCols(data: DataFrame): DataFrame = {
+  def selectWithRowLineage(data: DataFrame): DataFrame = {
     selectWithAdditionalCols(data, ROW_LINEAGE_META_COLUMNS)
   }
 

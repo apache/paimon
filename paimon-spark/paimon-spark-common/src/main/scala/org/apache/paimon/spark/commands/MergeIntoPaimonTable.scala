@@ -107,7 +107,7 @@ case class MergeIntoPaimonTable(
         createNewScanPlan(candidateDataSplits, relation, targetOnlyCondition))
       val ds = constructChangedRows(
         sparkSession,
-        selectWithDvMetaCols(filteredDf),
+        selectWithDvMeta(filteredDf),
         remainDeletedRow = true,
         extraMetadataCols = dvMetaCols)
 
@@ -176,7 +176,7 @@ case class MergeIntoPaimonTable(
       var filesToRewrittenDS =
         createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
       if (writeRowLineage) {
-        filesToRewrittenDS = selectWithRowLineageMetaCols(filesToRewrittenDS)
+        filesToRewrittenDS = selectWithRowLineage(filesToRewrittenDS)
       }
 
       var filesToReadDS =
