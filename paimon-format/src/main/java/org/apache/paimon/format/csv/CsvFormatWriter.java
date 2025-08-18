@@ -18,18 +18,22 @@
 
 package org.apache.paimon.format.csv;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.CloseShieldOutputStream;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.TypeUtils;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 /** CSV format writer implementation. */
 public class CsvFormatWriter implements FormatWriter {
@@ -78,7 +82,7 @@ public class CsvFormatWriter implements FormatWriter {
 
             Object value =
                     InternalRow.createFieldGetter(rowType.getTypeAt(i), i).getFieldOrNull(element);
-            String fieldValue = escapeField(TypeUtils.castToString(value, rowType.getTypeAt(i)));
+            String fieldValue = escapeField(castToString(value, rowType.getTypeAt(i)));
             sb.append(fieldValue);
         }
         sb.append(lineDelimiter);
@@ -128,5 +132,20 @@ public class CsvFormatWriter implements FormatWriter {
         }
 
         return field;
+    }
+
+    public static String castToString(Object value, DataType dataType) {
+        if (value == null) {
+            return null;
+        }
+        DataTypeRoot typeRoot = dataType.getTypeRoot();
+        switch (typeRoot) {
+            case BINARY:
+            case VARBINARY:
+                return Base64.getEncoder().encodeToString((byte[]) value);
+            default:
+                CastExecutor cast = CastExecutors.resolveToString(dataType);
+                return cast.cast(value).toString();
+        }
     }
 }
