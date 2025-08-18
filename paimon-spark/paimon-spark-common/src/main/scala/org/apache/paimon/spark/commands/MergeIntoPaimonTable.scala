@@ -163,9 +163,9 @@ case class MergeIntoPaimonTable(
         filePathsToRead --= noMatchedBySourceFilePaths
       }
 
-      val (filesToRewritten, touchedFileRelation) =
+      val (filesToRewritten, filesToRewrittenScan) =
         extractFilesAndCreateNewScan(filePathsToRewritten.toArray, dataFilePathToMeta, relation)
-      val (_, unTouchedFileRelation) =
+      val (_, filesToReadScan) =
         extractFilesAndCreateNewScan(filePathsToRead.toArray, dataFilePathToMeta, relation)
 
       // If no files need to be rewritten, no need to write row lineage
@@ -173,21 +173,28 @@ case class MergeIntoPaimonTable(
 
       // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
       // modified and was from touched file, it should be kept too.
-      def buildDataset(relation: LogicalPlan, fileTouch: Boolean): Dataset[Row] = {
-        val _ds = createDataset(sparkSession, relation).withColumn(FILE_TOUCHED_COL, lit(fileTouch))
+      val filesToRewrittenDS = {
+        var _ds =
+          createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
         if (writeRowLineage) {
-          selectWithRowLineageMetaCols(_ds)
-        } else {
-          _ds
+          _ds = selectWithRowLineageMetaCols(_ds)
         }
+        _ds
       }
 
-      val targetDSWithFileTouchedCol = buildDataset(touchedFileRelation, fileTouch = true).union(
-        buildDataset(unTouchedFileRelation, fileTouch = false))
+      val filesToReadDS = {
+        var _ds =
+          createDataset(sparkSession, filesToReadScan).withColumn(FILE_TOUCHED_COL, lit(false))
+        if (writeRowLineage) {
+          // For filesToReadScan we don't need to read row lineage meta cols, just add placeholders
+          ROW_LINEAGE_META_COLUMNS.foreach(c => _ds = _ds.withColumn(c, lit(null)))
+        }
+        _ds
+      }
 
       val toWriteDS = constructChangedRows(
         sparkSession,
-        targetDSWithFileTouchedCol,
+        filesToRewrittenDS.union(filesToReadDS),
         writeRowLineage = writeRowLineage).drop(ROW_KIND_COL)
 
       val writer = if (writeRowLineage) {

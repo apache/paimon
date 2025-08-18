@@ -33,7 +33,7 @@ class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(
 }
 
 /** For internal use only. */
-private case class PaimonSplitScan(
+case class PaimonSplitScan(
     table: InnerTable,
     dataSplits: Array[DataSplit],
     requiredSchema: StructType,
