@@ -16,7 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-from pathlib import Path
 from typing import List
 
 from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
@@ -64,11 +63,11 @@ class RenamingSnapshotCommit(SnapshotCommit):
         """
         # Determine the correct snapshot path based on branch
         if hasattr(self.snapshot_manager, 'branch') and self.snapshot_manager.branch == branch:
-            new_snapshot_path = self._get_snapshot_path(snapshot.id)
+            new_snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
         else:
             # For different branches, we would need to copy with branch
             # For now, use the main branch path as a simplification
-            new_snapshot_path = self._get_snapshot_path(snapshot.id)
+            new_snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
 
         def commit_callable() -> bool:
             """Internal function to perform the actual commit."""
@@ -88,18 +87,6 @@ class RenamingSnapshotCommit(SnapshotCommit):
         """Close the lock and release resources."""
         self.lock.close()
 
-    def _get_snapshot_path(self, snapshot_id: int) -> Path:
-        """
-        Get the path for a snapshot file.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            Path to the snapshot file
-        """
-        return self.snapshot_manager.snapshot_dir / f"snapshot-{snapshot_id}"
-
     def _commit_latest_hint(self, snapshot_id: int):
         """
         Update the latest snapshot hint.
@@ -107,7 +94,7 @@ class RenamingSnapshotCommit(SnapshotCommit):
         Args:
             snapshot_id: The latest snapshot ID
         """
-        latest_file = self.snapshot_manager.snapshot_dir / "LATEST"
+        latest_file = self.snapshot_manager.latest_file
         try:
             # Try atomic write first
             success = self.file_io.try_to_write_atomic(latest_file, str(snapshot_id))

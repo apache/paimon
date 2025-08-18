@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import List
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
@@ -27,7 +27,7 @@ from pypaimon.snapshot.snapshot import Snapshot
 class CatalogSnapshotCommit(SnapshotCommit):
     """A SnapshotCommit using Catalog to commit."""
 
-    def __init__(self, catalog: Catalog, identifier: Identifier, uuid: Optional[str] = None):
+    def __init__(self, catalog: Catalog, identifier: Identifier, uuid: str):
         """
         Initialize CatalogSnapshotCommit.
 
