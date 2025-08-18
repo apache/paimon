@@ -375,7 +375,8 @@ public class SchemaManager implements Serializable {
                     @Override
                     protected void updateLastColumn(
                             int depth, List<DataField> newFields, String fieldName)
-                            throws Catalog.ColumnAlreadyExistException {
+                            throws Catalog.ColumnAlreadyExistException,
+                                    Catalog.ColumnNotExistException {
                         assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
                         DataField dataField =
@@ -391,8 +392,26 @@ public class SchemaManager implements Serializable {
                             if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
                                 newFields.add(0, dataField);
                             } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
-                                int fieldIndex = map.get(move.referenceFieldName());
-                                newFields.add(fieldIndex + 1, dataField);
+                                if (map.containsKey(move.referenceFieldName())) {
+                                    int fieldIndex = map.get(move.referenceFieldName());
+                                    newFields.add(fieldIndex + 1, dataField);
+                                } else {
+                                    throw new Catalog.ColumnNotExistException(
+                                            lazyIdentifier.get(), move.referenceFieldName());
+                                }
+                            } else if (move.type().equals(SchemaChange.Move.MoveType.BEFORE)) {
+                                if (map.containsKey(move.referenceFieldName())) {
+                                    int fieldIndex = map.get(move.referenceFieldName());
+                                    newFields.add(fieldIndex, dataField);
+                                } else {
+                                    throw new Catalog.ColumnNotExistException(
+                                            lazyIdentifier.get(), move.referenceFieldName());
+                                }
+                            } else if (move.type().equals(SchemaChange.Move.MoveType.LAST)) {
+                                newFields.add(dataField);
+                            } else {
+                                throw new UnsupportedOperationException(
+                                        "Unsupported move type: " + move.type());
                             }
                         } else {
                             newFields.add(dataField);
