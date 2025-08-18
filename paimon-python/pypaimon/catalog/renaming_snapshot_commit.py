@@ -20,7 +20,6 @@ from typing import List
 
 from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.lock import Lock
 from pypaimon.common.rest_json import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -34,7 +33,7 @@ class RenamingSnapshotCommit(SnapshotCommit):
     But if the file system is object storage, we need additional lock protection.
     """
 
-    def __init__(self, snapshot_manager: SnapshotManager, lock: Lock):
+    def __init__(self, snapshot_manager: SnapshotManager):
         """
         Initialize RenamingSnapshotCommit.
 
@@ -44,7 +43,6 @@ class RenamingSnapshotCommit(SnapshotCommit):
         """
         self.snapshot_manager = snapshot_manager
         self.file_io: FileIO = snapshot_manager.file_io
-        self.lock = lock
 
     def commit(self, snapshot: Snapshot, branch: str, statistics: List[PartitionStatistics]) -> bool:
         """
@@ -61,15 +59,8 @@ class RenamingSnapshotCommit(SnapshotCommit):
         Raises:
             Exception: If commit fails
         """
-        # Determine the correct snapshot path based on branch
-        if hasattr(self.snapshot_manager, 'branch') and self.snapshot_manager.branch == branch:
-            new_snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
-        else:
-            # For different branches, we would need to copy with branch
-            # For now, use the main branch path as a simplification
-            new_snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
-
-        def commit_callable() -> bool:
+        new_snapshot_path = self.snapshot_manager.get_snapshot_path(snapshot.id)
+        if not self.file_io.exists(new_snapshot_path):
             """Internal function to perform the actual commit."""
             # Try to write atomically using the file IO
             committed = self.file_io.try_to_write_atomic(new_snapshot_path, JSON.to_json(snapshot))
@@ -77,15 +68,10 @@ class RenamingSnapshotCommit(SnapshotCommit):
                 # Update the latest hint
                 self._commit_latest_hint(snapshot.id)
             return committed
-
-        # Use lock to ensure atomic operation
-        return self.lock.run_with_lock(
-            lambda: not self.file_io.exists(new_snapshot_path) and commit_callable()
-        )
+        return False
 
     def close(self):
         """Close the lock and release resources."""
-        self.lock.close()
 
     def _commit_latest_hint(self, snapshot_id: int):
         """

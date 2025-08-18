@@ -22,7 +22,6 @@ from pypaimon.catalog.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.catalog.renaming_snapshot_commit import RenamingSnapshotCommit
 from pypaimon.catalog.snapshot_commit import SnapshotCommit
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.lock import EmptyLock
 
 
 class CatalogEnvironment:
@@ -55,11 +54,10 @@ class CatalogEnvironment:
             catalog = self.catalog_loader.load()
             return CatalogSnapshotCommit(catalog, self.identifier, self.uuid)
         else:
-            # Use file renaming-based snapshot commit with empty lock
+            # Use file renaming-based snapshot commit
             # In a full implementation, this would use a proper lock factory
             # to create locks based on the catalog lock context
-            lock = EmptyLock.empty()
-            return RenamingSnapshotCommit(snapshot_manager, lock)
+            return RenamingSnapshotCommit(snapshot_manager)
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
