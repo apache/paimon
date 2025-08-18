@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
@@ -32,7 +33,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
 import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
@@ -112,6 +115,23 @@ public class CommitMessageImpl implements CommitMessage {
 
     public boolean isEmpty() {
         return dataIncrement.isEmpty() && compactIncrement.isEmpty() && indexIncrement.isEmpty();
+    }
+
+    public CommitMessageImpl assignFirstRowIdForIncrementNewFiles(long firstRowId) {
+        List<DataFileMeta> newFiles =
+                newFilesIncrement().newFiles().stream()
+                        .map(f -> f.assignFirstRowId(firstRowId))
+                        .collect(Collectors.toList());
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                totalBuckets,
+                new DataIncrement(
+                        newFiles,
+                        newFilesIncrement().deletedFiles(),
+                        newFilesIncrement().changelogFiles()),
+                compactIncrement,
+                indexIncrement);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {

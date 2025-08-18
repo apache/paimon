@@ -22,13 +22,14 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.spark.{DataEvolutionSparkTableWrite, SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
@@ -50,23 +51,23 @@ import java.io.IOException
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
-case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = false)
-  extends WriteHelper {
+case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
 
   private lazy val tableSchema = table.schema
 
   private lazy val bucketMode = table.bucketMode
 
+  private var firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]] = _
+
+  private var writeRowLineage = false
+
+  private var dataEvolutionWrite = false
+
   @transient private lazy val serializer = new CommitMessageSerializer
 
-  private val writeType = {
-    if (writeRowLineage) {
-      SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
-    } else {
-      table.rowType()
-    }
-  }
+  private var writeType = table.rowType()
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
@@ -75,11 +76,33 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
   }
 
   def withRowLineage(): PaimonSparkWriter = {
-    if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowLineage = true)
-    } else {
-      this
+    this.writeRowLineage = true
+    this.writeType = SpecialFields.rowTypeWithRowTrackingFileFields(table.rowType(), true)
+    this
+  }
+
+  def withDataEvolutionMergeWrite(columnNames: Seq[String]): PaimonSparkWriter = {
+    this.dataEvolutionWrite = true
+    this.writeType = table.rowType().project(columnNames.asJava)
+    if (firstRowIdToPartitionMap == null) {
+      firstRowIdToPartitionMap = new mutable.HashMap[Long, Tuple2[BinaryRow, Long]]
+      table
+        .store()
+        .newScan()
+        .readFileIterator()
+        .forEachRemaining(
+          k =>
+            firstRowIdToPartitionMap
+              .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
     }
+    this
+  }
+
+  def disableDataEvolutionMergeWrite(): PaimonSparkWriter = {
+    this.dataEvolutionWrite = false
+    this.writeType = table.rowType()
+    this.firstRowIdToPartitionMap = null
+    this
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
@@ -98,7 +121,15 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
+    def newWrite() = if (dataEvolutionWrite) {
+      DataEvolutionSparkTableWrite(
+        table,
+        writeBuilder.commitUser(),
+        writeType,
+        firstRowIdToPartitionMap)
+    } else {
+      SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
+    }
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism

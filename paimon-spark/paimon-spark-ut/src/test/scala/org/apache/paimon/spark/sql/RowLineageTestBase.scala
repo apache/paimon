@@ -41,6 +41,22 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Lineage: read row lineage with first row id") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
+
+      checkAnswer(
+        sql("SELECT *, _FIRST_ROW_ID, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(11, "a", 0, 0, 1), Row(22, "b", 1, 1, 1))
+      )
+      checkAnswer(
+        sql("SELECT _ROW_ID, data, _SEQUENCE_NUMBER, id, _FIRST_ROW_ID FROM t"),
+        Seq(Row(0, "a", 1, 11, 0), Row(1, "b", 1, 22, 1))
+      )
+    }
+  }
+
   test("Row Lineage: compact table") {
     withTable("t") {
       sql(
@@ -194,6 +210,29 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(2, 22, 0, 2), Row(3, 3, 1, 1))
+      )
+    }
+  }
+
+  test("Row Lineage: merge into table with with data-evolution") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
       )
     }
   }

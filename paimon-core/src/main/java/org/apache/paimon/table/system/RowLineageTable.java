@@ -101,7 +101,7 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        return SpecialFields.rowTypeWithRowLineage(wrapped.rowType());
+        return SpecialFields.rowTypeWithRowTrackingFileFields(wrapped.rowType());
     }
 
     @Override

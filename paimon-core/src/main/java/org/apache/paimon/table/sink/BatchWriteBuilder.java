@@ -71,4 +71,6 @@ public interface BatchWriteBuilder extends WriteBuilder {
     /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
     @Override
     BatchTableCommit newCommit();
+
+    String commitUser();
 }

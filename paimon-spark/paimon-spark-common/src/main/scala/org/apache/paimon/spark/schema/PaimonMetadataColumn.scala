@@ -22,6 +22,7 @@ import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.table.SpecialFields
 import org.apache.paimon.types.DataField
 
+import org.apache.spark.sql.Column
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.connector.catalog.MetadataColumn
 import org.apache.spark.sql.types.{DataType, IntegerType, LongType, StringType, StructField, StructType}
@@ -48,8 +49,9 @@ object PaimonMetadataColumn {
   val FILE_PATH_COLUMN = "__paimon_file_path"
   val PARTITION_COLUMN = "__paimon_partition"
   val BUCKET_COLUMN = "__paimon_bucket"
-  val ROW_ID_COLUMN = SpecialFields.ROW_ID.name()
-  val SEQUENCE_NUMBER_COLUMN = SpecialFields.SEQUENCE_NUMBER.name()
+  val ROW_ID_COLUMN: String = SpecialFields.ROW_ID.name()
+  val SEQUENCE_NUMBER_COLUMN: String = SpecialFields.SEQUENCE_NUMBER.name()
+  val FIRST_ROW_ID_COLUMN: String = SpecialFields.FIRST_ROW_ID.name()
 
   val DV_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
   val ROW_LINEAGE_META_COLUMNS: Seq[String] = Seq(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN)
@@ -60,7 +62,8 @@ object PaimonMetadataColumn {
     PARTITION_COLUMN,
     BUCKET_COLUMN,
     ROW_ID_COLUMN,
-    SEQUENCE_NUMBER_COLUMN
+    SEQUENCE_NUMBER_COLUMN,
+    FIRST_ROW_ID_COLUMN
   )
 
   val ROW_INDEX: PaimonMetadataColumn =
@@ -76,10 +79,10 @@ object PaimonMetadataColumn {
     PaimonMetadataColumn(Int.MaxValue - 104, ROW_ID_COLUMN, LongType)
   val SEQUENCE_NUMBER: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 105, SEQUENCE_NUMBER_COLUMN, LongType)
+  val FIRST_ROW_ID: PaimonMetadataColumn =
+    PaimonMetadataColumn(Int.MaxValue - 106, SpecialFields.FIRST_ROW_ID.name(), LongType)
 
   def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
-
-  def rowLineageMetaCols: Seq[PaimonMetadataColumn] = Seq(ROW_ID, SEQUENCE_NUMBER)
 
   def get(metadataColumn: String, partitionType: StructType): PaimonMetadataColumn = {
     metadataColumn match {
@@ -89,6 +92,7 @@ object PaimonMetadataColumn {
       case BUCKET_COLUMN => BUCKET
       case ROW_ID_COLUMN => ROW_ID
       case SEQUENCE_NUMBER_COLUMN => SEQUENCE_NUMBER
+      case FIRST_ROW_ID_COLUMN => FIRST_ROW_ID
       case _ =>
         throw new IllegalArgumentException(s"$metadataColumn metadata column is not supported.")
     }

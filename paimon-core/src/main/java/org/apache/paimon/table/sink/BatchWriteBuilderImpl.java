@@ -80,4 +80,9 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
                         .orElse(true));
         return commit;
     }
+
+    @Override
+    public String commitUser() {
+        return commitUser;
+    }
 }

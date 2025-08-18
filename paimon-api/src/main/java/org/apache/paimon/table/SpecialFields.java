@@ -24,6 +24,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -93,14 +94,21 @@ public class SpecialFields {
     public static final DataField ROW_ID =
             new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT());
 
+    public static final DataField FIRST_ROW_ID =
+            new DataField(Integer.MAX_VALUE - 6, "_FIRST_ROW_ID", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
             Stream.of(
                             SEQUENCE_NUMBER.name(),
                             VALUE_KIND.name(),
                             LEVEL.name(),
                             ROW_KIND.name(),
-                            ROW_ID.name())
+                            ROW_ID.name(),
+                            FIRST_ROW_ID.name())
                     .collect(Collectors.toSet());
+
+    public static final List<DataField> ROW_TRACKING_SYSTEM_FIELDS =
+            Arrays.asList(SEQUENCE_NUMBER, ROW_ID, FIRST_ROW_ID);
 
     public static boolean isSystemField(int fieldId) {
         return fieldId >= SYSTEM_FIELD_ID_START;
@@ -139,8 +147,31 @@ public class SpecialFields {
                 + depth;
     }
 
-    public static RowType rowTypeWithRowLineage(RowType rowType) {
-        return rowTypeWithRowLineage(rowType, false);
+    public static RowType rowTypeWithRowTrackingSystemFields(RowType rowType) {
+        List<DataField> fieldsWithRowTracking = new ArrayList<>(rowType.getFields());
+        fieldsWithRowTracking.forEach(
+                f -> {
+                    if (ROW_ID.name().equals(f.name())
+                            || SEQUENCE_NUMBER.name().equals(f.name())
+                            || FIRST_ROW_ID.name().equals(f.name())) {
+                        throw new IllegalArgumentException(
+                                "Row tracking field name '"
+                                        + f.name()
+                                        + "' conflicts with existing field names.");
+                    }
+                });
+        fieldsWithRowTracking.addAll(ROW_TRACKING_SYSTEM_FIELDS);
+        return new RowType(fieldsWithRowTracking);
+    }
+
+    /**
+     * Add row lineage system fields to rowType. Only for read.
+     *
+     * @param rowType
+     * @return
+     */
+    public static RowType rowTypeWithRowTrackingFileFields(RowType rowType) {
+        return rowTypeWithRowTrackingFileFields(rowType, false);
     }
 
     /**
@@ -149,7 +180,8 @@ public class SpecialFields {
      * @param sequenceNumberNullable sequence number is not null for user, but is nullable when read
      *     and write
      */
-    public static RowType rowTypeWithRowLineage(RowType rowType, boolean sequenceNumberNullable) {
+    public static RowType rowTypeWithRowTrackingFileFields(
+            RowType rowType, boolean sequenceNumberNullable) {
         List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
 
         fieldsWithRowLineage.forEach(

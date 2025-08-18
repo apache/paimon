@@ -45,7 +45,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public boolean alwaysRawConvertible() {
-        return true;
+        return false;
     }
 
     @Override
@@ -58,7 +58,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                 openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
                 .flatMap(Collection::stream)
-                .map(SplitGroup::rawConvertibleGroup)
+                .map(SplitGroup::nonRawConvertibleGroup)
                 .collect(Collectors.toList());
     }
 

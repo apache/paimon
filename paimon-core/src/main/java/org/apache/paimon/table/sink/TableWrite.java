@@ -57,6 +57,9 @@ public interface TableWrite extends AutoCloseable {
     /** Write a row with bucket. */
     void write(InternalRow row, int bucket) throws Exception;
 
+    /** Write a row with partition and bucket. */
+    void write(InternalRow row, BinaryRow partition, int bucket) throws Exception;
+
     /** Write a bundle records directly, not per row. */
     void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle) throws Exception;
 

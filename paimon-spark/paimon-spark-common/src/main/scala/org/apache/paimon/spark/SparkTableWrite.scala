@@ -34,7 +34,7 @@ case class SparkTableWrite(
     writeType: RowType,
     rowKindColIdx: Int = -1,
     writeRowLineage: Boolean = false)
-  extends AutoCloseable {
+  extends SparkTableWriteTrait {
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
@@ -80,15 +80,5 @@ case class SparkTableWrite(
   override def close(): Unit = {
     write.close()
     ioManager.close()
-  }
-
-  private def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
-    val taskContext = TaskContext.get
-    if (taskContext != null) {
-      PaimonUtils.updateOutputMetrics(
-        taskContext.taskMetrics.outputMetrics,
-        bytesWritten,
-        recordsWritten)
-    }
   }
 }
