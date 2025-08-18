@@ -98,7 +98,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 options.fileSuffixIncludeCompression(),
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
-                CoreOptions.createExternalPaths(options));
+                null);
     }
 
     @Override

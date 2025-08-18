@@ -25,8 +25,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
@@ -69,12 +67,6 @@ public interface FormatTable extends Table {
 
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
-
-    TableSchema schema();
-
-    default int bucket() {
-        return BucketMode.UNAWARE_BUCKET;
-    }
 
     /** Currently supported formats. */
     enum Format {
@@ -173,7 +165,6 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
-        private TableSchema schema;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -192,15 +183,6 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
-            this.schema =
-                    TableSchema.create(
-                            0L,
-                            new Schema(
-                                    rowType.getFields(),
-                                    partitionKeys,
-                                    Collections.emptyList(),
-                                    options,
-                                    comment));
         }
 
         @Override
@@ -251,11 +233,6 @@ public interface FormatTable extends Table {
         @Override
         public FileIO fileIO() {
             return fileIO;
-        }
-
-        @Override
-        public TableSchema schema() {
-            return schema;
         }
 
         @Override
