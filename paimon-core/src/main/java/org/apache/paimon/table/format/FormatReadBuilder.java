@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -138,6 +139,11 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withLimit(int limit) {
         return this;
+    }
+
+    @Override
+    public ReadBuilder withTopN(TopN topN) {
+        throw new UnsupportedOperationException("TopN is not supported for FormatTable.");
     }
 
     @Override
