@@ -92,6 +92,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
@@ -929,6 +930,38 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             .field("price", DataTypes.BIGINT())
                             .build();
             table = createUnawareBucketFileStoreTable(rowType, configure);
+            DataField field = rowType.getField("price");
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(rowCount);
+            reader.close();
+        }
+
+        // test should not push topN with dv modes
+        {
+            table.schemaManager()
+                    .commitChanges(SchemaChange.updateColumnType("price", DataTypes.INT()));
+            rowType =
+                    RowType.builder()
+                            .field("id", DataTypes.STRING())
+                            .field("event", DataTypes.STRING())
+                            .field("price", DataTypes.INT())
+                            .build();
+            Consumer<Options> newConfigure =
+                    options -> {
+                        configure.accept(options);
+                        options.set(DELETION_VECTORS_ENABLED, true);
+                    };
+            table = createUnawareBucketFileStoreTable(rowType, newConfigure);
             DataField field = rowType.getField("price");
             SortValue sort =
                     new SortValue(
