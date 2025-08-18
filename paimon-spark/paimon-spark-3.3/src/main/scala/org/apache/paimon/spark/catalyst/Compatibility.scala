@@ -18,22 +18,13 @@
 
 package org.apache.paimon.spark.catalyst
 
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Cast, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
-import org.apache.spark.sql.connector.read.Scan
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.DataType
 
 object Compatibility {
-
-  def createDataSourceV2ScanRelation(
-      relation: DataSourceV2Relation,
-      scan: Scan,
-      output: Seq[AttributeReference]): DataSourceV2ScanRelation = {
-    DataSourceV2ScanRelation(relation, scan, output)
-  }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {
     o.withNewQuery(query)

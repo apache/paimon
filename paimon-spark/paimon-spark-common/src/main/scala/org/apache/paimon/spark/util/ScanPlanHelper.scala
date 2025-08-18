@@ -65,3 +65,12 @@ trait ScanPlanHelper extends SQLConfHelper {
     data.select(mergedColNames.map(col): _*)
   }
 }
+
+/** This wrapper is only used in java code, e.g. Procedure. */
+object ScanPlanHelper extends ScanPlanHelper {
+  def createNewScanPlan(
+      dataSplits: Array[DataSplit],
+      relation: DataSourceV2Relation): LogicalPlan = {
+    ScanPlanHelper.createNewScanPlan(dataSplits.toSeq, relation)
+  }
+}

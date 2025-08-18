@@ -23,13 +23,11 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{PaimonUtils, Row}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.paimon.Utils
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.immutable
@@ -62,7 +60,7 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
                                |""".stripMargin)
       val optimizedPlan = Optimize.execute(query.queryExecution.analyzed)
 
-      val df = Utils.createDataFrame(spark, createRelationV2("T"))
+      val df = PaimonUtils.createDataset(spark, createRelationV2("T"))
       val mergedSubquery = df
         .select(
           toColumn(count(Literal(1))).as("cnt"),

@@ -33,7 +33,7 @@ class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(
 }
 
 /** For internal use only. */
-case class PaimonSplitScan(
+private case class PaimonSplitScan(
     table: InnerTable,
     dataSplits: Array[DataSplit],
     requiredSchema: StructType,
@@ -57,12 +57,5 @@ case class PaimonSplitScan(
       ""
     }
     s"PaimonSplitScan: [${table.name}]" + pushedFiltersStr
-  }
-}
-
-object PaimonSplitScan {
-  def apply(table: InnerTable, dataSplits: Array[DataSplit]): PaimonSplitScan = {
-    val requiredSchema = SparkTypeUtils.fromPaimonRowType(table.rowType)
-    new PaimonSplitScan(table, dataSplits, requiredSchema, Seq.empty)
   }
 }
