@@ -470,7 +470,7 @@ class RESTCatalogServer:
             # Basic validation
             if not commit_request.snapshot:
                 return self._mock_response(
-                    ErrorResponse(None, None, "Missing snapshot in commit request", 400), 400
+                    ErrorResponse("SNAPSHOT", None, "Snapshot is required for commit operation", 400), 400
                 )
 
             # Write snapshot to file system
