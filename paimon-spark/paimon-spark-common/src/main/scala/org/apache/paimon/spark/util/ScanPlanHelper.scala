@@ -38,16 +38,21 @@ trait ScanPlanHelper extends SQLConfHelper {
       dataSplits: Seq[DataSplit],
       relation: DataSourceV2Relation,
       condition: Option[Expression] = None): LogicalPlan = {
-    val newRelation = relation.table match {
+    val newRelation = createNewPlan(dataSplits, relation)
+    condition match {
+      case Some(c) if c != TrueLiteral => Filter(c, newRelation)
+      case _ => newRelation
+    }
+  }
+
+  def createNewPlan(
+      dataSplits: Seq[DataSplit],
+      relation: DataSourceV2Relation): DataSourceV2Relation = {
+    relation.table match {
       case sparkTable @ SparkTable(table: InnerTable) =>
         val knownSplitsTable = KnownSplitsTable.create(table, dataSplits.toArray)
         relation.copy(table = sparkTable.copy(table = knownSplitsTable))
       case _ => throw new RuntimeException()
-    }
-
-    condition match {
-      case Some(c) if c != TrueLiteral => Filter(c, newRelation)
-      case _ => newRelation
     }
   }
 

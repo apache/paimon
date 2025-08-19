@@ -85,7 +85,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     // step 1: find the related data split, make it target file plan
     val dataSplits: Seq[DataSplit] = targetRelatedSplits(sparkSession)
     val touchedFileTargetRelation =
-      createNewRelation(dataSplits, targetRelation)
+      createNewPlan(dataSplits, targetRelation)
 
     // step 2: invoke update action
     val updateCommit =
