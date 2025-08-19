@@ -96,7 +96,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
             firstRowIdToPartitionMap
               .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
     }
-    writeBuilder.withDynamicOptions(singletonMap(CoreOptions.TARGET_FILE_SIZE, "9999 GB"))
+    writeBuilder.withDynamicOptions(singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "9999 GB"))
     this
   }
 
@@ -104,7 +104,8 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
     this.dataEvolutionWrite = false
     this.writeType = table.rowType()
     this.firstRowIdToPartitionMap = null
-    writeBuilder.withDynamicOptions(Collections.emptyMap())
+    writeBuilder.withDynamicOptions(
+      singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), coreOptions.targetFileSize(false) + "B"))
     this
   }
 
