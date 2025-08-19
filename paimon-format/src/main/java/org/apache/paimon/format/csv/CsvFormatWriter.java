@@ -56,8 +56,7 @@ public class CsvFormatWriter implements FormatWriter {
 
     private final StringBuilder stringBuilder;
 
-    public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options)
-            throws IOException {
+    public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options) {
         this.rowType = rowType;
         this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
         this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER);
@@ -166,7 +165,6 @@ public class CsvFormatWriter implements FormatWriter {
             case BOOLEAN:
             case TINYINT:
             case SMALLINT:
-                return value.toString();
             case CHAR:
             case VARCHAR:
                 return value.toString();
@@ -177,7 +175,6 @@ public class CsvFormatWriter implements FormatWriter {
 
     private String useCachedStringCastExecutor(Object value, DataType dataType) {
         String cacheKey = dataType.toString();
-        @SuppressWarnings("unchecked")
         CastExecutor<Object, ?> cast =
                 (CastExecutor<Object, ?>)
                         CAST_EXECUTOR_CACHE.computeIfAbsent(
