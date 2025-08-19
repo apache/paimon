@@ -24,7 +24,7 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.operation.{AbstractFileStoreWrite, AppendFileStoreWrite}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer, TableWriteImpl}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RecordWriter
 
@@ -74,6 +74,9 @@ case class DataEvolutionSparkTableWrite(
 
     val writer = writeBuilder
       .newWrite()
+      .withWriteType(writeType)
+      .asInstanceOf[TableWriteImpl[InternalRow]]
+      .getWrite
       .asInstanceOf[AbstractFileStoreWrite[InternalRow]]
       .createWriter(partition, 0)
     currentWriter = PerFileWriter(partition, firstRowId, writer, numRecords)
