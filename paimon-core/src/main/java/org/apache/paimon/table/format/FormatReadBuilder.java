@@ -56,43 +56,33 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final Map<String, String> tableOptions;
     private CoreOptions options;
+    private FormatTable table;
+    private RowType readType;
 
     private final FileFormatDiscover formatDiscover;
-
-    private RowType readRowType;
-    private List<String> partitionKeys;
-    private String tableName;
-    private String defaultPartName;
-    private FormatTable table;
 
     @Nullable private List<Predicate> filters;
 
     private @Nullable PartitionPredicate partitionFilter;
-    private @Nullable RowType readType;
     private @Nullable Predicate predicate;
     private @Nullable int[] projection;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
-        this.tableOptions = table.options();
-        this.options = new CoreOptions(tableOptions);
-        this.readRowType = table.rowType();
-        this.partitionKeys = table.partitionKeys();
-        this.tableName = table.name();
+        this.readType = this.table.rowType();
+        this.options = new CoreOptions(table.options());
         this.formatDiscover = FileFormatDiscover.of(this.options);
-        this.defaultPartName = table.defaultPartName();
     }
 
     @Override
     public String tableName() {
-        return this.tableName;
+        return this.table.name();
     }
 
     @Override
     public RowType readType() {
-        return readType;
+        return this.readType;
     }
 
     @Override
@@ -104,12 +94,12 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            RowType partitionType = readRowType.project(partitionKeys);
+            RowType partitionType = readType().project(table.partitionKeys());
             PartitionPredicate partitionPredicate =
                     fromPredicate(
                             partitionType,
                             createPartitionPredicate(
-                                    partitionSpec, partitionType, this.defaultPartName));
+                                    partitionSpec, partitionType, table.defaultPartName()));
             withPartitionFilter(partitionPredicate);
         }
         return this;
@@ -133,7 +123,7 @@ public class FormatReadBuilder implements ReadBuilder {
             return this;
         }
         this.projection = projection;
-        return withReadType(readRowType.project(projection));
+        return withReadType(readType().project(projection));
     }
 
     @Override
@@ -156,7 +146,7 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public TableRead newRead() {
         FormatReadBuilder read = this;
-        return new FormatTableRead(readRowType, read, predicate);
+        return new FormatTableRead(readType(), read, predicate);
     }
 
     RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
@@ -176,15 +166,12 @@ public class FormatReadBuilder implements ReadBuilder {
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
 
         // Create FormatReaderFactory directly
-        RowType actualReadRowType = readRowType;
         FormatReaderFactory readerFactory =
-                formatDiscover
-                        .discover(formatIdentifier)
-                        .createReaderFactory(actualReadRowType, filters);
+                formatDiscover.discover(formatIdentifier).createReaderFactory(readType(), filters);
 
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        readRowType,
+                        readType(),
                         readerFactory,
                         formatReaderContext,
                         null, // indexMapping

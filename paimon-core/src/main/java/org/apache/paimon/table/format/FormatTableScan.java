@@ -129,7 +129,8 @@ public class FormatTableScan implements InnerTableScan {
         @Override
         public List<Split> splits() {
             List<Split> splits = new ArrayList<>();
-            try (FileIO fileIO = table.fileIO()) {
+            try {
+                FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
                     List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                             PartitionPathUtils.searchPartSpecAndPaths(

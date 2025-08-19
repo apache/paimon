@@ -25,9 +25,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.annotation.Nullable;
 
@@ -42,11 +42,8 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
 
     private final FileIO fileIO;
     private final Path filePath;
-    private final long fileSize;
-    private final RowType rowType;
     private final Options options;
 
-    private final ObjectMapper objectMapper;
     private final JsonToRowConverter converter;
 
     private InputStream inputStream;
@@ -54,16 +51,11 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
     private long currentRowPosition = 0;
     private JsonRecordIterator reader;
 
-    public JsonFileReader(
-            FileIO fileIO, Path filePath, long fileSize, RowType rowType, Options options)
+    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
             throws IOException {
         this.fileIO = fileIO;
         this.filePath = filePath;
-        this.fileSize = fileSize;
-        this.rowType = rowType;
         this.options = options;
-
-        this.objectMapper = new ObjectMapper();
         this.converter = new JsonToRowConverter(rowType, options);
     }
 
@@ -89,7 +81,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
             inputStream = fileIO.newInputStream(filePath);
         }
         if (reader == null) {
-            this.reader = new JsonRecordIterator();
+            this.reader = new JsonRecordIterator(this.converter);
         }
 
         if (!reader.hasNext) {
@@ -101,16 +93,14 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
     private class JsonRecordIterator implements FileRecordIterator<InternalRow> {
 
         private final BufferedReader bufferedReader;
-        private final ObjectMapper objectMapper;
         private final JsonToRowConverter converter;
         private final boolean ignoreParseErrors;
         private boolean hasNext = true;
 
-        public JsonRecordIterator() throws IOException {
+        public JsonRecordIterator(JsonToRowConverter converter) throws IOException {
             this.bufferedReader =
                     new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-            this.objectMapper = new ObjectMapper();
-            this.converter = new JsonToRowConverter(rowType, options);
+            this.converter = converter;
             this.ignoreParseErrors = options.get(JsonFileFormat.JSON_IGNORE_PARSE_ERRORS);
         }
 
@@ -124,7 +114,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
                 }
 
                 try {
-                    JsonNode jsonNode = objectMapper.readTree(line);
+                    JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
                     return converter.convert(jsonNode);
                 } catch (Exception e) {
                     if (!ignoreParseErrors) {

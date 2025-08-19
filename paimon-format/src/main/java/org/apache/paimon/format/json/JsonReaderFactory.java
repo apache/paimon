@@ -43,8 +43,7 @@ public class JsonReaderFactory implements FormatReaderFactory {
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
         FileIO fileIO = context.fileIO();
         Path filePath = context.filePath();
-        long fileSize = context.fileSize();
 
-        return new JsonFileReader(fileIO, filePath, fileSize, projectedRowType, options);
+        return new JsonFileReader(fileIO, filePath, projectedRowType, options);
     }
 }
