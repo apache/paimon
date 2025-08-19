@@ -26,7 +26,7 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
-import org.apache.paimon.options.FormatOptions;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.schema.Schema;
@@ -530,7 +530,7 @@ public class SparkCatalog extends SparkBaseCatalog
         Options options = Options.fromMap(formatTable.options());
         CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
-            options.set("sep", options.get(FormatOptions.FIELD_DELIMITER));
+            options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
                     ident.name(),

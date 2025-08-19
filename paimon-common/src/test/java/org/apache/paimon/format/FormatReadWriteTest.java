@@ -64,7 +64,7 @@ public abstract class FormatReadWriteTest {
 
     @TempDir java.nio.file.Path tempPath;
 
-    private final String formatType;
+    protected final String formatType;
 
     protected FileIO fileIO;
     protected Path file;
@@ -85,6 +85,11 @@ public abstract class FormatReadWriteTest {
 
     @Test
     public void testSimpleTypes() throws IOException {
+        FileFormat format = fileFormat();
+        testSimpleTypesUtil(format, file);
+    }
+
+    protected void testSimpleTypesUtil(FileFormat format, Path file) throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -92,9 +97,8 @@ public abstract class FormatReadWriteTest {
         }
 
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
-        FileFormat format = fileFormat();
         FormatWriterFactory factory = format.createWriterFactory(rowType);
-        write(factory, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
+        write(factory, file, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -110,12 +114,16 @@ public abstract class FormatReadWriteTest {
 
     @Test
     public void testFullTypes() throws IOException {
+        FileFormat format = fileFormat();
+        testFullTypesUtil(format, file);
+    }
+
+    protected void testFullTypesUtil(FileFormat format, Path file) throws IOException {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow expected = expectedRowForFullTypesTest();
-        FileFormat format = fileFormat();
 
         FormatWriterFactory factory = format.createWriterFactory(rowType);
-        write(factory, expected);
+        write(factory, file, expected);
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -151,7 +159,7 @@ public abstract class FormatReadWriteTest {
                                         DataTypes.FIELD(4, "f2", DataTypes.INT()))));
 
         FormatWriterFactory factory = format.createWriterFactory(writeType);
-        write(factory, GenericRow.of(0, GenericRow.of(10, 11, 12)));
+        write(factory, file, GenericRow.of(0, GenericRow.of(10, 11, 12)));
 
         // skip read f0, f1.f1
         RowType readType =
@@ -187,7 +195,10 @@ public abstract class FormatReadWriteTest {
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
 
         FormatWriterFactory factory = format.createWriterFactory(writeType);
-        write(factory, GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
+        write(
+                factory,
+                file,
+                GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType)
@@ -212,6 +223,7 @@ public abstract class FormatReadWriteTest {
         RowType writeType = DataTypes.ROW(new ArrayType(true, new VariantType()));
         write(
                 format.createWriterFactory(writeType),
+                file,
                 GenericRow.of(
                         new GenericArray(
                                 new Object[] {
@@ -233,7 +245,8 @@ public abstract class FormatReadWriteTest {
         assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
     }
 
-    private void write(FormatWriterFactory factory, InternalRow... rows) throws IOException {
+    protected void write(FormatWriterFactory factory, Path file, InternalRow... rows)
+            throws IOException {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
@@ -450,7 +463,7 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
+    protected void validateFullTypesResult(InternalRow actual, InternalRow expected) {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow.FieldGetter[] fieldGetters =
                 IntStream.range(0, rowType.getFieldCount())

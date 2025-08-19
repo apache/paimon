@@ -19,7 +19,7 @@
 package org.apache.paimon.options;
 
 /** Options for csv format. */
-public class FormatOptions {
+public class CsvOptions {
     public static final ConfigOption<String> FIELD_DELIMITER =
             ConfigOptions.key("field-delimiter")
                     .stringType()
@@ -55,4 +55,44 @@ public class FormatOptions {
                     .stringType()
                     .defaultValue("null")
                     .withDescription("The literal for null values in CSV format");
+
+    private final String fieldDelimiter;
+    private final String lineDelimiter;
+    private final String nullLiteral;
+    private final boolean includeHeader;
+    private final String quoteCharacter;
+    private final String escapeCharacter;
+
+    public CsvOptions(Options options) {
+        this.fieldDelimiter = options.get(FIELD_DELIMITER);
+        this.lineDelimiter = options.get(LINE_DELIMITER);
+        this.nullLiteral = options.get(NULL_LITERAL);
+        this.includeHeader = options.get(INCLUDE_HEADER);
+        this.quoteCharacter = options.get(QUOTE_CHARACTER);
+        this.escapeCharacter = options.get(ESCAPE_CHARACTER);
+    }
+
+    public String fieldDelimiter() {
+        return fieldDelimiter;
+    }
+
+    public String lineDelimiter() {
+        return lineDelimiter;
+    }
+
+    public String nullLiteral() {
+        return nullLiteral;
+    }
+
+    public boolean includeHeader() {
+        return includeHeader;
+    }
+
+    public String quoteCharacter() {
+        return quoteCharacter;
+    }
+
+    public String escapeCharacter() {
+        return escapeCharacter;
+    }
 }

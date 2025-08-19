@@ -18,28 +18,54 @@
 
 package org.apache.paimon.format.csv;
 
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.format.FormatReadWriteTest;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CsvFileFormat}. */
-public class CsvFileFormatTest extends BaseCsvFileFormatTest {
+public class CsvFileFormatTest extends FormatReadWriteTest {
 
     protected CsvFileFormatTest() {
-        super();
+        super("csv");
     }
 
     @Override
     protected FileFormat fileFormat() {
         return new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+    }
+
+    @Test
+    public void testWhenUseHiveDefaultDelimiter() throws IOException {
+        Options options = new Options();
+        options.set(CsvOptions.FIELD_DELIMITER, "\001");
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+        testSimpleTypesUtil(
+                format, new Path(new Path(parent.toUri()), UUID.randomUUID() + "." + formatType));
+        testFullTypesUtil(
+                format, new Path(new Path(parent.toUri()), UUID.randomUUID() + "." + formatType));
     }
 
     @Test
@@ -130,6 +156,67 @@ public class CsvFileFormatTest extends BaseCsvFileFormatTest {
         assertThat(fields[1])
                 .isEqualTo(" [1,2,3]"); // Should preserve quotes due to [ after whitespace
         assertThat(fields[2]).isEqualTo("field3");
+    }
+
+    @Override
+    protected RowType rowTypeForFullTypesTest() {
+        RowType.Builder builder =
+                RowType.builder()
+                        .field("id", DataTypes.INT().notNull())
+                        .field("name", DataTypes.STRING()) /* optional by default */
+                        .field("salary", DataTypes.DOUBLE().notNull())
+                        .field("boolean", DataTypes.BOOLEAN().nullable())
+                        .field("tinyint", DataTypes.TINYINT())
+                        .field("smallint", DataTypes.SMALLINT())
+                        .field("bigint", DataTypes.BIGINT())
+                        .field("timestamp", DataTypes.TIMESTAMP())
+                        .field("timestamp_3", DataTypes.TIMESTAMP(3))
+                        .field("timestamp_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                        .field("timestamp_ltz_3", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .field("date", DataTypes.DATE())
+                        .field("decimal", DataTypes.DECIMAL(2, 2))
+                        .field("decimal2", DataTypes.DECIMAL(38, 2))
+                        .field("decimal3", DataTypes.DECIMAL(10, 1));
+
+        RowType rowType = builder.build();
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            rowType = (RowType) rowType.notNull();
+        }
+
+        return rowType;
+    }
+
+    @Override
+    protected GenericRow expectedRowForFullTypesTest() {
+        List<Object> values =
+                Arrays.asList(
+                        1,
+                        fromString("name"),
+                        5.26D,
+                        true,
+                        (byte) 3,
+                        (short) 6,
+                        12304L,
+                        Timestamp.fromMicros(123123123),
+                        Timestamp.fromEpochMillis(123123123),
+                        Timestamp.fromMicros(123123123),
+                        Timestamp.fromEpochMillis(123123123),
+                        2456,
+                        Decimal.fromBigDecimal(new BigDecimal("0.22"), 2, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("12312455.22"), 38, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1));
+        return GenericRow.of(values.toArray());
+    }
+
+    @Override
+    public boolean supportNestedReadPruning() {
+        return false;
+    }
+
+    @Override
+    public boolean supportDataFileWithoutExtension() {
+        return true;
     }
 
     private String[] parse(String csvLine) throws IOException {

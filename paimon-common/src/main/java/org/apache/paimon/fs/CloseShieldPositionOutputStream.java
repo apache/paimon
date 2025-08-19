@@ -59,6 +59,7 @@ public class CloseShieldPositionOutputStream extends PositionOutputStream {
     @Override
     public void close() throws IOException {
         if (out != null) {
+            out.flush();
             out.close();
         }
     }

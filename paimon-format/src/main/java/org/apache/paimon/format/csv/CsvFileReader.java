@@ -27,8 +27,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.options.FormatOptions;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
@@ -60,11 +59,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             new ConcurrentHashMap<>(32);
 
     private final RowType rowType;
-    private final String fieldDelimiter;
-    private final String nullLiteral;
-    private final boolean includeHeader;
-    private final String quoteCharacter;
-    private final String escapeCharacter;
+    private final CsvOptions options;
     private final Path filePath;
     private final CsvSchema schema;
 
@@ -73,21 +68,17 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private boolean readerClosed = false;
     private CsvRecordIterator reader;
 
-    public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, Options options)
+    public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, CsvOptions options)
             throws IOException {
         this.rowType = rowType;
         this.filePath = context.filePath();
-        this.fieldDelimiter = options.get(FormatOptions.FIELD_DELIMITER);
-        this.nullLiteral = options.get(FormatOptions.NULL_LITERAL);
-        this.includeHeader = options.get(FormatOptions.INCLUDE_HEADER);
-        this.quoteCharacter = options.get(FormatOptions.QUOTE_CHARACTER);
-        this.escapeCharacter = options.get(FormatOptions.ESCAPE_CHARACTER);
+        this.options = options;
         this.schema =
                 CsvSchema.emptySchema()
-                        .withQuoteChar(quoteCharacter.charAt(0))
-                        .withColumnSeparator(fieldDelimiter.charAt(0))
-                        .withEscapeChar(escapeCharacter.charAt(0));
-        if (!includeHeader) {
+                        .withQuoteChar(options.quoteCharacter().charAt(0))
+                        .withColumnSeparator(options.fieldDelimiter().charAt(0))
+                        .withEscapeChar(options.escapeCharacter().charAt(0));
+        if (!options.includeHeader()) {
             this.schema.withoutHeader();
         }
         FileIO fileIO = context.fileIO();
@@ -106,7 +97,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         }
 
         // Skip header if needed
-        if (includeHeader && !headerSkipped) {
+        if (options.includeHeader() && !headerSkipped) {
             bufferedReader.readLine();
             headerSkipped = true;
         }
@@ -180,7 +171,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             String field = fields[i];
 
             // Fast path for null values
-            if (field == null || field.equals(nullLiteral) || field.isEmpty()) {
+            if (field == null || field.equals(options.nullLiteral()) || field.isEmpty()) {
                 values[i] = null;
                 continue;
             }
@@ -194,7 +185,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     /** Optimized field parsing with caching and fast paths for common types. */
     private Object parseFieldOptimized(String field, DataType dataType) {
-        if (field == null || field.equals(nullLiteral)) {
+        if (field == null || field.equals(options.nullLiteral())) {
             return null;
         }
 

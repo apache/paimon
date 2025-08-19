@@ -24,11 +24,9 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.CloseShieldPositionOutputStream;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataType;
@@ -59,12 +57,12 @@ public class CsvFileFormat extends FileFormat {
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, options);
+        return new CsvReaderFactory(projectedRowType, new CsvOptions(options));
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, options);
+        return new CsvWriterFactory(type, new CsvOptions(options));
     }
 
     @Override
@@ -102,12 +100,12 @@ public class CsvFileFormat extends FileFormat {
     }
 
     /** A {@link FormatWriterFactory} to write {@link InternalRow} to CSV. */
-    private static class CsvWriterFactory implements FormatWriterFactory, SupportsDirectWrite {
+    private static class CsvWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
-        private final Options options;
+        private final CsvOptions options;
 
-        public CsvWriterFactory(RowType rowType, Options options) {
+        public CsvWriterFactory(RowType rowType, CsvOptions options) {
             this.rowType = rowType;
             this.options = options;
         }
@@ -116,16 +114,8 @@ public class CsvFileFormat extends FileFormat {
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
             // Wrap the output stream to prevent premature closing/flushing
-            PositionOutputStream protectedOut = new CloseShieldPositionOutputStream(out);
+            CloseShieldPositionOutputStream protectedOut = new CloseShieldPositionOutputStream(out);
             return new CsvFormatWriter(protectedOut, rowType, options);
-        }
-
-        @Override
-        public FormatWriter create(FileIO fileIO, Path path, String compression)
-                throws IOException {
-            // Direct file I/O management - this bypasses SingleFileWriter's stream management
-            PositionOutputStream out = fileIO.newOutputStream(path, false);
-            return new CsvFormatWriter(out, rowType, options);
         }
     }
 }

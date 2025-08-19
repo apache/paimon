@@ -23,8 +23,7 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.FormatOptions;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -44,12 +43,7 @@ public class CsvFormatWriter implements FormatWriter {
             new ConcurrentHashMap<>(32);
 
     private final RowType rowType;
-    private final String fieldDelimiter;
-    private final String lineDelimiter;
-    private final String quoteCharacter;
-    private final String escapeCharacter;
-    private final String nullLiteral;
-    private final boolean includeHeader;
+    private final CsvOptions options;
 
     private final BufferedWriter writer;
     private final PositionOutputStream outputStream;
@@ -57,14 +51,9 @@ public class CsvFormatWriter implements FormatWriter {
 
     private final StringBuilder stringBuilder;
 
-    public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options) {
+    public CsvFormatWriter(PositionOutputStream out, RowType rowType, CsvOptions options) {
         this.rowType = rowType;
-        this.fieldDelimiter = options.get(FormatOptions.FIELD_DELIMITER);
-        this.lineDelimiter = options.get(FormatOptions.LINE_DELIMITER);
-        this.quoteCharacter = options.get(FormatOptions.QUOTE_CHARACTER);
-        this.escapeCharacter = options.get(FormatOptions.ESCAPE_CHARACTER);
-        this.nullLiteral = options.get(FormatOptions.NULL_LITERAL);
-        this.includeHeader = options.get(FormatOptions.INCLUDE_HEADER);
+        this.options = options;
         this.outputStream = out;
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(out, StandardCharsets.UTF_8);
         this.writer = new BufferedWriter(outputStreamWriter);
@@ -74,7 +63,7 @@ public class CsvFormatWriter implements FormatWriter {
     @Override
     public void addElement(InternalRow element) throws IOException {
         // Write header if needed
-        if (includeHeader && !headerWritten) {
+        if (options.includeHeader() && !headerWritten) {
             writeHeader();
             headerWritten = true;
         }
@@ -85,7 +74,7 @@ public class CsvFormatWriter implements FormatWriter {
         int fieldCount = rowType.getFieldCount();
         for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                stringBuilder.append(fieldDelimiter);
+                stringBuilder.append(options.fieldDelimiter());
             }
 
             Object value =
@@ -93,7 +82,7 @@ public class CsvFormatWriter implements FormatWriter {
             String fieldValue = escapeField(castToStringOptimized(value, rowType.getTypeAt(i)));
             stringBuilder.append(fieldValue);
         }
-        stringBuilder.append(lineDelimiter);
+        stringBuilder.append(options.lineDelimiter());
 
         writer.write(stringBuilder.toString());
     }
@@ -123,32 +112,35 @@ public class CsvFormatWriter implements FormatWriter {
         int fieldCount = rowType.getFieldCount();
         for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                stringBuilder.append(fieldDelimiter);
+                stringBuilder.append(options.fieldDelimiter());
             }
             stringBuilder.append(escapeField(rowType.getFieldNames().get(i)));
         }
-        stringBuilder.append(lineDelimiter);
+        stringBuilder.append(options.lineDelimiter());
         writer.write(stringBuilder.toString());
     }
 
     private String escapeField(String field) {
         if (field == null) {
-            return nullLiteral;
+            return options.nullLiteral();
         }
 
         // Optimized escaping with early exit checks
         boolean needsQuoting =
-                field.indexOf(fieldDelimiter.charAt(0)) >= 0
-                        || field.indexOf(lineDelimiter.charAt(0)) >= 0
-                        || field.indexOf(quoteCharacter.charAt(0)) >= 0;
+                field.indexOf(options.fieldDelimiter().charAt(0)) >= 0
+                        || field.indexOf(options.lineDelimiter().charAt(0)) >= 0
+                        || field.indexOf(options.quoteCharacter().charAt(0)) >= 0;
 
         if (!needsQuoting) {
             return field;
         }
 
         // Only escape if needed
-        String escaped = field.replace(quoteCharacter, escapeCharacter + quoteCharacter);
-        return quoteCharacter + escaped + quoteCharacter;
+        String escaped =
+                field.replace(
+                        options.quoteCharacter(),
+                        options.escapeCharacter() + options.quoteCharacter());
+        return options.quoteCharacter() + escaped + options.quoteCharacter();
     }
 
     /** Optimized string casting with caching and fast paths for common types. */

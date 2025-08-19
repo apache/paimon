@@ -37,7 +37,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.FormatOptions;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1491,8 +1491,8 @@ public class HiveCatalog extends AbstractCatalog {
             param.put(
                     FIELD_DELIM,
                     tableParameters.getOrDefault(
-                            FormatOptions.FIELD_DELIMITER.key(),
-                            options.get(FormatOptions.FIELD_DELIMITER)));
+                            CsvOptions.FIELD_DELIMITER.key(),
+                            options.get(CsvOptions.FIELD_DELIMITER)));
         }
         return param;
     }

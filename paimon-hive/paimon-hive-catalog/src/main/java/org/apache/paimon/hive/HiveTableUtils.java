@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.options.FormatOptions;
+import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
@@ -78,7 +78,7 @@ class HiveTableUtils {
             } else {
                 format = Format.CSV;
                 options.set(
-                        FormatOptions.FIELD_DELIMITER,
+                        CsvOptions.FIELD_DELIMITER,
                         serdeInfo
                                 .getParameters()
                                 .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
