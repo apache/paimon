@@ -84,11 +84,7 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public boolean isNullAt(int i) {
-        try {
-            return row.isNullAt(i);
-        } catch (RuntimeException e) {
-            throw e;
-        }
+        return row.isNullAt(i);
     }
 
     @Override

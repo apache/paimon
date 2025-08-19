@@ -278,8 +278,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     )
 
     val toWrite = createDataset(sparkSession, mergeRows)
-//    val writer0 = writer.disableDataEvolutionMergeWrite()
-    writer.write(toWrite)
+    val writer0 = writer.disableDataEvolutionMergeWrite()
+    writer0.write(toWrite)
   }
 
   private def findRelatedFirstRowIds(
