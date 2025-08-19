@@ -25,49 +25,50 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 
-/** A {@link FormatWriter} implementation for JSON format. */
+/** High-performance JSON format writer implementation with optimized buffering. */
 public class JsonFormatWriter implements FormatWriter {
+
+    private static final int DEFAULT_BUFFER_SIZE = 8192; // 8KB buffer for better I/O performance
+    private static final char LINE_SEPARATOR = '\n'; // Use char literal for better performance
 
     private final PositionOutputStream outputStream;
     private final Writer writer;
-    private final ObjectMapper objectMapper;
     private final RowType rowType;
 
     public JsonFormatWriter(PositionOutputStream outputStream, RowType rowType, Options options) {
         this.outputStream = outputStream;
-        this.writer =
-                new BufferedWriter(
-                        new OutputStreamWriter(
-                                new CloseShieldOutputStream(outputStream), StandardCharsets.UTF_8));
-        this.objectMapper = new ObjectMapper();
+        CloseShieldOutputStream shieldOutputStream = new CloseShieldOutputStream(outputStream);
+        OutputStreamWriter outputStreamWriter =
+                new OutputStreamWriter(shieldOutputStream, StandardCharsets.UTF_8);
+        this.writer = new BufferedWriter(outputStreamWriter, DEFAULT_BUFFER_SIZE);
         this.rowType = rowType;
     }
 
     @Override
     public void addElement(InternalRow element) throws IOException {
-        String jsonString = RowToJsonConverter.convertRow2String(element, rowType);
+        String jsonString = JsonSerde.convertRowToJsonString(element, rowType);
         writer.write(jsonString);
-        writer.write('\n'); // JSON lines format - one JSON object per line
+        writer.write(LINE_SEPARATOR); // JSON lines format - one JSON object per line
     }
 
     @Override
     public void close() throws IOException {
-        writer.flush();
-        writer.close();
+        if (writer != null) {
+            writer.flush();
+            writer.close();
+        }
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
         if (outputStream != null && suggestedCheck) {
-            writer.flush(); // Ensure all data is written to the stream
+            writer.flush(); // Ensure all data is written to the stream before checking size
             return outputStream.getPos() >= targetSize;
         }
         return false;

@@ -44,11 +44,19 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV file reader implementation. */
 public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     private static final CsvMapper CSV_MAPPER = new CsvMapper();
+    private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
+
+    // Performance optimization: Cache frequently used cast executors
+    private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
+            new ConcurrentHashMap<>(32);
 
     private final RowType rowType;
     private final String fieldDelimiter;
@@ -84,8 +92,9 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         FileIO fileIO = context.fileIO();
         SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());
         reader = new CsvRecordIterator();
-        this.bufferedReader =
-                new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+        InputStreamReader inputStreamReader =
+                new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+        this.bufferedReader = new BufferedReader(inputStreamReader);
     }
 
     @Override
@@ -164,33 +173,26 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private InternalRow parseCsvLine(String line, CsvSchema schema) throws IOException {
         String[] fields = parseCsvLineToArray(line, schema);
         int fieldCount = Math.min(fields.length, rowType.getFieldCount());
-        Object[] values = new Object[fieldCount];
+        Object[] values = new Object[fieldCount]; // Pre-allocated array
 
         for (int i = 0; i < fieldCount; i++) {
             String field = fields[i];
 
-            // Handle null values early
+            // Fast path for null values
             if (field == null || field.equals(nullLiteral) || field.isEmpty()) {
                 values[i] = null;
                 continue;
             }
 
-            // Trim whitespace only for non-JSON fields
-            String trimmedField = field.trim();
-            values[i] = parseField(trimmedField, rowType.getTypeAt(i));
+            // Optimized field parsing with cached cast executors
+            values[i] = parseFieldOptimized(field.trim(), rowType.getTypeAt(i));
         }
 
         return GenericRow.of(values);
     }
 
-    /**
-     * Parse a single field value according to its data type.
-     *
-     * @param field the field value as string
-     * @param dataType the target data type
-     * @return parsed value or null for null/empty fields
-     */
-    private Object parseField(String field, DataType dataType) {
+    /** Optimized field parsing with caching and fast paths for common types. */
+    private Object parseFieldOptimized(String field, DataType dataType) {
         if (field == null || field.equals(nullLiteral)) {
             return null;
         }
@@ -199,17 +201,36 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         switch (typeRoot) {
             case BINARY:
             case VARBINARY:
-                // Handle base64 encoded binary data
-                try {
-                    return java.util.Base64.getDecoder().decode(field);
-                } catch (IllegalArgumentException e) {
-                    throw new RuntimeException("Failed to decode base64 binary data: " + field, e);
-                }
+                return BASE64_DECODER.decode(field);
+            case INTEGER:
+                return Integer.parseInt(field);
+            case BIGINT:
+                return Long.parseLong(field);
+            case FLOAT:
+                return Float.parseFloat(field);
+            case DOUBLE:
+                return Double.parseDouble(field);
+            case BOOLEAN:
+                return Boolean.parseBoolean(field);
+            case CHAR:
+            case VARCHAR:
+                return BinaryString.fromString(field);
             default:
-                // Use Paimon's built-in type casting
-                BinaryString binaryString = BinaryString.fromString(field);
-                CastExecutor cast = CastExecutors.resolve(DataTypes.STRING(), dataType);
-                return cast.cast(binaryString);
+                return useCachedCastExecutor(field, dataType);
         }
+    }
+
+    private Object useCachedCastExecutor(String field, DataType dataType) {
+        String cacheKey = dataType.toString();
+        @SuppressWarnings("unchecked")
+        CastExecutor<BinaryString, Object> cast =
+                (CastExecutor<BinaryString, Object>)
+                        CAST_EXECUTOR_CACHE.computeIfAbsent(
+                                cacheKey, k -> CastExecutors.resolve(DataTypes.STRING(), dataType));
+
+        if (cast != null) {
+            return cast.cast(BinaryString.fromString(field));
+        }
+        return BinaryString.fromString(field);
     }
 }

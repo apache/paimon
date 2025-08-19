@@ -34,9 +34,17 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV format writer implementation. */
 public class CsvFormatWriter implements FormatWriter {
+
+    private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
+
+    // Performance optimization: Cache frequently used cast executors
+    private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
+            new ConcurrentHashMap<>(32);
 
     private final RowType rowType;
     private final String fieldDelimiter;
@@ -50,6 +58,8 @@ public class CsvFormatWriter implements FormatWriter {
     private final PositionOutputStream outputStream;
     private boolean headerWritten = false;
 
+    private final StringBuilder stringBuilder;
+
     public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options)
             throws IOException {
         this.rowType = rowType;
@@ -60,10 +70,12 @@ public class CsvFormatWriter implements FormatWriter {
         this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
         this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
         this.outputStream = out;
-        this.writer =
-                new BufferedWriter(
-                        new OutputStreamWriter(
-                                new CloseShieldOutputStream(out), StandardCharsets.UTF_8));
+        CloseShieldOutputStream shieldOutputStream = new CloseShieldOutputStream(out);
+        OutputStreamWriter outputStreamWriter =
+                new OutputStreamWriter(shieldOutputStream, StandardCharsets.UTF_8);
+        this.writer = new BufferedWriter(outputStreamWriter);
+        int estimatedRowLength = rowType.getFieldCount() * 20; // Estimate ~20 chars per field
+        this.stringBuilder = new StringBuilder(estimatedRowLength);
     }
 
     @Override
@@ -74,20 +86,23 @@ public class CsvFormatWriter implements FormatWriter {
             headerWritten = true;
         }
 
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
+        // Reuse StringBuilder for better performance
+        stringBuilder.setLength(0); // Reset without reallocating
+
+        int fieldCount = rowType.getFieldCount();
+        for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                sb.append(fieldDelimiter);
+                stringBuilder.append(fieldDelimiter);
             }
 
             Object value =
                     InternalRow.createFieldGetter(rowType.getTypeAt(i), i).getFieldOrNull(element);
-            String fieldValue = escapeField(castToString(value, rowType.getTypeAt(i)));
-            sb.append(fieldValue);
+            String fieldValue = escapeField(castToStringOptimized(value, rowType.getTypeAt(i)));
+            stringBuilder.append(fieldValue);
         }
-        sb.append(lineDelimiter);
+        stringBuilder.append(lineDelimiter);
 
-        writer.write(sb.toString());
+        writer.write(stringBuilder.toString());
     }
 
     @Override
@@ -107,15 +122,17 @@ public class CsvFormatWriter implements FormatWriter {
     }
 
     private void writeHeader() throws IOException {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
+        stringBuilder.setLength(0); // Reuse StringBuilder
+
+        int fieldCount = rowType.getFieldCount();
+        for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                sb.append(fieldDelimiter);
+                stringBuilder.append(fieldDelimiter);
             }
-            sb.append(escapeField(rowType.getFieldNames().get(i)));
+            stringBuilder.append(escapeField(rowType.getFieldNames().get(i)));
         }
-        sb.append(lineDelimiter);
-        writer.write(sb.toString());
+        stringBuilder.append(lineDelimiter);
+        writer.write(stringBuilder.toString());
     }
 
     private String escapeField(String field) {
@@ -123,29 +140,59 @@ public class CsvFormatWriter implements FormatWriter {
             return nullLiteral;
         }
 
-        // Simple escaping - wrap in quotes if contains delimiter
-        if (field.contains(fieldDelimiter)
-                || field.contains(lineDelimiter)
-                || field.contains(quoteCharacter)) {
-            String escaped = field.replace(quoteCharacter, escapeCharacter + quoteCharacter);
-            return quoteCharacter + escaped + quoteCharacter;
+        // Optimized escaping with early exit checks
+        boolean needsQuoting =
+                field.indexOf(fieldDelimiter.charAt(0)) >= 0
+                        || field.indexOf(lineDelimiter.charAt(0)) >= 0
+                        || field.indexOf(quoteCharacter.charAt(0)) >= 0;
+
+        if (!needsQuoting) {
+            return field;
         }
 
-        return field;
+        // Only escape if needed
+        String escaped = field.replace(quoteCharacter, escapeCharacter + quoteCharacter);
+        return quoteCharacter + escaped + quoteCharacter;
     }
 
-    public static String castToString(Object value, DataType dataType) {
+    /** Optimized string casting with caching and fast paths for common types. */
+    private String castToStringOptimized(Object value, DataType dataType) {
         if (value == null) {
             return null;
         }
+
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case BINARY:
             case VARBINARY:
-                return Base64.getEncoder().encodeToString((byte[]) value);
+                return BASE64_ENCODER.encodeToString((byte[]) value);
+                // Fast path for common types that can be directly converted
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+            case BOOLEAN:
+                return value.toString();
+            case CHAR:
+            case VARCHAR:
+                return value.toString();
             default:
-                CastExecutor cast = CastExecutors.resolveToString(dataType);
-                return cast.cast(value).toString();
+                return useCachedStringCastExecutor(value, dataType);
         }
+    }
+
+    private String useCachedStringCastExecutor(Object value, DataType dataType) {
+        String cacheKey = dataType.toString() + "_toString";
+        @SuppressWarnings("unchecked")
+        CastExecutor<Object, ?> cast =
+                (CastExecutor<Object, ?>)
+                        CAST_EXECUTOR_CACHE.computeIfAbsent(
+                                cacheKey, k -> CastExecutors.resolveToString(dataType));
+
+        if (cast != null) {
+            Object result = cast.cast(value);
+            return result != null ? result.toString() : null;
+        }
+        return value.toString();
     }
 }

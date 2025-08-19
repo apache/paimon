@@ -138,7 +138,6 @@ public class CsvFileFormat extends FileFormat {
             case ARRAY:
             case MAP:
             case ROW:
-                // Complex types can be represented as JSON strings in CSV
                 break;
             default:
                 throw new UnsupportedOperationException(

@@ -25,9 +25,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import javax.annotation.Nullable;
 
@@ -37,18 +34,18 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
-/** A {@link FileRecordReader} implementation for JSON format. */
+/** High-performance JSON file reader implementation with optimized buffering. */
 public class JsonFileReader implements FileRecordReader<InternalRow> {
+
+    private static final int DEFAULT_BUFFER_SIZE = 8192; // 8KB buffer for better I/O performance
 
     private final FileIO fileIO;
     private final Path filePath;
     private final Options options;
-
-    private final JsonToRowConverter converter;
+    private final RowType rowType;
 
     private InputStream inputStream;
     private boolean readerClosed = false;
-    private long currentRowPosition = 0;
     private JsonRecordIterator reader;
 
     public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
@@ -56,7 +53,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
         this.fileIO = fileIO;
         this.filePath = filePath;
         this.options = options;
-        this.converter = new JsonToRowConverter(rowType, options);
+        this.rowType = rowType;
     }
 
     @Override
@@ -81,7 +78,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
             inputStream = fileIO.newInputStream(filePath);
         }
         if (reader == null) {
-            this.reader = new JsonRecordIterator(this.converter);
+            this.reader = new JsonRecordIterator();
         }
 
         if (!reader.hasNext) {
@@ -93,14 +90,16 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
     private class JsonRecordIterator implements FileRecordIterator<InternalRow> {
 
         private final BufferedReader bufferedReader;
-        private final JsonToRowConverter converter;
         private final boolean ignoreParseErrors;
         private boolean hasNext = true;
+        private long currentPosition = 0;
 
-        public JsonRecordIterator(JsonToRowConverter converter) throws IOException {
+        public JsonRecordIterator() throws IOException {
+            // Use optimized buffer size for better I/O performance
             this.bufferedReader =
-                    new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-            this.converter = converter;
+                    new BufferedReader(
+                            new InputStreamReader(inputStream, StandardCharsets.UTF_8),
+                            DEFAULT_BUFFER_SIZE);
             this.ignoreParseErrors = options.get(JsonFileFormat.JSON_IGNORE_PARSE_ERRORS);
         }
 
@@ -108,18 +107,26 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
         public InternalRow next() throws IOException {
             while (hasNext) {
                 String line = bufferedReader.readLine();
+                currentPosition++;
+
                 if (line == null) {
                     hasNext = false;
                     return null;
                 }
 
+                // Skip empty lines for better performance
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+
                 try {
-                    JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
-                    return converter.convert(jsonNode);
+                    return JsonSerde.convertJsonStringToRow(line, rowType, options);
                 } catch (Exception e) {
                     if (!ignoreParseErrors) {
-                        throw new IOException("Failed to parse JSON line: " + line, e);
+                        throw new IOException(
+                                "Failed to parse JSON line " + currentPosition + ": " + line, e);
                     }
+                    // Continue to next line if ignoring parse errors
                 }
             }
             return null;
@@ -143,7 +150,7 @@ public class JsonFileReader implements FileRecordReader<InternalRow> {
 
         @Override
         public long returnedPosition() {
-            return currentRowPosition;
+            return Math.max(0, currentPosition - 1); // Return position of last returned row
         }
     }
 }
