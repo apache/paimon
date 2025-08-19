@@ -239,7 +239,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
                |USING source
                |ON target.a = source.a
                |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
-               |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET *
+               |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
                |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
                |WHEN NOT MATCHED THEN INSERT *
                |""".stripMargin)
