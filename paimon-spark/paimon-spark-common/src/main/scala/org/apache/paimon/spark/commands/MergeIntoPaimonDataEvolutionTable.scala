@@ -80,6 +80,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
     .distinct
     .sorted
+    .toSeq
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
