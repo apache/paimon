@@ -85,7 +85,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     // step 1: find the related data split, make it target file plan
     val dataSplits: Seq[DataSplit] = targetRelatedSplits(sparkSession)
     val touchedFileTargetRelation =
-      createNewPlan(dataSplits, targetRelation)
+      createNewPlan(dataSplits.toList, targetRelation)
 
     // step 2: invoke update action
     val updateCommit =
@@ -102,7 +102,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     updateCommit ++ insertCommit
   }
 
-  private def targetRelatedSplits(sparkSession: SparkSession): immutable.Seq[DataSplit] = {
+  private def targetRelatedSplits(sparkSession: SparkSession): Seq[DataSplit] = {
     val mergeFields = extractFields(matchedCondition)
     val mergeFieldsOnTarget =
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
@@ -140,7 +140,6 @@ case class MergeIntoPaimonDataEvolutionTable(
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
-      .toList
   }
 
   private def updateActionInvoke(
