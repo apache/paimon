@@ -1490,7 +1490,8 @@ public class HiveCatalog extends AbstractCatalog {
             String delimiterKey = "field-delimiter";
             param.put(
                     FIELD_DELIM,
-                    tableParameters.getOrDefault(delimiterKey, options.get(delimiterKey)));
+                    tableParameters.getOrDefault(
+                            delimiterKey, options.getString(delimiterKey, ",")));
         }
         return param;
     }
