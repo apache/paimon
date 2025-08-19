@@ -21,15 +21,13 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
-import org.apache.paimon.spark.schema.SparkSystemColumns
-import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{DataFrame, PaimonUtils, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
-import org.apache.spark.sql.functions.{col, lit}
 
 import scala.collection.JavaConverters._
 
@@ -40,7 +38,7 @@ case class WriteIntoPaimonTable(
     _data: DataFrame,
     options: Options)
   extends RunnableCommand
-  with PaimonCommand
+  with ExpressionHelper
   with SchemaHelper
   with Logging {
 

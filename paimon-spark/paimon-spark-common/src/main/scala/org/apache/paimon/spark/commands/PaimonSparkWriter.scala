@@ -301,8 +301,8 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
 
   /**
    * Write all the deletion vectors to the index files. If it's in unaware mode, one index file maps
-   * deletion vectors; else, one index file will contains all deletion vector with the same
-   * partition and bucket.
+   * deletion vectors; else, one index file will contain all deletion vector with the same partition
+   * and bucket.
    */
   def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession

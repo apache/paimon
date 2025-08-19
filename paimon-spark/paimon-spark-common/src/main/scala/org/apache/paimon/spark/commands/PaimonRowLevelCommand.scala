@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
+import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.BucketMode
@@ -46,16 +47,17 @@ import java.util.Collections
 
 import scala.collection.JavaConverters._
 
-/** Helper trait for all paimon commands. */
-trait PaimonCommand
-  extends WithFileStoreTable
+/** Helper trait for paimon row level command, like delete, update, merge into. */
+trait PaimonRowLevelCommand
+  extends PaimonLeafRunnableCommand
+  with WithFileStoreTable
   with ExpressionHelper
   with ScanPlanHelper
   with SQLConfHelper {
 
-  lazy val dvSafeWriter: PaimonSparkWriter = {
+  lazy val writer: PaimonSparkWriter = {
     if (table.primaryKeys().isEmpty && table.bucketMode() == BucketMode.HASH_FIXED) {
-
+      // todo: fix out why fix bucket non-pk table need write only
       /**
        * Writer without compaction, note that some operations may generate Deletion Vectors, and
        * writing may occur at the same time as generating deletion vectors. If compaction occurs at
