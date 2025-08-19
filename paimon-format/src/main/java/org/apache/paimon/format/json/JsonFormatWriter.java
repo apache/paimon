@@ -24,8 +24,8 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.TypeUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -38,7 +38,8 @@ public class JsonFormatWriter implements FormatWriter {
 
     private final PositionOutputStream outputStream;
     private final Writer writer;
-    private RowType rowType;
+    private final ObjectMapper objectMapper;
+    private final RowType rowType;
 
     public JsonFormatWriter(PositionOutputStream outputStream, RowType rowType, Options options) {
         this.outputStream = outputStream;
@@ -46,13 +47,13 @@ public class JsonFormatWriter implements FormatWriter {
                 new BufferedWriter(
                         new OutputStreamWriter(
                                 new CloseShieldOutputStream(outputStream), StandardCharsets.UTF_8));
+        this.objectMapper = new ObjectMapper();
         this.rowType = rowType;
     }
 
     @Override
     public void addElement(InternalRow element) throws IOException {
-        Object jsonObject = TypeUtils.convertRow(element, rowType);
-        String jsonString = JsonSerdeUtil.writeValueAsString(jsonObject);
+        String jsonString = RowToJsonConverter.convertRow2String(element, rowType);
         writer.write(jsonString);
         writer.write('\n'); // JSON lines format - one JSON object per line
     }

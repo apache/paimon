@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.json;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -29,16 +30,12 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -69,23 +66,6 @@ public class JsonToRowConverter {
 
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
-            case BOOLEAN:
-                return node.asBoolean();
-            case TINYINT:
-                return (byte) node.asInt();
-            case SMALLINT:
-                return (short) node.asInt();
-            case INTEGER:
-                return node.asInt();
-            case BIGINT:
-                return node.asLong();
-            case FLOAT:
-                return (float) node.asDouble();
-            case DOUBLE:
-                return node.asDouble();
-            case CHAR:
-            case VARCHAR:
-                return BinaryString.fromString(node.asText());
             case BINARY:
             case VARBINARY:
                 // Assume base64 encoded bytes
@@ -95,18 +75,6 @@ public class JsonToRowConverter {
                     throw new RuntimeException(
                             "Failed to decode base64 binary data: " + node.asText(), e);
                 }
-            case DECIMAL:
-                DecimalType decimalType = (DecimalType) dataType;
-                BigDecimal bigDecimal = new BigDecimal(node.asText());
-                return Decimal.fromBigDecimal(
-                        bigDecimal, decimalType.getPrecision(), decimalType.getScale());
-            case DATE:
-                return (int) LocalDate.parse(node.asText()).toEpochDay();
-            case TIME_WITHOUT_TIME_ZONE:
-                return (int) (LocalTime.parse(node.asText()).toNanoOfDay() / 1_000_000);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return TypeUtils.castFromString(node.asText(), dataType);
             case ARRAY:
                 return convertArray(node, (ArrayType) dataType);
             case MAP:
@@ -114,7 +82,9 @@ public class JsonToRowConverter {
             case ROW:
                 return convertRow(node, (RowType) dataType);
             default:
-                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+                BinaryString binaryString = BinaryString.fromString(node.asText());
+                CastExecutor cast = CastExecutors.resolve(DataTypes.STRING(), dataType);
+                return cast.cast(binaryString);
         }
     }
 
