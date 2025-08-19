@@ -321,10 +321,9 @@ public class TestFileStore extends KeyValueFileStore {
                             bucket,
                             (b, w) -> {
                                 if (w == null) {
+                                    write.withIgnorePreviousFiles(ignorePreviousFiles);
                                     RecordWriter<KeyValue> writer =
-                                            write.createWriterContainer(
-                                                            partition, bucket, ignorePreviousFiles)
-                                                    .writer;
+                                            write.createWriterContainer(partition, bucket).writer;
                                     ((MemoryOwner) writer)
                                             .setMemoryPool(
                                                     new HeapMemorySegmentPool(

@@ -90,6 +90,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         this.defaultValueRow = DefaultValueRow.create(rowType);
     }
 
+    public FileStoreWrite<T> fileStoreWrite() {
+        return write;
+    }
+
     @Override
     public InnerTableWrite withWriteRestore(WriteRestore writeRestore) {
         this.write.withWriteRestore(writeRestore);
