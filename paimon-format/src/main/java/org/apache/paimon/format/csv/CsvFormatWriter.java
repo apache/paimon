@@ -54,8 +54,7 @@ public class CsvFormatWriter implements FormatWriter {
         this.rowType = rowType;
         this.options = options;
         this.outputStream = out;
-        OutputStreamWriter outputStreamWriter = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-        this.writer = new BufferedWriter(outputStreamWriter);
+        this.writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
         this.stringBuilder = new StringBuilder();
     }
 
@@ -88,15 +87,13 @@ public class CsvFormatWriter implements FormatWriter {
 
     @Override
     public void close() throws IOException {
-        if (writer != null) {
-            writer.flush();
-            writer.close();
-        }
+        writer.flush();
+        writer.close();
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (outputStream != null && suggestedCheck) {
+        if (suggestedCheck) {
             return outputStream.getPos() >= targetSize;
         }
         return false;
@@ -164,15 +161,12 @@ public class CsvFormatWriter implements FormatWriter {
 
     private String useCachedStringCastExecutor(Object value, DataType dataType) {
         String cacheKey = dataType.toString();
+        @SuppressWarnings("unchecked")
         CastExecutor<Object, ?> cast =
                 (CastExecutor<Object, ?>)
                         CAST_EXECUTOR_CACHE.computeIfAbsent(
                                 cacheKey, k -> CastExecutors.resolveToString(dataType));
-
-        if (cast != null) {
-            Object result = cast.cast(value);
-            return result != null ? result.toString() : null;
-        }
-        return value.toString();
+        Object result = cast.cast(value);
+        return result != null ? result.toString() : null;
     }
 }

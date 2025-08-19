@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -109,7 +110,7 @@ public class CsvFileFormat extends FileFormat {
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new CsvFormatWriter(out, rowType, options);
+            return new CsvFormatWriter(new CloseShieldOutputStream(out), rowType, options);
         }
     }
 }

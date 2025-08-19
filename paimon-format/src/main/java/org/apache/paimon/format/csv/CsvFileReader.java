@@ -23,7 +23,6 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -43,7 +42,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -51,7 +49,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     private static final CsvMapper CSV_MAPPER = new CsvMapper();
-    private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
 
     // Performance optimization: Cache frequently used cast executors
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
@@ -61,16 +58,16 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private final CsvOptions options;
     private final Path filePath;
     private final CsvSchema schema;
+    private final BufferedReader bufferedReader;
+    private final CsvRecordIterator reader;
 
-    private BufferedReader bufferedReader;
     private boolean headerSkipped = false;
     private boolean readerClosed = false;
-    private CsvRecordIterator reader;
 
-    public CsvFileReader(FormatReaderFactory.Context context, RowType rowType, CsvOptions options)
+    public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, CsvOptions options)
             throws IOException {
         this.rowType = rowType;
-        this.filePath = context.filePath();
+        this.filePath = filePath;
         this.options = options;
         this.schema =
                 CsvSchema.emptySchema()
@@ -80,8 +77,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         if (!options.includeHeader()) {
             this.schema.withoutHeader();
         }
-        FileIO fileIO = context.fileIO();
-        SeekableInputStream inputStream = fileIO.newInputStream(context.filePath());
+        SeekableInputStream inputStream = fileIO.newInputStream(filePath);
         reader = new CsvRecordIterator();
         InputStreamReader inputStreamReader =
                 new InputStreamReader(inputStream, StandardCharsets.UTF_8);
@@ -115,9 +111,9 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     }
 
     private class CsvRecordIterator implements FileRecordIterator<InternalRow> {
+
         private boolean batchRead = false;
         private long currentPosition = 0;
-        private String nextLine = null;
         boolean end = false;
 
         @Override
@@ -126,7 +122,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             if (batchRead || readerClosed) {
                 return null;
             }
-            nextLine = bufferedReader.readLine();
+            String nextLine = bufferedReader.readLine();
             if (nextLine == null) {
                 batchRead = true;
                 end = true;

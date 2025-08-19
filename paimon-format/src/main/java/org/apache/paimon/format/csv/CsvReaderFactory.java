@@ -38,6 +38,6 @@ public class CsvReaderFactory implements FormatReaderFactory {
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(context, rowType, options);
+        return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
     }
 }
