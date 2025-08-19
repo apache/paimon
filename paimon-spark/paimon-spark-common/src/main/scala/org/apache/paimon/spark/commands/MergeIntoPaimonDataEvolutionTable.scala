@@ -54,7 +54,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with PaimonCommand {
+  with PaimonRowLevelCommand {
 
   assert(
     notMatchedBySourceActions.isEmpty,
@@ -89,7 +89,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     val commitMessages = invokeMergeInto(sparkSession)
-    dvSafeWriter.commit(commitMessages.toSeq)
+    writer.commit(commitMessages.toSeq)
     Seq.empty[Row]
   }
 
@@ -242,8 +242,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     val sortedDs = toWrite
       .repartitionByRange(firstRowIdColumn)
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
-    val writer = dvSafeWriter.withDataEvolutionMergeWrite(updateColumnsSorted.map(_.name))
-    writer.write(sortedDs)
+    val writer0 = writer.withDataEvolutionMergeWrite(updateColumnsSorted.map(_.name))
+    writer0.write(sortedDs)
   }
 
   private def insertActionInvoke(
@@ -277,8 +277,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     )
 
     val toWrite = createDataset(sparkSession, mergeRows)
-    val writer = dvSafeWriter.disableDataEvolutionMergeWrite()
-    writer.write(toWrite)
+    val writer0 = writer.disableDataEvolutionMergeWrite()
+    writer0.write(toWrite)
   }
 
   private def findRelatedFirstRowIds(
