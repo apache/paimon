@@ -93,9 +93,6 @@ public class CsvFormatWriter implements FormatWriter {
             writer.flush();
             writer.close();
         }
-        if (outputStream != null) {
-            outputStream.close();
-        }
     }
 
     @Override
