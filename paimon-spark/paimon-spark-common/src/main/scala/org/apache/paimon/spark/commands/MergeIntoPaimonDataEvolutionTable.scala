@@ -199,7 +199,6 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val rowFromSourceAttr = attribute(ROW_FROM_SOURCE, joinPlan)
     val rowFromTargetAttr = attribute(ROW_FROM_TARGET, joinPlan)
-    createDataset(sparkSession, joinPlan).show()
 
     val mergeRows = MergeRows(
       isSourceRowPresent = rowFromSourceAttr,
@@ -237,7 +236,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     val joinPlan =
       Join(sourceRelation, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
 
-    createDataset(sparkSession, joinPlan).show()
     // merge rows as there are multiple not matched actions
     val mergeRows = MergeRows(
       isSourceRowPresent = TrueLiteral,
@@ -256,7 +254,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     )
 
     val toWrite = createDataset(sparkSession, mergeRows)
-    toWrite.show()
     val writer = dvSafeWriter.disableDataEvolutionMergeWrite()
     writer.write(toWrite)
   }
