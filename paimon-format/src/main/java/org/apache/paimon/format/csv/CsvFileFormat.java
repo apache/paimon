@@ -120,8 +120,6 @@ public class CsvFileFormat extends FileFormat {
             case CHAR:
             case VARCHAR:
             case BOOLEAN:
-            case BINARY:
-            case VARBINARY:
             case DECIMAL:
             case TINYINT:
             case SMALLINT:
@@ -134,10 +132,6 @@ public class CsvFileFormat extends FileFormat {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 // These are directly supported
-                break;
-            case ARRAY:
-            case MAP:
-            case ROW:
                 break;
             default:
                 throw new UnsupportedOperationException(

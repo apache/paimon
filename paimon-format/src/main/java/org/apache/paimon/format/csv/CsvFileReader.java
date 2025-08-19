@@ -199,9 +199,10 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
 
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
-            case BINARY:
-            case VARBINARY:
-                return BASE64_DECODER.decode(field);
+            case TINYINT:
+                return Byte.parseByte(field);
+            case SMALLINT:
+                return Short.parseShort(field);
             case INTEGER:
                 return Integer.parseInt(field);
             case BIGINT:

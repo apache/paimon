@@ -169,7 +169,11 @@ public final class GenericRow implements InternalRow, Serializable {
 
     @Override
     public BinaryString getString(int pos) {
-        return (BinaryString) this.fields[pos];
+        try {
+            return (BinaryString) this.fields[pos];
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

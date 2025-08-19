@@ -47,14 +47,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** JSON Serde for Paimon Json format. */
 public class JsonSerde {
 
-    // Performance optimization: Cache frequently used cast executors
-    private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
-            new ConcurrentHashMap<>(64);
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
@@ -86,22 +82,8 @@ public class JsonSerde {
             case ROW:
                 return convertJsonRow(node, (RowType) dataType, options);
             default:
-                return convertPrimitiveValue(node.asText(), dataType);
+                return convertPrimitiveStringToType(node.asText(), dataType);
         }
-    }
-
-    private static Object convertPrimitiveValue(String text, DataType dataType) {
-        String cacheKey = dataType.toString();
-        @SuppressWarnings("unchecked")
-        CastExecutor<BinaryString, Object> cast =
-                (CastExecutor<BinaryString, Object>)
-                        CAST_EXECUTOR_CACHE.computeIfAbsent(
-                                cacheKey, k -> CastExecutors.resolve(DataTypes.STRING(), dataType));
-
-        if (cast != null) {
-            return cast.cast(BinaryString.fromString(text));
-        }
-        return BinaryString.fromString(text);
     }
 
     private static GenericArray convertJsonArray(
@@ -145,10 +127,10 @@ public class JsonSerde {
                             Object key =
                                     keyStr == null
                                             ? ("LITERAL".equals(mapNullKeyMode)
-                                                    ? convertStringToType(
+                                                    ? convertPrimitiveStringToType(
                                                             mapNullKeyLiteral, keyType)
                                                     : null)
-                                            : convertStringToType(keyStr, keyType);
+                                            : convertPrimitiveStringToType(keyStr, keyType);
 
                             if (key == null && "FAIL".equals(mapNullKeyMode)) {
                                 throw new RuntimeException(
@@ -164,9 +146,12 @@ public class JsonSerde {
         return new GenericMap(map);
     }
 
-    private static Object convertStringToType(String str, DataType dataType) {
-        // Fast path for common types
+    private static Object convertPrimitiveStringToType(String str, DataType dataType) {
         switch (dataType.getTypeRoot()) {
+            case TINYINT:
+                return Byte.parseByte(str);
+            case SMALLINT:
+                return Short.parseShort(str);
             case INTEGER:
                 return Integer.parseInt(str);
             case BIGINT:
@@ -179,8 +164,11 @@ public class JsonSerde {
                 return Boolean.parseBoolean(str);
             case CHAR:
             case VARCHAR:
-            default:
                 return BinaryString.fromString(str);
+            default:
+                BinaryString binaryString = BinaryString.fromString(str);
+                CastExecutor cast = CastExecutors.resolve(DataTypes.STRING(), dataType);
+                return cast.cast(binaryString);
         }
     }
 
@@ -227,6 +215,16 @@ public class JsonSerde {
         }
 
         switch (dataType.getTypeRoot()) {
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case CHAR:
+            case VARCHAR:
+                return value.toString();
             case BINARY:
             case VARBINARY:
                 return BASE64_ENCODER.encodeToString((byte[]) value);
@@ -237,22 +235,9 @@ public class JsonSerde {
             case ROW:
                 return convertRowToMap((InternalRow) value, (RowType) dataType);
             default:
-                return convertToStringValue(value, dataType);
+                CastExecutor cast = CastExecutors.resolveToString(dataType);
+                return cast.cast(value).toString();
         }
-    }
-
-    private static Object convertToStringValue(Object value, DataType dataType) {
-        String cacheKey = dataType.toString();
-        CastExecutor<Object, BinaryString> cast =
-                (CastExecutor<Object, BinaryString>)
-                        CAST_EXECUTOR_CACHE.computeIfAbsent(
-                                cacheKey, k -> CastExecutors.resolveToString(dataType));
-
-        if (cast != null) {
-            Object result = cast.cast(value);
-            return result != null ? result.toString() : null;
-        }
-        return value.toString();
     }
 
     private static List<Object> convertRowArray(InternalArray array, ArrayType arrayType) {

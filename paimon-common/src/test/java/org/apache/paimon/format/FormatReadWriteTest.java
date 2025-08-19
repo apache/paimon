@@ -110,8 +110,8 @@ public abstract class FormatReadWriteTest {
 
     @Test
     public void testFullTypes() throws IOException {
-        RowType rowType = rowTypeForFullTypesTest();
-        InternalRow expected = expectedRowForFullTypesTest();
+        RowType rowType = this.rowTypeForFullTypesTest();
+        InternalRow expected = this.expectedRowForFullTypesTest();
         FileFormat format = fileFormat();
 
         FormatWriterFactory factory = format.createWriterFactory(rowType);
@@ -233,7 +233,7 @@ public abstract class FormatReadWriteTest {
         assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
     }
 
-    private void write(FormatWriterFactory factory, InternalRow... rows) throws IOException {
+    protected void write(FormatWriterFactory factory, InternalRow... rows) throws IOException {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
@@ -441,7 +441,7 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private Object[] getMapValueData() {
+    protected Object[] getMapValueData() {
         if (formatType.equals("avro") || formatType.equals("orc")) {
             // allow nested row in array
             return new Object[] {GenericRow.of(5.2D, 6.2D), GenericRow.of(6.2D, 2.2D)};
@@ -450,7 +450,7 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
+    public void validateFullTypesResult(InternalRow actual, InternalRow expected) {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow.FieldGetter[] fieldGetters =
                 IntStream.range(0, rowType.getFieldCount())

@@ -212,7 +212,11 @@ public final class GenericArray implements InternalArray, Serializable {
 
     @Override
     public BinaryString getString(int pos) {
-        return (BinaryString) getObject(pos);
+        try {
+            return (BinaryString) getObject(pos);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

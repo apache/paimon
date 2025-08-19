@@ -74,8 +74,7 @@ public class CsvFormatWriter implements FormatWriter {
         OutputStreamWriter outputStreamWriter =
                 new OutputStreamWriter(shieldOutputStream, StandardCharsets.UTF_8);
         this.writer = new BufferedWriter(outputStreamWriter);
-        int estimatedRowLength = rowType.getFieldCount() * 20; // Estimate ~20 chars per field
-        this.stringBuilder = new StringBuilder(estimatedRowLength);
+        this.stringBuilder = new StringBuilder();
     }
 
     @Override
@@ -163,15 +162,13 @@ public class CsvFormatWriter implements FormatWriter {
 
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
-            case BINARY:
-            case VARBINARY:
-                return BASE64_ENCODER.encodeToString((byte[]) value);
-                // Fast path for common types that can be directly converted
             case INTEGER:
             case BIGINT:
             case FLOAT:
             case DOUBLE:
             case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
                 return value.toString();
             case CHAR:
             case VARCHAR:

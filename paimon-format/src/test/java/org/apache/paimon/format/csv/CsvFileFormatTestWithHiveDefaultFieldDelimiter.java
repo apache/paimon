@@ -20,16 +20,15 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
-import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.options.Options;
 
 import static org.apache.paimon.format.csv.CsvFileFormat.FIELD_DELIMITER;
 
 /** Test for {@link CsvFileFormat} use hive default field delimiter. */
-public class CsvFileFormatTestWithHiveDefaultFieldDelimiter extends FormatReadWriteTest {
+public class CsvFileFormatTestWithHiveDefaultFieldDelimiter extends BaseCsvFileFormatTest {
 
     protected CsvFileFormatTestWithHiveDefaultFieldDelimiter() {
-        super("csv");
+        super();
     }
 
     @Override
@@ -37,15 +36,5 @@ public class CsvFileFormatTestWithHiveDefaultFieldDelimiter extends FormatReadWr
         Options options = new Options();
         options.set(FIELD_DELIMITER, "\001");
         return new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
-    }
-
-    @Override
-    public boolean supportNestedReadPruning() {
-        return false;
-    }
-
-    @Override
-    public boolean supportDataFileWithoutExtension() {
-        return true;
     }
 }

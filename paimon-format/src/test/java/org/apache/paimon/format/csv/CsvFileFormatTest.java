@@ -20,7 +20,6 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
-import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
@@ -32,25 +31,15 @@ import java.io.IOException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CsvFileFormat}. */
-public class CsvFileFormatTest extends FormatReadWriteTest {
+public class CsvFileFormatTest extends BaseCsvFileFormatTest {
 
     protected CsvFileFormatTest() {
-        super("csv");
+        super();
     }
 
     @Override
     protected FileFormat fileFormat() {
         return new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
-    }
-
-    @Override
-    public boolean supportNestedReadPruning() {
-        return false;
-    }
-
-    @Override
-    public boolean supportDataFileWithoutExtension() {
-        return true;
     }
 
     @Test
