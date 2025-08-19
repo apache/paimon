@@ -24,7 +24,6 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.fs.CloseShieldPositionOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
@@ -35,7 +34,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.List;
 
 /** CSV {@link FileFormat}. */
@@ -111,11 +109,8 @@ public class CsvFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression)
-                throws IOException {
-            // Wrap the output stream to prevent premature closing/flushing
-            CloseShieldPositionOutputStream protectedOut = new CloseShieldPositionOutputStream(out);
-            return new CsvFormatWriter(protectedOut, rowType, options);
+        public FormatWriter create(PositionOutputStream out, String compression) {
+            return new CsvFormatWriter(out, rowType, options);
         }
     }
 }
