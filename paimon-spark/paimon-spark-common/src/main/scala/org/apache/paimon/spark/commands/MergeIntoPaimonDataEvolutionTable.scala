@@ -140,6 +140,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
+      .toSeq
   }
 
   private def updateActionInvoke(
@@ -285,7 +286,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     traverse(expression)
-    fields.distinct
+    fields.distinct.toSeq
   }
 
   private def attribute(name: String, plan: LogicalPlan) =
