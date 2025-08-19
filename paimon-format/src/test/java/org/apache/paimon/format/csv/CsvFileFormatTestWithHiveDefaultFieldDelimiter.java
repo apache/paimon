@@ -20,9 +20,8 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.options.FormatOptions;
 import org.apache.paimon.options.Options;
-
-import static org.apache.paimon.format.csv.CsvFileFormat.FIELD_DELIMITER;
 
 /** Test for {@link CsvFileFormat} use hive default field delimiter. */
 public class CsvFileFormatTestWithHiveDefaultFieldDelimiter extends BaseCsvFileFormatTest {
@@ -34,7 +33,7 @@ public class CsvFileFormatTestWithHiveDefaultFieldDelimiter extends BaseCsvFileF
     @Override
     protected FileFormat fileFormat() {
         Options options = new Options();
-        options.set(FIELD_DELIMITER, "\001");
+        options.set(FormatOptions.FIELD_DELIMITER, "\001");
         return new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
     }
 }

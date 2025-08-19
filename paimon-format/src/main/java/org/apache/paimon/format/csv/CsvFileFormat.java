@@ -25,11 +25,10 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
+import org.apache.paimon.fs.CloseShieldPositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataType;
@@ -45,42 +44,6 @@ import java.util.List;
 public class CsvFileFormat extends FileFormat {
 
     public static final String CSV_IDENTIFIER = "csv";
-
-    protected static final ConfigOption<String> FIELD_DELIMITER =
-            ConfigOptions.key("field-delimiter")
-                    .stringType()
-                    .defaultValue(",")
-                    .withDescription("The field delimiter for CSV or TXT format");
-
-    protected static final ConfigOption<String> CSV_LINE_DELIMITER =
-            ConfigOptions.key("csv.line-delimiter")
-                    .stringType()
-                    .defaultValue("\n")
-                    .withDescription("The line delimiter for CSV format");
-
-    protected static final ConfigOption<String> CSV_QUOTE_CHARACTER =
-            ConfigOptions.key("csv.quote-character")
-                    .stringType()
-                    .defaultValue("\"")
-                    .withDescription("The quote character for CSV format");
-
-    protected static final ConfigOption<String> CSV_ESCAPE_CHARACTER =
-            ConfigOptions.key("csv.escape-character")
-                    .stringType()
-                    .defaultValue("\\")
-                    .withDescription("The escape character for CSV format");
-
-    protected static final ConfigOption<Boolean> CSV_INCLUDE_HEADER =
-            ConfigOptions.key("csv.include-header")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to include header in CSV files");
-
-    protected static final ConfigOption<String> CSV_NULL_LITERAL =
-            ConfigOptions.key("csv.null-literal")
-                    .stringType()
-                    .defaultValue("null")
-                    .withDescription("The literal for null values in CSV format");
 
     private final Options options;
 

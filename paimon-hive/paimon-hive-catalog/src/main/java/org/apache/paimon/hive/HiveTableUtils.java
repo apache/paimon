@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.options.FormatOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
@@ -39,7 +40,6 @@ import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.HiveCatalog.isView;
-import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 class HiveTableUtils {
 
@@ -78,7 +78,7 @@ class HiveTableUtils {
             } else {
                 format = Format.CSV;
                 options.set(
-                        FIELD_DELIMITER,
+                        FormatOptions.FIELD_DELIMITER,
                         serdeInfo
                                 .getParameters()
                                 .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));

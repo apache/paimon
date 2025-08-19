@@ -27,6 +27,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.FormatOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -76,11 +77,11 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
             throws IOException {
         this.rowType = rowType;
         this.filePath = context.filePath();
-        this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
-        this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
-        this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
-        this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
-        this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
+        this.fieldDelimiter = options.get(FormatOptions.FIELD_DELIMITER);
+        this.nullLiteral = options.get(FormatOptions.NULL_LITERAL);
+        this.includeHeader = options.get(FormatOptions.INCLUDE_HEADER);
+        this.quoteCharacter = options.get(FormatOptions.QUOTE_CHARACTER);
+        this.escapeCharacter = options.get(FormatOptions.ESCAPE_CHARACTER);
         this.schema =
                 CsvSchema.emptySchema()
                         .withQuoteChar(quoteCharacter.charAt(0))

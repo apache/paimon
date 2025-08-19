@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.csv;
-
-import org.apache.paimon.fs.PositionOutputStream;
+package org.apache.paimon.fs;
 
 import java.io.IOException;
 

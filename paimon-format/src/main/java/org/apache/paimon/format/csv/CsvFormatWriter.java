@@ -23,6 +23,7 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.FormatOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -58,12 +59,12 @@ public class CsvFormatWriter implements FormatWriter {
 
     public CsvFormatWriter(PositionOutputStream out, RowType rowType, Options options) {
         this.rowType = rowType;
-        this.fieldDelimiter = options.get(CsvFileFormat.FIELD_DELIMITER);
-        this.lineDelimiter = options.get(CsvFileFormat.CSV_LINE_DELIMITER);
-        this.quoteCharacter = options.get(CsvFileFormat.CSV_QUOTE_CHARACTER);
-        this.escapeCharacter = options.get(CsvFileFormat.CSV_ESCAPE_CHARACTER);
-        this.nullLiteral = options.get(CsvFileFormat.CSV_NULL_LITERAL);
-        this.includeHeader = options.get(CsvFileFormat.CSV_INCLUDE_HEADER);
+        this.fieldDelimiter = options.get(FormatOptions.FIELD_DELIMITER);
+        this.lineDelimiter = options.get(FormatOptions.LINE_DELIMITER);
+        this.quoteCharacter = options.get(FormatOptions.QUOTE_CHARACTER);
+        this.escapeCharacter = options.get(FormatOptions.ESCAPE_CHARACTER);
+        this.nullLiteral = options.get(FormatOptions.NULL_LITERAL);
+        this.includeHeader = options.get(FormatOptions.INCLUDE_HEADER);
         this.outputStream = out;
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(out, StandardCharsets.UTF_8);
         this.writer = new BufferedWriter(outputStreamWriter);
