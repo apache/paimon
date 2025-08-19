@@ -16,15 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.format.csv;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 
-import java.io.IOException;
+/** Factory to create {@link CsvFileFormat}. */
+public class CsvFileFormatFactory implements FileFormatFactory {
 
-/** Create a FormatWriter which has full control abort file io. */
-public interface SupportsDirectWrite {
+    public static final String IDENTIFIER = "csv";
 
-    FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException;
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public FileFormat create(FormatContext formatContext) {
+        return new CsvFileFormat(formatContext);
+    }
 }

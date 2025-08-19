@@ -16,18 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.format.csv;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.types.RowType;
 
-/** Options of {@link FormatTable}. */
-public class FormatTableOptions {
+import java.io.IOException;
 
-    public static final ConfigOption<String> FIELD_DELIMITER =
-            ConfigOptions.key("field-delimiter")
-                    .stringType()
-                    .defaultValue(",")
-                    .withDescription(
-                            "Optional field delimiter character for CSV (',' by default).");
+/** CSV {@link FormatReaderFactory} implementation. */
+public class CsvReaderFactory implements FormatReaderFactory {
+
+    private final RowType rowType;
+    private final CsvOptions options;
+
+    public CsvReaderFactory(RowType rowType, CsvOptions options) {
+        this.rowType = rowType;
+        this.options = options;
+    }
+
+    @Override
+    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+        return new CsvFileReader(context, rowType, options);
+    }
 }
