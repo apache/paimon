@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -66,6 +68,7 @@ public abstract class FormatReadWriteTest {
 
     protected FileIO fileIO;
     protected Path file;
+    protected Path parent;
 
     protected FormatReadWriteTest(String formatType) {
         this.formatType = formatType;
@@ -74,6 +77,7 @@ public abstract class FormatReadWriteTest {
     @BeforeEach
     public void beforeEach() {
         this.fileIO = LocalFileIO.create();
+        this.parent = new Path(tempPath.toUri());
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID() + "." + formatType);
     }
 
@@ -124,8 +128,15 @@ public abstract class FormatReadWriteTest {
         validateFullTypesResult(result.get(0), expected);
     }
 
+    public boolean supportNestedReadPruning() {
+        return true;
+    }
+
     @Test
     public void testNestedReadPruning() throws Exception {
+        if (!supportNestedReadPruning()) {
+            return;
+        }
         FileFormat format = fileFormat();
 
         RowType writeType =
@@ -330,6 +341,94 @@ public abstract class FormatReadWriteTest {
                         new GenericArray(
                                 new Object[] {GenericRow.of(1, 0.1D), GenericRow.of(2, 0.2D)}));
         return GenericRow.of(values.toArray());
+    }
+
+    public boolean supportDataFileWithoutExtension() {
+        return false;
+    }
+
+    @Test
+    public void testWriteAndReadFileWithoutExtension() throws IOException {
+        if (!supportDataFileWithoutExtension()) {
+            return;
+        }
+        RowType rowType =
+                RowType.of(DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BOOLEAN());
+
+        // Create test data
+        List<InternalRow> testData = new ArrayList<>();
+        testData.add(GenericRow.of(1, BinaryString.fromString("Alice"), true));
+        testData.add(GenericRow.of(2, BinaryString.fromString("Bob"), false));
+        testData.add(GenericRow.of(3, BinaryString.fromString("Charlie"), true));
+
+        // Create file format
+        FileFormat jsonFormat = fileFormat();
+
+        // Write data
+        Path filePath = new Path(parent, UUID.randomUUID().toString());
+        FormatWriterFactory writerFactory = jsonFormat.createWriterFactory(rowType);
+        try (FormatWriter writer =
+                writerFactory.create(fileIO.newOutputStream(filePath, false), "none")) {
+            for (InternalRow row : testData) {
+                writer.addElement(row);
+            }
+        }
+
+        // Read data
+        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, null);
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderFactory.Context() {
+                            @Override
+                            public FileIO fileIO() {
+                                return fileIO;
+                            }
+
+                            @Override
+                            public Path filePath() {
+                                return filePath;
+                            }
+
+                            @Override
+                            public long fileSize() {
+                                try {
+                                    return fileIO.getFileSize(filePath);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+
+                            @Override
+                            public org.apache.paimon.utils.RoaringBitmap32 selection() {
+                                return null;
+                            }
+                        });
+
+        List<InternalRow> readData = new ArrayList<>();
+        RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+        while (iterator != null) {
+            InternalRow row;
+            while ((row = iterator.next()) != null) {
+                readData.add(GenericRow.of(row.getInt(0), row.getString(1), row.getBoolean(2)));
+            }
+            iterator.releaseBatch();
+            iterator = reader.readBatch();
+        }
+        reader.close();
+
+        // Verify data
+        assertThat(readData).hasSize(3);
+        assertThat(readData.get(0).getInt(0)).isEqualTo(1);
+        assertThat(readData.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(readData.get(0).getBoolean(2)).isTrue();
+
+        assertThat(readData.get(1).getInt(0)).isEqualTo(2);
+        assertThat(readData.get(1).getString(1).toString()).isEqualTo("Bob");
+        assertThat(readData.get(1).getBoolean(2)).isFalse();
+
+        assertThat(readData.get(2).getInt(0)).isEqualTo(3);
+        assertThat(readData.get(2).getString(1).toString()).isEqualTo("Charlie");
+        assertThat(readData.get(2).getBoolean(2)).isTrue();
     }
 
     private DataType getMapValueType() {
