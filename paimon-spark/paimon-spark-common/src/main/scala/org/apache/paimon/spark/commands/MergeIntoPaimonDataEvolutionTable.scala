@@ -38,7 +38,7 @@ import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 
-import scala.collection.{mutable, Seq}
+import scala.collection.{immutable, mutable, Seq}
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
@@ -77,7 +77,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     val commitMessages = invokeMergeInto(sparkSession)
-    dvSafeWriter.commit(commitMessages)
+    dvSafeWriter.commit(commitMessages.toList)
     Seq.empty[Row]
   }
 
@@ -102,7 +102,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     updateCommit ++ insertCommit
   }
 
-  private def targetRelatedSplits(sparkSession: SparkSession): Seq[DataSplit] = {
+  private def targetRelatedSplits(sparkSession: SparkSession): immutable.Seq[DataSplit] = {
     val mergeFields = extractFields(matchedCondition)
     val mergeFieldsOnTarget =
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
@@ -113,14 +113,14 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession,
       targetRelation.copy(
         targetRelation.table,
-        mergeFieldsOnTarget
+        mergeFieldsOnTarget.toList
       ))
 
     val sourceDss = createDataset(
       sparkSession,
       sourceRelation.copy(
         sourceRelation.table,
-        mergeFieldsOnSource
+        mergeFieldsOnSource.toList
       ))
 
     val firstRowIdsTouched = mutable.Set.empty[Long]
@@ -140,6 +140,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
+      .toList
   }
 
   private def updateActionInvoke(
@@ -203,12 +204,14 @@ case class MergeIntoPaimonDataEvolutionTable(
     val mergeRows = MergeRows(
       isSourceRowPresent = rowFromSourceAttr,
       isTargetRowPresent = rowFromTargetAttr,
-      matchedInstructions = realUpdateActions.map(
-        action => {
-          Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-        }),
+      matchedInstructions = realUpdateActions
+        .map(
+          action => {
+            Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
+          })
+        .toList,
       notMatchedInstructions = Nil,
-      notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)),
+      notMatchedBySourceInstructions = immutable.Seq(Keep(TrueLiteral, output)),
       checkCardinality = false,
       output = output,
       child = joinPlan
@@ -231,7 +234,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
 
     val targetReadPlan =
-      touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget)
+      touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toList)
 
     val joinPlan =
       Join(sourceRelation, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
@@ -246,7 +249,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           Keep(
             insertAction.condition.getOrElse(TrueLiteral),
             insertAction.assignments.map(a => a.value))
-      },
+      }.toList,
       notMatchedBySourceInstructions = Nil,
       checkCardinality = false,
       output = targetTable.output,
