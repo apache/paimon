@@ -74,11 +74,11 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   lazy val tableSchema: StructType = v2Table.schema
 
-  override def run(sparkSession: SparkSession): Seq[Row] = {
+  override def run(sparkSession: SparkSession): scala.collection.Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     val commitMessages = invokeMergeInto(sparkSession)
     dvSafeWriter.commit(commitMessages.toList)
-    Seq.empty[Row]
+    scala.collection.Seq.empty[Row]
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Seq[CommitMessage] = {
