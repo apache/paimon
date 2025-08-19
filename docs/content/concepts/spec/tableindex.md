@@ -1,6 +1,6 @@
 ---
 title: "Table Index"
-weight: 6
+weight: 7
 type: docs
 aliases:
 - /concepts/spec/tableindex.html
