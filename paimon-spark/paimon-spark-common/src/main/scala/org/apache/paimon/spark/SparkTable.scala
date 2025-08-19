@@ -110,6 +110,7 @@ case class SparkTable(table: Table)
     if (useV2Write) {
       capabilities.add(TableCapability.BATCH_WRITE)
       capabilities.add(TableCapability.OVERWRITE_DYNAMIC)
+      capabilities.add(TableCapability.STREAMING_WRITE)
     } else {
       capabilities.add(TableCapability.ACCEPT_ANY_SCHEMA)
       capabilities.add(TableCapability.V1_BATCH_WRITE)

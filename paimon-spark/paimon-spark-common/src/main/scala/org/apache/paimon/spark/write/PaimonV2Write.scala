@@ -28,6 +28,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.write._
+import org.apache.spark.sql.connector.write.streaming.{StreamingDataWriterFactory, StreamingWrite}
 import org.apache.spark.sql.types.StructType
 
 import java.io.{IOException, UncheckedIOException}
@@ -68,6 +69,9 @@ class PaimonV2Write(
 
   override def toBatch: BatchWrite = PaimonBatchWrite(table, writeSchema, overwritePartitions)
 
+  override def toStreaming: StreamingWrite =
+    PaimonBatchWrite(table, writeSchema, overwritePartitions)
+
   override def toString: String = {
     val overwriteDynamicStr = if (overwriteDynamic) {
       ", overwriteDynamic=true"
@@ -88,6 +92,7 @@ private case class PaimonBatchWrite(
     writeSchema: StructType,
     overwritePartitions: Option[Map[String, String]])
   extends BatchWrite
+  with StreamingWrite
   with WriteHelper {
 
   private val batchWriteBuilder = {
@@ -126,6 +131,33 @@ private case class PaimonBatchWrite(
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     // TODO clean uncommitted files
+  }
+
+  override def createStreamingWriterFactory(
+      physicalWriteInfo: PhysicalWriteInfo): StreamingDataWriterFactory = {
+    StreamingWriterFactory(writeSchema, batchWriteBuilder)
+  }
+
+  override def commit(epochId: Long, messages: Array[WriterCommitMessage]): Unit = {
+    commit(messages)
+  }
+
+  override def abort(epochId: Long, writerCommitMessages: Array[WriterCommitMessage]): Unit = {
+    // TODO clean uncommitted files
+  }
+}
+
+private case class StreamingWriterFactory(
+    writeSchema: StructType,
+    batchWriteBuilder: BatchWriteBuilder)
+  extends StreamingDataWriterFactory {
+
+  override def createWriter(
+      partitionId: Int,
+      taskId: Long,
+      epochId: Long): DataWriter[InternalRow] = {
+    val streamingTableWrite = batchWriteBuilder.newWrite()
+    new PaimonDataWriter(streamingTableWrite, writeSchema)
   }
 }
 
