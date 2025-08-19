@@ -122,11 +122,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
     def newWrite() = if (dataEvolutionWrite) {
-      DataEvolutionSparkTableWrite(
-        table,
-        writeBuilder.commitUser(),
-        writeType,
-        firstRowIdToPartitionMap)
+      DataEvolutionSparkTableWrite(writeBuilder, writeType, firstRowIdToPartitionMap)
     } else {
       SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
     }

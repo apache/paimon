@@ -21,10 +21,10 @@ package org.apache.paimon.spark
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
-import org.apache.paimon.operation.AppendFileStoreWrite
+import org.apache.paimon.operation.{AbstractFileStoreWrite, AppendFileStoreWrite}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{CommitMessageImpl, CommitMessageSerializer}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RecordWriter
 
@@ -37,8 +37,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 case class DataEvolutionSparkTableWrite(
-    table: FileStoreTable,
-    commitUser: String,
+    writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]])
   extends SparkTableWriteTrait {
@@ -72,13 +71,11 @@ case class DataEvolutionSparkTableWrite(
         s"First row ID $firstRowId not found in partition map. " +
           s"Available first row IDs: ${firstRowIdToPartitionMap.keys.mkString(", ")}")
     }
-    val writer = table
-      .store()
-      .newWrite(commitUser)
-      .withWriteType(writeType)
-      .asInstanceOf[AppendFileStoreWrite]
-      .createWriterContainer(partition, 0, true)
-      .writer
+
+    val writer = writeBuilder
+      .newWrite()
+      .asInstanceOf[AbstractFileStoreWrite[InternalRow]]
+      .createWriter(partition, 0)
     currentWriter = PerFileWriter(partition, firstRowId, writer, numRecords)
   }
 
