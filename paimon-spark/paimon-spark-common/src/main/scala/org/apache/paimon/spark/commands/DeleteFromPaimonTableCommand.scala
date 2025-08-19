@@ -148,10 +148,11 @@ case class DeleteFromPaimonTableCommand(
       var data = createDataset(sparkSession, toRewriteScanRelation)
       if (coreOptions.rowTrackingEnabled()) {
         data = selectWithRowLineage(data)
+        writer.withRowLineage()
       }
 
       // only write new files, should have no compaction
-      val addCommitMessage = writer.writeOnly().withRowLineage().write(data)
+      val addCommitMessage = writer.writeOnly().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

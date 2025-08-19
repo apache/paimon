@@ -158,10 +158,11 @@ case class UpdatePaimonTableCommand(
             toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
           .as(SEQUENCE_NUMBER_COLUMN)
       )
+      writer.withRowLineage()
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.withRowLineage().write(data)
+    writer.write(data)
   }
 
   private def optimizedIf(
