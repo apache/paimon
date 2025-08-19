@@ -35,7 +35,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final InnerTable table;
+    private InnerTable table;
     private final String commitUser;
 
     private Map<String, String> staticPartition;
@@ -79,5 +79,13 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true));
         return commit;
+    }
+
+    @Override
+    public BatchWriteBuilder withDynamicOptions(@Nullable Map<String, String> dynamicOptions) {
+        if (dynamicOptions != null) {
+            table = table.copy(dynamicOptions);
+        }
+        return this;
     }
 }

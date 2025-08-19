@@ -48,6 +48,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.Collections
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -69,7 +70,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
 
   private var writeType = table.rowType()
 
-  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+  var writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
   def writeOnly(): PaimonSparkWriter = {
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
@@ -95,6 +96,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
             firstRowIdToPartitionMap
               .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
     }
+    writeBuilder.withDynamicOptions(singletonMap(CoreOptions.TARGET_FILE_SIZE, "9999 GB"))
     this
   }
 
@@ -102,6 +104,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
     this.dataEvolutionWrite = false
     this.writeType = table.rowType()
     this.firstRowIdToPartitionMap = null
+    writeBuilder.withDynamicOptions(Collections.emptyMap())
     this
   }
 

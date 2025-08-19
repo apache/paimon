@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
 
+import java.util.Map;
 import java.util.Optional;
 
 /** Inner table for implementation, provide newScan, newRead ... directly. */
@@ -62,4 +63,7 @@ public interface InnerTable extends Table {
     default StreamWriteBuilder newStreamWriteBuilder() {
         return new StreamWriteBuilderImpl(this);
     }
+
+    @Override
+    InnerTable copy(Map<String, String> dynamicOptions);
 }
