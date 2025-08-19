@@ -54,7 +54,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     FileStoreWrite<T> withIOManager(IOManager ioManager);
 
     /** Specified the write rowType. */
-    default FileStoreWrite<T> withWriteType(RowType writeType) {
+    default void withWriteType(RowType writeType) {
         throw new UnsupportedOperationException();
     }
 

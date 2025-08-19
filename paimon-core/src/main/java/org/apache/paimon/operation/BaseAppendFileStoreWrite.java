@@ -139,7 +139,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     @Override
-    public BaseAppendFileStoreWrite withWriteType(RowType writeType) {
+    public void withWriteType(RowType writeType) {
         this.writeType = writeType;
         int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
@@ -150,7 +150,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (writeCols.size() >= fullCount && writeCols.subList(0, fullCount).equals(fullNames)) {
             writeCols = null;
         }
-        return this;
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {

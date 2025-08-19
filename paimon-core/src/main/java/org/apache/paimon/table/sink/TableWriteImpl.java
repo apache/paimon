@@ -162,11 +162,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public void write(InternalRow row, BinaryRow partition, int bucket) throws Exception {
-        writeAndReturn(row, partition, bucket);
-    }
-
-    @Override
     public void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle)
             throws Exception {
         if (write instanceof BundleFileStoreWriter) {
@@ -185,29 +180,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Nullable
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
-        return writeAndReturn(row, null, bucket);
-    }
-
-    @Nullable
-    public SinkRecord writeAndReturn(InternalRow row, @Nullable BinaryRow partition, int bucket)
-            throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
         if (ignoreDelete && rowKind.isRetract()) {
             return null;
         }
-
-        SinkRecord record;
-        if (partition != null) {
-            record =
-                    bucket == -1
-                            ? toSinkRecord(row, partition)
-                            : toSinkRecord(row, partition, bucket);
-        } else {
-            record = bucket == -1 ? toSinkRecord(row) : toSinkRecord(row, bucket);
-        }
-
+        SinkRecord record = bucket == -1 ? toSinkRecord(row) : toSinkRecord(row, bucket);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record, rowKind));
         return record;
     }
@@ -242,20 +221,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 bucket,
                 keyAndBucketExtractor.trimmedPrimaryKey(),
                 row);
-    }
-
-    private SinkRecord toSinkRecord(InternalRow row, BinaryRow partition) {
-        keyAndBucketExtractor.setRecord(row);
-        return new SinkRecord(
-                partition,
-                keyAndBucketExtractor.bucket(),
-                keyAndBucketExtractor.trimmedPrimaryKey(),
-                row);
-    }
-
-    private SinkRecord toSinkRecord(InternalRow row, BinaryRow partition, int bucket) {
-        keyAndBucketExtractor.setRecord(row);
-        return new SinkRecord(partition, bucket, keyAndBucketExtractor.trimmedPrimaryKey(), row);
     }
 
     public SinkRecord toLogRecord(SinkRecord record) {
