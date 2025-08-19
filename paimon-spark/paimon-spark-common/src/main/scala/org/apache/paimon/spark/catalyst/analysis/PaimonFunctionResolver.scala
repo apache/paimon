@@ -18,28 +18,34 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.function.{Function => PaimonFunction}
 import org.apache.paimon.spark.catalog.SupportV1Function
 
-import org.apache.spark.sql.catalyst.FunctionIdentifier
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.UNRESOLVED_FUNCTION
 
-case class PaimonFunctionResolver() extends Rule[LogicalPlan] {
+case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan] {
+
+  protected lazy val catalogManager = spark.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): LogicalPlan =
     plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
-          case UnResolvedPaimonV1Function(
-                v1FunctionCatalog: SupportV1Function,
-                funcIdent: FunctionIdentifier,
-                func: Option[PaimonFunction],
-                arguments: Seq[Expression]) =>
-            v1FunctionCatalog.registerAndResolveV1Function(funcIdent, func, arguments)
+          case u: UnResolvedPaimonV1Function =>
+            u.funcIdent.catalog match {
+              case Some(catalog) =>
+                catalogManager.catalog(catalog) match {
+                  case v1FunctionCatalog: SupportV1Function =>
+                    v1FunctionCatalog.registerAndResolveV1Function(u)
+                  case _ =>
+                    throw new IllegalArgumentException(
+                      s"Catalog $catalog is not a v1 function catalog")
+                }
+              case None => throw new IllegalArgumentException("Catalog name is not defined")
+            }
         }
     }
 }
