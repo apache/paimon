@@ -127,12 +127,7 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public BinaryString getString(int i) {
-        try {
-            return BinaryString.fromString(row.getString(i));
-        } catch (RuntimeException e) {
-            System.out.println(i);
-            throw e;
-        }
+        return BinaryString.fromString(row.getString(i));
     }
 
     @Override
