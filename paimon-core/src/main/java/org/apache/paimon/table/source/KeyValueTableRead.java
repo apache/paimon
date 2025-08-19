@@ -26,6 +26,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
@@ -54,6 +55,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private boolean forceKeepDelete = false;
     private Predicate predicate = null;
     private IOManager ioManager = null;
+    @Nullable private TopN topN = null;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -86,6 +88,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (readType != null) {
             read = read.withReadType(readType);
         }
+        if (topN != null) {
+            read = read.withTopN(topN);
+        }
         read.withFilter(predicate).withIOManager(ioManager);
     }
 
@@ -106,6 +111,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     protected InnerTableRead innerWithFilter(Predicate predicate) {
         initialized().forEach(r -> r.withFilter(predicate));
         this.predicate = predicate;
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withTopN(TopN topN) {
+        initialized().forEach(r -> r.withTopN(topN));
+        this.topN = topN;
         return this;
     }
 

@@ -53,4 +53,8 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
         }
         return FileIndexResult.super.or(fileIndexResult);
     }
+
+    public FileIndexResult andNot(RoaringBitmap32 deletion) {
+        return new BitmapIndexResult(() -> RoaringBitmap32.andNot(get(), deletion));
+    }
 }
