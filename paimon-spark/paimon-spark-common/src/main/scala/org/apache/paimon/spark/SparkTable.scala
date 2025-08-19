@@ -131,7 +131,6 @@ case class SparkTable(table: Table)
     if (coreOptions.rowTrackingEnabled()) {
       _metadataColumns.append(PaimonMetadataColumn.ROW_ID)
       _metadataColumns.append(PaimonMetadataColumn.SEQUENCE_NUMBER)
-      _metadataColumns.append(PaimonMetadataColumn.FIRST_ROW_ID)
     }
 
     _metadataColumns.toArray

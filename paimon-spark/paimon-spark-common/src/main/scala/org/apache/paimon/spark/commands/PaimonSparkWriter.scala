@@ -77,7 +77,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
 
   def withRowLineage(): PaimonSparkWriter = {
     this.writeRowLineage = true
-    this.writeType = SpecialFields.rowTypeWithRowTrackingFileFields(table.rowType(), true)
+    this.writeType = SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
     this
   }
 

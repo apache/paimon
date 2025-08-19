@@ -424,9 +424,8 @@ public class CompactProcedure extends BaseProcedure {
                                             CoreOptions coreOptions = table.coreOptions();
                                             if (coreOptions.rowTrackingEnabled()) {
                                                 write.withWriteType(
-                                                        SpecialFields
-                                                                .rowTypeWithRowTrackingFileFields(
-                                                                        table.rowType()));
+                                                        SpecialFields.rowTypeWithRowLineage(
+                                                                table.rowType()));
                                             }
                                             AppendCompactTaskSerializer ser =
                                                     new AppendCompactTaskSerializer();

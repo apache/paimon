@@ -45,8 +45,8 @@ case class DataEvolutionSparkTableWrite(
 
   private var currentWriter: PerFileWriter = _
   private val ioManager: IOManager = SparkUtils.createIOManager
-  private val firstRowIdIndex = writeType.getFieldCount
-  private val rowIdIndex = firstRowIdIndex + 1
+  private val rowIdIndex = writeType.getFieldCount
+  private val firstRowIdIndex = rowIdIndex + 1
   private val commitMessageImpls = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {

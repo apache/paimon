@@ -56,8 +56,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTrackingFileFields;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTrackingSystemFields;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -125,9 +124,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 new Builder(
                         formatDiscover,
                         readRowType.getFields(),
-                        schema ->
-                                rowTypeWithRowTrackingFileFields(schema.logicalRowType(), true)
-                                        .getFields(),
+                        schema -> rowTypeWithRowLineage(schema.logicalRowType(), true).getFields(),
                         null,
                         null);
 
@@ -191,8 +188,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             long schemaId = file.schemaId();
             TableSchema dataSchema = schemaManager.schema(schemaId).project(file.writeCols());
             int[] fieldIds =
-                    rowTypeWithRowTrackingSystemFields(dataSchema.logicalRowType()).getFields()
-                            .stream()
+                    rowTypeWithRowLineage(dataSchema.logicalRowType()).getFields().stream()
                             .mapToInt(DataField::id)
                             .toArray();
             List<DataField> readFields = new ArrayList<>();

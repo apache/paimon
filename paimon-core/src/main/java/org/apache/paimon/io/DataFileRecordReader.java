@@ -109,7 +109,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             }
 
             if (rowLineageEnabled && !systemFields.isEmpty()) {
-                GenericRow lineageRow = new GenericRow(3);
+                GenericRow lineageRow = new GenericRow(2);
 
                 int[] fallbackToLineageMappings = new int[tableRowType.getFieldCount()];
                 Arrays.fill(fallbackToLineageMappings, -1);
@@ -122,10 +122,6 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                                     systemFields.get(SpecialFields.SEQUENCE_NUMBER.name())] =
                             1;
                 }
-                if (systemFields.containsKey(SpecialFields.FIRST_ROW_ID.name())) {
-                    fallbackToLineageMappings[systemFields.get(SpecialFields.FIRST_ROW_ID.name())] =
-                            2;
-                }
 
                 FallbackMappingRow fallbackMappingRow =
                         new FallbackMappingRow(fallbackToLineageMappings);
@@ -136,7 +132,6 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                                     if (firstRowId != null) {
                                         lineageRow.setField(
                                                 0, iteratorInner.returnedPosition() + firstRowId);
-                                        lineageRow.setField(2, firstRowId);
                                     }
                                     lineageRow.setField(1, maxSequenceNumber);
                                     return fallbackMappingRow.replace(row, lineageRow);

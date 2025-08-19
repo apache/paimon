@@ -171,22 +171,6 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
                     };
         }
 
-        if (meta.containsKey(SpecialFields.FIRST_ROW_ID.name())) {
-            Integer index = meta.get(SpecialFields.FIRST_ROW_ID.name());
-            vectors[index] =
-                    new LongColumnVector() {
-                        @Override
-                        public long getLong(int i) {
-                            return firstRowId;
-                        }
-
-                        @Override
-                        public boolean isNullAt(int i) {
-                            return firstRowId == null;
-                        }
-                    };
-        }
-
         copy(vectors);
         return this;
     }

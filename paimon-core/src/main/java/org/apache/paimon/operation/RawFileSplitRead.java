@@ -65,7 +65,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTrackingFileFields;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -172,8 +172,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         readRowType.getFields(),
                         schema -> {
                             if (rowTrackingEnabled) {
-                                return rowTypeWithRowTrackingFileFields(
-                                                schema.logicalRowType(), true)
+                                return rowTypeWithRowLineage(schema.logicalRowType(), true)
                                         .getFields();
                             }
                             return schema.fields();

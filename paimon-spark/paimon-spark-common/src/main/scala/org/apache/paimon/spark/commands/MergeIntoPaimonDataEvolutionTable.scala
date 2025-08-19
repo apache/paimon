@@ -36,9 +36,11 @@ import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
+import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
@@ -68,6 +70,16 @@ case class MergeIntoPaimonDataEvolutionTable(
   import MergeIntoPaimonDataEvolutionTable._
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+  private val firstRowIds: Seq[Long] = table
+    .newSnapshotReader()
+    .withManifestEntryFilter(entry => entry.file().firstRowId() != null)
+    .read()
+    .splits()
+    .asScala
+    .map(_.asInstanceOf[DataSplit])
+    .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
+    .distinct
+    .sorted
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
@@ -128,7 +140,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     firstRowIdsTouched ++= findRelatedFirstRowIds(
       targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
       sparkSession,
-      "_left." + FIRST_ROW_ID_NAME)
+      "_left." + ROW_ID_NAME)
 
     table
       .newSnapshotReader()
@@ -164,8 +176,11 @@ case class MergeIntoPaimonDataEvolutionTable(
       }
     }
 
+    val updateColumnsSorted = updateColumns.toSeq.sortBy(
+      s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
+
     val assignments = redundantColumns.map(column => Assignment(column, column))
-    val output = updateColumns.toSeq ++ redundantColumns
+    val output = updateColumnsSorted ++ redundantColumns
     val realUpdateActions = matchedActions
       .map(s => s.asInstanceOf[UpdateAction])
       .map(
@@ -173,7 +188,9 @@ case class MergeIntoPaimonDataEvolutionTable(
           UpdateAction.apply(
             update.condition,
             update.assignments.filter(
-              a => updateColumns.contains(a.key.asInstanceOf[AttributeReference])) ++ assignments))
+              a =>
+                updateColumnsSorted.contains(
+                  a.key.asInstanceOf[AttributeReference])) ++ assignments))
 
     for (action <- realUpdateActions) {
       allFields ++= action.references.flatMap(r => extractFields(r)).seq
@@ -208,8 +225,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         .map(
           action => {
             Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-          })
-        .toSeq,
+          }) ++ Seq(Keep(TrueLiteral, output)),
       notMatchedInstructions = Nil,
       notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toSeq,
       checkCardinality = false,
@@ -217,12 +233,16 @@ case class MergeIntoPaimonDataEvolutionTable(
       child = joinPlan
     )
 
-    val toWrite = createDataset(sparkSession, mergeRows)
-    assert(toWrite.schema.fields.length == updateColumns.size + redundantColumns.size)
+    val firstRowIdsFinal = firstRowIds
+    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
+    val firstRowIdColumn = firstRowIdUdf(col(ROW_ID_NAME))
+    val toWrite =
+      createDataset(sparkSession, mergeRows).withColumn(FIRST_ROW_ID_NAME, firstRowIdColumn)
+    assert(toWrite.schema.fields.length == updateColumnsSorted.size + 2)
     val sortedDs = toWrite
-      .repartitionByRange(toColumn(attribute(FIRST_ROW_ID_NAME, joinPlan)))
+      .repartitionByRange(firstRowIdColumn)
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
-    val writer = dvSafeWriter.withDataEvolutionMergeWrite(updateColumns.map(_.name).toSeq)
+    val writer = dvSafeWriter.withDataEvolutionMergeWrite(updateColumnsSorted.map(_.name))
     writer.write(sortedDs)
   }
 
@@ -266,10 +286,12 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession: SparkSession,
       identifier: String = FILE_PATH_COLUMN): Array[Long] = {
     import sparkSession.implicits._
+    val firstRowIdsFinal = firstRowIds
     dataset
       .select(identifier)
-      .distinct()
       .as[Long]
+      .map(x => floorBinarySearch(firstRowIdsFinal, x))
+      .distinct()
       .collect()
   }
 
@@ -291,6 +313,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def attribute(name: String, plan: LogicalPlan) =
     plan.output.find(attr => resolver(name, attr.name)).get
+
 }
 
 object MergeIntoPaimonDataEvolutionTable {
@@ -299,5 +322,25 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
   final private val redundantColumns =
-    Seq(PaimonMetadataColumn.FIRST_ROW_ID.toAttribute, PaimonMetadataColumn.ROW_ID.toAttribute)
+    Seq(PaimonMetadataColumn.ROW_ID.toAttribute)
+
+  def floorBinarySearch(sortedSeq: Seq[Long], value: Long): Long = {
+    val indexed = sortedSeq.toIndexedSeq
+
+    if (indexed.isEmpty) {
+      throw new IllegalArgumentException("The input sorted sequence is empty.")
+    }
+
+    indexed.search(value) match {
+      case Found(foundIndex) => indexed(foundIndex)
+      case InsertionPoint(insertionIndex) => {
+        if (insertionIndex == 0) {
+          throw new IllegalArgumentException(
+            s"Value $value is less than the first element in the sorted sequence.")
+        } else {
+          indexed(insertionIndex - 1)
+        }
+      }
+    }
+  }
 }

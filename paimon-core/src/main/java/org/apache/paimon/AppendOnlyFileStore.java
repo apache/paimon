@@ -115,8 +115,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
         if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
             RawFileSplitRead readForCompact = newRead();
             if (options.rowTrackingEnabled()) {
-                readForCompact.withReadType(
-                        SpecialFields.rowTypeWithRowTrackingFileFields(rowType));
+                readForCompact.withReadType(SpecialFields.rowTypeWithRowLineage(rowType));
             }
             return new AppendFileStoreWrite(
                     fileIO,

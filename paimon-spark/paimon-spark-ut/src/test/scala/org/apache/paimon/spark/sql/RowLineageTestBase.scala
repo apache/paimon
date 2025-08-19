@@ -41,22 +41,6 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: read row lineage with first row id") {
-    withTable("t") {
-      sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
-      sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
-
-      checkAnswer(
-        sql("SELECT *, _FIRST_ROW_ID, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
-        Seq(Row(11, "a", 0, 0, 1), Row(22, "b", 1, 1, 1))
-      )
-      checkAnswer(
-        sql("SELECT _ROW_ID, data, _SEQUENCE_NUMBER, id, _FIRST_ROW_ID FROM t"),
-        Seq(Row(0, "a", 1, 11, 0), Row(1, "b", 1, 22, 1))
-      )
-    }
-  }
-
   test("Row Lineage: compact table") {
     withTable("t") {
       sql(
@@ -234,6 +218,43 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
       )
+    }
+  }
+
+  test("Row Lineage: merge into table with with data-evolution complex") {
+    if (gteqSpark3_4) {
+      withTable("source", "target") {
+        sql(
+          "CREATE TABLE source (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        sql(
+          "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
+
+        sql(
+          "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql(
+          "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+        sql(s"""
+               |MERGE INTO target
+               |USING source
+               |ON target.a = source.a
+               |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+               |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET *
+               |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+               |WHEN NOT MATCHED THEN INSERT *
+               |""".stripMargin)
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+          Seq(
+            Row(1, 10, "c1", 0, 2),
+            Row(2, 20, "c2", 1, 2),
+            Row(3, 300, "c33", 2, 2),
+            Row(4, 40, "c4", 3, 2),
+            Row(5, 550, "c5", 4, 2),
+            Row(7, 700, "c77", 5, 2),
+            Row(9, 990, "c99", 6, 2))
+        )
+      }
     }
   }
 
