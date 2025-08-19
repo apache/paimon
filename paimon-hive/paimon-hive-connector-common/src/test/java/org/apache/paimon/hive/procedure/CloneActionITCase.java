@@ -914,7 +914,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         return (FileStoreTable) catalog.getTable(table);
     }
 
-        private List<Row> sql(TableEnvironment tEnv, String query, Object... args) {
+    private List<Row> sql(TableEnvironment tEnv, String query, Object... args) {
         String formattedQuery = String.format(query, args);
         Exception lastException = null;
 
