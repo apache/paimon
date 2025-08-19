@@ -16,10 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.options;
+package org.apache.paimon.format.csv;
+
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
 /** Options for csv format. */
 public class CsvOptions {
+
     public static final ConfigOption<String> FIELD_DELIMITER =
             ConfigOptions.key("field-delimiter")
                     .stringType()

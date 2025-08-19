@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.options.CsvOptions;
+import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.table.api.Schema;

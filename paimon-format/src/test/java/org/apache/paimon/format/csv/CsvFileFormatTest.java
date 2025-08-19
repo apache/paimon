@@ -25,7 +25,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;

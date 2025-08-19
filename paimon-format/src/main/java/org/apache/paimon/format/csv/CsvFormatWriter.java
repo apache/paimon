@@ -23,7 +23,6 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;

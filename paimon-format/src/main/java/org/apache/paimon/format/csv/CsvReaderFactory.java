@@ -20,7 +20,6 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.options.CsvOptions;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
