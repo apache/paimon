@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /** Evaluate file index result. */
@@ -53,24 +54,29 @@ public class FileIndexEvaluator {
             return FileIndexResult.REMAIN;
         }
 
-        FileIndexResult result =
+        FileIndexResult selection =
                 new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
         if (deletionVector instanceof BitmapDeletionVector) {
             RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
-            result = ((BitmapIndexResult) result).andNot(deletion);
+            selection = ((BitmapIndexResult) selection).andNot(deletion);
         }
 
         try (FileIndexPredicate predicate =
                 createFileIndexPredicate(fileIO, dataSchema, dataFilePathFactory, file)) {
+            FileIndexResult result = FileIndexResult.REMAIN;
             if (predicate != null) {
                 if (!ListUtils.isNullOrEmpty(dataFilter)) {
                     Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
-                    result = predicate.evaluate(filter, result);
+                    result = predicate.evaluate(filter, selection);
                 } else if (topN != null) {
-                    result = predicate.evaluateTopN(topN, result);
+                    result = predicate.evaluateTopN(topN, selection);
                 }
-            } else {
-                result = FileIndexResult.REMAIN;
+
+                // if all position selected, or if only and not the deletion
+                // the effect will not obvious, just return REMAIN.
+                if (Objects.equals(result, selection)) {
+                    result = FileIndexResult.REMAIN;
+                }
             }
 
             if (!result.remain()) {
