@@ -38,8 +38,8 @@ import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 
-import scala.collection.{immutable, mutable, Seq}
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /** Command for Merge Into for Data Evolution paimom table. */
@@ -74,11 +74,11 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   lazy val tableSchema: StructType = v2Table.schema
 
-  override def run(sparkSession: SparkSession): scala.collection.Seq[Row] = {
+  override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     val commitMessages = invokeMergeInto(sparkSession)
     dvSafeWriter.commit(commitMessages.toList)
-    scala.collection.Seq.empty[Row]
+    Seq.empty[Row]
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Seq[CommitMessage] = {
@@ -210,7 +210,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           })
         .toList,
       notMatchedInstructions = Nil,
-      notMatchedBySourceInstructions = immutable.Seq(Keep(TrueLiteral, output)),
+      notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toList,
       checkCardinality = false,
       output = output,
       child = joinPlan
