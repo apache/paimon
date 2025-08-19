@@ -77,7 +77,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     val commitMessages = invokeMergeInto(sparkSession)
-    dvSafeWriter.commit(commitMessages.toList)
+    dvSafeWriter.commit(commitMessages.toSeq)
     Seq.empty[Row]
   }
 
@@ -85,7 +85,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     // step 1: find the related data split, make it target file plan
     val dataSplits: Seq[DataSplit] = targetRelatedSplits(sparkSession)
     val touchedFileTargetRelation =
-      createNewPlan(dataSplits.toList, targetRelation)
+      createNewPlan(dataSplits.toSeq, targetRelation)
 
     // step 2: invoke update action
     val updateCommit =
@@ -113,14 +113,14 @@ case class MergeIntoPaimonDataEvolutionTable(
       sparkSession,
       targetRelation.copy(
         targetRelation.table,
-        mergeFieldsOnTarget.toList
+        mergeFieldsOnTarget.toSeq
       ))
 
     val sourceDss = createDataset(
       sparkSession,
       sourceRelation.copy(
         sourceRelation.table,
-        mergeFieldsOnSource.toList
+        mergeFieldsOnSource.toSeq
       ))
 
     val firstRowIdsTouched = mutable.Set.empty[Long]
@@ -209,9 +209,9 @@ case class MergeIntoPaimonDataEvolutionTable(
           action => {
             Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
           })
-        .toList,
+        .toSeq,
       notMatchedInstructions = Nil,
-      notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toList,
+      notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toSeq,
       checkCardinality = false,
       output = output,
       child = joinPlan
@@ -234,7 +234,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
 
     val targetReadPlan =
-      touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toList)
+      touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
 
     val joinPlan =
       Join(sourceRelation, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
@@ -249,7 +249,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           Keep(
             insertAction.condition.getOrElse(TrueLiteral),
             insertAction.assignments.map(a => a.value))
-      }.toList,
+      }.toSeq,
       notMatchedBySourceInstructions = Nil,
       checkCardinality = false,
       output = targetTable.output,
