@@ -42,8 +42,6 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
 
-import java.util.Collections
-
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
@@ -125,25 +123,11 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def targetRelatedSplits(sparkSession: SparkSession): Seq[DataSplit] = {
-    val mergeFields = extractFields(matchedCondition)
-    val mergeFieldsOnTarget =
-      mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
-    val mergeFieldsOnSource =
-      mergeFields.filter(field => sourceTable.output.exists(attr => attr.equals(field)))
-
     val targetDss = createDataset(
       sparkSession,
-      targetRelation.copy(
-        targetRelation.table,
-        mergeFieldsOnTarget.toSeq
-      ))
-
-    val sourceDss = createDataset(
-      sparkSession,
-      sourceRelation.copy(
-        sourceRelation.table,
-        mergeFieldsOnSource.toSeq
-      ))
+      targetRelation
+    )
+    val sourceDss = createDataset(sparkSession, sourceRelation)
 
     val firstRowIdsTouched = mutable.Set.empty[Long]
 
@@ -292,14 +276,14 @@ case class MergeIntoPaimonDataEvolutionTable(
   private def findRelatedFirstRowIds(
       dataset: Dataset[Row],
       sparkSession: SparkSession,
-      identifier: String = FILE_PATH_COLUMN): Array[Long] = {
+      identifier: String): Array[Long] = {
     import sparkSession.implicits._
     val firstRowIdsFinal = firstRowIds
+    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
     dataset
-      .select(identifier)
-      .as[Long]
-      .map(x => floorBinarySearch(firstRowIdsFinal, x))
+      .select(firstRowIdUdf(col(identifier)))
       .distinct()
+      .as[Long]
       .collect()
   }
 
