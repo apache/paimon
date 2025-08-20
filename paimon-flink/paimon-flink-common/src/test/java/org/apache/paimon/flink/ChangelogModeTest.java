@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,7 +77,14 @@ public class ChangelogModeTest {
 
     @Test
     public void testDefault() throws Exception {
-        test(new Options(), ChangelogMode.upsert(), ChangelogMode.upsert());
+        test(
+                new Options(),
+                ChangelogMode.upsert(),
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE)
+                        .build());
     }
 
     @Test
