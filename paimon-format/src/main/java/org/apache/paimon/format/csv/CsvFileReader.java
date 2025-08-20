@@ -112,19 +112,17 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
 
     private class CsvRecordIterator implements FileRecordIterator<InternalRow> {
 
-        private boolean batchRead = false;
         private long currentPosition = 0;
         boolean end = false;
 
         @Override
         @Nullable
         public InternalRow next() throws IOException {
-            if (batchRead || readerClosed) {
+            if (readerClosed) {
                 return null;
             }
             String nextLine = bufferedReader.readLine();
             if (nextLine == null) {
-                batchRead = true;
                 end = true;
                 return null;
             }
@@ -140,7 +138,7 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
 
         @Override
         public long returnedPosition() {
-            return currentPosition - 1; // Return position of last returned row
+            return Math.max(0, currentPosition - 1);
         }
 
         @Override
