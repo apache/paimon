@@ -915,10 +915,24 @@ public class CloneActionITCase extends ActionITCaseBase {
     }
 
     private List<Row> sql(TableEnvironment tEnv, String query, Object... args) {
-        try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
-            return ImmutableList.copyOf(iter);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        String formattedQuery = String.format(query, args);
+        Exception lastException = null;
+
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try (CloseableIterator<Row> iter = tEnv.executeSql(formattedQuery).collect()) {
+                return ImmutableList.copyOf(iter);
+            } catch (Exception e) {
+                lastException = e;
+                if (attempt < 5) {
+                    try {
+                        Thread.sleep(60_000); // 1 minute between attempts
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
         }
+        throw new RuntimeException(lastException);
     }
 }
