@@ -260,28 +260,32 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution: update table throws exception") {
-    withTable("t") {
-      sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-      assert(
-        intercept[RuntimeException] {
-          sql("UPDATE t SET b = 22")
-        }.getMessage
-          .contains("Update operation is not supported when data evolution is enabled yet."))
+    if (gteqSpark3_5) {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+        assert(
+          intercept[RuntimeException] {
+            sql("UPDATE t SET b = 22")
+          }.getMessage
+            .contains("Update operation is not supported when data evolution is enabled yet."))
+      }
     }
   }
 
   test("Data Evolution: delete table throws exception") {
-    withTable("t") {
-      sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-      assert(
-        intercept[RuntimeException] {
-          sql("DELETE FROM t WHERE id = 2")
-        }.getMessage
-          .contains("Delete operation is not supported when data evolution is enabled yet."))
+    if (gteqSpark3_5) {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+        assert(
+          intercept[RuntimeException] {
+            sql("DELETE FROM t WHERE id = 2")
+          }.getMessage
+            .contains("Delete operation is not supported when data evolution is enabled yet."))
+      }
     }
   }
 
