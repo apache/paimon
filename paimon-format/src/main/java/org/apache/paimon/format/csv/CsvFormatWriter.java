@@ -28,12 +28,16 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV format writer implementation. */
 public class CsvFormatWriter extends BaseTextFileWriter {
 
+    private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
     // Performance optimization: Cache frequently used cast executors
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>(32);
@@ -130,6 +134,9 @@ public class CsvFormatWriter extends BaseTextFileWriter {
             case CHAR:
             case VARCHAR:
                 return value.toString();
+            case BINARY:
+            case VARBINARY:
+                return BASE64_ENCODER.encodeToString((byte[]) value);
             default:
                 return useCachedStringCastExecutor(value, dataType);
         }

@@ -86,6 +86,8 @@ public class CsvFileFormat extends FileFormat {
             case FLOAT:
             case DOUBLE:
             case DATE:
+            case BINARY:
+            case VARBINARY:
             case TIME_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:

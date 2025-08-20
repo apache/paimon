@@ -35,12 +35,16 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.Csv
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV file reader implementation. */
 public class CsvFileReader extends BaseTextFileReader {
 
+    private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final CsvMapper CSV_MAPPER = new CsvMapper();
 
     // Performance optimization: Cache frequently used cast executors
@@ -143,6 +147,9 @@ public class CsvFileReader extends BaseTextFileReader {
             case CHAR:
             case VARCHAR:
                 return BinaryString.fromString(field);
+            case BINARY:
+            case VARBINARY:
+                return BASE64_DECODER.decode(field);
             default:
                 return useCachedCastExecutor(field, dataType);
         }

@@ -414,7 +414,7 @@ Format Options:
     </tr>
     <tr>
       <td><h5>csv.null-literal</h5></td>
-      <td style="word-wrap: break-word;">(none)</td>
+      <td style="word-wrap: break-word;"><code>""</code></td>
       <td>String</td>
       <td>Null literal string that is interpreted as a null value (disabled by default).</td>
     </tr>
