@@ -80,12 +80,4 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
                         .orElse(true));
         return commit;
     }
-
-    @Override
-    public BatchWriteBuilder withDynamicOptions(@Nullable Map<String, String> dynamicOptions) {
-        if (dynamicOptions != null) {
-            table = table.copy(dynamicOptions);
-        }
-        return this;
-    }
 }

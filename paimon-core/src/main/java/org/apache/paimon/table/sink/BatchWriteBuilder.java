@@ -71,7 +71,4 @@ public interface BatchWriteBuilder extends WriteBuilder {
     /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
     @Override
     BatchTableCommit newCommit();
-
-    /** Config dynamic options to this write builder. */
-    BatchWriteBuilder withDynamicOptions(@Nullable Map<String, String> dynamicOptions);
 }

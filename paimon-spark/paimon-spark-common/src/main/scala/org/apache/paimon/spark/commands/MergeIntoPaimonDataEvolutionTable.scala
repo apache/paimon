@@ -18,12 +18,15 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
+import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.spark.util.ScanPlanHelper.createNewPlan
+import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 
@@ -38,6 +41,8 @@ import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
+
+import java.util.Collections
 
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
@@ -54,7 +59,11 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with PaimonRowLevelCommand {
+  with WithFileStoreTable {
+
+  lazy val writer: DataEvolutionPaimonWriter = {
+    DataEvolutionPaimonWriter(table)
+  }
 
   assert(
     notMatchedBySourceActions.isEmpty,
@@ -243,8 +252,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val sortedDs = toWrite
       .repartitionByRange(firstRowIdColumn)
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
-    val writer0 = writer.withDataEvolutionMergeWrite(updateColumnsSorted.map(_.name))
-    writer0.write(sortedDs)
+    writer.writePartialFields(sortedDs, updateColumnsSorted.map(_.name))
   }
 
   private def insertActionInvoke(
@@ -278,8 +286,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     )
 
     val toWrite = createDataset(sparkSession, mergeRows)
-    val writer0 = writer.disableDataEvolutionMergeWrite()
-    writer0.write(toWrite)
+    writer.write(toWrite)
   }
 
   private def findRelatedFirstRowIds(

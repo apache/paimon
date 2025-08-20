@@ -424,4 +424,5 @@ object MergeIntoPaimonTable {
         .map(notDeletedInternalRow => fromRow(outputProj(notDeletedInternalRow)))
     }
   }
+
 }

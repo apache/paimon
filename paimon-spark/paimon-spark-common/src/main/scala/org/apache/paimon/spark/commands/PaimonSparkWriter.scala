@@ -22,14 +22,13 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
-import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{DataEvolutionSparkTableWrite, SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
@@ -48,65 +47,39 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
-import java.util.Collections
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
-case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
+case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = false)
+  extends WriteHelper {
 
   private lazy val tableSchema = table.schema
 
   private lazy val bucketMode = table.bucketMode
 
-  private var firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]] = _
-
-  private var writeRowLineage = false
-
-  private var dataEvolutionWrite = false
-
   @transient private lazy val serializer = new CommitMessageSerializer
 
-  private var writeType = table.rowType()
+  private val writeType = {
+    if (writeRowLineage) {
+      SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
+    } else {
+      table.rowType()
+    }
+  }
 
-  var writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
   def writeOnly(): PaimonSparkWriter = {
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
   def withRowLineage(): PaimonSparkWriter = {
-    this.writeRowLineage = true
-    this.writeType = SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
-    this
-  }
-
-  def withDataEvolutionMergeWrite(columnNames: Seq[String]): PaimonSparkWriter = {
-    this.dataEvolutionWrite = true
-    this.writeType = table.rowType().project(columnNames.asJava)
-    if (firstRowIdToPartitionMap == null) {
-      firstRowIdToPartitionMap = new mutable.HashMap[Long, Tuple2[BinaryRow, Long]]
-      table
-        .store()
-        .newScan()
-        .readFileIterator()
-        .forEachRemaining(
-          k =>
-            firstRowIdToPartitionMap
-              .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
+    if (coreOptions.rowTrackingEnabled()) {
+      PaimonSparkWriter(table, writeRowLineage = true)
+    } else {
+      this
     }
-    writeBuilder.withDynamicOptions(singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "9999 GB"))
-    this
-  }
-
-  def disableDataEvolutionMergeWrite(): PaimonSparkWriter = {
-    this.dataEvolutionWrite = false
-    this.writeType = table.rowType()
-    this.firstRowIdToPartitionMap = null
-    writeBuilder.withDynamicOptions(
-      singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), coreOptions.targetFileSize(false) + "B"))
-    this
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
@@ -125,11 +98,7 @@ case class PaimonSparkWriter(table: FileStoreTable) extends WriteHelper {
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite() = if (dataEvolutionWrite) {
-      DataEvolutionSparkTableWrite(writeBuilder, writeType, firstRowIdToPartitionMap)
-    } else {
-      SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
-    }
+    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
