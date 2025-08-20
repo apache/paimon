@@ -26,24 +26,21 @@ import org.apache.paimon.types.RowType;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 
-/** High-performance JSON format writer implementation with optimized buffering. */
+/** Json format writer implementation. */
 public class JsonFormatWriter implements FormatWriter {
 
-    private static final int DEFAULT_BUFFER_SIZE = 8192; // 8KB buffer for better I/O performance
-    private static final char LINE_SEPARATOR = '\n'; // Use char literal for better performance
+    private static final char LINE_SEPARATOR = '\n';
 
     private final PositionOutputStream outputStream;
-    private final Writer writer;
+    private final BufferedWriter writer;
     private final RowType rowType;
 
     public JsonFormatWriter(PositionOutputStream outputStream, RowType rowType) {
         this.outputStream = outputStream;
-        OutputStreamWriter outputStreamWriter =
-                new OutputStreamWriter(outputStream, StandardCharsets.UTF_8);
-        this.writer = new BufferedWriter(outputStreamWriter, DEFAULT_BUFFER_SIZE);
+        this.writer =
+                new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
         this.rowType = rowType;
     }
 
@@ -51,21 +48,18 @@ public class JsonFormatWriter implements FormatWriter {
     public void addElement(InternalRow element) throws IOException {
         String jsonString = JsonSerde.convertRowToJsonString(element, rowType);
         writer.write(jsonString);
-        writer.write(LINE_SEPARATOR); // JSON lines format - one JSON object per line
+        writer.write(LINE_SEPARATOR);
     }
 
     @Override
     public void close() throws IOException {
-        if (writer != null) {
-            writer.flush();
-            writer.close();
-        }
+        writer.flush();
+        writer.close();
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (outputStream != null && suggestedCheck) {
-            writer.flush(); // Ensure all data is written to the stream before checking size
+        if (suggestedCheck) {
             return outputStream.getPos() >= targetSize;
         }
         return false;

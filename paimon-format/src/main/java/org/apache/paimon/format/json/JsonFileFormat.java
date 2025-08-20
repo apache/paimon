@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -33,7 +34,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.List;
 
 /** JSON {@link FileFormat}. */
@@ -108,9 +108,8 @@ public class JsonFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression)
-                throws IOException {
-            return new JsonFormatWriter(out, rowType);
+        public FormatWriter create(PositionOutputStream out, String compression) {
+            return new JsonFormatWriter(new CloseShieldOutputStream(out), rowType);
         }
     }
 }
