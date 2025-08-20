@@ -198,10 +198,10 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with with data-evolution") {
+  test("Row Lineage: merge into table with data-evolution") {
     if (gteqSpark3_5) {
       withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        sql("CREATE TABLE s (id INT, b INT)")
         sql("INSERT INTO s VALUES (1, 11), (2, 22)")
 
         sql(
@@ -223,11 +223,10 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with with data-evolution complex") {
+  test("Row Lineage: merge into table with data-evolution complex") {
     if (gteqSpark3_5) {
       withTable("source", "target") {
-        sql(
-          "CREATE TABLE source (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        sql("CREATE TABLE source (a INT, b INT, c STRING)")
         sql(
           "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
 
@@ -257,6 +256,32 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
             Row(9, 990, "c99", 6, 2))
         )
       }
+    }
+  }
+
+  test("Data Evolution: update table throws exception") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      assert(
+        intercept[RuntimeException] {
+          sql("UPDATE t SET b = 22")
+        }.getMessage
+          .contains("Update operation is not supported when data evolution is enabled yet."))
+    }
+  }
+
+  test("Data Evolution: delete table throws exception") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      assert(
+        intercept[RuntimeException] {
+          sql("DELETE FROM t WHERE id = 2")
+        }.getMessage
+          .contains("Delete operation is not supported when data evolution is enabled yet."))
     }
   }
 
