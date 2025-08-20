@@ -175,6 +175,10 @@ public class RoaringBitmap32 {
         return roaringBitmap32;
     }
 
+    public static RoaringBitmap32 bitmapOfRange(long min, long max) {
+        return new RoaringBitmap32(RoaringBitmap.bitmapOfRange(min, max));
+    }
+
     public static RoaringBitmap32 and(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
         return new RoaringBitmap32(RoaringBitmap.and(x1.roaringBitmap, x2.roaringBitmap));
     }

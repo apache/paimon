@@ -147,7 +147,6 @@ public class TestChangelogDataReadWrite {
                         FileFormatDiscover.of(options),
                         pathFactory,
                         options.fileIndexReadEnabled(),
-                        false,
                         false);
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
