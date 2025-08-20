@@ -50,22 +50,15 @@ public class FileIndexEvaluator {
             @Nullable Integer limit,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
-            @Nullable DeletionVector deletionVector)
+            @Nullable DeletionVector dv)
             throws IOException {
-        if (isNullOrEmpty(dataFilter) && topN == null && limit == null) {
-            return FileIndexResult.REMAIN;
-        }
-
-        FileIndexResult selection =
-                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
-        if (deletionVector instanceof BitmapDeletionVector) {
-            RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
-            selection = ((BitmapIndexResult) selection).andNot(deletion);
-        }
-
-        // for now, limit can not work with other predicates.
-        if (isNullOrEmpty(dataFilter) && topN == null && limit != null) {
-            return ((BitmapIndexResult) selection).limit(limit);
+        if (isNullOrEmpty(dataFilter) && topN == null) {
+            if (limit == null) {
+                return FileIndexResult.REMAIN;
+            } else {
+                // limit can not work with other predicates.
+                return createBaseSelection(file, dv).limit(limit);
+            }
         }
 
         try (FileIndexPredicate predicate =
@@ -74,6 +67,7 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             }
 
+            BitmapIndexResult selection = createBaseSelection(file, dv);
             FileIndexResult result;
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
@@ -97,6 +91,17 @@ public class FileIndexEvaluator {
 
             return result;
         }
+    }
+
+    private static BitmapIndexResult createBaseSelection(
+            DataFileMeta file, @Nullable DeletionVector dv) {
+        BitmapIndexResult selection =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
+        if (dv instanceof BitmapDeletionVector) {
+            RoaringBitmap32 deletion = ((BitmapDeletionVector) dv).get();
+            selection = selection.andNot(deletion);
+        }
+        return selection;
     }
 
     @Nullable
