@@ -158,7 +158,44 @@ TODO
 
 Experimental feature, not recommended for production.
 
-TODO
+The JSON format supports several configuration options to customize JSON parsing and serialization behavior:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Option</th>
+        <th class="text-center">Type</th>
+        <th class="text-center">Default</th>
+        <th class="text-left">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td>json.ignore-parse-errors</td>
+      <td>Boolean</td>
+      <td>false</td>
+      <td>Whether to ignore parse errors for JSON format. When enabled, malformed JSON lines will be skipped and returned as null instead of throwing exceptions.</td>
+    </tr>
+    <tr>
+      <td>json.map-null-key-mode</td>
+      <td>Enum</td>
+      <td>FAIL</td>
+      <td>How to handle map keys that are null. Available values: FAIL (throw exception), DROP (drop entries with null keys), LITERAL (replace null keys with literal string).</td>
+    </tr>
+    <tr>
+      <td>json.map-null-key-literal</td>
+      <td>String</td>
+      <td>"null"</td>
+      <td>Literal to use for null map keys when map-null-key-mode is set to LITERAL.</td>
+    </tr>
+    <tr>
+      <td>json.line-delimiter</td>
+      <td>String</td>
+      <td>"\n"</td>
+      <td>The line delimiter for JSON format. Each JSON record should be separated by this delimiter.</td>
+    </tr>
+    </tbody>
+</table>
 
 ## CSV
 
