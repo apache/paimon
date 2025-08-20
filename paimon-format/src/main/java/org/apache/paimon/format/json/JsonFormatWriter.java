@@ -19,29 +19,19 @@
 package org.apache.paimon.format.json;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.BaseTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 
 /** Json format writer implementation. */
-public class JsonFormatWriter implements FormatWriter {
+public class JsonFormatWriter extends BaseTextFileWriter {
 
     private static final char LINE_SEPARATOR = '\n';
 
-    private final PositionOutputStream outputStream;
-    private final BufferedWriter writer;
-    private final RowType rowType;
-
     public JsonFormatWriter(PositionOutputStream outputStream, RowType rowType) {
-        this.outputStream = outputStream;
-        this.writer =
-                new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
-        this.rowType = rowType;
+        super(outputStream, rowType);
     }
 
     @Override
@@ -49,19 +39,5 @@ public class JsonFormatWriter implements FormatWriter {
         String jsonString = JsonSerde.convertRowToJsonString(element, rowType);
         writer.write(jsonString);
         writer.write(LINE_SEPARATOR);
-    }
-
-    @Override
-    public void close() throws IOException {
-        writer.flush();
-        writer.close();
-    }
-
-    @Override
-    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (suggestedCheck) {
-            return outputStream.getPos() >= targetSize;
-        }
-        return false;
     }
 }

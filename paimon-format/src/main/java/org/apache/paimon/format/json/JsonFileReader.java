@@ -19,94 +19,36 @@
 package org.apache.paimon.format.json;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.BaseTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 
 /** High-performance JSON file reader implementation with optimized buffering. */
-public class JsonFileReader implements FileRecordReader<InternalRow> {
+public class JsonFileReader extends BaseTextFileReader {
 
-    private final Path filePath;
     private final JsonOptions options;
-    private final RowType rowType;
-    private final BufferedReader bufferedReader;
-    private boolean readerClosed = false;
-    private JsonRecordIterator reader;
 
     public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
             throws IOException {
-        this.filePath = filePath;
+        super(fileIO, filePath, rowType);
         this.options = options;
-        this.rowType = rowType;
-        reader = new JsonRecordIterator();
-        this.bufferedReader =
-                new BufferedReader(
-                        new InputStreamReader(
-                                fileIO.newInputStream(filePath), StandardCharsets.UTF_8));
     }
 
     @Override
-    @Nullable
-    public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        if (readerClosed) {
-            return null;
-        }
-        if (reader.end) {
-            return null;
-        }
-        return reader;
+    protected BaseTextRecordIterator createRecordIterator() {
+        return new JsonRecordIterator();
     }
 
     @Override
-    public void close() throws IOException {
-        if (!readerClosed && bufferedReader != null) {
-            bufferedReader.close();
-            readerClosed = true;
-        }
+    protected InternalRow parseLine(String line) throws IOException {
+        return JsonSerde.convertJsonStringToRow(line, rowType, options);
     }
 
-    private class JsonRecordIterator implements FileRecordIterator<InternalRow> {
-
-        private long currentPosition = 0;
-        boolean end = false;
-
-        @Override
-        public InternalRow next() throws IOException {
-            if (readerClosed) {
-                return null;
-            }
-            String nextLine = bufferedReader.readLine();
-            if (nextLine == null) {
-                end = true;
-                return null;
-            }
-
-            currentPosition++;
-            return JsonSerde.convertJsonStringToRow(nextLine, rowType, options);
-        }
-
-        @Override
-        public void releaseBatch() {
-            // Nothing to release for JSON reader
-        }
-
-        @Override
-        public Path filePath() {
-            return filePath;
-        }
-
-        @Override
-        public long returnedPosition() {
-            return Math.max(0, currentPosition - 1);
-        }
+    private class JsonRecordIterator extends BaseTextRecordIterator {
+        // Inherits all functionality from BaseTextRecordIterator
+        // No additional JSON-specific iterator logic needed
     }
 }
