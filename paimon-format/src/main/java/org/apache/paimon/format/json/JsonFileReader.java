@@ -46,15 +46,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** High-performance JSON file reader implementation with optimized buffering. */
+/** JSON file reader. */
 public class JsonFileReader extends BaseTextFileReader {
 
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
-
-    // Map null key mode constants
-    private static final String MAP_NULL_KEY_MODE_DROP = "DROP";
-    private static final String MAP_NULL_KEY_MODE_LITERAL = "LITERAL";
-    private static final String MAP_NULL_KEY_MODE_FAIL = "FAIL";
 
     private final JsonOptions options;
 
@@ -81,13 +76,16 @@ public class JsonFileReader extends BaseTextFileReader {
             }
         } catch (RuntimeException e) {
             if (options.ignoreParseErrors()) {
-                // Follow Spark behavior: ignore runtime errors during JSON conversion and return
-                // null
                 return null;
             } else {
                 throw new IOException("Failed to convert JSON line: " + line, e);
             }
         }
+    }
+
+    private class JsonRecordIterator extends BaseTextRecordIterator {
+        // Inherits all functionality from BaseTextRecordIterator
+        // No additional JSON-specific iterator logic needed
     }
 
     private InternalRow convertJsonStringToRow(String line, RowType rowType, JsonOptions options)
@@ -106,14 +104,8 @@ public class JsonFileReader extends BaseTextFileReader {
             case VARBINARY:
                 try {
                     return BASE64_DECODER.decode(node.asText());
-                } catch (IllegalArgumentException e) {
-                    if (options.ignoreParseErrors()) {
-                        // Follow Spark behavior: return null for invalid base64 data when ignoring
-                        // errors
-                        return null;
-                    }
-                    throw new RuntimeException(
-                            "Failed to decode base64 binary data: " + node.asText(), e);
+                } catch (Exception e) {
+                    return handleParseError(e);
                 }
             case ARRAY:
                 return convertJsonArray(node, (ArrayType) dataType, options);
@@ -129,11 +121,9 @@ public class JsonFileReader extends BaseTextFileReader {
     private GenericArray convertJsonArray(
             JsonNode arrayNode, ArrayType arrayType, JsonOptions options) {
         if (!arrayNode.isArray()) {
-            if (options.ignoreParseErrors()) {
-                // Follow Spark behavior: return null for non-array nodes when ignoring errors
-                return null;
-            }
-            throw new RuntimeException("Expected array node but got: " + arrayNode.getNodeType());
+            return handleParseError(
+                    new RuntimeException(
+                            "Expected array node but got: " + arrayNode.getNodeType()));
         }
 
         int size = arrayNode.size();
@@ -141,15 +131,13 @@ public class JsonFileReader extends BaseTextFileReader {
         DataType elementType = arrayType.getElementType();
 
         for (int i = 0; i < size; i++) {
+            Object element;
             try {
-                elements.add(convertJsonValue(arrayNode.get(i), elementType, options));
-            } catch (RuntimeException e) {
-                if (options.ignoreParseErrors()) {
-                    // Follow Spark behavior: add null for elements that fail to convert
-                    elements.add(null);
-                } else {
-                    throw e;
-                }
+                element = convertJsonValue(arrayNode.get(i), elementType, options);
+                elements.add(element);
+            } catch (Exception e) {
+                Object elementValue = handleParseError(e);
+                elements.add(elementValue);
             }
         }
         return new GenericArray(elements.toArray());
@@ -157,16 +145,14 @@ public class JsonFileReader extends BaseTextFileReader {
 
     private GenericMap convertJsonMap(JsonNode objectNode, MapType mapType, JsonOptions options) {
         if (!objectNode.isObject()) {
-            if (options.ignoreParseErrors()) {
-                // Follow Spark behavior: return null for non-object nodes when ignoring errors
-                return null;
-            }
-            throw new RuntimeException("Expected object node but got: " + objectNode.getNodeType());
+            return handleParseError(
+                    new IllegalArgumentException(
+                            "Expected object node but got: " + objectNode.getNodeType()));
         }
 
         int estimatedSize = Math.max(16, objectNode.size()); // Pre-allocate with estimated size
         Map<Object, Object> map = new HashMap<>(estimatedSize);
-        String mapNullKeyMode = options.getMapNullKeyMode();
+        JsonOptions.MapNullKeyMode mapNullKeyMode = options.getMapNullKeyMode();
         String mapNullKeyLiteral = options.getMapNullKeyLiteral();
         DataType keyType = mapType.getKeyType();
         DataType valueType = mapType.getValueType();
@@ -177,41 +163,47 @@ public class JsonFileReader extends BaseTextFileReader {
                         field -> {
                             try {
                                 String keyStr = field.getKey();
-                                if (keyStr == null
-                                        && MAP_NULL_KEY_MODE_DROP.equals(mapNullKeyMode)) {
-                                    return;
-                                }
 
-                                Object key =
-                                        keyStr == null
-                                                ? (MAP_NULL_KEY_MODE_LITERAL.equals(mapNullKeyMode)
-                                                        ? convertPrimitiveStringToType(
-                                                                mapNullKeyLiteral, keyType, options)
-                                                        : null)
-                                                : convertPrimitiveStringToType(
-                                                        keyStr, keyType, options);
-
-                                if (key == null && MAP_NULL_KEY_MODE_FAIL.equals(mapNullKeyMode)) {
-                                    if (options.ignoreParseErrors()) {
-                                        // Follow Spark behavior: skip null keys when ignoring
-                                        // errors
-                                        return;
+                                // Handle null keys based on the configured mode
+                                if (keyStr == null) {
+                                    switch (mapNullKeyMode) {
+                                        case DROP:
+                                            return; // Skip this entry
+                                        case FAIL:
+                                            if (options.ignoreParseErrors()) {
+                                                return; // Skip null keys when ignoring errors
+                                            }
+                                            throw new RuntimeException(
+                                                    "Null map key encountered and map-null-key-mode is set to FAIL.");
+                                        case LITERAL:
+                                            // Will be handled below in key conversion
+                                            break;
+                                        default:
+                                            throw new IllegalStateException(
+                                                    "Unknown MapNullKeyMode: " + mapNullKeyMode);
                                     }
-                                    throw new RuntimeException(
-                                            "Null map key encountered and map-null-key-mode is set to FAIL.");
                                 }
 
+                                // Convert the key
+                                Object key;
+                                if (keyStr == null) {
+                                    // Only LITERAL mode reaches here for null keys
+                                    key =
+                                            convertPrimitiveStringToType(
+                                                    mapNullKeyLiteral, keyType, options);
+                                } else {
+                                    key = convertPrimitiveStringToType(keyStr, keyType, options);
+                                }
+
+                                // Add the entry to the map if key is not null
                                 if (key != null) {
                                     Object value =
                                             convertJsonValue(field.getValue(), valueType, options);
                                     map.put(key, value);
                                 }
-                            } catch (RuntimeException e) {
-                                if (!options.ignoreParseErrors()) {
-                                    throw e;
-                                }
-                                // Follow Spark behavior: skip entries that fail to convert when
-                                // ignoring errors
+                            } catch (Exception e) {
+                                // Use the error handling method for consistency
+                                handleParseError(e);
                             }
                         });
         return new GenericMap(map);
@@ -244,26 +236,15 @@ public class JsonFileReader extends BaseTextFileReader {
                     return cast.cast(binaryString);
             }
         } catch (Exception e) {
-            if (options.ignoreParseErrors()) {
-                // Follow Spark behavior: return null for conversion errors when ignoring errors
-                return null;
-            }
-            throw new RuntimeException("Failed to convert string '" + str + "' to " + dataType, e);
+            return handleParseError(e);
         }
-    }
-
-    // Overloaded method for backward compatibility
-    private Object convertPrimitiveStringToType(String str, DataType dataType) {
-        return convertPrimitiveStringToType(str, dataType, options);
     }
 
     private GenericRow convertJsonRow(JsonNode objectNode, RowType rowType, JsonOptions options) {
         if (!objectNode.isObject()) {
-            if (options.ignoreParseErrors()) {
-                // Follow Spark behavior: return null for non-object nodes when ignoring errors
-                return null;
-            }
-            throw new RuntimeException("Expected object node but got: " + objectNode.getNodeType());
+            return handleParseError(
+                    new IllegalArgumentException(
+                            "Expected object node but got: " + objectNode.getNodeType()));
         }
 
         List<DataField> fields = rowType.getFields();
@@ -274,20 +255,29 @@ public class JsonFileReader extends BaseTextFileReader {
             DataField field = fields.get(i);
             try {
                 values[i] = convertJsonValue(objectNode.get(field.name()), field.type(), options);
-            } catch (RuntimeException e) {
-                if (options.ignoreParseErrors()) {
-                    // Follow Spark behavior: set null for fields that fail to convert
-                    values[i] = null;
-                } else {
-                    throw e;
-                }
+            } catch (Exception e) {
+                values[i] = handleParseError(e);
             }
         }
         return GenericRow.of(values);
     }
 
-    private class JsonRecordIterator extends BaseTextRecordIterator {
-        // Inherits all functionality from BaseTextRecordIterator
-        // No additional JSON-specific iterator logic needed
+    /**
+     * Handles parse errors based on the ignoreParseErrors option.
+     *
+     * @param exception The exception that occurred
+     * @return null if ignoring errors, otherwise re-throws the exception
+     * @throws RuntimeException if not ignoring errors
+     */
+    private <T> T handleParseError(Exception exception) {
+        if (options.ignoreParseErrors()) {
+            return null;
+        } else {
+            if (exception instanceof RuntimeException) {
+                throw (RuntimeException) exception;
+            } else {
+                throw new RuntimeException(exception);
+            }
+        }
     }
 }

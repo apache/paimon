@@ -21,6 +21,10 @@ package org.apache.paimon.format.json;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
+
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for Json format. */
 public class JsonOptions {
@@ -31,12 +35,11 @@ public class JsonOptions {
                     .defaultValue(false)
                     .withDescription("Whether to ignore parse errors for JSON format");
 
-    public static final ConfigOption<String> JSON_MAP_NULL_KEY_MODE =
+    public static final ConfigOption<MapNullKeyMode> JSON_MAP_NULL_KEY_MODE =
             ConfigOptions.key("json.map-null-key-mode")
-                    .stringType()
-                    .defaultValue("FAIL")
-                    .withDescription(
-                            "How to handle map keys that are null. Options: FAIL, DROP, LITERAL");
+                    .enumType(MapNullKeyMode.class)
+                    .defaultValue(MapNullKeyMode.FAIL)
+                    .withDescription("How to handle map keys that are null.");
 
     public static final ConfigOption<String> JSON_MAP_NULL_KEY_LITERAL =
             ConfigOptions.key("json.map-null-key-literal")
@@ -51,8 +54,37 @@ public class JsonOptions {
                     .defaultValue("\n")
                     .withDescription("The line delimiter for JSON format");
 
+    /** Enum for handling null keys in JSON maps. */
+    public enum MapNullKeyMode implements DescribedEnum {
+        FAIL("fail", "Throw an exception when encountering null map keys."),
+        DROP("drop", "Drop entries with null keys from the map."),
+        LITERAL("literal", "Replace null keys with a literal string value.");
+
+        private final String value;
+        private final String description;
+
+        MapNullKeyMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
+
     private final boolean ignoreParseErrors;
-    private final String mapNullKeyMode;
+    private final MapNullKeyMode mapNullKeyMode;
     private final String mapNullKeyLiteral;
     private final String lineDelimiter;
 
@@ -67,7 +99,7 @@ public class JsonOptions {
         return ignoreParseErrors;
     }
 
-    public String getMapNullKeyMode() {
+    public MapNullKeyMode getMapNullKeyMode() {
         return mapNullKeyMode;
     }
 
