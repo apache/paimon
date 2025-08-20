@@ -158,7 +158,7 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     @Test
     public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
         tEnv.executeSql(
-                "CREATE TABLE flink_csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv', 'field-delimiter'=';')");
+                "CREATE TABLE flink_csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv', 'csv.field-delimiter'=';')");
         doTestCSVFormatTable("flink_csv_table_delimiter");
     }
 
