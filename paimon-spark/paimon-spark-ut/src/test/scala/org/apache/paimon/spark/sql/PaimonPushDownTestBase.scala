@@ -224,6 +224,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
               sql("INSERT INTO T SELECT id FROM range (1, 50000)")
               sql("DELETE FROM T WHERE id % 13 = 0")
+              Assertions.assertEquals(100, spark.sql("SELECT * FROM T LIMIT 100").count())
 
               val withoutLimit = getScanBuilder().build().asInstanceOf[PaimonScan].getOriginSplits
               assert(withoutLimit.length == 10)

@@ -56,6 +56,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
+    @Nullable private Integer limit = null;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -91,6 +92,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (topN != null) {
             read = read.withTopN(topN);
         }
+        if (limit != null) {
+            read = read.withLimit(limit);
+        }
         read.withFilter(predicate).withIOManager(ioManager);
     }
 
@@ -118,6 +122,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public InnerTableRead withTopN(TopN topN) {
         initialized().forEach(r -> r.withTopN(topN));
         this.topN = topN;
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withLimit(int limit) {
+        initialized().forEach(r -> r.withLimit(limit));
+        this.limit = limit;
         return this;
     }
 

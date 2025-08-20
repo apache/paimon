@@ -83,6 +83,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
+    @Nullable private Integer limit;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -135,6 +136,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
+        this.limit = limit;
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
@@ -172,7 +179,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             return schema.fields();
                         },
                         filters,
-                        topN);
+                        topN,
+                        limit);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -230,6 +238,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             formatReaderMapping.getDataSchema(),
                             formatReaderMapping.getDataFilters(),
                             formatReaderMapping.getTopN(),
+                            formatReaderMapping.getLimit(),
                             dataFilePathFactory,
                             file,
                             deletionVector);

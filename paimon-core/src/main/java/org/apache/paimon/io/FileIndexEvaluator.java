@@ -47,12 +47,25 @@ public class FileIndexEvaluator {
             TableSchema dataSchema,
             List<Predicate> dataFilter,
             @Nullable TopN topN,
+            @Nullable Integer limit,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
             @Nullable DeletionVector deletionVector)
             throws IOException {
-        if (isNullOrEmpty(dataFilter) && topN == null) {
+        if (isNullOrEmpty(dataFilter) && topN == null && limit == null) {
             return FileIndexResult.REMAIN;
+        }
+
+        FileIndexResult selection =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
+        if (deletionVector instanceof BitmapDeletionVector) {
+            RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
+            selection = ((BitmapIndexResult) selection).andNot(deletion);
+        }
+
+        // for now, limit can not work with other predicates.
+        if (isNullOrEmpty(dataFilter) && topN == null && limit != null) {
+            return ((BitmapIndexResult) selection).limit(limit);
         }
 
         try (FileIndexPredicate predicate =
@@ -61,12 +74,6 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             }
 
-            FileIndexResult selection =
-                    new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
-            if (deletionVector instanceof BitmapDeletionVector) {
-                RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
-                selection = ((BitmapIndexResult) selection).andNot(deletion);
-            }
             FileIndexResult result;
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
