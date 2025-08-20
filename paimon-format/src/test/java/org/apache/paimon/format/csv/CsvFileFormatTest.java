@@ -175,9 +175,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.FIELD_DELIMITER, delimiter);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options, rowType, testData, "test_field_delim_" + delimiter.hashCode());
 
             // Verify results
@@ -211,9 +210,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.LINE_DELIMITER, delimiter);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options, rowType, testData, "test_line_delim_" + delimiter.hashCode());
 
             // Verify results
@@ -244,9 +242,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.QUOTE_CHARACTER, quoteChar);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options, rowType, testData, "test_quote_char_" + quoteChar.hashCode());
 
             // Verify results
@@ -277,9 +274,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.ESCAPE_CHARACTER, escapeChar);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options,
                             rowType,
                             testData,
@@ -312,9 +308,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.INCLUDE_HEADER, includeHeader);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options, rowType, testData, "test_include_header_" + includeHeader);
 
             // Verify results
@@ -349,9 +344,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             Options options = new Options();
             options.set(CsvOptions.NULL_LITERAL, nullLiteral);
 
-            // Perform write-read test
             List<InternalRow> result =
-                    performWriteReadTest(
+                    writeThenRead(
                             options,
                             rowType,
                             testData,
@@ -397,9 +391,8 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         GenericRow.of(3, BinaryString.fromString("Charlie's Data"), null, true),
                         GenericRow.of(4, BinaryString.fromString("Normal"), 400.0, null));
 
-        // Perform write-read test
         List<InternalRow> result =
-                performWriteReadTest(options, rowType, testData, "test_csv_combination");
+                writeThenRead(options, rowType, testData, "test_csv_combination");
 
         // Verify results
         assertThat(result).hasSize(4);
@@ -500,20 +493,17 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         return CsvFileReader.parseCsvLineToArray(csvLine, schema);
     }
 
-    /** Creates a CsvFileFormat with the given options. */
-    private FileFormat createCsvFileFormat(Options options) {
-        return new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
-    }
-
-    /** Creates a unique test file path with the given prefix. */
-    private Path createTestFilePath(String prefix) {
-        return new Path(parent, prefix + "_" + UUID.randomUUID() + ".csv");
-    }
-
-    /** Writes test data to a file using the given format. */
-    private void writeTestData(
-            FileFormat format, RowType rowType, Path testFile, List<InternalRow> testData)
+    /**
+     * Performs a complete write-read test with the given options and test data. Returns the data
+     * that was read back for further verification.
+     */
+    private List<InternalRow> writeThenRead(
+            Options options, RowType rowType, List<InternalRow> testData, String testPrefix)
             throws IOException {
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+        Path testFile = new Path(parent, testPrefix + "_" + UUID.randomUUID() + ".csv");
+
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         try (PositionOutputStream out = fileIO.newOutputStream(testFile, false);
                 FormatWriter writer = writerFactory.create(out, "none")) {
@@ -521,11 +511,6 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 writer.addElement(row);
             }
         }
-    }
-
-    /** Reads test data from a file using the given format. */
-    private List<InternalRow> readTestData(FileFormat format, RowType rowType, Path testFile)
-            throws IOException {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -537,19 +522,5 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
             return result;
         }
-    }
-
-    /**
-     * Performs a complete write-read test with the given options and test data. Returns the data
-     * that was read back for further verification.
-     */
-    private List<InternalRow> performWriteReadTest(
-            Options options, RowType rowType, List<InternalRow> testData, String testPrefix)
-            throws IOException {
-        FileFormat format = createCsvFileFormat(options);
-        Path testFile = createTestFilePath(testPrefix);
-
-        writeTestData(format, rowType, testFile, testData);
-        return readTestData(format, rowType, testFile);
     }
 }
