@@ -56,7 +56,7 @@ public class JsonFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new JsonWriterFactory(type);
+        return new JsonWriterFactory(type, new JsonOptions(options));
     }
 
     @Override
@@ -102,14 +102,16 @@ public class JsonFileFormat extends FileFormat {
     private static class JsonWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
+        private final JsonOptions options;
 
-        public JsonWriterFactory(RowType rowType) {
+        public JsonWriterFactory(RowType rowType, JsonOptions options) {
             this.rowType = rowType;
+            this.options = options;
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new JsonFormatWriter(new CloseShieldOutputStream(out), rowType);
+            return new JsonFormatWriter(new CloseShieldOutputStream(out), rowType, options);
         }
     }
 }

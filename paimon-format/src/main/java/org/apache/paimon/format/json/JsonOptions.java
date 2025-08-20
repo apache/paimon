@@ -45,14 +45,22 @@ public class JsonOptions {
                     .withDescription(
                             "Literal to use for null map keys when map-null-key-mode is LITERAL");
 
+    public static final ConfigOption<String> LINE_DELIMITER =
+            ConfigOptions.key("json.line-delimiter")
+                    .stringType()
+                    .defaultValue("\n")
+                    .withDescription("The line delimiter for JSON format");
+
     private final boolean ignoreParseErrors;
     private final String mapNullKeyMode;
     private final String mapNullKeyLiteral;
+    private final String lineDelimiter;
 
     public JsonOptions(Options options) {
         this.ignoreParseErrors = options.get(JSON_IGNORE_PARSE_ERRORS);
         this.mapNullKeyMode = options.get(JSON_MAP_NULL_KEY_MODE);
         this.mapNullKeyLiteral = options.get(JSON_MAP_NULL_KEY_LITERAL);
+        this.lineDelimiter = options.get(LINE_DELIMITER);
     }
 
     public boolean ignoreParseErrors() {
@@ -65,5 +73,9 @@ public class JsonOptions {
 
     public String getMapNullKeyLiteral() {
         return mapNullKeyLiteral;
+    }
+
+    public String getLineDelimiter() {
+        return lineDelimiter;
     }
 }
