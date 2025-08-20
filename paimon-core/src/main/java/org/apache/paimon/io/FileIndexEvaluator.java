@@ -28,7 +28,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -37,6 +36,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 
 /** Evaluate file index result. */
 public class FileIndexEvaluator {
@@ -50,44 +51,48 @@ public class FileIndexEvaluator {
             DataFileMeta file,
             @Nullable DeletionVector deletionVector)
             throws IOException {
-        if (ListUtils.isNullOrEmpty(dataFilter) && topN == null) {
+        if (isNullOrEmpty(dataFilter) && topN == null) {
             return FileIndexResult.REMAIN;
-        }
-
-        FileIndexResult selection =
-                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
-        if (deletionVector instanceof BitmapDeletionVector) {
-            RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
-            selection = ((BitmapIndexResult) selection).andNot(deletion);
         }
 
         try (FileIndexPredicate predicate =
                 createFileIndexPredicate(fileIO, dataSchema, dataFilePathFactory, file)) {
-            FileIndexResult result = FileIndexResult.REMAIN;
-            if (predicate != null) {
-                if (!ListUtils.isNullOrEmpty(dataFilter)) {
-                    Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
-                    result = predicate.evaluate(filter);
-                    result.and(selection);
-                } else if (topN != null) {
-                    result = predicate.evaluateTopN(topN, selection);
-                }
+            if (predicate == null) {
+                return FileIndexResult.REMAIN;
+            }
 
-                // if all position selected, or if only and not the deletion
-                // the effect will not obvious, just return REMAIN.
-                if (Objects.equals(result, selection)) {
-                    result = FileIndexResult.REMAIN;
-                }
+            FileIndexResult selection =
+                    new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
+            if (deletionVector instanceof BitmapDeletionVector) {
+                RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
+                selection = ((BitmapIndexResult) selection).andNot(deletion);
+            }
+            FileIndexResult result;
+            if (!isNullOrEmpty(dataFilter)) {
+                Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
+                result = predicate.evaluate(filter);
+                result.and(selection);
+            } else if (topN != null) {
+                result = predicate.evaluateTopN(topN, selection);
+            } else {
+                return FileIndexResult.REMAIN;
+            }
+
+            // if all position selected, or if only and not the deletion
+            // the effect will not obvious, just return REMAIN.
+            if (Objects.equals(result, selection)) {
+                return FileIndexResult.REMAIN;
             }
 
             if (!result.remain()) {
-                result = FileIndexResult.SKIP;
+                return FileIndexResult.SKIP;
             }
 
             return result;
         }
     }
 
+    @Nullable
     private static FileIndexPredicate createFileIndexPredicate(
             FileIO fileIO,
             TableSchema dataSchema,
