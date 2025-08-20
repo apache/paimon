@@ -61,12 +61,21 @@ public class CsvOptions {
                     .defaultValue("null")
                     .withDescription("The literal for null values in CSV format");
 
+    public static final ConfigOption<String> COMPRESSION =
+            ConfigOptions.key("compression")
+                    .stringType()
+                    .defaultValue("none")
+                    .withDescription(
+                            "The compression codec to use for CSV files. Supported values: "
+                                    + "none, gzip, bzip2, deflate. Default is none (no compression).");
+
     private final String fieldDelimiter;
     private final String lineDelimiter;
     private final String nullLiteral;
     private final boolean includeHeader;
     private final String quoteCharacter;
     private final String escapeCharacter;
+    private final String compression;
 
     public CsvOptions(Options options) {
         this.fieldDelimiter = options.get(FIELD_DELIMITER);
@@ -75,6 +84,7 @@ public class CsvOptions {
         this.includeHeader = options.get(INCLUDE_HEADER);
         this.quoteCharacter = options.get(QUOTE_CHARACTER);
         this.escapeCharacter = options.get(ESCAPE_CHARACTER);
+        this.compression = options.get(COMPRESSION);
     }
 
     public String fieldDelimiter() {
@@ -99,5 +109,9 @@ public class CsvOptions {
 
     public String escapeCharacter() {
         return escapeCharacter;
+    }
+
+    public String compression() {
+        return compression;
     }
 }

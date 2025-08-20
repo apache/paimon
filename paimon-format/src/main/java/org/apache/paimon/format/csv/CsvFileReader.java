@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
@@ -40,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -64,7 +66,12 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private boolean headerSkipped = false;
     private boolean readerClosed = false;
 
-    public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, CsvOptions options)
+    public CsvFileReader(
+            FileIO fileIO,
+            Path filePath,
+            RowType rowType,
+            CsvOptions options,
+            Options formatOptions)
             throws IOException {
         this.rowType = rowType;
         this.filePath = filePath;
@@ -79,8 +86,13 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         }
         SeekableInputStream inputStream = fileIO.newInputStream(filePath);
         reader = new CsvRecordIterator();
+
+        // Create decompressed input stream based on file extension using Hadoop codecs
+        InputStream decompressedStream =
+                CsvCompressionUtils.createDecompressedInputStream(
+                        inputStream, filePath, formatOptions);
         InputStreamReader inputStreamReader =
-                new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+                new InputStreamReader(decompressedStream, StandardCharsets.UTF_8);
         this.bufferedReader = new BufferedReader(inputStreamReader);
     }
 

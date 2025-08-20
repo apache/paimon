@@ -34,6 +34,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
 
 /** CSV {@link FileFormat}. */
@@ -55,12 +56,12 @@ public class CsvFileFormat extends FileFormat {
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, new CsvOptions(options));
+        return new CsvReaderFactory(projectedRowType, new CsvOptions(options), options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, new CsvOptions(options));
+        return new CsvWriterFactory(type, new CsvOptions(options), options);
     }
 
     @Override
@@ -69,6 +70,10 @@ public class CsvFileFormat extends FileFormat {
         for (DataType dataType : fieldTypes) {
             validateDataType(dataType);
         }
+
+        // Validate compression format
+        String compression = options.get(CsvOptions.COMPRESSION);
+        CsvCompressionUtils.validateCompressionFormat(compression, options);
     }
 
     private void validateDataType(DataType dataType) {
@@ -102,15 +107,28 @@ public class CsvFileFormat extends FileFormat {
 
         private final RowType rowType;
         private final CsvOptions options;
+        private final Options formatOptions;
 
-        public CsvWriterFactory(RowType rowType, CsvOptions options) {
+        public CsvWriterFactory(RowType rowType, CsvOptions options, Options formatOptions) {
             this.rowType = rowType;
             this.options = options;
+            this.formatOptions = formatOptions;
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression) {
-            return new CsvFormatWriter(new CloseShieldOutputStream(out), rowType, options);
+        public FormatWriter create(PositionOutputStream out, String compression)
+                throws IOException {
+            // Use compression from options if not provided via parameter
+            String actualCompression =
+                    (compression != null && !compression.isEmpty())
+                            ? compression
+                            : options.compression();
+            return new CsvFormatWriter(
+                    new CloseShieldOutputStream(out),
+                    rowType,
+                    options,
+                    formatOptions,
+                    actualCompression);
         }
     }
 }

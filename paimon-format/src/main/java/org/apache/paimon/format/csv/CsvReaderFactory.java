@@ -20,6 +20,7 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
@@ -30,14 +31,17 @@ public class CsvReaderFactory implements FormatReaderFactory {
 
     private final RowType rowType;
     private final CsvOptions options;
+    private final Options formatOptions;
 
-    public CsvReaderFactory(RowType rowType, CsvOptions options) {
+    public CsvReaderFactory(RowType rowType, CsvOptions options, Options formatOptions) {
         this.rowType = rowType;
         this.options = options;
+        this.formatOptions = formatOptions;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
+        return new CsvFileReader(
+                context.fileIO(), context.filePath(), rowType, options, formatOptions);
     }
 }
