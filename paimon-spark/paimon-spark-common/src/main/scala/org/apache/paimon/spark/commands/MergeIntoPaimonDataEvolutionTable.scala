@@ -18,15 +18,13 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewPlan
-import org.apache.paimon.table.{BucketMode, FileStoreTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 
@@ -59,9 +57,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable {
 
-  lazy val writer: DataEvolutionPaimonWriter = {
-    DataEvolutionPaimonWriter(table)
-  }
+  private lazy val writer = DataEvolutionPaimonWriter(table)
 
   assert(
     notMatchedBySourceActions.isEmpty,
