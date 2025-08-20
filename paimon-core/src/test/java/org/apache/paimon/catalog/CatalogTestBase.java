@@ -25,7 +25,14 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SupportsDirectWrite;
+import org.apache.paimon.format.csv.CsvFileFormatFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
@@ -57,17 +64,15 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.junit.Ignore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -569,57 +574,67 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    @Ignore
-    void testFormatTableWriteAndRead(boolean partitioned) throws Exception {
+    @Test
+    void testFormatTableRead() throws Exception {
         if (!supportsFormatTable()) {
             return;
         }
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        String[] formats = {"parquet"};
         int partitionValue = 10;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
-        if (partitioned) {
-            schemaBuilder.partitionKeys("dt");
-        }
+        schemaBuilder.partitionKeys("dt");
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
-        for (String format : formats) {
-            Identifier identifier = Identifier.create(dbName, "table_" + format);
-            schemaBuilder.option("file.format", format);
-            catalog.createTable(identifier, schemaBuilder.build(), true);
-            Table table = catalog.getTable(identifier);
-            int size = 5;
-            InternalRow[] datas = new InternalRow[size];
-            for (int j = 0; j < size; j++) {
-                datas[j] = GenericRow.of(random.nextInt(), partitionValue);
-            }
-            InternalRow dataWithDiffPartition = GenericRow.of(random.nextInt(), 11);
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            try (BatchTableWrite write = writeBuilder.newWrite()) {
-                for (InternalRow row : datas) {
-                    write.write(row);
-                }
-                if (partitioned) {
-                    write.write(dataWithDiffPartition);
-                }
-            }
-            List<InternalRow> readData;
-            if (partitioned) {
-                Map<String, String> partitionSpec = new HashMap<>();
-                partitionSpec.put("dt", "" + partitionValue);
-                readData = read(table, null, partitionSpec);
-            } else {
-                readData = read(table, null, null);
-            }
+        String format = "csv";
+        Identifier identifier = Identifier.create(dbName, "table_" + format);
+        schemaBuilder.option("file.format", format);
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        FormatTable table = (FormatTable) catalog.getTable(identifier);
+        int size = 5;
+        InternalRow[] datas = new InternalRow[size];
+        for (int j = 0; j < size; j++) {
+            datas[j] = GenericRow.of(random.nextInt(), partitionValue);
+        }
+        InternalRow dataWithDiffPartition = GenericRow.of(random.nextInt(), 11);
+        FormatWriterFactory factory =
+                (new CsvFileFormatFactory()
+                                .create(
+                                        new FileFormatFactory.FormatContext(
+                                                new Options(), 1024, 1024)))
+                        .createWriterFactory(table.rowType());
+        Path partitionPath = new Path(table.location(), "dt=" + partitionValue);
+        Path diffPartitionPath = new Path(table.location(), "dt=" + 11);
+        write(factory, partitionPath, datas);
+        write(factory, diffPartitionPath, dataWithDiffPartition);
+        List<InternalRow> readData;
+        Map<String, String> partitionSpec = new HashMap<>();
+        partitionSpec.put("dt", "" + partitionValue);
+        readData = read(table, null, partitionSpec);
 
-            assertThat(readData).containsExactlyInAnyOrder(datas);
-            catalog.dropTable(Identifier.create(dbName, format), true);
+        assertThat(readData).containsExactlyInAnyOrder(datas);
+        catalog.dropTable(Identifier.create(dbName, format), true);
+    }
+
+    protected void write(FormatWriterFactory factory, Path file, InternalRow... rows)
+            throws IOException {
+        FormatWriter writer;
+        PositionOutputStream out = null;
+        if (factory instanceof SupportsDirectWrite) {
+            writer = ((SupportsDirectWrite) factory).create(fileIO, file, "zstd");
+        } else {
+            out = fileIO.newOutputStream(file, false);
+            writer = factory.create(out, "zstd");
+        }
+        for (InternalRow row : rows) {
+            writer.addElement(row);
+        }
+        writer.close();
+        if (out != null) {
+            out.close();
         }
     }
 
