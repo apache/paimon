@@ -42,7 +42,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -150,8 +150,7 @@ public class JsonFileReader extends BaseTextFileReader {
                             "Expected object node but got: " + objectNode.getNodeType()));
         }
 
-        int estimatedSize = Math.max(16, objectNode.size()); // Pre-allocate with estimated size
-        Map<Object, Object> map = new HashMap<>(estimatedSize);
+        Map<Object, Object> map = new LinkedHashMap<>(objectNode.size());
         JsonOptions.MapNullKeyMode mapNullKeyMode = options.getMapNullKeyMode();
         String mapNullKeyLiteral = options.getMapNullKeyLiteral();
         DataType keyType = mapType.getKeyType();

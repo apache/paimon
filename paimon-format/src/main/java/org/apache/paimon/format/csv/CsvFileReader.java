@@ -35,8 +35,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.Csv
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
