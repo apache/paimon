@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -62,10 +64,11 @@ public abstract class FormatReadWriteTest {
 
     @TempDir java.nio.file.Path tempPath;
 
-    private final String formatType;
+    protected final String formatType;
 
     protected FileIO fileIO;
     protected Path file;
+    protected Path parent;
 
     protected FormatReadWriteTest(String formatType) {
         this.formatType = formatType;
@@ -74,6 +77,7 @@ public abstract class FormatReadWriteTest {
     @BeforeEach
     public void beforeEach() {
         this.fileIO = LocalFileIO.create();
+        this.parent = new Path(tempPath.toUri());
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID() + "." + formatType);
     }
 
@@ -81,6 +85,11 @@ public abstract class FormatReadWriteTest {
 
     @Test
     public void testSimpleTypes() throws IOException {
+        FileFormat format = fileFormat();
+        testSimpleTypesUtil(format, file);
+    }
+
+    protected void testSimpleTypesUtil(FileFormat format, Path file) throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -88,9 +97,8 @@ public abstract class FormatReadWriteTest {
         }
 
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
-        FileFormat format = fileFormat();
         FormatWriterFactory factory = format.createWriterFactory(rowType);
-        write(factory, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
+        write(factory, file, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -106,12 +114,16 @@ public abstract class FormatReadWriteTest {
 
     @Test
     public void testFullTypes() throws IOException {
+        FileFormat format = fileFormat();
+        testFullTypesUtil(format, file);
+    }
+
+    protected void testFullTypesUtil(FileFormat format, Path file) throws IOException {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow expected = expectedRowForFullTypesTest();
-        FileFormat format = fileFormat();
 
         FormatWriterFactory factory = format.createWriterFactory(rowType);
-        write(factory, expected);
+        write(factory, file, expected);
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType)
                         .createReader(
@@ -124,8 +136,15 @@ public abstract class FormatReadWriteTest {
         validateFullTypesResult(result.get(0), expected);
     }
 
+    public boolean supportNestedReadPruning() {
+        return true;
+    }
+
     @Test
     public void testNestedReadPruning() throws Exception {
+        if (!supportNestedReadPruning()) {
+            return;
+        }
         FileFormat format = fileFormat();
 
         RowType writeType =
@@ -140,7 +159,7 @@ public abstract class FormatReadWriteTest {
                                         DataTypes.FIELD(4, "f2", DataTypes.INT()))));
 
         FormatWriterFactory factory = format.createWriterFactory(writeType);
-        write(factory, GenericRow.of(0, GenericRow.of(10, 11, 12)));
+        write(factory, file, GenericRow.of(0, GenericRow.of(10, 11, 12)));
 
         // skip read f0, f1.f1
         RowType readType =
@@ -176,7 +195,10 @@ public abstract class FormatReadWriteTest {
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
 
         FormatWriterFactory factory = format.createWriterFactory(writeType);
-        write(factory, GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
+        write(
+                factory,
+                file,
+                GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType)
@@ -201,6 +223,7 @@ public abstract class FormatReadWriteTest {
         RowType writeType = DataTypes.ROW(new ArrayType(true, new VariantType()));
         write(
                 format.createWriterFactory(writeType),
+                file,
                 GenericRow.of(
                         new GenericArray(
                                 new Object[] {
@@ -222,7 +245,8 @@ public abstract class FormatReadWriteTest {
         assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
     }
 
-    private void write(FormatWriterFactory factory, InternalRow... rows) throws IOException {
+    protected void write(FormatWriterFactory factory, Path file, InternalRow... rows)
+            throws IOException {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
@@ -332,6 +356,94 @@ public abstract class FormatReadWriteTest {
         return GenericRow.of(values.toArray());
     }
 
+    public boolean supportDataFileWithoutExtension() {
+        return false;
+    }
+
+    @Test
+    public void testWriteAndReadFileWithoutExtension() throws IOException {
+        if (!supportDataFileWithoutExtension()) {
+            return;
+        }
+        RowType rowType =
+                RowType.of(DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BOOLEAN());
+
+        // Create test data
+        List<InternalRow> testData = new ArrayList<>();
+        testData.add(GenericRow.of(1, BinaryString.fromString("Alice"), true));
+        testData.add(GenericRow.of(2, BinaryString.fromString("Bob"), false));
+        testData.add(GenericRow.of(3, BinaryString.fromString("Charlie"), true));
+
+        // Create file format
+        FileFormat jsonFormat = fileFormat();
+
+        // Write data
+        Path filePath = new Path(parent, UUID.randomUUID().toString());
+        FormatWriterFactory writerFactory = jsonFormat.createWriterFactory(rowType);
+        try (FormatWriter writer =
+                writerFactory.create(fileIO.newOutputStream(filePath, false), "none")) {
+            for (InternalRow row : testData) {
+                writer.addElement(row);
+            }
+        }
+
+        // Read data
+        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, null);
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderFactory.Context() {
+                            @Override
+                            public FileIO fileIO() {
+                                return fileIO;
+                            }
+
+                            @Override
+                            public Path filePath() {
+                                return filePath;
+                            }
+
+                            @Override
+                            public long fileSize() {
+                                try {
+                                    return fileIO.getFileSize(filePath);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+
+                            @Override
+                            public org.apache.paimon.utils.RoaringBitmap32 selection() {
+                                return null;
+                            }
+                        });
+
+        List<InternalRow> readData = new ArrayList<>();
+        RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+        while (iterator != null) {
+            InternalRow row;
+            while ((row = iterator.next()) != null) {
+                readData.add(GenericRow.of(row.getInt(0), row.getString(1), row.getBoolean(2)));
+            }
+            iterator.releaseBatch();
+            iterator = reader.readBatch();
+        }
+        reader.close();
+
+        // Verify data
+        assertThat(readData).hasSize(3);
+        assertThat(readData.get(0).getInt(0)).isEqualTo(1);
+        assertThat(readData.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(readData.get(0).getBoolean(2)).isTrue();
+
+        assertThat(readData.get(1).getInt(0)).isEqualTo(2);
+        assertThat(readData.get(1).getString(1).toString()).isEqualTo("Bob");
+        assertThat(readData.get(1).getBoolean(2)).isFalse();
+
+        assertThat(readData.get(2).getInt(0)).isEqualTo(3);
+        assertThat(readData.get(2).getString(1).toString()).isEqualTo("Charlie");
+        assertThat(readData.get(2).getBoolean(2)).isTrue();
+    }
+
     private DataType getMapValueType() {
         if (formatType.equals("avro") || formatType.equals("orc")) {
             return DataTypes.ROW(
@@ -351,7 +463,7 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
+    protected void validateFullTypesResult(InternalRow actual, InternalRow expected) {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow.FieldGetter[] fieldGetters =
                 IntStream.range(0, rowType.getFieldCount())

@@ -39,7 +39,6 @@ import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.HiveCatalog.isView;
-import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 class HiveTableUtils {
 
@@ -78,7 +77,7 @@ class HiveTableUtils {
             } else {
                 format = Format.CSV;
                 options.set(
-                        FIELD_DELIMITER,
+                        "field-delimiter",
                         serdeInfo
                                 .getParameters()
                                 .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));

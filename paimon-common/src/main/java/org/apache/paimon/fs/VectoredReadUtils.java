@@ -27,12 +27,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
-import static org.apache.paimon.fs.FileIOUtils.IO_THREAD_POOL;
 import static org.apache.paimon.fs.FileRange.createFileRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 
 /* This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -40,6 +42,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link VectoredReadable}. */
 public class VectoredReadUtils {
+
+    public static final ExecutorService IO_THREAD_POOL =
+            Executors.newCachedThreadPool(newDaemonThreadFactory("VECTORED-IO-THREAD"));
 
     public static void readVectored(VectoredReadable readable, List<? extends FileRange> ranges)
             throws IOException {

@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
 
-/** Creaet a FormatWriter which has full control abort file io. */
+/** Create a FormatWriter which has full control abort file io. */
 public interface SupportsDirectWrite {
 
     FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException;

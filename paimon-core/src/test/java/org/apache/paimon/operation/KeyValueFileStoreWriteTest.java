@@ -98,7 +98,7 @@ public class KeyValueFileStoreWriteTest {
 
         KeyValue keyValue = gen.next();
         AbstractFileStoreWrite.WriterContainer<KeyValue> writerContainer =
-                write.createWriterContainer(gen.getPartition(keyValue), 1, false);
+                write.createWriterContainer(gen.getPartition(keyValue), 1);
         MergeTreeWriter writer = (MergeTreeWriter) writerContainer.writer;
         try (MergeTreeCompactManager compactManager =
                 (MergeTreeCompactManager) writer.compactManager()) {

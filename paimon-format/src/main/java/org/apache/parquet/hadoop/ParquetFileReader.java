@@ -329,7 +329,8 @@ public class ParquetFileReader implements Closeable {
 
     public long getFilteredRecordCount() {
         if (!options.useColumnIndexFilter()
-                || !FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+                || (!FilterCompat.isFilteringRequired(options.getRecordFilter())
+                        && selection == null)) {
             return getRecordCount();
         }
         long total = 0L;
@@ -514,7 +515,8 @@ public class ParquetFileReader implements Closeable {
 
         // Filtering not required -> fall back to the non-filtering path
         if (!options.useColumnIndexFilter()
-                || !FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+                || (!FilterCompat.isFilteringRequired(options.getRecordFilter())
+                        && selection == null)) {
             return internalReadRowGroup(blockIndex);
         }
 
@@ -681,7 +683,8 @@ public class ParquetFileReader implements Closeable {
         }
         // Filtering not required -> fall back to the non-filtering path
         if (!options.useColumnIndexFilter()
-                || !FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+                || (!FilterCompat.isFilteringRequired(options.getRecordFilter())
+                        && selection == null)) {
             return readNextRowGroup();
         }
         BlockMetaData block = blocks.get(currentBlock);
@@ -792,19 +795,46 @@ public class ParquetFileReader implements Closeable {
     }
 
     private RowRanges getRowRanges(int blockIndex) {
-        assert FilterCompat.isFilteringRequired(options.getRecordFilter())
-                : "Should not be invoked if filter is null or NOOP";
+        boolean filteringRequired = FilterCompat.isFilteringRequired(options.getRecordFilter());
+        if (!filteringRequired && selection == null) {
+            throw new IllegalArgumentException("Should not be invoked if filter is null or NOOP");
+        }
+
         RowRanges rowRanges = blockRowRanges.get(blockIndex);
         if (rowRanges == null) {
-            rowRanges =
+            rowRanges = calculateRowRanges(blockIndex);
+            blockRowRanges.set(blockIndex, rowRanges);
+        }
+        return rowRanges;
+    }
+
+    private RowRanges calculateRowRanges(int blockIndex) {
+        BlockMetaData block = blocks.get(blockIndex);
+        RowRanges rowRanges = RowRanges.createSingle(block.getRowCount());
+        if (selection != null) {
+            ColumnIndexStore store = getColumnIndexStore(blockIndex);
+            List<OffsetIndex> offsets =
+                    paths.keySet().stream()
+                            .map(store::getOffsetIndex)
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+            long rowCount = block.getRowCount();
+            long rowIndexOffset = block.getRowIndexOffset();
+            for (OffsetIndex offset : offsets) {
+                // avoiding creating too many ranges, just filter columns pages
+                RowRanges result = RowRanges.create(rowCount, rowIndexOffset, offset, selection);
+                rowRanges = RowRanges.intersection(result, rowRanges);
+            }
+        }
+
+        if (FilterCompat.isFilteringRequired(options.getRecordFilter())) {
+            RowRanges result =
                     ColumnIndexFilter.calculateRowRanges(
                             options.getRecordFilter(),
                             getColumnIndexStore(blockIndex),
                             paths.keySet(),
-                            blocks.get(blockIndex).getRowCount(),
-                            blocks.get(blockIndex).getRowIndexOffset(),
-                            selection);
-            blockRowRanges.set(blockIndex, rowRanges);
+                            block.getRowCount());
+            rowRanges = RowRanges.intersection(result, rowRanges);
         }
         return rowRanges;
     }

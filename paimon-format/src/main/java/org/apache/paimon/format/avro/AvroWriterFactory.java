@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 
 import org.apache.avro.file.DataFileWriter;

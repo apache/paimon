@@ -53,7 +53,6 @@ import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.fs.FileIOUtils.checkAccess;
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -605,5 +604,18 @@ public interface FileIO extends Serializable, Closeable {
                     }
                 });
         return results;
+    }
+
+    static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
+            throws IOException {
+        if (fileIO == null) {
+            return null;
+        }
+
+        // check access
+        FileIO io = fileIO.load(path);
+        io.configure(config);
+        io.exists(path);
+        return fileIO;
     }
 }

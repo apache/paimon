@@ -51,11 +51,10 @@ public class DynamicBucketTableTest extends TableTestBase {
         Table table = getTableDefault();
         BatchWriteBuilderImpl builder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
         TableWriteImpl batchTableWrite = (TableWriteImpl) builder.withOverwrite().newWrite();
+        AbstractFileStoreWrite<?> write = (AbstractFileStoreWrite<?>) (batchTableWrite.getWrite());
+        write.withIgnorePreviousFiles(true);
         DynamicBucketIndexMaintainer indexMaintainer =
-                (DynamicBucketIndexMaintainer)
-                        ((AbstractFileStoreWrite<?>) (batchTableWrite.getWrite()))
-                                .createWriterContainer(BinaryRow.EMPTY_ROW, 0, true)
-                                .dynamicBucketMaintainer;
+                write.createWriterContainer(BinaryRow.EMPTY_ROW, 0).dynamicBucketMaintainer;
 
         assertThat(indexMaintainer.isEmpty()).isTrue();
         Pair<InternalRow, Integer> rowWithBucket = data(0);

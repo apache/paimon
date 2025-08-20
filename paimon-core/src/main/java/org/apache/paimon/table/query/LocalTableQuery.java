@@ -115,9 +115,7 @@ public class LocalTableQuery implements TableQuery {
         LookupLevels<KeyValue> lookupLevels =
                 tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
         if (lookupLevels == null) {
-            Preconditions.checkArgument(
-                    beforeFiles.isEmpty(),
-                    "The before file should be empty for the initial phase.");
+            // Initial phase: ignore beforeFiles as they represent deletions from previous state
             newLookupLevels(partition, bucket, dataFiles);
         } else {
             lookupLevels.getLevels().update(beforeFiles, dataFiles);

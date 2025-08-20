@@ -65,6 +65,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCsvFileFormat() {
+        sql("CREATE TABLE CSV (a INT, b INT, c INT) WITH ('file.format'='csv')");
+        sql("INSERT INTO CSV VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM CSV")).containsExactly(Row.of(1, 2, 3));
+    }
+
+    @Test
     public void testFullCompactionNoDv() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TEMPORARY TABLE GEN (a INT) WITH ("
