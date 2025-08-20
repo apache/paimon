@@ -34,11 +34,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-/** Utility class for handling CSV file compression and decompression using Hadoop codecs. */
+/**
+ * Utility class for handling CSV file compression and decompression using Hadoop codecs.
+ */
 public class CsvCompressionUtils {
 
     private static final String[] SUPPORTED_COMPRESSIONS = {
-        "none", "gzip", "bzip2", "deflate", "snappy", "lz4", "lzo", "zstd"
+            "none", "gzip", "bzip2", "deflate", "snappy", "lz4"
     };
 
     /**
@@ -54,9 +56,9 @@ public class CsvCompressionUtils {
     /**
      * Creates a compressed output stream using Hadoop's compression codecs.
      *
-     * @param out The underlying output stream
+     * @param out         The underlying output stream
      * @param compression The compression format (following Spark's naming convention)
-     * @param options Paimon options for Hadoop configuration
+     * @param options     Paimon options for Hadoop configuration
      * @return Compressed output stream
      * @throws IOException If compression stream creation fails
      */
@@ -69,39 +71,22 @@ public class CsvCompressionUtils {
         Configuration conf = getHadoopConfiguration(options);
         CompressionCodecFactory codecFactory = new CompressionCodecFactory(conf);
 
-        // Map Spark-style compression names to Hadoop codec names
         String codecName = mapCompressionName(compression);
 
-        // Try to get codec by name first
         CompressionCodec codec = getCodecByName(codecFactory, codecName, conf);
 
-        if (codec == null) {
-            // If specific codec is not available, try fallback for known unsupported cases
-            if ("zstd".equalsIgnoreCase(compression)) {
-                // Fallback to gzip for zstd when native library is not available
-                codecName = mapCompressionName("gzip");
-                codec = getCodecByName(codecFactory, codecName, conf);
-                if (codec != null) {
-                    return codec.createOutputStream(out);
-                }
-            }
-
-            throw new IllegalArgumentException(
-                    "Unsupported compression format: "
-                            + compression
-                            + ". Supported formats are: "
-                            + String.join(", ", SUPPORTED_COMPRESSIONS));
+        if (codec != null) {
+            return codec.createOutputStream(out);
         }
-
-        return codec.createOutputStream(out);
+        return out;
     }
 
     /**
      * Creates a decompressed input stream using Hadoop's compression codecs.
      *
      * @param inputStream The underlying input stream
-     * @param filePath The file path (used to detect compression from extension)
-     * @param options Paimon options for Hadoop configuration
+     * @param filePath    The file path (used to detect compression from extension)
+     * @param options     Paimon options for Hadoop configuration
      * @return Decompressed input stream
      * @throws IOException If decompression stream creation fails
      */
@@ -119,7 +104,19 @@ public class CsvCompressionUtils {
             return inputStream;
         }
 
-        return codec.createInputStream(inputStream);
+        try {
+            return codec.createInputStream(inputStream);
+        } catch (Exception e) {
+            // If decompression fails (e.g., due to missing native libraries or file not actually
+            // compressed),
+            // return the original stream to prevent data corruption
+            System.err.println(
+                    "Warning: Failed to create decompressed input stream for "
+                            + filePath
+                            + ", using uncompressed input: "
+                            + e.getMessage());
+            return inputStream;
+        }
     }
 
     /**
@@ -142,12 +139,8 @@ public class CsvCompressionUtils {
                 return "org.apache.hadoop.io.compress.SnappyCodec";
             case "lz4":
                 return "org.apache.hadoop.io.compress.Lz4Codec";
-            case "lzo":
-                return "org.apache.hadoop.io.compress.LzoCodec";
-            case "zstd":
-                return "org.apache.hadoop.io.compress.ZStandardCodec";
             default:
-                return compression;
+                return null;
         }
     }
 
@@ -155,8 +148,8 @@ public class CsvCompressionUtils {
      * Gets a compression codec by name, handling various ways of codec instantiation.
      *
      * @param codecFactory The Hadoop codec factory
-     * @param codecName The codec class name
-     * @param conf Hadoop configuration
+     * @param codecName    The codec class name
+     * @param conf         Hadoop configuration
      * @return CompressionCodec instance or null if not found
      */
     @Nullable
@@ -164,6 +157,9 @@ public class CsvCompressionUtils {
             CompressionCodecFactory codecFactory, String codecName, Configuration conf) {
         try {
             // Try to get codec by class name
+            if (codecName == null) {
+                return null;
+            }
             Class<?> codecClass = Class.forName(codecName);
             if (CompressionCodec.class.isAssignableFrom(codecClass)) {
                 CompressionCodec codec =
@@ -217,8 +213,6 @@ public class CsvCompressionUtils {
             return "snappy";
         } else if (codecName.contains("Lz4")) {
             return "lz4";
-        } else if (codecName.contains("Lzo")) {
-            return "lzo";
         } else if (codecName.contains("ZStandard")) {
             return "zst";
         }
@@ -229,7 +223,7 @@ public class CsvCompressionUtils {
      * Validates if the compression format is supported by checking if a codec can be created.
      *
      * @param compression The compression format string
-     * @param options Paimon options for Hadoop configuration
+     * @param options     Paimon options for Hadoop configuration
      * @throws IllegalArgumentException If compression format is not supported
      */
     public static void validateCompressionFormat(String compression, Options options) {

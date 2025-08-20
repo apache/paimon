@@ -118,17 +118,12 @@ public class CsvFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            // Use compression from options if not provided via parameter
-            String actualCompression =
-                    (compression != null && !compression.isEmpty())
-                            ? compression
-                            : options.compression();
             return new CsvFormatWriter(
                     new CloseShieldOutputStream(out),
                     rowType,
                     options,
                     formatOptions,
-                    actualCompression);
+                    compression);
         }
     }
 }
