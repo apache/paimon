@@ -16,32 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fs;
+package org.apache.paimon.format.csv;
 
-import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
+/** CSV {@link FormatReaderFactory} implementation. */
+public class CsvReaderFactory implements FormatReaderFactory {
 
-/** Utils for {@link FileIO}. */
-public class FileIOUtils {
+    private final RowType rowType;
+    private final CsvOptions options;
 
-    public static final ExecutorService IO_THREAD_POOL =
-            Executors.newCachedThreadPool(newDaemonThreadFactory("IO-THREAD-POOL"));
+    public CsvReaderFactory(RowType rowType, CsvOptions options) {
+        this.rowType = rowType;
+        this.options = options;
+    }
 
-    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
-            throws IOException {
-        if (fileIO == null) {
-            return null;
-        }
-
-        // check access
-        FileIO io = fileIO.load(path);
-        io.configure(config);
-        io.exists(path);
-        return fileIO;
+    @Override
+    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+        return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
     }
 }

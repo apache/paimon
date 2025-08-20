@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, Overwrite}
-import org.apache.paimon.spark.commands.{PaimonCommand, SchemaHelper, WriteIntoPaimonTable}
+import org.apache.paimon.spark.commands.{SchemaHelper, WriteIntoPaimonTable}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{DataFrame, PaimonUtils, SQLContext}

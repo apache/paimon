@@ -124,7 +124,6 @@ import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
-import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -1488,10 +1487,11 @@ public class HiveCatalog extends AbstractCatalog {
             @Nullable FormatTable.Format provider, Map<String, String> tableParameters) {
         Map<String, String> param = new HashMap<>();
         if (provider == FormatTable.Format.CSV) {
+            String delimiterKey = "field-delimiter";
             param.put(
                     FIELD_DELIM,
                     tableParameters.getOrDefault(
-                            FIELD_DELIMITER.key(), options.get(FIELD_DELIMITER)));
+                            delimiterKey, options.getString(delimiterKey, ",")));
         }
         return param;
     }

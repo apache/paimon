@@ -173,30 +173,30 @@ public class TestChangelogDataReadWrite {
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
 
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
-        RecordWriter<KeyValue> writer =
+        KeyValueFileStoreWrite write =
                 new KeyValueFileStoreWrite(
-                                LocalFileIO.create(),
-                                schemaManager,
-                                schemaManager.schema(0),
-                                commitUser,
-                                PARTITION_TYPE,
-                                KEY_TYPE,
-                                VALUE_TYPE,
-                                () -> COMPARATOR,
-                                () -> null,
-                                () -> EQUALISER,
-                                DeduplicateMergeFunction.factory(),
-                                pathFactory,
-                                (coreOptions, format) -> pathFactory,
-                                snapshotManager,
-                                null, // not used, we only create an empty writer
-                                null,
-                                null,
-                                options,
-                                EXTRACTOR,
-                                tablePath.getName())
-                        .createWriterContainer(partition, bucket, true)
-                        .writer;
+                        LocalFileIO.create(),
+                        schemaManager,
+                        schemaManager.schema(0),
+                        commitUser,
+                        PARTITION_TYPE,
+                        KEY_TYPE,
+                        VALUE_TYPE,
+                        () -> COMPARATOR,
+                        () -> null,
+                        () -> EQUALISER,
+                        DeduplicateMergeFunction.factory(),
+                        pathFactory,
+                        (coreOptions, format) -> pathFactory,
+                        snapshotManager,
+                        null, // not used, we only create an empty writer
+                        null,
+                        null,
+                        options,
+                        EXTRACTOR,
+                        tablePath.getName());
+        write.withIgnorePreviousFiles(true);
+        RecordWriter<KeyValue> writer = write.createWriterContainer(partition, bucket).writer;
         ((MemoryOwner) writer)
                 .setMemoryPool(
                         new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

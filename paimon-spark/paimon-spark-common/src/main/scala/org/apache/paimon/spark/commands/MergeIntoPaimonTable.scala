@@ -20,7 +20,6 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
@@ -51,8 +50,7 @@ case class MergeIntoPaimonTable(
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
-  extends PaimonLeafRunnableCommand
-  with PaimonCommand {
+  extends PaimonRowLevelCommand {
 
   import MergeIntoPaimonTable._
 
@@ -79,12 +77,12 @@ case class MergeIntoPaimonTable(
     } else {
       performMergeForNonPkTable(sparkSession)
     }
-    dvSafeWriter.commit(commitMessages)
+    writer.commit(commitMessages)
     Seq.empty[Row]
   }
 
   private def performMergeForPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
-    dvSafeWriter.write(
+    writer.write(
       constructChangedRows(
         sparkSession,
         createDataset(sparkSession, filteredTargetPlan),
@@ -117,14 +115,14 @@ case class MergeIntoPaimonTable(
         val dvDS = ds.where(
           s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
         val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
-        val indexCommitMsg = dvSafeWriter.persistDeletionVectors(deletionVectors)
+        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
 
         // Step4: filter rows that should be written as the inserted/updated data.
         val toWriteDS = ds
           .where(
             s"$ROW_KIND_COL = ${RowKind.INSERT.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
           .drop(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
-        val addCommitMessage = dvSafeWriter.write(toWriteDS)
+        val addCommitMessage = writer.write(toWriteDS)
 
         // Step5: commit index and data commit messages
         addCommitMessage ++ indexCommitMsg
@@ -192,12 +190,12 @@ case class MergeIntoPaimonTable(
         filesToRewrittenDS.union(filesToReadDS),
         writeRowLineage = writeRowLineage).drop(ROW_KIND_COL)
 
-      val writer = if (writeRowLineage) {
-        dvSafeWriter.withRowLineage()
+      val finalWriter = if (writeRowLineage) {
+        writer.withRowLineage()
       } else {
-        dvSafeWriter
+        writer
       }
-      val addCommitMessage = writer.write(toWriteDS)
+      val addCommitMessage = finalWriter.write(toWriteDS)
       val deletedCommitMessage = buildDeletedCommitMessage(filesToRewritten)
 
       addCommitMessage ++ deletedCommitMessage

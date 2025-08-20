@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
@@ -41,8 +40,7 @@ case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
     override val table: FileStoreTable,
     condition: Expression)
-  extends PaimonLeafRunnableCommand
-  with PaimonCommand
+  extends PaimonRowLevelCommand
   with ExpressionHelper
   with SupportsSubquery {
 
@@ -90,7 +88,7 @@ case class DeleteFromPaimonTableCommand(
         if (dropPartitions.nonEmpty) {
           commit.truncatePartitions(dropPartitions.asJava)
         } else {
-          dvSafeWriter.commit(Seq.empty)
+          writer.commit(Seq.empty)
         }
       } else {
         val commitMessages = if (usePKUpsertDelete()) {
@@ -98,7 +96,7 @@ case class DeleteFromPaimonTableCommand(
         } else {
           performNonPrimaryKeyDelete(sparkSession)
         }
-        dvSafeWriter.commit(commitMessages)
+        writer.commit(commitMessages)
       }
     }
 
@@ -117,7 +115,7 @@ case class DeleteFromPaimonTableCommand(
   private def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     val df = createDataset(sparkSession, Filter(condition, relation))
       .withColumn(ROW_KIND_COL, lit(RowKind.DELETE.toByteValue))
-    dvSafeWriter.write(df)
+    writer.write(df)
   }
 
   private def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
@@ -135,7 +133,7 @@ case class DeleteFromPaimonTableCommand(
         sparkSession)
 
       // Step3: update the touched deletion vectors and index files
-      dvSafeWriter.persistDeletionVectors(deletionVectors)
+      writer.persistDeletionVectors(deletionVectors)
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
@@ -153,7 +151,7 @@ case class DeleteFromPaimonTableCommand(
       }
 
       // only write new files, should have no compaction
-      val addCommitMessage = dvSafeWriter.writeOnly().withRowLineage().write(data)
+      val addCommitMessage = writer.writeOnly().withRowLineage().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

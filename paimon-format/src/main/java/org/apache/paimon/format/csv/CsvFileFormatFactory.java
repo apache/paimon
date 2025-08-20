@@ -16,18 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.format.csv;
 
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 
-/** Options of {@link FormatTable}. */
-public class FormatTableOptions {
+/** Factory to create {@link CsvFileFormat}. */
+public class CsvFileFormatFactory implements FileFormatFactory {
 
-    public static final ConfigOption<String> FIELD_DELIMITER =
-            ConfigOptions.key("field-delimiter")
-                    .stringType()
-                    .defaultValue(",")
-                    .withDescription(
-                            "Optional field delimiter character for CSV (',' by default).");
+    public static final String IDENTIFIER = "csv";
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public FileFormat create(FormatContext formatContext) {
+        return new CsvFileFormat(formatContext);
+    }
 }

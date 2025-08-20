@@ -74,8 +74,7 @@ public class FileStoreTestUtils {
             TestFileStore store, List<KeyValue> keyValues, BinaryRow partition, int bucket)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = store.newWrite();
-        RecordWriter<KeyValue> writer =
-                write.createWriterContainer(partition, bucket, false).writer;
+        RecordWriter<KeyValue> writer = write.createWriterContainer(partition, bucket).writer;
         ((MemoryOwner) writer)
                 .setMemoryPool(
                         new HeapMemorySegmentPool(

@@ -401,16 +401,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             writers.put(partition.copy(), buckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, ignorePreviousFiles));
+                bucket, k -> createWriterContainer(partition.copy(), bucket));
     }
 
-    private long writerNumber() {
-        return writers.values().stream().mapToLong(Map::size).sum();
+    public RecordWriter<T> createWriter(BinaryRow partition, int bucket) {
+        return createWriterContainer(partition, bucket).writer;
     }
 
-    @VisibleForTesting
-    public WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, boolean ignorePreviousFiles) {
+    public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -459,6 +457,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 indexMaintainer,
                 dvMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
+    }
+
+    private long writerNumber() {
+        return writers.values().stream().mapToLong(Map::size).sum();
     }
 
     @Override

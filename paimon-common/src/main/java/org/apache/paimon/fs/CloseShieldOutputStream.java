@@ -16,22 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.avro;
+package org.apache.paimon.fs;
 
 import java.io.IOException;
-import java.io.OutputStream;
 
 /** A proxy output stream that prevents the underlying output stream from being closed. */
-public class CloseShieldOutputStream extends OutputStream {
-    private final OutputStream out;
+public class CloseShieldOutputStream extends PositionOutputStream {
 
-    public CloseShieldOutputStream(OutputStream out) {
+    private final PositionOutputStream out;
+
+    public CloseShieldOutputStream(PositionOutputStream out) {
         this.out = out;
     }
 
     @Override
     public void write(int b) throws IOException {
         out.write(b);
+    }
+
+    @Override
+    public long getPos() throws IOException {
+        return out.getPos();
     }
 
     @Override

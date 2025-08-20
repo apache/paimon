@@ -19,10 +19,9 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
-import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
-import org.apache.paimon.table.{FileStoreTable, SpecialFields}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
@@ -31,7 +30,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, LogicalPlan, Project, SupportsSubquery}
+import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit}
 
@@ -40,8 +39,7 @@ case class UpdatePaimonTableCommand(
     override val table: FileStoreTable,
     condition: Expression,
     assignments: Seq[Assignment])
-  extends PaimonLeafRunnableCommand
-  with PaimonCommand
+  extends PaimonRowLevelCommand
   with AssignmentAlignmentHelper
   with SupportsSubquery {
 
@@ -58,7 +56,7 @@ case class UpdatePaimonTableCommand(
     } else {
       performUpdateForNonPkTable(sparkSession)
     }
-    dvSafeWriter.commit(commitMessages)
+    writer.commit(commitMessages)
 
     Seq.empty[Row]
   }
@@ -68,7 +66,7 @@ case class UpdatePaimonTableCommand(
     val updatedPlan = Project(updateExpressions, Filter(condition, relation))
     val df = createDataset(sparkSession, updatedPlan)
       .withColumn(ROW_KIND_COL, lit(RowKind.UPDATE_AFTER.toByteValue))
-    dvSafeWriter.write(df)
+    writer.write(df)
   }
 
   /** Update for table without primary keys */
@@ -102,7 +100,7 @@ case class UpdatePaimonTableCommand(
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = dvSafeWriter.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
@@ -138,7 +136,7 @@ case class UpdatePaimonTableCommand(
 
     val toUpdateScanRelation = createNewScanPlan(touchedDataSplits, relation, Some(condition))
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    dvSafeWriter.write(data)
+    writer.write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
@@ -163,7 +161,7 @@ case class UpdatePaimonTableCommand(
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    dvSafeWriter.withRowLineage().write(data)
+    writer.withRowLineage().write(data)
   }
 
   private def optimizedIf(
