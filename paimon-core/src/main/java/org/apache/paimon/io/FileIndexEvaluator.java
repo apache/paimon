@@ -67,7 +67,8 @@ public class FileIndexEvaluator {
             if (predicate != null) {
                 if (!ListUtils.isNullOrEmpty(dataFilter)) {
                     Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
-                    result = predicate.evaluate(filter, selection);
+                    result = predicate.evaluate(filter);
+                    result.and(selection);
                 } else if (topN != null) {
                     result = predicate.evaluateTopN(topN, selection);
                 }

@@ -71,8 +71,7 @@ public class FileIndexPredicate implements Closeable {
         this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
     }
 
-    public FileIndexResult evaluate(
-            @Nullable Predicate predicate, @Nullable FileIndexResult input) {
+    public FileIndexResult evaluate(@Nullable Predicate predicate) {
         if (predicate == null) {
             return REMAIN;
         }
@@ -84,9 +83,6 @@ public class FileIndexPredicate implements Closeable {
             LOG.debug(
                     "One file has been filtered: "
                             + (path == null ? "in scan stage" : path.toString()));
-        }
-        if (input != null) {
-            result = result.and(input);
         }
         return result;
     }

@@ -137,7 +137,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
-            return predicate.evaluate(dataPredicate, null).remain();
+            return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);
         }
