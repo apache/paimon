@@ -35,7 +35,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private InnerTable table;
+    private final InnerTable table;
     private final String commitUser;
 
     private Map<String, String> staticPartition;
