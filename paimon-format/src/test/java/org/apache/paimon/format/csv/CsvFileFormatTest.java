@@ -433,6 +433,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         .field("tinyint", DataTypes.TINYINT())
                         .field("smallint", DataTypes.SMALLINT())
                         .field("bigint", DataTypes.BIGINT())
+                        .field("bytes", DataTypes.BYTES())
                         .field("timestamp", DataTypes.TIMESTAMP())
                         .field("timestamp_3", DataTypes.TIMESTAMP(3))
                         .field("timestamp_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
@@ -462,6 +463,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         (byte) 3,
                         (short) 6,
                         12304L,
+                        new byte[] {1, 5, 2},
                         Timestamp.fromMicros(123123123),
                         Timestamp.fromEpochMillis(123123123),
                         Timestamp.fromMicros(123123123),
