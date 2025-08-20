@@ -86,6 +86,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
 
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1299,6 +1300,60 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                     });
             assertThat(cnt.get()).isEqualTo(k);
             assertThat(actual).isEqualTo(bitmap);
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testLimitPushDownInDeletionVectorMode() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 2);
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
+                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
+                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int rowCount = 10000;
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // append
+        for (int i = 0; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.INSERT, 1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // delete [0, 2000]
+        for (int i = 0; i < 2000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // delete (rowCount - 2000, rowCount)
+        for (int i = rowCount - 2000; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        // test limit push down
+        {
+            int limit = new RandomDataGenerator().nextInt(1, 1000);
+            TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+            assertThat(plan.splits()).hasSize(1);
+
+            RecordReader<InternalRow> reader =
+                    table.newRead().withLimit(limit).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(limit);
             reader.close();
         }
     }

@@ -49,6 +49,10 @@ public interface SplitRead<T> {
         return this;
     }
 
+    default SplitRead<T> withLimit(@Nullable Integer limit) {
+        return this;
+    }
+
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(DataSplit split) throws IOException;
 
