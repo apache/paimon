@@ -607,7 +607,7 @@ The following table lists the type mapping from Paimon type to JSON type.
     </tr>
     <tr>
       <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
-      <td><code>string with format: date-time</code></td>
+      <td><code>string with format: date-time (with UTC time zone)</code></td>
     </tr>
     <tr>
       <td><code>ARRAY</code></td>
