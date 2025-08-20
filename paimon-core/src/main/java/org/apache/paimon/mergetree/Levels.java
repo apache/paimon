@@ -63,9 +63,22 @@ public class Levels {
                                 return Long.compare(b.maxSequenceNumber(), a.maxSequenceNumber());
                             } else {
                                 // When two or more jobs are writing the same merge tree, it is
-                                // possible that multiple files have the same maxSequenceNumber. In
-                                // this case we have to compare their file names so that files with
-                                // same maxSequenceNumber won't be "de-duplicated" by the tree set.
+                                // possible that multiple files have the same maxSequenceNumber.
+                                // Use minSequenceNumber as a semantically meaningful tie-breaker
+                                // to ensure deterministic ordering during compaction.
+                                // This fixes Issue #5872: data corruption due to filename-based
+                                // ordering.
+                                int minSeqCompare =
+                                        Long.compare(a.minSequenceNumber(), b.minSequenceNumber());
+                                if (minSeqCompare != 0) {
+                                    return minSeqCompare;
+                                }
+                                // If minSequenceNumber is also the same, use creation time
+                                int timeCompare = a.creationTime().compareTo(b.creationTime());
+                                if (timeCompare != 0) {
+                                    return timeCompare;
+                                }
+                                // Final fallback: filename (to ensure uniqueness in TreeSet)
                                 return a.fileName().compareTo(b.fileName());
                             }
                         });
