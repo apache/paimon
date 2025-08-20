@@ -157,7 +157,7 @@ CREATE TABLE my_csv_table (
 ) WITH (
     'type'='format-table',
     'file.format'='csv',
-    'field-delimiter'=','
+    'csv.field-delimiter'=','
 )
 ```
 {{< /tab >}}
@@ -168,7 +168,7 @@ CREATE TABLE my_csv_table (
 CREATE TABLE my_csv_table (
     a INT,
     b STRING
-) USING csv OPTIONS ('field-delimiter' ',')
+) USING csv OPTIONS ('csv.field-delimiter' ',')
 ```
 
 {{< /tab >}}
