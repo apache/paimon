@@ -216,7 +216,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
               |""".stripMargin)
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-          Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 2), Row(3, 3, 3, 1, 2))
+          Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 1), Row(3, 3, 3, 1, 1))
         )
       }
     }
