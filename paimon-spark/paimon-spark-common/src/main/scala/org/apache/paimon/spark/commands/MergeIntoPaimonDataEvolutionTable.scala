@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.spark.util.ScanPlanHelper.createNewPlan
+import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
@@ -102,7 +102,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     // step 1: find the related data split, make it target file plan
     val dataSplits: Seq[DataSplit] = targetRelatedSplits(sparkSession)
     val touchedFileTargetRelation =
-      createNewPlan(dataSplits.toSeq, targetRelation)
+      createNewScanPlan(dataSplits.toSeq, targetRelation)
 
     // step 2: invoke update action
     val updateCommit =
