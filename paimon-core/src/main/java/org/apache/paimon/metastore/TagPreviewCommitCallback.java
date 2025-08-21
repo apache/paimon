@@ -45,7 +45,8 @@ public class TagPreviewCommitCallback implements CommitCallback {
             List<SimpleFileEntry> baseFiles,
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+            Snapshot snapshot,
+            boolean endInput) {
         long currentMillis = System.currentTimeMillis();
         Optional<String> tagOptional = tagPreview.extractTag(currentMillis, snapshot.watermark());
         tagOptional.ifPresent(tagCallback::notifyCreation);

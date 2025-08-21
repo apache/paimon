@@ -534,7 +534,7 @@ public class FileStoreCommitTest {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) -> commit.commit(committable, false));
+                (commit, committable) -> commit.commit(committable, false, false));
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
         // commit empty new files
@@ -548,7 +548,7 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 (commit, committable) -> {
                     commit.ignoreEmptyCommit(false);
-                    commit.commit(committable, false);
+                    commit.commit(committable, false, false);
                 });
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id() + 1);
     }
@@ -569,14 +569,14 @@ public class FileStoreCommitTest {
                     null,
                     Collections.emptyList(),
                     (commit, committable) -> {
-                        commit.commit(committable, false);
+                        commit.commit(committable, false, false);
                         committables.add(committable);
                     });
         }
 
         // commit the first snapshot again, should throw exception due to conflicts
         for (int i = 0; i < 3; i++) {
-            assertThatThrownBy(() -> store.newCommit().commit(committables.get(0), true))
+            assertThatThrownBy(() -> store.newCommit().commit(committables.get(0), true, false))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("Give up committing.");
         }
@@ -1020,7 +1020,7 @@ public class FileStoreCommitTest {
 
             // commit with empty properties, the properties in snapshot should be null
             ManifestCommittable manifestCommittable = new ManifestCommittable(0);
-            fileStoreCommit.commit(manifestCommittable, false);
+            fileStoreCommit.commit(manifestCommittable, false, false);
             Snapshot snapshot = checkNotNull(store.snapshotManager().latestSnapshot());
             assertThat(snapshot.properties()).isNull();
 
@@ -1028,7 +1028,7 @@ public class FileStoreCommitTest {
             manifestCommittable = new ManifestCommittable(0);
             manifestCommittable.addProperty("k1", "v1");
             manifestCommittable.addProperty("k2", "v2");
-            fileStoreCommit.commit(manifestCommittable, false);
+            fileStoreCommit.commit(manifestCommittable, false, false);
             snapshot = checkNotNull(store.snapshotManager().latestSnapshot());
             Map<String, String> expectedProps = new HashMap<>();
             expectedProps.put("k1", "v1");
@@ -1057,7 +1057,8 @@ public class FileStoreCommitTest {
                     Snapshot.CommitKind.APPEND,
                     firstLatest,
                     mustConflictCheck(),
-                    null);
+                    null,
+                    false);
             // Compact
             commit.tryCommitOnce(
                     new RetryResult(firstLatest, Collections.emptyList(), null),
@@ -1071,7 +1072,8 @@ public class FileStoreCommitTest {
                     Snapshot.CommitKind.COMPACT,
                     store.snapshotManager().latestSnapshot(),
                     mustConflictCheck(),
-                    null);
+                    null,
+                    false);
         }
         long id = store.snapshotManager().latestSnapshot().id();
         assertThat(id).isEqualTo(2);

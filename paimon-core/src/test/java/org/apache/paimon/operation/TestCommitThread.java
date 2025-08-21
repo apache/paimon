@@ -151,7 +151,7 @@ public class TestCommitThread extends Thread {
                             inc.compactIncrement()));
         }
 
-        runWithRetry(committable, () -> commit.commit(committable, false));
+        runWithRetry(committable, () -> commit.commit(committable, false, false));
     }
 
     private void doOverwrite() throws Exception {
@@ -172,7 +172,8 @@ public class TestCommitThread extends Thread {
                         commit.overwrite(
                                 TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
                                 committable,
-                                Collections.emptyMap()));
+                                Collections.emptyMap(),
+                                false));
     }
 
     private void doFinalCompact() {
@@ -193,7 +194,7 @@ public class TestCommitThread extends Thread {
                                     inc.newFilesIncrement(),
                                     inc.compactIncrement()));
                 }
-                commit.commit(committable, false);
+                commit.commit(committable, false, false);
                 break;
             } catch (Exception e) {
                 if (LOG.isDebugEnabled()) {

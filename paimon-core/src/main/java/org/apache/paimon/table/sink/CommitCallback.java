@@ -44,7 +44,8 @@ public interface CommitCallback extends AutoCloseable {
             List<SimpleFileEntry> baseFiles,
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot);
+            Snapshot snapshot,
+            boolean endInput);
 
     void retry(ManifestCommittable committable);
 

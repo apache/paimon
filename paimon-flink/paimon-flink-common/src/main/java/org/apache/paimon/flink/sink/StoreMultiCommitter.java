@@ -180,7 +180,8 @@ public class StoreMultiCommitter
     public int filterAndCommit(
             List<WrappedManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
-            boolean partitionMarkDoneRecoverFromState) {
+            boolean partitionMarkDoneRecoverFromState,
+            boolean endInput) {
         int result = 0;
         for (Map.Entry<Identifier, List<ManifestCommittable>> entry :
                 groupByTable(globalCommittables).entrySet()) {
@@ -189,7 +190,8 @@ public class StoreMultiCommitter
                             .filterAndCommit(
                                     entry.getValue(),
                                     checkAppendFiles,
-                                    partitionMarkDoneRecoverFromState);
+                                    partitionMarkDoneRecoverFromState,
+                                    endInput);
         }
         return result;
     }

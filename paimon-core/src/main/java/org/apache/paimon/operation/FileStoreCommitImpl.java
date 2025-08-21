@@ -277,7 +277,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public int commit(ManifestCommittable committable, boolean checkAppendFiles) {
+    public int commit(ManifestCommittable committable, boolean checkAppendFiles, boolean endInput) {
         LOG.info(
                 "Ready to commit to table {}, number of commit messages: {}",
                 tableName,
@@ -346,7 +346,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.properties(),
                                 Snapshot.CommitKind.APPEND,
                                 noConflictCheck(),
-                                null);
+                                null,
+                                endInput);
                 generatedSnapshot += 1;
             }
 
@@ -382,7 +383,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.properties(),
                                 Snapshot.CommitKind.COMPACT,
                                 hasConflictChecked(safeLatestSnapshotId),
-                                null);
+                                null,
+                                endInput);
                 generatedSnapshot += 1;
             }
         } finally {
@@ -426,7 +428,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public int overwrite(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            boolean endInput) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
@@ -519,7 +522,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
-                                committable.properties());
+                                committable.properties(),
+                                endInput);
                 generatedSnapshot += 1;
             }
 
@@ -535,7 +539,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.properties(),
                                 Snapshot.CommitKind.COMPACT,
                                 mustConflictCheck(),
-                                null);
+                                null,
+                                endInput);
                 generatedSnapshot += 1;
             }
         } finally {
@@ -593,7 +598,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitIdentifier,
                 null,
                 new HashMap<>(),
-                new HashMap<>());
+                new HashMap<>(),
+                true);
     }
 
     @Override
@@ -605,7 +611,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitIdentifier,
                 null,
                 new HashMap<>(),
-                new HashMap<>());
+                new HashMap<>(),
+                true);
     }
 
     @Override
@@ -645,7 +652,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
                 noConflictCheck(),
-                statsFileName);
+                statsFileName,
+                true);
     }
 
     @Override
@@ -788,7 +796,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<String, String> properties,
             Snapshot.CommitKind commitKind,
             ConflictCheck conflictCheck,
-            @Nullable String statsFileName) {
+            @Nullable String statsFileName,
+            boolean endInput) {
         int retryCount = 0;
         RetryResult retryResult = null;
         long startMillis = System.currentTimeMillis();
@@ -807,7 +816,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind,
                             latestSnapshot,
                             conflictCheck,
-                            statsFileName);
+                            statsFileName,
+                            endInput);
 
             if (result.isSuccess()) {
                 break;
@@ -837,7 +847,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            boolean endInput) {
         // collect all files with overwrite
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
@@ -885,7 +896,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 properties,
                 Snapshot.CommitKind.OVERWRITE,
                 mustConflictCheck(),
-                null);
+                null,
+                endInput);
     }
 
     @VisibleForTesting
@@ -901,7 +913,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot.CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
             ConflictCheck conflictCheck,
-            @Nullable String newStatsFileName) {
+            @Nullable String newStatsFileName,
+            boolean endInput) {
         long startMillis = System.currentTimeMillis();
 
         // Check if the commit has been completed. At this point, there will be no more repeated
@@ -1166,7 +1179,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
         commitCallbacks.forEach(
                 callback ->
-                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+                        callback.call(
+                                finalBaseFiles,
+                                finalDeltaFiles,
+                                indexFiles,
+                                newSnapshot,
+                                endInput));
         return new SuccessResult();
     }
 

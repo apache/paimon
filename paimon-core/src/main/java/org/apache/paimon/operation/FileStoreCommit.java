@@ -40,7 +40,7 @@ public interface FileStoreCommit extends AutoCloseable {
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 
     /** Commit from manifest committable with checkAppendFiles. */
-    int commit(ManifestCommittable committable, boolean checkAppendFiles);
+    int commit(ManifestCommittable committable, boolean checkAppendFiles, boolean endInput);
 
     /**
      * Overwrite from manifest committable and partition.
@@ -53,7 +53,8 @@ public interface FileStoreCommit extends AutoCloseable {
     int overwrite(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties);
+            Map<String, String> properties,
+            boolean endInput);
 
     /**
      * Drop multiple partitions. The {@link Snapshot.CommitKind} of generated snapshot is {@link

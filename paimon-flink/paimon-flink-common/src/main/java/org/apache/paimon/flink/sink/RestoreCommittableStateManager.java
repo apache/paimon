@@ -78,7 +78,8 @@ public class RestoreCommittableStateManager<GlobalCommitT>
 
     protected int recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
-        return committer.filterAndCommit(committables, true, partitionMarkDoneRecoverFromState);
+        return committer.filterAndCommit(
+                committables, true, partitionMarkDoneRecoverFromState, false);
     }
 
     @Override

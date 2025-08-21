@@ -226,7 +226,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             List<SimpleFileEntry> baseFiles,
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+            Snapshot snapshot,
+            boolean endInput) {
         createMetadata(
                 snapshot,
                 (removedFiles, addedFiles) ->
