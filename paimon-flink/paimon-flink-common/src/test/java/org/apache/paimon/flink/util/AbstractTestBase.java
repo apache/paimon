@@ -55,6 +55,11 @@ import java.util.UUID;
 /** Similar to Flink's AbstractTestBase but using Junit5. */
 public class AbstractTestBase {
 
+    protected static boolean isFlink2_0() {
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("2.0") >= 0;
+    }
+
     private static final int DEFAULT_PARALLELISM = 16;
 
     @RegisterExtension

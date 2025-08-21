@@ -42,6 +42,7 @@ import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.TinyIntType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.types.logical.VariantType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
 
 import java.util.ArrayList;
@@ -175,6 +176,10 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
         }
 
         return new org.apache.paimon.types.RowType(rowType.isNullable(), dataFields);
+    }
+
+    public DataType visit(VariantType variantType) {
+        return new org.apache.paimon.types.VariantType();
     }
 
     @Override
