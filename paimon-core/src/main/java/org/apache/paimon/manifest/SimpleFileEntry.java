@@ -40,6 +40,7 @@ public class SimpleFileEntry implements FileEntry {
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
     @Nullable private final String externalPath;
+    private final long creationTimeEpochMillis;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -52,7 +53,8 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            long creationTimeEpochMillis) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -64,6 +66,7 @@ public class SimpleFileEntry implements FileEntry {
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.externalPath = externalPath;
+        this.creationTimeEpochMillis = creationTimeEpochMillis;
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -78,7 +81,8 @@ public class SimpleFileEntry implements FileEntry {
                 entry.file().embeddedIndex(),
                 entry.minKey(),
                 entry.maxKey(),
-                entry.externalPath());
+                entry.externalPath(),
+                entry.creationTimeEpochMillis());
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -140,6 +144,11 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public List<String> extraFiles() {
         return extraFiles;
+    }
+
+    @Override
+    public long creationTimeEpochMillis() {
+        return creationTimeEpochMillis;
     }
 
     @Override

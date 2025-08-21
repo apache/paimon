@@ -67,6 +67,8 @@ public interface FileEntry {
 
     List<String> extraFiles();
 
+    long creationTimeEpochMillis();
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.

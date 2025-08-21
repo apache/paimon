@@ -43,7 +43,8 @@ public class ExpireFileEntry extends SimpleFileEntry {
             BinaryRow minKey,
             BinaryRow maxKey,
             @Nullable FileSource fileSource,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            long creationTimeEpochMillis) {
         super(
                 kind,
                 partition,
@@ -55,7 +56,8 @@ public class ExpireFileEntry extends SimpleFileEntry {
                 embeddedIndex,
                 minKey,
                 maxKey,
-                externalPath);
+                externalPath,
+                creationTimeEpochMillis);
         this.fileSource = fileSource;
     }
 
@@ -76,7 +78,8 @@ public class ExpireFileEntry extends SimpleFileEntry {
                 entry.minKey(),
                 entry.maxKey(),
                 entry.file().fileSource().orElse(null),
-                entry.externalPath());
+                entry.externalPath(),
+                entry.creationTimeEpochMillis());
     }
 
     @Override
