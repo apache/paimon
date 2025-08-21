@@ -38,7 +38,6 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
 
   private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]] =
     initPartitionMap()
-  private lazy val normalWrite = PaimonSparkWriter(paimonTable)
   override val table: FileStoreTable = paimonTable.copy(dynamicOp)
 
   @transient private lazy val serializer = new CommitMessageSerializer
@@ -83,22 +82,6 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
       .collect()
       .map(deserializeCommitMessage(serializer, _))
       .toSeq
-  }
-
-  def write(data: DataFrame): Seq[CommitMessage] = {
-    normalWrite.write(data)
-  }
-
-  def commit(commitMessages: Seq[CommitMessage]): Unit = {
-    val tableCommit = table.newCommit(table.coreOptions().createCommitUser())
-    try {
-      tableCommit.commit(commitMessages.toList.asJava)
-    } catch {
-      case e: Throwable => throw new RuntimeException(e);
-    } finally {
-      tableCommit.close()
-    }
-    postCommit(commitMessages)
   }
 }
 

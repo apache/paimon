@@ -57,7 +57,8 @@ case class MergeIntoPaimonDataEvolutionTable(
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable {
 
-  private lazy val writer = DataEvolutionPaimonWriter(table)
+  private lazy val partialColumnWriter = DataEvolutionPaimonWriter(table)
+  private lazy val writer = PaimonSparkWriter(table)
 
   assert(
     notMatchedBySourceActions.isEmpty,
@@ -232,7 +233,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val sortedDs = toWrite
       .repartitionByRange(firstRowIdColumn)
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
-    writer.writePartialFields(sortedDs, updateColumnsSorted.map(_.name))
+    partialColumnWriter.writePartialFields(sortedDs, updateColumnsSorted.map(_.name))
   }
 
   private def insertActionInvoke(

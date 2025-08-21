@@ -198,7 +198,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with data-evolution") {
+  test("Data Evolution: merge into table with data-evolution") {
     if (gteqSpark3_5) {
       withTable("s", "t") {
         sql("CREATE TABLE s (id INT, b INT)")
@@ -223,7 +223,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with data-evolution complex") {
+  test("Data Evolution: merge into table with data-evolution complex") {
     if (gteqSpark3_5) {
       withTable("source", "target") {
         sql("CREATE TABLE source (a INT, b INT, c STRING)")
