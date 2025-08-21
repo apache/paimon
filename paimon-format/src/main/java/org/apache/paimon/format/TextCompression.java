@@ -47,7 +47,8 @@ public class TextCompression {
      * @throws IOException If compression stream creation fails
      */
     public static OutputStream createCompressedOutputStream(
-            PositionOutputStream out, String compression, Options options) throws IOException {
+            PositionOutputStream out, TextCompressionType compression, Options options)
+            throws IOException {
         Optional<CompressionCodec> codecOpt =
                 getCompressionCodecByCompression(compression, options);
         if (codecOpt.isPresent()) {
@@ -76,9 +77,10 @@ public class TextCompression {
                                     new org.apache.hadoop.fs.Path(filePath.toString())));
 
             if (!codecOpt.isPresent()) {
-                codecOpt =
-                        getCompressionCodecByCompression(
+                TextCompressionType compressionType =
+                        TextCompression.getTextCompressionType(
                                 options.get(CoreOptions.FILE_COMPRESSION), options);
+                codecOpt = getCompressionCodecByCompression(compressionType, options);
             }
             if (codecOpt.isPresent()) {
                 return codecOpt.get().createInputStream(inputStream);
@@ -88,25 +90,32 @@ public class TextCompression {
         return inputStream;
     }
 
+    public static TextCompressionType getTextCompressionType(String compression, Options options) {
+        TextCompressionType compressionType = TextCompressionType.fromValue(compression);
+        Optional<CompressionCodec> codecOpt =
+                getCompressionCodecByCompression(compressionType, options);
+        if (codecOpt.isPresent()) {
+            return TextCompressionType.fromValue(compression);
+        }
+        return TextCompressionType.NONE;
+    }
+
     /**
      * Gets a compression codec by compression type.
      *
-     * @param compression The compression format string
+     * @param compressionType The compression type
      * @param options Paimon options for Hadoop configuration
      * @return Optional CompressionCodec instance
      */
     public static Optional<CompressionCodec> getCompressionCodecByCompression(
-            String compression, Options options) {
-        if (compression == null
-                || compression.isEmpty()
-                || TextCompressionType.NONE.value().equalsIgnoreCase(compression)) {
+            TextCompressionType compressionType, Options options) {
+        if (compressionType == null || TextCompressionType.NONE == compressionType) {
             return Optional.empty();
         }
 
         try {
             Configuration conf = HadoopUtils.getHadoopConfiguration(options);
-            TextCompressionType textCompressionType = TextCompressionType.fromValue(compression);
-            String codecName = textCompressionType.hadoopCodecClassName();
+            String codecName = compressionType.hadoopCodecClassName();
             if (codecName != null) {
                 Class<?> codecClass = Class.forName(codecName);
                 if (CompressionCodec.class.isAssignableFrom(codecClass)) {

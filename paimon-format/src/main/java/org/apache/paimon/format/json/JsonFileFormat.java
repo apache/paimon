@@ -115,11 +115,8 @@ public class JsonFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            String compressionType =
-                    TextCompression.getCompressionCodecByCompression(compression, options)
-                                    .isPresent()
-                            ? compression
-                            : TextCompressionType.NONE.value();
+            TextCompressionType compressionType =
+                    TextCompression.getTextCompressionType(compression, options);
             return new JsonFormatWriter(
                     new CloseShieldOutputStream(out), rowType, options, compressionType);
         }

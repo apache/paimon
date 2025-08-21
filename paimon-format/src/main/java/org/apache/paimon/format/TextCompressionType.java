@@ -118,11 +118,7 @@ public enum TextCompressionType implements DescribedEnum {
                 return type;
             }
         }
-
-        throw new IllegalArgumentException(
-                String.format(
-                        "Invalid compression type '%s'. Supported types are: %s",
-                        value, getSupportedTypes()));
+        return NONE;
     }
 
     /**

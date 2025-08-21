@@ -41,12 +41,12 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             PositionOutputStream outputStream,
             RowType rowType,
             Options formatOptions,
-            String compression)
+            TextCompressionType compressionType)
             throws IOException {
         this.outputStream = outputStream;
         this.compressedStream =
                 TextCompression.createCompressedOutputStream(
-                        outputStream, compression, formatOptions);
+                        outputStream, compressionType, formatOptions);
         this.writer =
                 new BufferedWriter(
                         new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8));

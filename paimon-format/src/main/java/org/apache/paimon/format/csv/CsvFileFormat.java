@@ -116,11 +116,8 @@ public class CsvFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            String compressionType =
-                    TextCompression.getCompressionCodecByCompression(compression, options)
-                                    .isPresent()
-                            ? compression
-                            : TextCompressionType.NONE.value();
+            TextCompressionType compressionType =
+                    TextCompression.getTextCompressionType(compression, options);
             return new CsvFormatWriter(
                     new CloseShieldOutputStream(out), rowType, options, compressionType);
         }
