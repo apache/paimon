@@ -36,6 +36,7 @@ MANIFEST_ENTRY_SCHEMA = {
     "type": "record",
     "name": "ManifestEntry",
     "fields": [
+        {"name": "_VERSION", "type": "int"},
         {"name": "_KIND", "type": "int"},
         {"name": "_PARTITION", "type": "bytes"},
         {"name": "_BUCKET", "type": "int"},

@@ -32,7 +32,8 @@ class SchemaTestCase(unittest.TestCase):
             DataField(0, "name", AtomicType('INT'), 'desc  name'),
             DataField(1, "arr", ArrayType(True, AtomicType('INT')), 'desc arr1'),
             DataField(2, "map1",
-                      MapType(False, AtomicType('INT'), MapType(False, AtomicType('INT'), AtomicType('INT'))),
+                      MapType(False, AtomicType('INT', False),
+                              MapType(False, AtomicType('INT', False), AtomicType('INT', False))),
                       'desc map1'),
         ]
         table_schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields,

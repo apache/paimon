@@ -19,7 +19,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Union
 
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot

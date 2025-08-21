@@ -29,7 +29,7 @@ from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO

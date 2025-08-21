@@ -57,22 +57,6 @@ class TableSchema:
     comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
     time_millis: int = json_field("timeMillis", default_factory=lambda: int(time.time() * 1000))
 
-    def __init__(self, version: int, id: int, fields: List[DataField], highest_field_id: int,
-                 partition_keys: List[str], primary_keys: List[str], options: Dict[str, str],
-                 comment: Optional[str] = None, time_millis: Optional[int] = None):
-        self.version = version
-        self.id = id
-        self.fields = fields
-        self.highest_field_id = highest_field_id
-        self.partition_keys = partition_keys or []
-        self.primary_keys = primary_keys or []
-        self.options = options or {}
-        self.comment = comment
-        self.time_millis = time_millis if time_millis is not None else int(time.time() * 1000)
-        self.get_trimmed_primary_key_fields()
-
-    from typing import List
-
     def cross_partition_update(self) -> bool:
         if not self.primary_keys or not self.partition_keys:
             return False
@@ -96,7 +80,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = -1  # max(field.id for field in fields)
+        highest_field_id: int = max(field.id for field in fields)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,
@@ -106,8 +90,7 @@ class TableSchema:
             partition_keys,
             primary_keys,
             options,
-            schema.comment,
-            int(time.time())
+            schema.comment
         )
 
     @staticmethod
@@ -149,22 +132,6 @@ class TableSchema:
             raise RuntimeError(f"Missing required field in schema JSON: {e}") from e
         except Exception as e:
             raise RuntimeError(f"Failed to parse schema from JSON: {e}") from e
-
-    def to_json(self) -> str:
-        data = {
-            TableSchema.FIELD_VERSION: self.version,
-            TableSchema.FIELD_ID: self.id,
-            TableSchema.FIELD_FIELDS: [field.to_dict() for field in self.fields],
-            TableSchema.FIELD_HIGHEST_FIELD_ID: self.highest_field_id,
-            TableSchema.FIELD_PARTITION_KEYS: self.partition_keys,
-            TableSchema.FIELD_PRIMARY_KEYS: self.primary_keys,
-            TableSchema.FIELD_OPTIONS: self.options,
-            TableSchema.FIELD_COMMENT: self.comment,
-            TableSchema.FIELD_TIME_MILLIS: self.time_millis
-        }
-        if self.comment is not None:
-            data["comment"] = self.comment
-        return json.dumps(data, indent=2, ensure_ascii=False)
 
     def copy(self, new_options: Optional[Dict[str, str]] = None) -> "TableSchema":
         return TableSchema(

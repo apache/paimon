@@ -32,7 +32,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest,
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.typedef import T
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema

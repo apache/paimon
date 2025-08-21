@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import List
 
-from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.snapshot.snapshot import Snapshot
@@ -67,16 +67,15 @@ class FileStoreCommit:
 
         new_snapshot_id = self._generate_snapshot_id()
         snapshot_data = Snapshot(
-            version=3,
+            version=1,
             id=new_snapshot_id,
-            schema_id=0,
+            schema_id=self.table.table_schema.id,
             base_manifest_list=manifest_list,
             delta_manifest_list=manifest_list,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="APPEND",
             time_millis=int(time.time() * 1000),
-            log_offsets={},
         )
 
         # Generate partition statistics for the commit
@@ -102,16 +101,15 @@ class FileStoreCommit:
 
         new_snapshot_id = self._generate_snapshot_id()
         snapshot_data = Snapshot(
-            version=3,
+            version=1,
             id=new_snapshot_id,
-            schema_id=0,
+            schema_id=self.table.table_schema.id,
             base_manifest_list=manifest_list,
             delta_manifest_list=manifest_list,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="OVERWRITE",
             time_millis=int(time.time() * 1000),
-            log_offsets={},
         )
 
         # Generate partition statistics for the commit
