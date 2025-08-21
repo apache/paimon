@@ -188,7 +188,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             long schemaId = file.schemaId();
             TableSchema dataSchema = schemaManager.schema(schemaId).project(file.writeCols());
-            int[] fieldIds = dataSchema.fields().stream().mapToInt(DataField::id).toArray();
+            int[] fieldIds =
+                    rowTypeWithRowLineage(dataSchema.logicalRowType()).getFields().stream()
+                            .mapToInt(DataField::id)
+                            .toArray();
             List<DataField> readFields = new ArrayList<>();
             for (int j = 0; j < readFieldIndex.length; j++) {
                 for (int fieldId : fieldIds) {

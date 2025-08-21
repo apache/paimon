@@ -47,6 +47,10 @@ object PaimonUpdateTable
             }
 
             val relation = PaimonRelation.getPaimonRelation(u.table)
+            if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+              throw new RuntimeException(
+                "Update operation is not supported when data evolution is enabled yet.")
+            }
             UpdatePaimonTableCommand(
               relation,
               paimonTable,

@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.table.source.DataSplit;
 
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,6 +123,8 @@ public class DataEvolutionSplitReadProviderTest {
         DataFileMeta file1 = mock(DataFileMeta.class);
         DataFileMeta file2 = mock(DataFileMeta.class);
 
+        when(file1.fileSource()).thenReturn(Optional.of(FileSource.APPEND));
+        when(file2.fileSource()).thenReturn(Optional.of(FileSource.APPEND));
         when(file1.firstRowId()).thenReturn(100L);
         when(file2.firstRowId()).thenReturn(100L);
         when(split.dataFiles()).thenReturn(Arrays.asList(file1, file2));

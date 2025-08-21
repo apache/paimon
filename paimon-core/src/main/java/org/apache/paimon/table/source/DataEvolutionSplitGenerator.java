@@ -45,7 +45,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public boolean alwaysRawConvertible() {
-        return true;
+        return false;
     }
 
     @Override
@@ -57,8 +57,17 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                 file.stream().mapToLong(DataFileMeta::fileSize).sum(),
                                 openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
-                .flatMap(Collection::stream)
-                .map(SplitGroup::rawConvertibleGroup)
+                .map(
+                        f -> {
+                            boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
+                            List<DataFileMeta> groupFiles =
+                                    f.stream()
+                                            .flatMap(Collection::stream)
+                                            .collect(Collectors.toList());
+                            return rawConvertible
+                                    ? SplitGroup.rawConvertibleGroup(groupFiles)
+                                    : SplitGroup.nonRawConvertibleGroup(groupFiles);
+                        })
                 .collect(Collectors.toList());
     }
 

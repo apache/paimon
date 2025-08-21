@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.commands.MergeIntoPaimonTable
+import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
@@ -67,15 +67,27 @@ trait PaimonMergeIntoBase
           merge.notMatchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
         val alignedNotMatchedBySourceActions = resolveNotMatchedBySourceActions(merge, targetOutput)
 
-        MergeIntoPaimonTable(
-          v2Table,
-          merge.targetTable,
-          merge.sourceTable,
-          merge.mergeCondition,
-          alignedMatchedActions,
-          alignedNotMatchedActions,
-          alignedNotMatchedBySourceActions
-        )
+        if (v2Table.coreOptions.dataEvolutionEnabled()) {
+          MergeIntoPaimonDataEvolutionTable(
+            v2Table,
+            merge.targetTable,
+            merge.sourceTable,
+            merge.mergeCondition,
+            alignedMatchedActions,
+            alignedNotMatchedActions,
+            alignedNotMatchedBySourceActions
+          )
+        } else {
+          MergeIntoPaimonTable(
+            v2Table,
+            merge.targetTable,
+            merge.sourceTable,
+            merge.mergeCondition,
+            alignedMatchedActions,
+            alignedNotMatchedActions,
+            alignedNotMatchedBySourceActions
+          )
+        }
     }
   }
 

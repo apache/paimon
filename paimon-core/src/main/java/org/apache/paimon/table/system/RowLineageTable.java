@@ -30,7 +30,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -49,6 +48,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 
 /** A {@link Table} for reading row id of table. */
 public class RowLineageTable implements DataTable, ReadonlyTable {
@@ -101,7 +101,7 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        return SpecialFields.rowTypeWithRowLineage(wrapped.rowType());
+        return rowTypeWithRowLineage(wrapped.rowType());
     }
 
     @Override
