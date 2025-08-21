@@ -174,7 +174,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         // Init all we need to create a compound reader
         List<DataField> allReadFields = readRowType.getFields();
-
         RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[needMergeFiles.size()];
         int[] readFieldIndex = allReadFields.stream().mapToInt(DataField::id).toArray();
         // which row the read field index belongs to
