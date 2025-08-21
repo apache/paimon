@@ -119,11 +119,7 @@ public class CsvFileFormat extends FileFormat {
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
             return new CsvFormatWriter(
-                    new CloseShieldOutputStream(out),
-                    rowType,
-                    options,
-                    formatOptions,
-                    compression);
+                    new CloseShieldOutputStream(out), rowType, options, formatOptions, compression);
         }
     }
 }
