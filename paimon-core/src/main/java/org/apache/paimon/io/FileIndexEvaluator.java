@@ -74,6 +74,10 @@ public class FileIndexEvaluator {
                 result = predicate.evaluate(filter);
                 result.and(selection);
             } else if (topN != null) {
+                // 1. TopN cannot work with filter, because a filter may not completely filter out
+                // all records, any unfiltered records can affect the calculation results of TopN
+                // 2. evaluateTopN with selection, because we must filter out the data based on
+                // deletion vector before selecting TopN records.
                 result = predicate.evaluateTopN(topN, selection);
             } else {
                 return FileIndexResult.REMAIN;
