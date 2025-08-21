@@ -40,7 +40,6 @@ public class SimpleFileEntry implements FileEntry {
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
     @Nullable private final String externalPath;
-    private final long creationTimeEpochMillis;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -53,8 +52,7 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey,
-            @Nullable String externalPath,
-            long creationTimeEpochMillis) {
+            @Nullable String externalPath) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -66,27 +64,41 @@ public class SimpleFileEntry implements FileEntry {
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.externalPath = externalPath;
-        this.creationTimeEpochMillis = creationTimeEpochMillis;
     }
 
-    public static SimpleFileEntry from(ManifestEntry entry) {
-        return new SimpleFileEntry(
-                entry.kind(),
-                entry.partition(),
-                entry.bucket(),
-                entry.totalBuckets(),
-                entry.level(),
-                entry.fileName(),
-                entry.file().extraFiles(),
-                entry.file().embeddedIndex(),
-                entry.minKey(),
-                entry.maxKey(),
-                entry.externalPath(),
-                entry.creationTimeEpochMillis());
+    public static SimpleFileEntry from(ManifestEntry entry, boolean containsTime) {
+        return containsTime
+                ? new TimedFileEntry(
+                        entry.kind(),
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.level(),
+                        entry.fileName(),
+                        entry.file().extraFiles(),
+                        entry.file().embeddedIndex(),
+                        entry.minKey(),
+                        entry.maxKey(),
+                        entry.externalPath(),
+                        entry.file().creationTimeEpochMillis())
+                : new SimpleFileEntry(
+                        entry.kind(),
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.level(),
+                        entry.fileName(),
+                        entry.file().extraFiles(),
+                        entry.file().embeddedIndex(),
+                        entry.minKey(),
+                        entry.maxKey(),
+                        entry.externalPath());
     }
 
-    public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
-        return entries.stream().map(SimpleFileEntry::from).collect(Collectors.toList());
+    public static List<SimpleFileEntry> from(List<ManifestEntry> entries, boolean containsTime) {
+        return entries.stream()
+                .map(entry -> SimpleFileEntry.from(entry, containsTime))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -144,11 +156,6 @@ public class SimpleFileEntry implements FileEntry {
     @Override
     public List<String> extraFiles() {
         return extraFiles;
-    }
-
-    @Override
-    public long creationTimeEpochMillis() {
-        return creationTimeEpochMillis;
     }
 
     @Override

@@ -23,15 +23,13 @@ import org.apache.paimon.data.BinaryRow;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
 
-/** A {@link SimpleFileEntry} with {@link #fileSource}. */
-public class ExpireFileEntry extends SimpleFileEntry {
+/** A {@link SimpleFileEntry} with file creation time. */
+public class TimedFileEntry extends SimpleFileEntry {
 
-    @Nullable private final FileSource fileSource;
+    private final long creationTimeEpochMillis;
 
-    public ExpireFileEntry(
+    public TimedFileEntry(
             FileKind kind,
             BinaryRow partition,
             int bucket,
@@ -42,8 +40,8 @@ public class ExpireFileEntry extends SimpleFileEntry {
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey,
-            @Nullable FileSource fileSource,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            long creationTimeEpochMillis) {
         super(
                 kind,
                 partition,
@@ -56,46 +54,10 @@ public class ExpireFileEntry extends SimpleFileEntry {
                 minKey,
                 maxKey,
                 externalPath);
-        this.fileSource = fileSource;
+        this.creationTimeEpochMillis = creationTimeEpochMillis;
     }
 
-    public Optional<FileSource> fileSource() {
-        return Optional.ofNullable(fileSource);
-    }
-
-    public static ExpireFileEntry from(ManifestEntry entry) {
-        return new ExpireFileEntry(
-                entry.kind(),
-                entry.partition(),
-                entry.bucket(),
-                entry.totalBuckets(),
-                entry.level(),
-                entry.fileName(),
-                entry.file().extraFiles(),
-                entry.file().embeddedIndex(),
-                entry.minKey(),
-                entry.maxKey(),
-                entry.file().fileSource().orElse(null),
-                entry.externalPath());
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        if (!super.equals(o)) {
-            return false;
-        }
-        ExpireFileEntry that = (ExpireFileEntry) o;
-        return fileSource == that.fileSource;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(super.hashCode(), fileSource);
+    public long creationTimeEpochMillis() {
+        return creationTimeEpochMillis;
     }
 }

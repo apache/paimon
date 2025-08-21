@@ -1943,6 +1943,16 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Whether ignore empty commit.");
 
+    @ExcludeFromDocumentation(
+            "Advanced option for calling commit callbacks in FileStoreCommitImpl.")
+    public static final ConfigOption<Boolean> BASE_ENTRY_CONTAINS_TIME =
+            key("base-entry-contains-time")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, FileStoreCommitImpl will scan base entries with file creation time "
+                                    + "for commit callbacks.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2976,6 +2986,10 @@ public class CoreOptions implements Serializable {
         } else {
             return OrderType.of(clusteringStrategy);
         }
+    }
+
+    public boolean baseEntryContainsTime() {
+        return options.get(BASE_ENTRY_CONTAINS_TIME);
     }
 
     /** Specifies the merge engine for table with primary key. */

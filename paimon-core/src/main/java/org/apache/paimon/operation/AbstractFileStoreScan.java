@@ -305,12 +305,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public List<SimpleFileEntry> readSimpleEntries() {
+    public List<SimpleFileEntry> readSimpleEntries(boolean containsTime) {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        Function<List<ManifestEntry>, List<SimpleFileEntry>> converter =
+                manifestEntries -> SimpleFileEntry.from(manifestEntries, containsTime);
         Iterator<SimpleFileEntry> iterator =
                 scanMode == ScanMode.ALL
-                        ? readAndMergeFileEntries(manifests, SimpleFileEntry::from, false)
-                        : readAndNoMergeFileEntries(manifests, SimpleFileEntry::from, false);
+                        ? readAndMergeFileEntries(manifests, converter, false)
+                        : readAndNoMergeFileEntries(manifests, converter, false);
         List<SimpleFileEntry> result = new ArrayList<>();
         while (iterator.hasNext()) {
             result.add(iterator.next());

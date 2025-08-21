@@ -116,11 +116,6 @@ public class ManifestEntry implements FileEntry {
     }
 
     @Override
-    public long creationTimeEpochMillis() {
-        return file.creationTimeEpochMillis();
-    }
-
-    @Override
     public int totalBuckets() {
         return totalBuckets;
     }
