@@ -19,12 +19,13 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BaseTextCompressionUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TextCompression;
+import org.apache.paimon.format.TextCompressionType;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -71,10 +72,6 @@ public class CsvFileFormat extends FileFormat {
         for (DataType dataType : fieldTypes) {
             validateDataType(dataType);
         }
-
-        // Validate compression format
-        String compression = options.get(CsvOptions.COMPRESSION);
-        BaseTextCompressionUtils.validateCompressionFormat(compression, options);
     }
 
     private void validateDataType(DataType dataType) {
@@ -119,8 +116,13 @@ public class CsvFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
+            String compressionType =
+                    TextCompression.getCompressionCodecByCompression(compression, options)
+                                    .isPresent()
+                            ? compression
+                            : TextCompressionType.NONE.value();
             return new CsvFormatWriter(
-                    new CloseShieldOutputStream(out), rowType, options, compression);
+                    new CloseShieldOutputStream(out), rowType, options, compressionType);
         }
     }
 }

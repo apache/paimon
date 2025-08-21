@@ -68,7 +68,8 @@ public class JsonFileReader extends BaseTextFileReader {
     @Override
     protected InternalRow parseLine(String line) throws IOException {
         try {
-            return convertJsonStringToRow(line, rowType, options);
+            JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
+            return (InternalRow) convertJsonValue(jsonNode, rowType, options);
         } catch (JsonProcessingException e) {
             if (options.ignoreParseErrors()) {
                 return null;
@@ -87,12 +88,6 @@ public class JsonFileReader extends BaseTextFileReader {
     private class JsonRecordIterator extends BaseTextRecordIterator {
         // Inherits all functionality from BaseTextRecordIterator
         // No additional JSON-specific iterator logic needed
-    }
-
-    private InternalRow convertJsonStringToRow(String line, RowType rowType, JsonOptions options)
-            throws JsonProcessingException {
-        JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
-        return (InternalRow) convertJsonValue(jsonNode, rowType, options);
     }
 
     private Object convertJsonValue(JsonNode node, DataType dataType, JsonOptions options) {

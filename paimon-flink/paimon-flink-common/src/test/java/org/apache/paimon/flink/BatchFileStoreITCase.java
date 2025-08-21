@@ -69,6 +69,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("CREATE TABLE CSV (a INT, b INT, c INT) WITH ('file.format'='csv')");
         sql("INSERT INTO CSV VALUES (1, 2, 3)");
         assertThat(sql("SELECT * FROM CSV")).containsExactly(Row.of(1, 2, 3));
+
+        sql(
+                "CREATE TABLE CSV_GZIP (a INT, b INT, c INT) WITH ('file.format'='csv', 'file.compression'='gzip')");
+        sql("INSERT INTO CSV_GZIP VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM CSV_GZIP")).containsExactly(Row.of(1, 2, 3));
     }
 
     @Test
@@ -76,6 +81,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("CREATE TABLE JSON_T (a INT, b INT, c INT) WITH ('file.format'='json')");
         sql("INSERT INTO JSON_T VALUES (1, 2, 3)");
         assertThat(sql("SELECT * FROM JSON_T")).containsExactly(Row.of(1, 2, 3));
+
+        sql(
+                "CREATE TABLE JSON_GZIP (a INT, b INT, c INT) WITH ('file.format'='json', 'file.compression'='gzip')");
+        sql("INSERT INTO JSON_GZIP VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM JSON_GZIP")).containsExactly(Row.of(1, 2, 3));
     }
 
     @Test

@@ -24,6 +24,8 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TextCompression;
+import org.apache.paimon.format.TextCompressionType;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -46,7 +48,7 @@ public class JsonFileFormat extends FileFormat {
 
     public JsonFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.options = getIdentifierPrefixOptions(context.options());
+        this.options = context.options();
     }
 
     @Override
@@ -113,8 +115,13 @@ public class JsonFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
+            String compressionType =
+                    TextCompression.getCompressionCodecByCompression(compression, options)
+                                    .isPresent()
+                            ? compression
+                            : TextCompressionType.NONE.value();
             return new JsonFormatWriter(
-                    new CloseShieldOutputStream(out), rowType, options, compression);
+                    new CloseShieldOutputStream(out), rowType, options, compressionType);
         }
     }
 }

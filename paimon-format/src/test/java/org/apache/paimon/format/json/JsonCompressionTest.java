@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.csv;
+package org.apache.paimon.format.json;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.BaseCompressionTest;
@@ -28,27 +28,37 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-/** Test for CSV compression functionality. */
-class CsvCompressionTest extends BaseCompressionTest {
+/** Test for JSON compression functionality. */
+class JsonCompressionTest extends BaseCompressionTest {
 
     @Override
     protected FileFormat createFileFormat(Options options) {
-        return new CsvFileFormat(createFormatContext(options));
+        return new JsonFileFormat(createFormatContext(options));
     }
 
     @Override
     protected String getFormatExtension() {
-        return "csv";
+        return "json";
     }
 
     @Test
-    void testCompressionWithCustomOptions() throws IOException {
+    void testCompressionWithCustomJsonOptions() throws IOException {
         Options options = new Options();
-        options.set(CoreOptions.FILE_COMPRESSION, TextCompressionType.GZIP.value());
-        options.set(CsvOptions.FIELD_DELIMITER, ";");
-        options.set(CsvOptions.INCLUDE_HEADER, true);
+        options.set(CoreOptions.FILE_COMPRESSION, "gzip");
+        options.set(JsonOptions.JSON_IGNORE_PARSE_ERRORS, true);
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.DROP);
+        options.set(JsonOptions.LINE_DELIMITER, "\n");
 
-        String fileName = "test_custom_options.csv.gz";
+        String fileName = "test_custom_json_options.json.gz";
         testCompressionRoundTripWithOptions(options, fileName);
+    }
+
+    @Test
+    void testJsonCompressionWithComplexData() throws IOException {
+        // Test with complex JSON structures and different compression formats
+        testCompressionRoundTrip(TextCompressionType.GZIP.value(), "test_complex_gzip.json.gz");
+        testCompressionRoundTrip(
+                TextCompressionType.DEFLATE.value(), "test_complex_deflate.json.deflate");
+        testCompressionRoundTrip(TextCompressionType.NONE.value(), "test_complex_none.json");
     }
 }

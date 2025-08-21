@@ -45,7 +45,7 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             throws IOException {
         this.outputStream = outputStream;
         this.compressedStream =
-                BaseTextCompressionUtils.createCompressedOutputStream(
+                TextCompression.createCompressedOutputStream(
                         outputStream, compression, formatOptions);
         this.writer =
                 new BufferedWriter(

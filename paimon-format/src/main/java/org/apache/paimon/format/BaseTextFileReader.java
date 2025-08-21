@@ -49,7 +49,7 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
         this.filePath = filePath;
         this.rowType = rowType;
         this.decompressedStream =
-                BaseTextCompressionUtils.createDecompressedInputStream(
+                TextCompression.createDecompressedInputStream(
                         fileIO.newInputStream(filePath), filePath, options);
         this.bufferedReader =
                 new BufferedReader(
