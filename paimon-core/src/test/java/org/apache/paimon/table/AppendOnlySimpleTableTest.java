@@ -36,6 +36,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
@@ -68,6 +69,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
 
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -92,11 +94,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -945,36 +947,55 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             assertThat(cnt.get()).isEqualTo(rowCount);
             reader.close();
         }
+    }
 
-        // test should not push topN with dv modes
+    @Test
+    public void testLimitPushDown() throws Exception {
+        RowType rowType = RowType.builder().field("id", DataTypes.INT()).build();
+        Consumer<Options> configure =
+                options -> {
+                    options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                    options.set(WRITE_ONLY, true);
+                    options.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
+                    options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                    options.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                    options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                };
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
+
+        int rowCount = 10000;
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+        commit.close();
+
+        // test limit push down
         {
-            table.schemaManager()
-                    .commitChanges(SchemaChange.updateColumnType("price", DataTypes.INT()));
-            rowType =
-                    RowType.builder()
-                            .field("id", DataTypes.STRING())
-                            .field("event", DataTypes.STRING())
-                            .field("price", DataTypes.INT())
-                            .build();
-            Consumer<Options> newConfigure =
-                    options -> {
-                        configure.accept(options);
-                        options.set(DELETION_VECTORS_ENABLED, true);
-                    };
-            table = createUnawareBucketFileStoreTable(rowType, newConfigure);
-            DataField field = rowType.getField("price");
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
-            TableScan.Plan plan = table.newScan().plan();
+            int limit = new RandomDataGenerator().nextInt(1, 1000);
+            TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+            assertThat(plan.splits()).hasSize(1);
+
             RecordReader<InternalRow> reader =
-                    table.newRead().withTopN(topN).createReader(plan.splits());
+                    table.newRead().withLimit(limit).createReader(plan.splits());
             AtomicInteger cnt = new AtomicInteger(0);
             reader.forEachRemaining(row -> cnt.incrementAndGet());
-            assertThat(cnt.get()).isEqualTo(rowCount);
+            assertThat(cnt.get()).isEqualTo(limit);
             reader.close();
         }
     }

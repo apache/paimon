@@ -28,7 +28,7 @@ import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
-import org.apache.spark.sql.catalyst.analysis.{FunctionRegistry, UnresolvedException, UnresolvedFunction, UnresolvedFunctionName, UnresolvedIdentifier}
+import org.apache.spark.sql.catalyst.analysis.{UnresolvedException, UnresolvedFunction, UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.catalog.CatalogFunction
 import org.apache.spark.sql.catalyst.expressions.{Expression, Unevaluable}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunction, DropFunction, LogicalPlan}
@@ -68,14 +68,20 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
         if (isPaimonBuildInFunction(funcIdent)) {
           throw new UnsupportedOperationException(s"Can't drop build-in function: $funcIdent")
         }
+        // The function may be v1 function or not, anyway it can be safely deleted here.
         DropPaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, ifExists)
 
-      case DescribeFunction(
+      case d @ DescribeFunction(
             CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
             isExtended)
           // For Paimon built-in functions, Spark will resolve them by itself.
           if !isPaimonBuildInFunction(funcIdent) =>
-        DescribePaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, isExtended)
+        val function = v1FunctionCatalog.getFunction(funcIdent)
+        if (isPaimonV1Function(function)) {
+          DescribePaimonV1FunctionCommand(function, isExtended)
+        } else {
+          d
+        }
 
       // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer can resolve
       // the 'arguments' without throwing an exception, saying that function is not supported.
@@ -88,21 +94,13 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
                   if !isPaimonBuildInFunction(funcIdent) =>
                 // If the function is already registered, avoid redundant lookup in the catalog to reduce overhead.
                 if (v1FunctionCatalog.v1FunctionRegistered(funcIdent)) {
-                  UnResolvedPaimonV1Function(v1FunctionCatalog, funcIdent, None, u.arguments)
+                  UnResolvedPaimonV1Function(funcIdent, u, None)
                 } else {
-                  val function = v1FunctionCatalog.getV1Function(funcIdent)
-                  function.definition(FUNCTION_DEFINITION_NAME) match {
-                    case _: FunctionDefinition.FileFunctionDefinition =>
-                      if (u.isDistinct && u.filter.isDefined) {
-                        throw new UnsupportedOperationException(
-                          s"DISTINCT with FILTER is not supported, func name: $funcIdent")
-                      }
-                      UnResolvedPaimonV1Function(
-                        v1FunctionCatalog,
-                        funcIdent,
-                        Some(function),
-                        u.arguments)
-                    case _ => u
+                  val function = v1FunctionCatalog.getFunction(funcIdent)
+                  if (isPaimonV1Function(function)) {
+                    UnResolvedPaimonV1Function(funcIdent, u, Some(function))
+                  } else {
+                    u
                   }
                 }
               case _ => u
@@ -125,12 +123,17 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
 
     def unapply(nameParts: Seq[String]): Option[(CatalogPlugin, FunctionIdentifier)] = {
       nameParts match {
-        // Spark's built-in functions is without database name or catalog name.
-        case Seq(funName) if isSparkBuiltInFunction(FunctionIdentifier(funName)) =>
+        // Spark's built-in or tmp functions is without database name or catalog name.
+        case Seq(funName) if isSparkBuiltInOrTmpFunction(FunctionIdentifier(funName)) =>
           None
         case CatalogAndIdentifier(v1FunctionCatalog: SupportV1Function, ident)
             if v1FunctionCatalog.v1FunctionEnabled() =>
-          Some(v1FunctionCatalog, FunctionIdentifier(ident.name(), Some(ident.namespace().last)))
+          Some(
+            v1FunctionCatalog,
+            FunctionIdentifier(
+              ident.name(),
+              Some(ident.namespace().last),
+              Some(v1FunctionCatalog.name)))
         case _ =>
           None
       }
@@ -141,21 +144,31 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
     PaimonFunctions.names.contains(funcIdent.funcName)
   }
 
-  private def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
-    FunctionRegistry.builtin.functionExists(funcIdent)
+  private def isSparkBuiltInOrTmpFunction(funcIdent: FunctionIdentifier): Boolean = {
+    catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent) || catalogManager.v1SessionCatalog
+      .isTemporaryFunction(funcIdent)
+  }
+
+  private def isPaimonV1Function(fun: PaimonFunction): Boolean = {
+    fun.definition(FUNCTION_DEFINITION_NAME) match {
+      case _: FunctionDefinition.FileFunctionDefinition => true
+      case _ => false
+    }
   }
 }
 
 /** An unresolved Paimon V1 function to let Spark resolve the necessary variables. */
 case class UnResolvedPaimonV1Function(
-    v1FunctionCatalog: SupportV1Function,
     funcIdent: FunctionIdentifier,
-    func: Option[PaimonFunction],
-    arguments: Seq[Expression])
+    arguments: Seq[Expression],
+    isDistinct: Boolean,
+    filter: Option[Expression] = None,
+    ignoreNulls: Boolean = false,
+    func: Option[PaimonFunction] = None)
   extends Expression
   with Unevaluable {
 
-  override def children: Seq[Expression] = arguments
+  override def children: Seq[Expression] = arguments ++ filter.toSeq
 
   override def dataType: DataType = throw new UnresolvedException("dataType")
 
@@ -167,8 +180,27 @@ case class UnResolvedPaimonV1Function(
 
   override def prettyName: String = funcIdent.identifier
 
+  override def toString: String = {
+    val distinct = if (isDistinct) "distinct " else ""
+    s"'$prettyName($distinct${children.mkString(", ")})"
+  }
+
   override protected def withNewChildrenInternal(
       newChildren: IndexedSeq[Expression]): UnResolvedPaimonV1Function = {
-    copy(arguments = newChildren)
+    if (filter.isDefined) {
+      copy(arguments = newChildren.dropRight(1), filter = Some(newChildren.last))
+    } else {
+      copy(arguments = newChildren)
+    }
+  }
+}
+
+object UnResolvedPaimonV1Function {
+
+  def apply(
+      funcIdent: FunctionIdentifier,
+      u: UnresolvedFunction,
+      fun: Option[PaimonFunction]): UnResolvedPaimonV1Function = {
+    UnResolvedPaimonV1Function(funcIdent, u.arguments, u.isDistinct, u.filter, u.ignoreNulls, fun)
   }
 }

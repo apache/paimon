@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
@@ -102,12 +101,7 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    if (!table.isInstanceOf[AppendOnlyFileStoreTable]) {
-      return false
-    }
-
-    val coreOptions = CoreOptions.fromMap(table.options())
-    if (coreOptions.deletionVectorsEnabled()) {
+    if (!table.isInstanceOf[FileStoreTable]) {
       return false
     }
 
@@ -115,7 +109,6 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    val order = orders(0)
     val fieldName = orders.head.expression() match {
       case nr: NamedReference => nr.fieldNames.mkString(".")
       case _ => return false
@@ -129,13 +122,13 @@ class PaimonScanBuilder(table: InnerTable)
     val field = rowType.getField(fieldName)
     val ref = new FieldRef(field.id(), field.name(), field.`type`())
 
-    val nullOrdering = order.nullOrdering() match {
+    val nullOrdering = orders.head.nullOrdering() match {
       case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
       case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
       case _ => return false
     }
 
-    val direction = order.direction() match {
+    val direction = orders.head.direction() match {
       case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
       case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
       case _ => return false

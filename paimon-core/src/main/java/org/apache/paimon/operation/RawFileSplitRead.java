@@ -21,7 +21,6 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
-import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -77,7 +76,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final boolean deletionVectorsEnabled;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
@@ -85,6 +83,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
+    @Nullable private Integer limit;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -94,14 +93,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled,
-            boolean deletionVectorsEnabled) {
+            boolean rowTrackingEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
-        this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.rowTrackingEnabled = rowTrackingEnabled;
@@ -134,9 +131,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> withTopN(@Nullable TopN topN) {
-        if (!deletionVectorsEnabled) {
-            this.topN = topN;
-        }
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
+        this.limit = limit;
         return this;
     }
 
@@ -178,7 +179,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             return schema.fields();
                         },
                         filters,
-                        topN);
+                        topN,
+                        limit);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -228,6 +230,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             IOExceptionSupplier<DeletionVector> dvFactory)
             throws IOException {
         FileIndexResult fileIndexResult = null;
+        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (fileIndexReadEnabled) {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
@@ -235,8 +238,10 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             formatReaderMapping.getDataSchema(),
                             formatReaderMapping.getDataFilters(),
                             formatReaderMapping.getTopN(),
+                            formatReaderMapping.getLimit(),
                             dataFilePathFactory,
-                            file);
+                            file,
+                            deletionVector);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
@@ -245,21 +250,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         RoaringBitmap32 selection = null;
         if (fileIndexResult instanceof BitmapIndexResult) {
             selection = ((BitmapIndexResult) fileIndexResult).get();
-        }
-
-        RoaringBitmap32 deletion = null;
-        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
-        if (deletionVector instanceof BitmapDeletionVector) {
-            deletion = ((BitmapDeletionVector) deletionVector).get();
-        }
-
-        if (selection != null) {
-            if (deletion != null) {
-                selection = RoaringBitmap32.andNot(selection, deletion);
-            }
-            if (selection.isEmpty()) {
-                return new EmptyFileRecordReader<>();
-            }
         }
 
         FormatReaderContext formatReaderContext =

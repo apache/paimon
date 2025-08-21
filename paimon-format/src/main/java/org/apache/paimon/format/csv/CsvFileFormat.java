@@ -19,6 +19,7 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.BaseTextCompressionUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -56,12 +57,12 @@ public class CsvFileFormat extends FileFormat {
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, new CsvOptions(options), options);
+        return new CsvReaderFactory(projectedRowType, options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, new CsvOptions(options), options);
+        return new CsvWriterFactory(type, options);
     }
 
     @Override
@@ -73,7 +74,7 @@ public class CsvFileFormat extends FileFormat {
 
         // Validate compression format
         String compression = options.get(CsvOptions.COMPRESSION);
-        CsvCompressionUtils.validateCompressionFormat(compression, options);
+        BaseTextCompressionUtils.validateCompressionFormat(compression, options);
     }
 
     private void validateDataType(DataType dataType) {
@@ -91,6 +92,8 @@ public class CsvFileFormat extends FileFormat {
             case FLOAT:
             case DOUBLE:
             case DATE:
+            case BINARY:
+            case VARBINARY:
             case TIME_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -106,20 +109,18 @@ public class CsvFileFormat extends FileFormat {
     private static class CsvWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
-        private final CsvOptions options;
-        private final Options formatOptions;
+        private final Options options;
 
-        public CsvWriterFactory(RowType rowType, CsvOptions options, Options formatOptions) {
+        public CsvWriterFactory(RowType rowType, Options options) {
             this.rowType = rowType;
             this.options = options;
-            this.formatOptions = formatOptions;
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
             return new CsvFormatWriter(
-                    new CloseShieldOutputStream(out), rowType, options, formatOptions, compression);
+                    new CloseShieldOutputStream(out), rowType, options, compression);
         }
     }
 }

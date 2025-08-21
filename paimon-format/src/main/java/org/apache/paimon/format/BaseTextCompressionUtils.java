@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.csv;
+package org.apache.paimon.format;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -35,7 +35,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /** Utility class for handling CSV file compression and decompression using Hadoop codecs. */
-public class CsvCompressionUtils {
+public class BaseTextCompressionUtils {
 
     private static final String[] SUPPORTED_COMPRESSIONS = {
         "none", "gzip", "bzip2", "deflate", "snappy", "lz4"

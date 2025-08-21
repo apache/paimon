@@ -41,8 +41,11 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.postpone.PostponeBucketWriter;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -72,15 +75,18 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.FileMonitorTable;
 import org.apache.paimon.table.system.ReadOptimizedTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
 
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1199,6 +1205,155 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             long count =
                     expectedMap.entrySet().stream().filter(x -> x.getValue().equals(next)).count();
             assertThat(expectedCnt.get()).isEqualTo(count);
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testTopNPushDownInDeletionVectorMode() throws Exception {
+        String indexColumnName = "b";
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 1);
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
+                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("file-index.range-bitmap.columns", indexColumnName);
+                        });
+
+        int rowCount = 1000000;
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // append
+        for (int i = 0; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.INSERT, 1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // delete [0, 20000]
+        int min = 20000;
+        for (int i = 0; i < 20000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // delete (rowCount - 20000, rowCount)
+        int max = rowCount - 20000;
+        for (int i = rowCount - 20000; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        // test bottom k
+        {
+            int k = new Random().nextInt(100);
+            RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(min, min + k);
+            DataField field = table.schema().nameToFieldMap().get(indexColumnName);
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.ASCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            RoaringBitmap32 actual = new RoaringBitmap32();
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        actual.add((int) row.getLong(2));
+                    });
+            assertThat(cnt.get()).isEqualTo(k);
+            assertThat(actual).isEqualTo(bitmap);
+            reader.close();
+        }
+
+        // test top k
+        {
+            int k = new Random().nextInt(100);
+            RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(max - k, max);
+            DataField field = table.schema().nameToFieldMap().get(indexColumnName);
+            SortValue sort =
+                    new SortValue(
+                            new FieldRef(field.id(), field.name(), field.type()),
+                            SortValue.SortDirection.DESCENDING,
+                            SortValue.NullOrdering.NULLS_LAST);
+            TopN topN = new TopN(Collections.singletonList(sort), k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            RoaringBitmap32 actual = new RoaringBitmap32();
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        actual.add((int) row.getLong(2));
+                    });
+            assertThat(cnt.get()).isEqualTo(k);
+            assertThat(actual).isEqualTo(bitmap);
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testLimitPushDownInDeletionVectorMode() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 2);
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
+                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
+                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int rowCount = 10000;
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // append
+        for (int i = 0; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.INSERT, 1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // delete [0, 2000]
+        for (int i = 0; i < 2000; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // delete (rowCount - 2000, rowCount)
+        for (int i = rowCount - 2000; i < rowCount; i++) {
+            write.write(rowDataWithKind(RowKind.DELETE, 1, i, (long) i));
+        }
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        // test limit push down
+        {
+            int limit = new RandomDataGenerator().nextInt(1, 1000);
+            TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+            assertThat(plan.splits()).hasSize(1);
+
+            RecordReader<InternalRow> reader =
+                    table.newRead().withLimit(limit).createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(row -> cnt.incrementAndGet());
+            assertThat(cnt.get()).isEqualTo(limit);
             reader.close();
         }
     }

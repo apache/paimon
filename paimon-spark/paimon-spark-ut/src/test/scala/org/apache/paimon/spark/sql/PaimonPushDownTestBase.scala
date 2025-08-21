@@ -224,6 +224,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
               sql("INSERT INTO T SELECT id FROM range (1, 50000)")
               sql("DELETE FROM T WHERE id % 13 = 0")
+              Assertions.assertEquals(100, spark.sql("SELECT * FROM T LIMIT 100").count())
 
               val withoutLimit = getScanBuilder().build().asInstanceOf[PaimonScan].getOriginSplits
               assert(withoutLimit.length == 10)
@@ -341,6 +342,91 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     val qe1 = df1.queryExecution
     Assertions.assertTrue(qe1.optimizedPlan.containsPattern(SORT))
     Assertions.assertTrue(qe1.optimizedPlan.containsPattern(LIMIT))
+  }
+
+  test("Paimon pushDown: topN for primary-key tables with deletion vector") {
+    assume(gteqSpark3_3)
+    withTable("dv_test") {
+      spark.sql("""
+                  |CREATE TABLE dv_test (id INT, c1 INT, c2 STRING) TBLPROPERTIES (
+                  |'primary-key'='id',
+                  |'deletion-vectors.enabled' = 'true',
+                  |'file-index.range-bitmap.columns'='c1'
+                  |)
+                  |""".stripMargin)
+
+      spark.sql(
+        "insert into table dv_test values(1, 1, 'a'),(2, 2,'b'),(3, 3, 'c'),(4, 4, 'd'),(5, 5, 'e'),(6, NULL, 'f')")
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS FIRST LIMIT 3"),
+        Row(6, null, "f") :: Row(1, 1, "a") :: Row(2, 2, "b") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS LAST LIMIT 3"),
+        Row(1, 1, "a") :: Row(2, 2, "b") :: Row(3, 3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS FIRST LIMIT 3"),
+        Row(6, null, "f") :: Row(5, 5, "e") :: Row(4, 4, "d") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS LAST LIMIT 3"),
+        Row(5, 5, "e") :: Row(4, 4, "d") :: Row(3, 3, "c") :: Nil)
+
+      spark.sql("delete from dv_test where id IN (1, 5)")
+
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS FIRST LIMIT 3"),
+        Row(6, null, "f") :: Row(2, 2, "b") :: Row(3, 3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS LAST LIMIT 3"),
+        Row(2, 2, "b") :: Row(3, 3, "c") :: Row(4, 4, "d") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS FIRST LIMIT 3"),
+        Row(6, null, "f") :: Row(4, 4, "d") :: Row(3, 3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS LAST LIMIT 3"),
+        Row(4, 4, "d") :: Row(3, 3, "c") :: Row(2, 2, "b") :: Nil)
+    }
+  }
+
+  test("Paimon pushDown: topN for append-only tables with deletion vector") {
+    assume(gteqSpark3_3)
+    withTable("dv_test") {
+      spark.sql("""
+                  |CREATE TABLE dv_test (c1 INT, c2 STRING) TBLPROPERTIES (
+                  |'deletion-vectors.enabled' = 'true',
+                  |'file-index.range-bitmap.columns'='c1'
+                  |)
+                  |""".stripMargin)
+
+      spark.sql(
+        "insert into table dv_test values(1, 'a'),(2, 'b'),(3, 'c'),(4, 'd'),(5, 'e'),(NULL, 'f')")
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS FIRST LIMIT 3"),
+        Row(null, "f") :: Row(1, "a") :: Row(2, "b") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS LAST LIMIT 3"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS FIRST LIMIT 3"),
+        Row(null, "f") :: Row(5, "e") :: Row(4, "d") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS LAST LIMIT 3"),
+        Row(5, "e") :: Row(4, "d") :: Row(3, "c") :: Nil)
+
+      spark.sql("delete from dv_test where c1 IN (1, 5)")
+
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS FIRST LIMIT 3"),
+        Row(null, "f") :: Row(2, "b") :: Row(3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 ASC NULLS LAST LIMIT 3"),
+        Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS FIRST LIMIT 3"),
+        Row(null, "f") :: Row(4, "d") :: Row(3, "c") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY c1 DESC NULLS LAST LIMIT 3"),
+        Row(4, "d") :: Row(3, "c") :: Row(2, "b") :: Nil)
+    }
   }
 
   test(s"Paimon pushdown: parquet in-filter") {

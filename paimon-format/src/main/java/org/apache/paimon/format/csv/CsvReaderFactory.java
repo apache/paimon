@@ -30,18 +30,15 @@ import java.io.IOException;
 public class CsvReaderFactory implements FormatReaderFactory {
 
     private final RowType rowType;
-    private final CsvOptions options;
-    private final Options formatOptions;
+    private final Options options;
 
-    public CsvReaderFactory(RowType rowType, CsvOptions options, Options formatOptions) {
+    public CsvReaderFactory(RowType rowType, Options options) {
         this.rowType = rowType;
         this.options = options;
-        this.formatOptions = formatOptions;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(
-                context.fileIO(), context.filePath(), rowType, options, formatOptions);
+        return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
     }
 }

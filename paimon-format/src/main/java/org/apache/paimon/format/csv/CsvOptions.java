@@ -26,39 +26,40 @@ import org.apache.paimon.options.Options;
 public class CsvOptions {
 
     public static final ConfigOption<String> FIELD_DELIMITER =
-            ConfigOptions.key("field-delimiter")
+            ConfigOptions.key("csv.field-delimiter")
                     .stringType()
                     .defaultValue(",")
+                    .withFallbackKeys("field-delimiter")
                     .withDescription("The field delimiter for CSV or TXT format");
 
     public static final ConfigOption<String> LINE_DELIMITER =
-            ConfigOptions.key("line-delimiter")
+            ConfigOptions.key("csv.line-delimiter")
                     .stringType()
                     .defaultValue("\n")
                     .withDescription("The line delimiter for CSV format");
 
     public static final ConfigOption<String> QUOTE_CHARACTER =
-            ConfigOptions.key("quote-character")
+            ConfigOptions.key("csv.quote-character")
                     .stringType()
                     .defaultValue("\"")
                     .withDescription("The quote character for CSV format");
 
     public static final ConfigOption<String> ESCAPE_CHARACTER =
-            ConfigOptions.key("escape-character")
+            ConfigOptions.key("csv.escape-character")
                     .stringType()
                     .defaultValue("\\")
                     .withDescription("The escape character for CSV format");
 
     public static final ConfigOption<Boolean> INCLUDE_HEADER =
-            ConfigOptions.key("include-header")
+            ConfigOptions.key("csv.include-header")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to include header in CSV files");
 
     public static final ConfigOption<String> NULL_LITERAL =
-            ConfigOptions.key("null-literal")
+            ConfigOptions.key("csv.null-literal")
                     .stringType()
-                    .defaultValue("null")
+                    .defaultValue("")
                     .withDescription("The literal for null values in CSV format");
 
     public static final ConfigOption<String> COMPRESSION =

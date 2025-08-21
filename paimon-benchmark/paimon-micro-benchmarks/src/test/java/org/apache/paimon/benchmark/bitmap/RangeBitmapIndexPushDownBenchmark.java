@@ -55,6 +55,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -92,6 +93,41 @@ public class RangeBitmapIndexPushDownBenchmark {
 
             // benchmark TopN
             benchmarkTopN(tables, bound, 1);
+        }
+    }
+
+    @Test
+    public void testLimitPushDown() throws Exception {
+        Random random = new Random();
+        for (int bound : BOUNDS) {
+            Table table = prepareData(bound, parquet(), "parquet_" + bound);
+            Benchmark benchmark =
+                    new Benchmark("limit", ROW_COUNT)
+                            .setNumWarmupIters(1)
+                            .setOutputPerIteration(false);
+            int limit = random.nextInt(Math.min(bound, 1000));
+            benchmark.addCase(
+                    bound + "-" + limit,
+                    1,
+                    () -> {
+                        List<Split> splits =
+                                table.newReadBuilder().withLimit(limit).newScan().plan().splits();
+                        AtomicLong readCount = new AtomicLong(0);
+                        try {
+                            for (Split split : splits) {
+                                RecordReader<InternalRow> reader =
+                                        table.newReadBuilder()
+                                                .withLimit(limit)
+                                                .newRead()
+                                                .createReader(split);
+                                reader.forEachRemaining(row -> readCount.incrementAndGet());
+                                reader.close();
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+            benchmark.run();
         }
     }
 

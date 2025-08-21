@@ -23,9 +23,7 @@ import org.apache.paimon.function.Function;
 import org.apache.spark.sql.catalyst.FunctionIdentifier;
 import org.apache.spark.sql.catalyst.catalog.CatalogFunction;
 import org.apache.spark.sql.catalyst.expressions.Expression;
-
-import scala.Option;
-import scala.collection.Seq;
+import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function;
 
 /** Catalog supports v1 function. */
 public interface SupportV1Function extends WithPaimonCatalog {
@@ -33,7 +31,7 @@ public interface SupportV1Function extends WithPaimonCatalog {
     boolean v1FunctionEnabled();
 
     /** Look up the function in the catalog. */
-    Function getV1Function(FunctionIdentifier funcIdent) throws Exception;
+    Function getFunction(FunctionIdentifier funcIdent) throws Exception;
 
     void createV1Function(CatalogFunction v1Function, boolean ignoreIfExists) throws Exception;
 
@@ -43,8 +41,8 @@ public interface SupportV1Function extends WithPaimonCatalog {
      * Register the function and resolves it to an Expression if not registered, otherwise returns
      * the registered Expression.
      */
-    Expression registerAndResolveV1Function(
-            FunctionIdentifier funcIdent, Option<Function> func, Seq<Expression> arguments);
+    Expression registerAndResolveV1Function(UnResolvedPaimonV1Function unresolvedV1Function)
+            throws Exception;
 
     /** Unregister the func first, then drop it. */
     void dropV1Function(FunctionIdentifier funcIdent, boolean ifExists) throws Exception;

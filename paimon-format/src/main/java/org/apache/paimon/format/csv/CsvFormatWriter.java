@@ -21,55 +21,35 @@ package org.apache.paimon.format.csv;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.BaseTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV format writer implementation. */
-public class CsvFormatWriter implements FormatWriter {
+public class CsvFormatWriter extends BaseTextFileWriter {
 
+    private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
     // Performance optimization: Cache frequently used cast executors
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>(32);
 
-    private final RowType rowType;
     private final CsvOptions csvOptions;
-
-    private final BufferedWriter writer;
-    private final PositionOutputStream outputStream;
-    private final OutputStream compressedStream;
     private boolean headerWritten = false;
-
     private final StringBuilder stringBuilder;
 
     public CsvFormatWriter(
-            PositionOutputStream out,
-            RowType rowType,
-            CsvOptions csvOptions,
-            Options formatOptions,
-            String compression)
+            PositionOutputStream out, RowType rowType, Options options, String compression)
             throws IOException {
-        this.rowType = rowType;
-        this.csvOptions = csvOptions;
-        this.outputStream = out;
-
-        // Create compressed stream using Hadoop codecs if compression is specified
-        this.compressedStream =
-                CsvCompressionUtils.createCompressedOutputStream(out, compression, formatOptions);
-        this.writer =
-                new BufferedWriter(
-                        new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8));
+        super(out, rowType, options, compression);
+        this.csvOptions = new CsvOptions(options);
         this.stringBuilder = new StringBuilder();
     }
 
@@ -98,24 +78,6 @@ public class CsvFormatWriter implements FormatWriter {
         stringBuilder.append(csvOptions.lineDelimiter());
 
         writer.write(stringBuilder.toString());
-    }
-
-    @Override
-    public void close() throws IOException {
-        writer.flush();
-        writer.close();
-        // Close the compressed stream if it's different from the output stream
-        if (compressedStream != outputStream) {
-            compressedStream.close();
-        }
-    }
-
-    @Override
-    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (suggestedCheck) {
-            return outputStream.getPos() >= targetSize;
-        }
-        return false;
     }
 
     private void writeHeader() throws IOException {
@@ -173,6 +135,9 @@ public class CsvFormatWriter implements FormatWriter {
             case CHAR:
             case VARCHAR:
                 return value.toString();
+            case BINARY:
+            case VARBINARY:
+                return BASE64_ENCODER.encodeToString((byte[]) value);
             default:
                 return useCachedStringCastExecutor(value, dataType);
         }
