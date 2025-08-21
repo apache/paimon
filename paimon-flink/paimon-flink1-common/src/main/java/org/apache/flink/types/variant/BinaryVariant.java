@@ -29,4 +29,12 @@ package org.apache.flink.types.variant;
  */
 public class BinaryVariant implements Variant {
     public BinaryVariant(byte[] value, byte[] metadata) {}
+
+    public byte[] getValue() {
+        throw new UnsupportedOperationException();
+    }
+
+    public byte[] getMetadata() {
+        throw new UnsupportedOperationException();
+    }
 }

@@ -31,8 +31,11 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.variant.Variant;
+import org.apache.flink.types.variant.VariantBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledIf;
 
 import javax.annotation.Nonnull;
 
@@ -1217,6 +1220,24 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(row.getField(4)).isIn(33L, 45L);
         assertThat(row.getField(5)).isEqualTo(1L);
         assertThat(row.getField(6)).isNotNull();
+    }
+
+    @Test
+    @EnabledIf("isFlink2_1OrAbove")
+    void testReadWriteVariant() {
+        sql("CREATE TABLE t (v VARIANT)");
+
+        sql(
+                "INSERT INTO t SELECT PARSE_JSON(s) FROM (VALUES ('{\"a\":1}'), ('{\"a\":2}'), ('\"hello\"')) AS T(s)");
+
+        List<Row> rows = sql("SELECT * FROM t");
+
+        VariantBuilder builder = Variant.newBuilder();
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(builder.object().add("a", builder.of((byte) 1)).build()),
+                        Row.of(builder.object().add("a", builder.of((byte) 2)).build()),
+                        Row.of(builder.of("hello")));
     }
 
     private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {
