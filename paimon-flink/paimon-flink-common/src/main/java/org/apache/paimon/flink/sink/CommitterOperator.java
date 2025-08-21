@@ -57,7 +57,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
      * checkpoint is not enabled we need to commit remaining data in {@link
      * CommitterOperator#endInput}.
      */
-    private final boolean streamingCheckpointEnabled;
+    protected final boolean streamingCheckpointEnabled;
 
     /** Whether to check the parallelism while runtime. */
     private final boolean forceSingleParallelism;
