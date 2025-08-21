@@ -94,7 +94,7 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
             written = newWritten;
         }
 
-        boolean enableCompaction = !table.coreOptions().writeOnly();
+        boolean enableCompaction = !table.coreOptions().writeOnly() && !table.coreOptions().dataEvolutionEnabled();
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()
