@@ -62,6 +62,10 @@ public class Levels {
                                 // file with larger sequence number should be in front
                                 return Long.compare(b.maxSequenceNumber(), a.maxSequenceNumber());
                             } else {
+                                // When two or more jobs are writing the same merge tree, it is
+                                // possible that multiple files have the same maxSequenceNumber. In
+                                // this case we have to compare their file names so that files with
+                                // same maxSequenceNumber won't be "de-duplicated" by the tree set.
                                 int minSeqCompare =
                                         Long.compare(a.minSequenceNumber(), b.minSequenceNumber());
                                 if (minSeqCompare != 0) {
