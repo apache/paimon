@@ -214,6 +214,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
               |ON t.id = s.id
               |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
               |""".stripMargin)
+
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 1), Row(3, 3, 3, 1, 1))
@@ -239,6 +240,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
               |WHEN MATCHED THEN UPDATE SET t.b = s.b
               |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
               |""".stripMargin)
+        checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))

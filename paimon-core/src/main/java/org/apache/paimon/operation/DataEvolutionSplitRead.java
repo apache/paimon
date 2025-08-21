@@ -131,7 +131,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         List<List<DataFileMeta>> splitByRowId = DataEvolutionSplitGenerator.split(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
-            if (needMergeFiles.size() == 1) {
+            if (needMergeFiles.size() == 1 || readRowType.getFields().isEmpty()) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
                         () ->
