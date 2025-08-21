@@ -23,11 +23,9 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.BaseTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
@@ -36,18 +34,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
-import javax.annotation.Nullable;
-
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV file reader implementation. */
-public class CsvFileReader implements FileRecordReader<InternalRow> {
+public class CsvFileReader extends BaseTextFileReader {
 
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final CsvMapper CSV_MAPPER = new CsvMapper();
@@ -56,20 +49,13 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>(32);
 
-    private final RowType rowType;
     private final CsvOptions options;
-    private final Path filePath;
     private final CsvSchema schema;
-    private final BufferedReader bufferedReader;
-    private final CsvRecordIterator reader;
-
     private boolean headerSkipped = false;
-    private boolean readerClosed = false;
 
     public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, CsvOptions options)
             throws IOException {
-        this.rowType = rowType;
-        this.filePath = filePath;
+        super(fileIO, filePath, rowType);
         this.options = options;
         this.schema =
                 CsvSchema.emptySchema()
@@ -79,76 +65,30 @@ public class CsvFileReader implements FileRecordReader<InternalRow> {
         if (!options.includeHeader()) {
             this.schema.withoutHeader();
         }
-        SeekableInputStream inputStream = fileIO.newInputStream(filePath);
-        reader = new CsvRecordIterator();
-        InputStreamReader inputStreamReader =
-                new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        this.bufferedReader = new BufferedReader(inputStreamReader);
     }
 
     @Override
-    @Nullable
-    public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        if (readerClosed) {
-            return null;
-        }
+    protected BaseTextRecordIterator createRecordIterator() {
+        return new CsvRecordIterator();
+    }
 
+    @Override
+    protected InternalRow parseLine(String line) throws IOException {
+        return parseCsvLine(line, schema);
+    }
+
+    @Override
+    protected void setupReading() throws IOException {
         // Skip header if needed
         if (options.includeHeader() && !headerSkipped) {
             bufferedReader.readLine();
             headerSkipped = true;
         }
-        if (reader.end) {
-            return null;
-        }
-        return reader;
     }
 
-    @Override
-    public void close() throws IOException {
-        if (!readerClosed && bufferedReader != null) {
-            bufferedReader.close();
-            readerClosed = true;
-        }
-    }
-
-    private class CsvRecordIterator implements FileRecordIterator<InternalRow> {
-
-        private boolean batchRead = false;
-        private long currentPosition = 0;
-        boolean end = false;
-
-        @Override
-        @Nullable
-        public InternalRow next() throws IOException {
-            if (batchRead || readerClosed) {
-                return null;
-            }
-            String nextLine = bufferedReader.readLine();
-            if (nextLine == null) {
-                batchRead = true;
-                end = true;
-                return null;
-            }
-
-            currentPosition++;
-            return parseCsvLine(nextLine, schema);
-        }
-
-        @Override
-        public void releaseBatch() {
-            // No resources to release for CSV
-        }
-
-        @Override
-        public long returnedPosition() {
-            return currentPosition - 1; // Return position of last returned row
-        }
-
-        @Override
-        public Path filePath() {
-            return filePath;
-        }
+    private class CsvRecordIterator extends BaseTextRecordIterator {
+        // Inherits all functionality from BaseTextRecordIterator
+        // No additional CSV-specific iterator logic needed
     }
 
     protected static String[] parseCsvLineToArray(String line, CsvSchema schema)

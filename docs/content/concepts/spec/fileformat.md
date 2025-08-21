@@ -496,4 +496,134 @@ The following table lists the type mapping from Paimon type to CSV type.
 
 Experimental feature, not recommended for production.
 
-TODO
+Format Options:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left" style="width: 25%">Option</th>
+        <th class="text-center" style="width: 7%">Default</th>
+        <th class="text-center" style="width: 10%">Type</th>
+        <th class="text-center" style="width: 42%">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>json.ignore-parse-errors</h5></td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Whether to ignore parse errors for JSON format. Skip fields and rows with parse errors instead of failing. Fields are set to null in case of errors.</td>
+    </tr>
+    <tr>
+      <td><h5>json.map-null-key-mode</h5></td>
+      <td style="word-wrap: break-word;"><code>FAIL</code></td>
+      <td>String</td>
+      <td>How to handle map keys that are null. Currently supported values are <code>'FAIL'</code>, <code>'DROP'</code> and <code>'LITERAL'</code>:
+      <ul>
+      <li>Option <code>'FAIL'</code> will throw exception when encountering map with null key.</li>
+      <li>Option <code>'DROP'</code> will drop null key entries for map.</li>
+      <li>Option <code>'LITERAL'</code> will replace null key with string literal. The string literal is defined by <code>json.map-null-key-literal</code> option.</li>
+      </ul>
+      </td>
+    </tr>
+    <tr>
+      <td><h5>json.map-null-key-literal</h5></td>
+      <td style="word-wrap: break-word;"><code>null</code></td>
+      <td>String</td>
+      <td>Literal to use for null map keys when <code>json.map-null-key-mode</code> is LITERAL.</td>
+    </tr>
+    <tr>
+      <td><h5>json.line-delimiter</h5></td>
+      <td style="word-wrap: break-word;"><code>\n</code></td>
+      <td>String</td>
+      <td>The line delimiter for JSON format.</td>
+    </tr>
+    </tbody>
+</table>
+
+Paimon JSON format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate JSON string.
+
+The following table lists the type mapping from Paimon type to JSON type.
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Paimon type</th>
+        <th class="text-left">JSON type</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>CHAR / VARCHAR / STRING</code></td>
+      <td><code>string</code></td>
+    </tr>
+    <tr>
+      <td><code>BOOLEAN</code></td>
+      <td><code>boolean</code></td>
+    </tr>
+    <tr>
+      <td><code>BINARY / VARBINARY</code></td>
+      <td><code>string with encoding: base64</code></td>
+    </tr>
+    <tr>
+      <td><code>DECIMAL</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>TINYINT</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>SMALLINT</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>INT</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>BIGINT</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>FLOAT</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>DOUBLE</code></td>
+      <td><code>number</code></td>
+    </tr>
+    <tr>
+      <td><code>DATE</code></td>
+      <td><code>string with format: date</code></td>
+    </tr>
+    <tr>
+      <td><code>TIME</code></td>
+      <td><code>string with format: time</code></td>
+    </tr>
+    <tr>
+      <td><code>TIMESTAMP</code></td>
+      <td><code>string with format: date-time</code></td>
+    </tr>
+    <tr>
+      <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
+      <td><code>string with format: date-time (with UTC time zone)</code></td>
+    </tr>
+    <tr>
+      <td><code>ARRAY</code></td>
+      <td><code>array</code></td>
+    </tr>
+    <tr>
+      <td><code>MAP</code></td>
+      <td><code>object</code></td>
+    </tr>
+    <tr>
+      <td><code>MULTISET</code></td>
+      <td><code>object</code></td>
+    </tr>
+    <tr>
+      <td><code>ROW</code></td>
+      <td><code>object</code></td>
+    </tr>
+    </tbody>
+</table>
