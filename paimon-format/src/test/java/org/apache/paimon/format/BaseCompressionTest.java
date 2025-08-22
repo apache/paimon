@@ -72,7 +72,7 @@ public abstract class BaseCompressionTest {
     protected abstract String getFormatExtension();
 
     @Test
-    void testCompression() throws IOException {
+    void testCompression() {
         compressionTypes.forEach(
                 compression -> {
                     try {
@@ -88,9 +88,16 @@ public abstract class BaseCompressionTest {
     }
 
     @Test
-    void testCompressionDetectionFromFileName() throws IOException {
-        // Test that compression is automatically detected from file extension during read
-        // operations
+    void testCompressionInitFail() throws IOException {
+        CompressionType compression = CompressionType.SNAPPY;
+        testCompressionRoundTrip(
+                compression.value(),
+                String.format(
+                        "test_compress.%s.%s", getFormatExtension(), compression.fileExtension()));
+    }
+
+    @Test
+    void testCompressionDetectionFromFileName() {
         compressionTypes.forEach(
                 compression -> {
                     try {

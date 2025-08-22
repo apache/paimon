@@ -21,6 +21,10 @@ package org.apache.paimon.format;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.apache.paimon.options.description.TextElement.text;
 
 /** Compression types supported by Paimon file formats. */
@@ -62,6 +66,20 @@ public enum CompressionType implements DescribedEnum {
     private final String fileExtension;
     private final String description;
 
+    private static final Set<String> SUPPORTED_EXTENSIONS;
+
+    static {
+        Set<String> extensions = new HashSet<>();
+        for (CompressionType type : CompressionType.values()) {
+            if (type != CompressionType.NONE
+                    && type.fileExtension() != null
+                    && !type.fileExtension().isEmpty()) {
+                extensions.add(type.fileExtension().toLowerCase());
+            }
+        }
+        SUPPORTED_EXTENSIONS = Collections.unmodifiableSet(extensions);
+    }
+
     CompressionType(String value, String description, String className, String fileExtension) {
         this.value = value;
         this.description = description;
@@ -83,31 +101,14 @@ public enum CompressionType implements DescribedEnum {
         return value;
     }
 
-    /**
-     * Maps compression type to Hadoop codec class name.
-     *
-     * @return Hadoop codec class name or null if not supported
-     */
     public String hadoopCodecClassName() {
         return className;
     }
 
-    /**
-     * Gets file extension for the compression type.
-     *
-     * @return file extension or null for no compression
-     */
     public String fileExtension() {
         return fileExtension;
     }
 
-    /**
-     * Get CompressionType from string value.
-     *
-     * @param value the string value
-     * @return the corresponding CompressionType
-     * @throws IllegalArgumentException if the value is not supported
-     */
     public static CompressionType fromValue(String value) {
         if (value == null || value.isEmpty()) {
             return NONE;
@@ -121,7 +122,16 @@ public enum CompressionType implements DescribedEnum {
         return NONE;
     }
 
-    public static String getFileExtension(String compression) {
-        return CompressionType.fromValue(compression).fileExtension();
+    /**
+     * Check if the given extension is a supported compression extension.
+     *
+     * @param extension the file extension to check
+     * @return true if the extension is a supported compression extension, false otherwise
+     */
+    public static boolean isSupportedExtension(String extension) {
+        if (extension == null || extension.isEmpty()) {
+            return false;
+        }
+        return SUPPORTED_EXTENSIONS.contains(extension.toLowerCase());
     }
 }

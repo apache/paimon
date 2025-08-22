@@ -638,7 +638,7 @@ public class SparkWriteITCase {
         Assertions.assertEquals(4, files.size());
 
         String defaultExtension = "." + "parquet";
-        String newExtension = "." + "zstd" + "." + "parquet";
+        String newExtension = "." + "zst" + "." + "parquet";
         // two data files end with ".parquet", two data file end with ".zstd.parquet"
         Assertions.assertEquals(
                 2,
@@ -682,7 +682,7 @@ public class SparkWriteITCase {
                         .filter(name -> name.contains("changelog-"))
                         .collect(Collectors.toList());
         String defaultExtension = "." + "parquet";
-        String newExtension = "." + "zstd" + "." + "parquet";
+        String newExtension = "." + "zst" + "." + "parquet";
         // one changelog file end with ".parquet", one changelog file end with ".zstd.parquet"
         Assertions.assertEquals(
                 1,

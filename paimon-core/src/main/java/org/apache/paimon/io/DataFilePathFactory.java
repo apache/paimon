@@ -90,8 +90,13 @@ public class DataFilePathFactory {
     private String newFileName(String prefix) {
         String extension;
         if (fileSuffixIncludeCompression) {
-            String compressionExtension = CompressionType.getFileExtension(fileCompression);
-            extension = "." + compressionExtension + "." + formatIdentifier;
+            String compressionExtension =
+                    CompressionType.fromValue(fileCompression).fileExtension();
+            if (isTextFormat(formatIdentifier)) {
+                extension = "." + formatIdentifier + "." + compressionExtension;
+            } else {
+                extension = "." + compressionExtension + "." + formatIdentifier;
+            }
         } else {
             extension = "." + formatIdentifier;
         }
@@ -164,7 +169,19 @@ public class DataFilePathFactory {
             throw new IllegalArgumentException(fileName + " is not a legal file name.");
         }
 
-        return fileName.substring(index + 1);
+        String extension = fileName.substring(index + 1);
+        if (CompressionType.isSupportedExtension(extension)) {
+            int secondLastDot = fileName.lastIndexOf('.', index - 1);
+            if (secondLastDot != -1) {
+                String formatIdentifier = fileName.substring(secondLastDot + 1, index);
+                // If the format is json or csv, return that instead of the compression extension
+                if (isTextFormat(formatIdentifier)) {
+                    return formatIdentifier;
+                }
+            }
+        }
+
+        return extension;
     }
 
     public boolean isExternalPath() {
@@ -174,5 +191,10 @@ public class DataFilePathFactory {
     @VisibleForTesting
     String uuid() {
         return uuid;
+    }
+
+    private static boolean isTextFormat(String formatIdentifier) {
+        return "json".equalsIgnoreCase(formatIdentifier)
+                || "csv".equalsIgnoreCase(formatIdentifier);
     }
 }

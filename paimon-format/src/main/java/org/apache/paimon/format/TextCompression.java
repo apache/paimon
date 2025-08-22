@@ -28,6 +28,8 @@ import org.apache.paimon.utils.HadoopUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,6 +39,7 @@ import java.util.Optional;
 /** Utility class for handling text file compression and decompression using Hadoop codecs. */
 public class TextCompression {
 
+    private static final Logger LOG = LoggerFactory.getLogger(TextCompression.class);
     /**
      * Creates a compressed output stream using Hadoop's compression codecs.
      *
@@ -85,7 +88,8 @@ public class TextCompression {
             if (codecOpt.isPresent()) {
                 return codecOpt.get().createInputStream(inputStream);
             }
-        } catch (Exception ignore) {
+        } catch (Throwable e) {
+            LOG.warn("Failed to create decompressed for input stream, so use none", e);
         }
         return inputStream;
     }
@@ -128,12 +132,13 @@ public class TextCompression {
                     try {
                         codec.createOutputStream(new java.io.ByteArrayOutputStream());
                         return Optional.of(codec);
-                    } catch (Exception ignored) {
-                        return Optional.empty();
+                    } catch (Throwable e) {
+                        LOG.warn("Failed to create compression, so use none", e);
                     }
                 }
             }
-        } catch (Exception ignore) {
+        } catch (Throwable e) {
+            LOG.warn("Failed to create compression, so use none", e);
         }
         return Optional.empty();
     }
