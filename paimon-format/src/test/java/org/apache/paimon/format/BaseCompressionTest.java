@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base class for compression tests across different file formats. */
 public abstract class BaseCompressionTest {
@@ -90,10 +91,14 @@ public abstract class BaseCompressionTest {
     @Test
     void testCompressionInitFail() throws IOException {
         CompressionType compression = CompressionType.SNAPPY;
-        testCompressionRoundTrip(
-                compression.value(),
-                String.format(
-                        "test_compress.%s.%s", getFormatExtension(), compression.fileExtension()));
+        assertThrows(
+                IOException.class,
+                () ->
+                        testCompressionRoundTrip(
+                                compression.value(),
+                                String.format(
+                                        "test_compress.%s.%s",
+                                        getFormatExtension(), compression.fileExtension())));
     }
 
     @Test

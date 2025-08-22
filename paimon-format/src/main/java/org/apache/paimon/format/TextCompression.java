@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -69,7 +68,7 @@ public class TextCompression {
      * @return Decompressed input stream
      */
     public static InputStream createDecompressedInputStream(
-            SeekableInputStream inputStream, Path filePath, Options options) {
+            SeekableInputStream inputStream, Path filePath, Options options) throws IOException {
         try {
             Configuration conf = HadoopUtils.getHadoopConfiguration(options);
             CompressionCodecFactory codecFactory = new CompressionCodecFactory(conf);
@@ -78,20 +77,13 @@ public class TextCompression {
                     Optional.ofNullable(
                             codecFactory.getCodec(
                                     new org.apache.hadoop.fs.Path(filePath.toString())));
-
-            if (!codecOpt.isPresent()) {
-                CompressionType compressionType =
-                        TextCompression.getTextCompressionType(
-                                options.get(CoreOptions.FILE_COMPRESSION), options);
-                codecOpt = getCompressionCodecByCompression(compressionType, options);
-            }
             if (codecOpt.isPresent()) {
                 return codecOpt.get().createInputStream(inputStream);
             }
+            return inputStream;
         } catch (Throwable e) {
-            LOG.warn("Failed to create decompressed input stream, so use none", e);
+            throw new IOException("Failed to create decompression stream", e);
         }
-        return inputStream;
     }
 
     public static CompressionType getTextCompressionType(String compression, Options options) {

@@ -89,14 +89,14 @@ public class DataFilePathFactory {
 
     private String newFileName(String prefix) {
         String extension;
-        if (fileSuffixIncludeCompression) {
+        if (isTextFormat(formatIdentifier)) {
             String compressionExtension =
                     CompressionType.fromValue(fileCompression).fileExtension();
-            if (isTextFormat(formatIdentifier)) {
-                extension = "." + formatIdentifier + "." + compressionExtension;
-            } else {
-                extension = "." + compressionExtension + "." + formatIdentifier;
-            }
+            extension = "." + formatIdentifier + "." + compressionExtension;
+        } else if (fileSuffixIncludeCompression) {
+            String compressionExtension =
+                    CompressionType.fromValue(fileCompression).fileExtension();
+            extension = "." + compressionExtension + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
