@@ -1020,12 +1020,18 @@ public class IcebergCompatibilityTest {
     }
 
     /*
-    Create a snapshot and tag
+    Create a snapshot and tag t1
+    Verify t1 in Iceberg
     Delete Iceberg metadata
-    Commit again and verify that Iceberg metadata and tags are created
+    Create a snapshot
+    Verify Iceberg tags are empty
+    Create a snapshot and tag t5
+    Create a snapshot
+    Only t5 should be visible in Iceberg
      */
     @Test
-    public void testTagsCreateMetadataWithoutBase() throws Exception {
+    public void testTagsAreOnlyAddedToIcebergDuringCommitCallbackIfSnapshotExistsInIceberg()
+            throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
@@ -1042,7 +1048,8 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
 
         String tagV1 = "v1";
-        table.createTag(tagV1, 1);
+        long tagV1SnapshotId = 1;
+        table.createTag(tagV1, tagV1SnapshotId);
 
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
@@ -1055,11 +1062,11 @@ public class IcebergCompatibilityTest {
                 .containsExactlyInAnyOrder(
                         "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
 
+        // Verify tag
         Map<String, IcebergRef> refs =
                 getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
-
         assertThat(refs.size() == 1).isTrue();
-        assertThat(refs.get(tagV1).snapshotId() == 1).isTrue();
+        assertThat(refs.get(tagV1).snapshotId() == tagV1SnapshotId).isTrue();
 
         assertThat(
                         getIcebergResult(
@@ -1078,10 +1085,35 @@ public class IcebergCompatibilityTest {
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
 
-        Map<String, IcebergRef> refsAfterMetadataDelete =
-                getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
-        assertThat(refsAfterMetadataDelete.size() == 1).isTrue();
-        assertThat(refsAfterMetadataDelete.get(tagV1).snapshotId() == 1).isTrue();
+        refs = getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+        assertThat(refs.size() == 0).isTrue();
+
+        String tagV5 = "v5";
+        long tagV5SnapshotId = 5;
+        table.createTag(tagV5, tagV5SnapshotId);
+
+        write.write(GenericRow.of(6, 60));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(6, write.prepareCommit(true, 4));
+
+        refs = getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+        assertThat(refs.size() == 1).isTrue();
+        assertThat(refs.get(tagV5).snapshotId() == tagV5SnapshotId).isTrue();
+
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable)
+                                                .useSnapshot(
+                                                        icebergTable.refs().get(tagV5).snapshotId())
+                                                .build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)");
     }
 
     private Map<String, IcebergRef> getIcebergRefsFromSnapshot(
