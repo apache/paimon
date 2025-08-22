@@ -617,14 +617,20 @@ public abstract class CatalogTestBase {
                             .createWriterFactory(table.rowType());
             Map<String, String> partitionSpec = null;
             if (partitioned) {
-                Path partitionPath = new Path(table.location(), "dt=" + partitionValue);
-                Path diffPartitionPath = new Path(table.location(), "dt=" + 11);
+                Path partitionPath =
+                        new Path(
+                                String.format(
+                                        "%s/%s/%s",
+                                        table.location(), "dt=" + partitionValue, "data"));
+                Path diffPartitionPath =
+                        new Path(String.format("%s/%s/%s", table.location(), "dt=" + 11, "data"));
                 write(factory, partitionPath, datas);
                 write(factory, diffPartitionPath, dataWithDiffPartition);
                 partitionSpec = new HashMap<>();
                 partitionSpec.put("dt", "" + partitionValue);
             } else {
-                write(factory, new Path(table.location()), datas);
+                Path filePath = new Path(table.location(), "data");
+                write(factory, filePath, datas);
             }
             List<InternalRow> readData = read(table, null, partitionSpec);
 
@@ -651,7 +657,7 @@ public abstract class CatalogTestBase {
         if (factory instanceof SupportsDirectWrite) {
             writer = ((SupportsDirectWrite) factory).create(fileIO, file, "gzip");
         } else {
-            out = fileIO.newOutputStream(file, false);
+            out = fileIO.newOutputStream(file, true);
             writer = factory.create(out, "gzip");
         }
         for (InternalRow row : rows) {
