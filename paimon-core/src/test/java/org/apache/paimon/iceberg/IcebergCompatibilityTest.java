@@ -875,7 +875,7 @@ public class IcebergCompatibilityTest {
         table.createTag(tagV3, 3);
 
         long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-        Map<String, IcebergRef> refs = getRefsFromSnapshot(table, latestSnapshotId);
+        Map<String, IcebergRef> refs = getIcebergRefsFromSnapshot(table, latestSnapshotId);
 
         assertThat(refs.size() == 2).isTrue();
 
@@ -907,7 +907,8 @@ public class IcebergCompatibilityTest {
 
         table.deleteTag(tagV1);
 
-        Map<String, IcebergRef> refsAfterDelete = getRefsFromSnapshot(table, latestSnapshotId);
+        Map<String, IcebergRef> refsAfterDelete =
+                getIcebergRefsFromSnapshot(table, latestSnapshotId);
 
         assertThat(refsAfterDelete.size() == 1).isTrue();
         assertThat(refsAfterDelete.get(tagV3).snapshotId() == latestSnapshotId).isTrue();
@@ -922,6 +923,97 @@ public class IcebergCompatibilityTest {
                                 Record::toString))
                 .containsExactlyInAnyOrder(
                         "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        write.close();
+        commit.close();
+    }
+
+    // Create snapshots and Iceberg metadata
+    // Delete Iceberg metadata
+    // Create tag - this should not create any metadata file
+    // Delete tag - this should not create any metadata file
+    @Test
+    public void testTagCallbackTakesNoActionIfIcebergMetadataDoesNotExist() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // Delete Iceberg metadata
+        Path metadataPath = new Path(table.location(), "metadata");
+        table.fileIO().deleteDirectoryQuietly(metadataPath);
+
+        assertThat(table.fileIO().listFiles(metadataPath, false).length == 0);
+
+        String tagV1 = "v1";
+        table.createTag(tagV1, 1);
+
+        assertThat(table.fileIO().listFiles(metadataPath, false).length == 0);
+
+        table.deleteTag(tagV1);
+
+        assertThat(table.fileIO().listFiles(metadataPath, false).length == 0);
+
+        write.close();
+        commit.close();
+    }
+
+    // Create snapshots and Iceberg metadata
+    // Delete Iceberg metadata
+    // Create a snapshot to create Iceberg metadata
+    // Create tag on a snapshot that does not exist in Iceberg - this should not add a tag.
+    @Test
+    public void testTagCallbackDoesNotAddTagIfSnapshotDoesNotExistInIceberg() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Delete Iceberg metadata
+        Path metadataPath = new Path(table.location(), "metadata");
+        table.fileIO().deleteDirectoryQuietly(metadataPath);
+
+        write.write(GenericRow.of(3, 30));
+        write.write(GenericRow.of(4, 40));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        String tagV1 = "v1";
+        long tagV1SnapshotId = 1;
+        table.createTag(tagV1, tagV1SnapshotId);
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+
+        assertThat(
+                        getIcebergRefsFromSnapshot(
+                                                table, table.snapshotManager().latestSnapshotId())
+                                        .size()
+                                == 0)
+                .isTrue();
 
         write.close();
         commit.close();
@@ -964,7 +1056,7 @@ public class IcebergCompatibilityTest {
                         "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
 
         Map<String, IcebergRef> refs =
-                getRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+                getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
 
         assertThat(refs.size() == 1).isTrue();
         assertThat(refs.get(tagV1).snapshotId() == 1).isTrue();
@@ -987,12 +1079,13 @@ public class IcebergCompatibilityTest {
         commit.commit(4, write.prepareCommit(true, 4));
 
         Map<String, IcebergRef> refsAfterMetadataDelete =
-                getRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
+                getIcebergRefsFromSnapshot(table, table.snapshotManager().latestSnapshotId());
         assertThat(refsAfterMetadataDelete.size() == 1).isTrue();
         assertThat(refsAfterMetadataDelete.get(tagV1).snapshotId() == 1).isTrue();
     }
 
-    private Map<String, IcebergRef> getRefsFromSnapshot(FileStoreTable table, long snapshotId) {
+    private Map<String, IcebergRef> getIcebergRefsFromSnapshot(
+            FileStoreTable table, long snapshotId) {
         return IcebergMetadata.fromPath(
                         table.fileIO(),
                         new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"))

@@ -1030,6 +1030,24 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             IcebergMetadata baseMetadata =
                     IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
 
+            // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
+            // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
+            boolean tagSnapshotInIceberg = false;
+            for (IcebergSnapshot snapshot : baseMetadata.snapshots()) {
+                if (snapshot.snapshotId() == snapshotId) {
+                    tagSnapshotInIceberg = true;
+                    break;
+                }
+            }
+
+            if (!tagSnapshotInIceberg) {
+                LOG.info(
+                        "Snapshot {} does not exist in Iceberg metadata. Unable to create tag {}.",
+                        snapshotId,
+                        tagName);
+                return;
+            }
+
             baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
 
             IcebergMetadata metadata =
