@@ -89,7 +89,7 @@ public class TextCompression {
                 return codecOpt.get().createInputStream(inputStream);
             }
         } catch (Throwable e) {
-            LOG.warn("Failed to create decompressed for input stream, so use none", e);
+            LOG.warn("Failed to create decompressed input stream, so use none", e);
         }
         return inputStream;
     }

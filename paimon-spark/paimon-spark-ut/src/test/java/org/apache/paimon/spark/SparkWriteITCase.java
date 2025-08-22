@@ -639,7 +639,7 @@ public class SparkWriteITCase {
 
         String defaultExtension = "." + "parquet";
         String newExtension = "." + "zst" + "." + "parquet";
-        // two data files end with ".parquet", two data file end with ".zstd.parquet"
+        // two data files end with ".parquet", two data file end with ".zst.parquet"
         Assertions.assertEquals(
                 2,
                 files.stream()
@@ -683,7 +683,7 @@ public class SparkWriteITCase {
                         .collect(Collectors.toList());
         String defaultExtension = "." + "parquet";
         String newExtension = "." + "zst" + "." + "parquet";
-        // one changelog file end with ".parquet", one changelog file end with ".zstd.parquet"
+        // one changelog file end with ".parquet", one changelog file end with ".zst.parquet"
         Assertions.assertEquals(
                 1,
                 files.stream()

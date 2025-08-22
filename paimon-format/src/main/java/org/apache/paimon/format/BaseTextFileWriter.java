@@ -33,7 +33,6 @@ import java.nio.charset.StandardCharsets;
 public abstract class BaseTextFileWriter implements FormatWriter {
 
     protected final PositionOutputStream outputStream;
-    private final OutputStream compressedStream;
     protected final BufferedWriter writer;
     protected final RowType rowType;
 
@@ -44,14 +43,13 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             CompressionType compressionType)
             throws IOException {
         this.outputStream = outputStream;
-        this.compressedStream =
+        OutputStream compressedStream =
                 TextCompression.createCompressedOutputStream(
                         outputStream, compressionType, formatOptions);
-        int bufferSize = getOptimalBufferSize(compressionType);
         this.writer =
                 new BufferedWriter(
                         new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8),
-                        bufferSize);
+                        getOptimalBufferSize(compressionType));
         this.rowType = rowType;
     }
 
