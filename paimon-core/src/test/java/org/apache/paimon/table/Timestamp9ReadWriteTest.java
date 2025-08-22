@@ -35,6 +35,7 @@ import java.time.format.DateTimeFormatter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Test for timestamp 9 read write. */
 public class Timestamp9ReadWriteTest extends TableTestBase {
 
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
