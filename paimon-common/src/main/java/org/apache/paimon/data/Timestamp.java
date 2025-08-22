@@ -60,7 +60,7 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     private final int nanoOfMillisecond;
 
     private Timestamp(long millisecond, int nanoOfMillisecond) {
-        Preconditions.checkArgument(nanoOfMillisecond >= 0 && nanoOfMillisecond <= 999_999);
+        Preconditions.checkArgument(nanoOfMillisecond <= 999_999);
         this.millisecond = millisecond;
         this.nanoOfMillisecond = nanoOfMillisecond;
     }
