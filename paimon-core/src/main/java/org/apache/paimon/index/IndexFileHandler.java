@@ -153,18 +153,10 @@ public class IndexFileHandler {
 
     public List<IndexManifestEntry> scanEntries(
             Snapshot snapshot, String indexType, Set<BinaryRow> partitions) {
-        if (snapshot == null) {
-            return Collections.emptyList();
-        }
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return Collections.emptyList();
-        }
-
+        List<IndexManifestEntry> manifestEntries = scan(snapshot, indexType);
         List<IndexManifestEntry> result = new ArrayList<>();
-        for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
-            if (file.indexFile().indexType().equals(indexType)
-                    && partitions.contains(file.partition())) {
+        for (IndexManifestEntry file : manifestEntries) {
+            if (partitions.contains(file.partition())) {
                 result.add(file);
             }
         }
