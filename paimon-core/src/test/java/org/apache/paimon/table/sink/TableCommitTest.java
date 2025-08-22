@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -29,6 +30,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.manifest.TimedFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -80,6 +82,58 @@ public class TableCommitTest {
     @Test
     public void testCommitCallbackWithFailureDynamicBucket() throws Exception {
         innerTestCommitCallbackWithFailure(-1);
+    }
+
+    @Test
+    public void testCommitCallbackWithBaseEntryContainsTime() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        conf.set(CoreOptions.COMMIT_CALLBACKS, TimedFileEntryTestCallback.class.getName());
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                conf.toMap(),
+                                ""));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // base
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        write.write(GenericRow.of(1, 1000L));
+        List<CommitMessage> messages = write.prepareCommit(true, 0);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0L, messages);
+        commit.close();
+
+        write.write(GenericRow.of(2, 2000L));
+        messages = write.prepareCommit(true, 1);
+
+        commit = table.newCommit(commitUser);
+        commit.baseEntryContainsTime(true);
+        commit.commit(1L, messages);
+        commit.close();
+
+        assertThat(TimedFileEntryTestCallback.containsTimedFileEntry).isTrue();
     }
 
     private void innerTestCommitCallbackWithFailure(int bucket) throws Exception {
@@ -196,6 +250,32 @@ public class TableCommitTest {
         public void retry(ManifestCommittable committable) {
             commitCallbackResult.get(testId).add(committable.identifier());
         }
+
+        @Override
+        public void close() throws Exception {}
+    }
+
+    /** {@link CommitCallback} for testing TimedFileEntry. */
+    public static class TimedFileEntryTestCallback implements CommitCallback {
+
+        public static boolean containsTimedFileEntry = false;
+
+        @Override
+        public void call(
+                List<SimpleFileEntry> baseFiles,
+                List<ManifestEntry> deltaFiles,
+                List<IndexManifestEntry> indexFiles,
+                Snapshot snapshot) {
+            for (SimpleFileEntry entry : baseFiles) {
+                if (entry instanceof TimedFileEntry) {
+                    containsTimedFileEntry = true;
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void retry(ManifestCommittable committable) {}
 
         @Override
         public void close() throws Exception {}

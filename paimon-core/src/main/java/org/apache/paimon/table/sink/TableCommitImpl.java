@@ -163,6 +163,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl baseEntryContainsTime(boolean baseEntryContainsTime) {
+        commit.baseEntryContainsTime(baseEntryContainsTime);
+        return this;
+    }
+
+    @Override
     public void commit(List<CommitMessage> commitMessages) {
         checkCommitted();
         commit(COMMIT_IDENTIFIER, commitMessages);

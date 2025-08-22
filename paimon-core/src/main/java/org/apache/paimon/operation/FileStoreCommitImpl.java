@@ -151,11 +151,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
-    private final boolean baseEntryContainsTime;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     @Nullable private PartitionExpire partitionExpire;
+    private boolean baseEntryContainsTime;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -188,8 +188,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitMinRetryWait,
             long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot,
-            boolean rowTrackingEnabled,
-            boolean baseEntryContainsTime) {
+            boolean rowTrackingEnabled) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -233,7 +232,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
-        this.baseEntryContainsTime = baseEntryContainsTime;
+        this.baseEntryContainsTime = false;
     }
 
     @Override
@@ -245,6 +244,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire) {
         this.partitionExpire = partitionExpire;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit baseEntryContainsTime(boolean baseEntryContainsTime) {
+        this.baseEntryContainsTime = baseEntryContainsTime;
         return this;
     }
 
