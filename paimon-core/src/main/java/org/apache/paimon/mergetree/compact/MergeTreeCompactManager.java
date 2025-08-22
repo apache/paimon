@@ -26,7 +26,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -63,7 +63,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final CompactRewriter rewriter;
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
-    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
     private final boolean forceRewriteAllFiles;
@@ -79,7 +79,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             int numSortedRunStopTrigger,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire,

@@ -20,7 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
@@ -177,10 +177,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
         }
-        DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
+        BucketedDvMaintainer.Factory dvMaintainerFactory = null;
         if (options.deletionVectorsEnabled()) {
-            deletionVectorsMaintainerFactory =
-                    new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
+            dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
         return new KeyValueFileStoreWrite(
                 fileIO,
@@ -199,7 +198,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 snapshotManager(),
                 newScan(),
                 indexFactory,
-                deletionVectorsMaintainerFactory,
+                dvMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
                 tableName);

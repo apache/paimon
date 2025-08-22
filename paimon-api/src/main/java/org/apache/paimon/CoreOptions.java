@@ -2863,7 +2863,7 @@ public class CoreOptions implements Serializable {
         return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
     }
 
-    public MemorySize deletionVectorIndexFileTargetSize() {
+    public MemorySize dvIndexFileTargetSize() {
         return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
     }
 

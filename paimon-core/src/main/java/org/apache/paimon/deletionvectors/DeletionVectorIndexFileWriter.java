@@ -45,12 +45,29 @@ public class DeletionVectorIndexFileWriter {
     }
 
     /**
-     * For unaware-bucket mode, this method will write out multiple index files, else, it will write
-     * out only one index file.
+     * The deletion file of the bucketed table is updated according to the bucket. If a compaction
+     * occurs and there is no longer a deletion file, an empty deletion file needs to be generated
+     * to overwrite the old file.
+     *
+     * <p>TODO: We can consider sending a message to delete the deletion file in the future.
      */
-    public List<IndexFileMeta> write(Map<String, DeletionVector> input) throws IOException {
+    public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
+
+        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
+        try {
+            for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {
+                writer.write(entry.getKey(), entry.getValue());
+            }
+        } finally {
+            writer.close();
+        }
+        return writer.result();
+    }
+
+    public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input)
+            throws IOException {
         if (input.isEmpty()) {
-            return emptyIndexFile();
+            return Collections.emptyList();
         }
         List<IndexFileMeta> result = new ArrayList<>();
         Iterator<Map.Entry<String, DeletionVector>> iterator = input.entrySet().iterator();
@@ -75,18 +92,5 @@ public class DeletionVectorIndexFileWriter {
             writer.close();
         }
         return writer.result();
-    }
-
-    /**
-     * The deletion file of the bucketed table is updated according to the bucket. If a compaction
-     * occurs and there is no longer a deletion file, an empty deletion file needs to be generated
-     * to overwrite the old file.
-     *
-     * <p>TODO: We can consider sending a message to delete the deletion file in the future.
-     */
-    private List<IndexFileMeta> emptyIndexFile() throws IOException {
-        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
-        writer.close();
-        return Collections.singletonList(writer.result());
     }
 }

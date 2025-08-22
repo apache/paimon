@@ -31,14 +31,14 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Maintainer of deletionVectors index. */
-public class DeletionVectorsMaintainer {
+public class BucketedDvMaintainer {
 
     private final IndexFileHandler indexFileHandler;
     private final Map<String, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
 
-    private DeletionVectorsMaintainer(
+    private BucketedDvMaintainer(
             IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
         this.indexFileHandler = fileHandler;
         this.deletionVectors = deletionVectors;
@@ -108,15 +108,16 @@ public class DeletionVectorsMaintainer {
     /**
      * Write new deletion vectors index file if any modifications have been made.
      *
-     * @return A list containing the metadata of the deletion vectors index file, or an empty list
-     *     if no changes need to be committed.
+     * @return None if no modifications have been made, otherwise the new deletion vectors index
+     *     file.
      */
-    public List<IndexFileMeta> writeDeletionVectorsIndex() {
+    public Optional<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
-            return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
+            return Optional.of(
+                    indexFileHandler.deletionVectorsIndex().writeSingleFile(deletionVectors));
         }
-        return Collections.emptyList();
+        return Optional.empty();
     }
 
     /**
@@ -147,12 +148,12 @@ public class DeletionVectorsMaintainer {
         return new Factory(handler);
     }
 
-    /** Factory to restore {@link DeletionVectorsMaintainer}. */
+    /** Factory to restore {@link BucketedDvMaintainer}. */
     public static class Factory {
 
         private final IndexFileHandler handler;
 
-        public Factory(IndexFileHandler handler) {
+        private Factory(IndexFileHandler handler) {
             this.handler = handler;
         }
 
@@ -160,7 +161,7 @@ public class DeletionVectorsMaintainer {
             return handler;
         }
 
-        public DeletionVectorsMaintainer create(@Nullable List<IndexFileMeta> restoredFiles) {
+        public BucketedDvMaintainer create(@Nullable List<IndexFileMeta> restoredFiles) {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
@@ -169,12 +170,12 @@ public class DeletionVectorsMaintainer {
             return create(deletionVectors);
         }
 
-        public DeletionVectorsMaintainer create() {
+        public BucketedDvMaintainer create() {
             return create(new HashMap<>());
         }
 
-        public DeletionVectorsMaintainer create(Map<String, DeletionVector> deletionVectors) {
-            return new DeletionVectorsMaintainer(handler, deletionVectors);
+        public BucketedDvMaintainer create(Map<String, DeletionVector> deletionVectors) {
+            return new BucketedDvMaintainer(handler, deletionVectors);
         }
     }
 }

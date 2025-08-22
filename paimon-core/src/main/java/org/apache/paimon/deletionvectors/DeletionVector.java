@@ -149,7 +149,7 @@ public interface DeletionVector extends DeletionVectorJudger {
         return fileName -> Optional.empty();
     }
 
-    static Factory factory(@Nullable DeletionVectorsMaintainer dvMaintainer) {
+    static Factory factory(@Nullable BucketedDvMaintainer dvMaintainer) {
         if (dvMaintainer == null) {
             return emptyFactory();
         }

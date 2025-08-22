@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -56,7 +56,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     private final LookupLevels<T> lookupLevels;
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
     private final boolean noSequenceField;
-    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final IntFunction<String> level2FileFormat;
 
     public LookupMergeTreeCompactRewriter(
@@ -71,7 +71,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             CoreOptions options) {
         super(
                 maxLevel,
@@ -156,7 +156,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<T> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer);
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer);
     }
 
     /** A normal {@link MergeFunctionWrapperFactory} to create lookup wrapper. */
@@ -181,7 +181,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<T> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
             return new LookupChangelogMergeFunctionWrapper<>(
                     mfFactory,
                     key -> {
@@ -207,7 +207,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<Boolean> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
             return new FirstRowMergeFunctionWrapper(
                     mfFactory,
                     key -> {
