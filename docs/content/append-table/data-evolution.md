@@ -47,24 +47,37 @@ To enable data evolution, you must enable row-tracking and set the `row-tracking
 Use Spark Sql as an example:
 
 ```sql
-CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES (
+CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
-)
+);
+
+INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
 ```
 
 Now we could only support spark 'MERGE INTO' statement to update partial columns.
 
 ```sql
-MERGE INTO t
-USING s
+CREATE TABLE source_table (id INT, b INT);
+INSERT INTO source_table VALUES (1, 11), (2, 22), (3, 33);
+
+MERGE INTO target_table AS t
+USING source_table AS s
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET t.b = s.b
-WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 0);
+
+SELECT * FROM my_table;
++----+----+----+
+| id | b  | c  |
++----+----+----+
+| 1  | 11 | 1  |
+| 2  | 22 | 2  |
+| 3  | 33 | 0  |
 ```
 
-This statement updates only the `b` column in the target table `t` based on the matching records from the source table
-`s`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values.
+This statement updates only the `b` column in the target table `target_table` based on the matching records from the source table
+`source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values.
 
 Note that: 
 * Data Evolution Table does not support 'Delete' statement yet.
