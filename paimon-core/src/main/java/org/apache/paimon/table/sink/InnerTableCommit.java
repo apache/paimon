@@ -51,9 +51,10 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
     InnerTableCommit withMetricRegistry(MetricRegistry registry);
 
     /**
-     * TableCommit will read base entries from previous snapshot. By default, the base entries will
-     * be {@link SimpleFileEntry}s To save memory usage. But in some cases, the {@link
-     * CommitCallback}s need the base entries with file creation time.
+     * TableCommit will read base entries from previous snapshot when commit COMPACT and {@link
+     * CommitCallback} will use them. By default, the base entries will be {@link SimpleFileEntry}s
+     * to save memory usage. But in some cases, the {@link CommitCallback}s need the base entries
+     * with file creation time.
      */
     InnerTableCommit baseEntryContainsTime(boolean baseEntryContainsTime);
 }
