@@ -106,7 +106,7 @@ abstract class PaimonBaseScan(
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
-    val paimonMetrics = Array(
+    Array(
       PaimonNumSplitMetric(),
       PaimonSplitSizeMetric(),
       PaimonAvgSplitSizeMetric(),
@@ -115,7 +115,6 @@ abstract class PaimonBaseScan(
       PaimonSkippedTableFilesMetric(),
       PaimonResultedTableFilesMetric()
     )
-    super.supportedCustomMetrics() ++ paimonMetrics
   }
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {

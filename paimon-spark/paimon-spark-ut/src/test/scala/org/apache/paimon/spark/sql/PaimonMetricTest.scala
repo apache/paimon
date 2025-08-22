@@ -18,14 +18,18 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SKIPPED_TABLE_FILES}
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.util.ScanPlanHelper
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.junit.jupiter.api.Assertions
 
-class PaimonMetricTest extends PaimonSparkTestBase {
+class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
 
   test(s"Paimon Metric: scan driver metric") {
     // Spark support reportDriverMetrics since Spark 3.4
@@ -58,6 +62,26 @@ class PaimonMetricTest extends PaimonSparkTestBase {
       sql("CALL sys.compact(table => 'T', partitions => 'pt=\"p2\"')")
       checkMetrics(s"SELECT * FROM T", 0, 2)
       checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 1, 1)
+    }
+  }
+
+  test(s"Paimon Metric: split scan driver metric") {
+    // Spark support reportDriverMetrics since Spark 3.4
+    if (gteqSpark3_4) {
+      sql("CREATE TABLE T (id INT, name STRING)")
+      sql(s"INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+      sql(s"INSERT INTO T VALUES (3, 'c')")
+
+      val splits = getPaimonScan("SELECT * FROM T").getOriginSplits.map(_.asInstanceOf[DataSplit])
+      val df = createDataset(spark, createNewScanPlan(splits, createRelationV2("T")))
+      val scan = df.queryExecution.optimizedPlan
+        .collectFirst { case relation: DataSourceV2ScanRelation => relation }
+        .get
+        .scan
+        .asInstanceOf[PaimonSplitScan]
+
+      val metrics = scan.reportDriverMetrics()
+      assert(metric(metrics, RESULTED_TABLE_FILES) == 3)
     }
   }
 

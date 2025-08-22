@@ -37,15 +37,15 @@ trait ScanPlanHelper extends SQLConfHelper {
   def createNewScanPlan(
       dataSplits: Seq[DataSplit],
       relation: DataSourceV2Relation,
-      condition: Option[Expression] = None): LogicalPlan = {
-    val newRelation = createNewPlan(dataSplits, relation)
+      condition: Option[Expression]): LogicalPlan = {
+    val newRelation = createNewScanPlan(dataSplits, relation)
     condition match {
       case Some(c) if c != TrueLiteral => Filter(c, newRelation)
       case _ => newRelation
     }
   }
 
-  def createNewPlan(
+  def createNewScanPlan(
       dataSplits: Seq[DataSplit],
       relation: DataSourceV2Relation): DataSourceV2Relation = {
     relation.table match {
