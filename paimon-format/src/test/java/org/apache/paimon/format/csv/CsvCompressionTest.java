@@ -20,8 +20,8 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.BaseCompressionTest;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TextCompressionType;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -44,7 +44,7 @@ class CsvCompressionTest extends BaseCompressionTest {
     @Test
     void testCompressionWithCustomOptions() throws IOException {
         Options options = new Options();
-        options.set(CoreOptions.FILE_COMPRESSION, TextCompressionType.GZIP.value());
+        options.set(CoreOptions.FILE_COMPRESSION, CompressionType.GZIP.value());
         options.set(CsvOptions.FIELD_DELIMITER, ";");
         options.set(CsvOptions.INCLUDE_HEADER, true);
 

@@ -41,15 +41,17 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             PositionOutputStream outputStream,
             RowType rowType,
             Options formatOptions,
-            TextCompressionType compressionType)
+            CompressionType compressionType)
             throws IOException {
         this.outputStream = outputStream;
         this.compressedStream =
                 TextCompression.createCompressedOutputStream(
                         outputStream, compressionType, formatOptions);
+        int bufferSize = getOptimalBufferSize(compressionType);
         this.writer =
                 new BufferedWriter(
-                        new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8));
+                        new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8),
+                        bufferSize);
         this.rowType = rowType;
     }
 
@@ -73,5 +75,22 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             return outputStream.getPos() >= targetSize;
         }
         return false;
+    }
+
+    private int getOptimalBufferSize(CompressionType compressionType) {
+        switch (compressionType) {
+            case GZIP:
+            case DEFLATE:
+                return 65536; // 64KB for deflate-based compression
+            case SNAPPY:
+            case LZ4:
+                return 131072; // 128KB for fast compression
+            case ZSTD:
+                return 262144; // 256KB for high compression ratio
+            case BZIP2:
+                return 65536; // 64KB for bzip2
+            default:
+                return 65536; // Default 64KB buffer size
+        }
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
@@ -89,7 +90,8 @@ public class DataFilePathFactory {
     private String newFileName(String prefix) {
         String extension;
         if (fileSuffixIncludeCompression) {
-            extension = "." + fileCompression + "." + formatIdentifier;
+            String compressionExtension = CompressionType.getFileExtension(fileCompression);
+            extension = "." + compressionExtension + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }

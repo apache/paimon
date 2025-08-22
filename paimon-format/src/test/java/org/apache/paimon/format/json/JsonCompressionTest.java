@@ -20,8 +20,8 @@ package org.apache.paimon.format.json;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.BaseCompressionTest;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TextCompressionType;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -56,9 +56,9 @@ class JsonCompressionTest extends BaseCompressionTest {
     @Test
     void testJsonCompressionWithComplexData() throws IOException {
         // Test with complex JSON structures and different compression formats
-        testCompressionRoundTrip(TextCompressionType.GZIP.value(), "test_complex_gzip.json.gz");
+        testCompressionRoundTrip(CompressionType.GZIP.value(), "test_complex_gzip.json.gz");
         testCompressionRoundTrip(
-                TextCompressionType.DEFLATE.value(), "test_complex_deflate.json.deflate");
-        testCompressionRoundTrip(TextCompressionType.NONE.value(), "test_complex_none.json");
+                CompressionType.DEFLATE.value(), "test_complex_deflate.json.deflate");
+        testCompressionRoundTrip(CompressionType.NONE.value(), "test_complex_none.json");
     }
 }

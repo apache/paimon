@@ -47,7 +47,7 @@ public class TextCompression {
      * @throws IOException If compression stream creation fails
      */
     public static OutputStream createCompressedOutputStream(
-            PositionOutputStream out, TextCompressionType compression, Options options)
+            PositionOutputStream out, CompressionType compression, Options options)
             throws IOException {
         Optional<CompressionCodec> codecOpt =
                 getCompressionCodecByCompression(compression, options);
@@ -77,7 +77,7 @@ public class TextCompression {
                                     new org.apache.hadoop.fs.Path(filePath.toString())));
 
             if (!codecOpt.isPresent()) {
-                TextCompressionType compressionType =
+                CompressionType compressionType =
                         TextCompression.getTextCompressionType(
                                 options.get(CoreOptions.FILE_COMPRESSION), options);
                 codecOpt = getCompressionCodecByCompression(compressionType, options);
@@ -90,14 +90,14 @@ public class TextCompression {
         return inputStream;
     }
 
-    public static TextCompressionType getTextCompressionType(String compression, Options options) {
-        TextCompressionType compressionType = TextCompressionType.fromValue(compression);
+    public static CompressionType getTextCompressionType(String compression, Options options) {
+        CompressionType compressionType = CompressionType.fromValue(compression);
         Optional<CompressionCodec> codecOpt =
                 getCompressionCodecByCompression(compressionType, options);
         if (codecOpt.isPresent()) {
-            return TextCompressionType.fromValue(compression);
+            return CompressionType.fromValue(compression);
         }
-        return TextCompressionType.NONE;
+        return CompressionType.NONE;
     }
 
     /**
@@ -108,8 +108,8 @@ public class TextCompression {
      * @return Optional CompressionCodec instance
      */
     public static Optional<CompressionCodec> getCompressionCodecByCompression(
-            TextCompressionType compressionType, Options options) {
-        if (compressionType == null || TextCompressionType.NONE == compressionType) {
+            CompressionType compressionType, Options options) {
+        if (compressionType == null || CompressionType.NONE == compressionType) {
             return Optional.empty();
         }
 

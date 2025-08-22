@@ -57,13 +57,13 @@ public abstract class BaseCompressionTest {
                     GenericRow.of(3, BinaryString.fromString("Charlie"), 300.25, true),
                     GenericRow.of(4, BinaryString.fromString("Diana"), 400.0, false));
 
-    private List<TextCompressionType> compressionTypes =
+    private List<CompressionType> compressionTypes =
             Arrays.asList(
-                    TextCompressionType.NONE,
-                    TextCompressionType.GZIP,
-                    TextCompressionType.BZIP2,
-                    TextCompressionType.DEFLATE,
-                    TextCompressionType.ZSTD);
+                    CompressionType.NONE,
+                    CompressionType.GZIP,
+                    CompressionType.BZIP2,
+                    CompressionType.DEFLATE,
+                    CompressionType.ZSTD);
 
     /** Returns the file format for testing. */
     protected abstract FileFormat createFileFormat(Options options);

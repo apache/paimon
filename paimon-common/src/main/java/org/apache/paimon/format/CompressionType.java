@@ -24,7 +24,7 @@ import org.apache.paimon.options.description.InlineElement;
 import static org.apache.paimon.options.description.TextElement.text;
 
 /** Compression types supported by Paimon file formats. */
-public enum TextCompressionType implements DescribedEnum {
+public enum CompressionType implements DescribedEnum {
     NONE("none", "No compression.", null, ""),
     GZIP(
             "gzip",
@@ -62,7 +62,7 @@ public enum TextCompressionType implements DescribedEnum {
     private final String fileExtension;
     private final String description;
 
-    TextCompressionType(String value, String description, String className, String fileExtension) {
+    CompressionType(String value, String description, String className, String fileExtension) {
         this.value = value;
         this.description = description;
         this.className = className;
@@ -108,12 +108,12 @@ public enum TextCompressionType implements DescribedEnum {
      * @return the corresponding CompressionType
      * @throws IllegalArgumentException if the value is not supported
      */
-    public static TextCompressionType fromValue(String value) {
+    public static CompressionType fromValue(String value) {
         if (value == null || value.isEmpty()) {
             return NONE;
         }
 
-        for (TextCompressionType type : TextCompressionType.values()) {
+        for (CompressionType type : CompressionType.values()) {
             if (type.value.equalsIgnoreCase(value)) {
                 return type;
             }
@@ -121,19 +121,7 @@ public enum TextCompressionType implements DescribedEnum {
         return NONE;
     }
 
-    /**
-     * Get all supported compression types as a comma-separated string.
-     *
-     * @return comma-separated string of supported types
-     */
-    public static String getSupportedTypes() {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < TextCompressionType.values().length; i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(TextCompressionType.values()[i].value);
-        }
-        return sb.toString();
+    public static String getFileExtension(String compression) {
+        return CompressionType.fromValue(compression).fileExtension();
     }
 }
