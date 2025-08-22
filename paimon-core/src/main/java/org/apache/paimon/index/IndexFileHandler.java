@@ -94,23 +94,32 @@ public class IndexFileHandler {
         if (indexManifest == null) {
             return Collections.emptyMap();
         }
-        Map<String, DeletionFile> result = new HashMap<>();
+        List<IndexManifestEntry> manifests = new ArrayList<>();
         for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
             IndexFileMeta meta = file.indexFile();
             if (meta.indexType().equals(DELETION_VECTORS_INDEX)
                     && file.partition().equals(partition)
                     && file.bucket() == bucket) {
-                LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
-                checkNotNull(dvMetas);
-                for (DeletionVectorMeta dvMeta : dvMetas.values()) {
-                    result.put(
-                            dvMeta.dataFileName(),
-                            new DeletionFile(
-                                    filePath(meta).toString(),
-                                    dvMeta.offset(),
-                                    dvMeta.length(),
-                                    dvMeta.cardinality()));
-                }
+                manifests.add(file);
+            }
+        }
+        return scanDVIndex(manifests);
+    }
+
+    public Map<String, DeletionFile> scanDVIndex(List<IndexManifestEntry> manifests) {
+        Map<String, DeletionFile> result = new HashMap<>();
+        for (IndexManifestEntry file : manifests) {
+            IndexFileMeta meta = file.indexFile();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
+            checkNotNull(dvMetas);
+            for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+                result.put(
+                        dvMeta.dataFileName(),
+                        new DeletionFile(
+                                filePath(meta).toString(),
+                                dvMeta.offset(),
+                                dvMeta.length(),
+                                dvMeta.cardinality()));
             }
         }
         return result;
@@ -288,10 +297,5 @@ public class IndexFileHandler {
                     "Input file is not deletion vectors index " + indexFile.indexType());
         }
         return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
-    }
-
-    public List<IndexFileMeta> writeDeletionVectorsIndex(
-            Map<String, DeletionVector> deletionVectors) {
-        return deletionVectorsIndex.write(deletionVectors);
     }
 }

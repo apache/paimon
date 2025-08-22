@@ -24,7 +24,7 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
@@ -56,7 +56,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
     private final ExecutorService executor;
-    private final DeletionVectorsMaintainer dvMaintainer;
+    private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
     private final long targetFileSize;
@@ -70,7 +70,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     public BucketedAppendCompactManager(
             ExecutorService executor,
             List<DataFileMeta> restored,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             int minFileNum,
             long targetFileSize,
             boolean forceRewriteAllFiles,
@@ -241,14 +241,14 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {
 
-        private final DeletionVectorsMaintainer dvMaintainer;
+        private final BucketedDvMaintainer dvMaintainer;
         private final LinkedList<DataFileMeta> toCompact;
         private final long targetFileSize;
         private final boolean forceRewriteAllFiles;
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
-                DeletionVectorsMaintainer dvMaintainer,
+                BucketedDvMaintainer dvMaintainer,
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
                 boolean forceRewriteAllFiles,
@@ -314,12 +314,12 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
      */
     public static class AutoCompactTask extends CompactTask {
 
-        private final DeletionVectorsMaintainer dvMaintainer;
+        private final BucketedDvMaintainer dvMaintainer;
         private final List<DataFileMeta> toCompact;
         private final CompactRewriter rewriter;
 
         public AutoCompactTask(
-                DeletionVectorsMaintainer dvMaintainer,
+                BucketedDvMaintainer dvMaintainer,
                 List<DataFileMeta> toCompact,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
@@ -336,7 +336,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     }
 
     private static CompactResult compact(
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             List<DataFileMeta> toCompact,
             CompactRewriter rewriter)
             throws Exception {

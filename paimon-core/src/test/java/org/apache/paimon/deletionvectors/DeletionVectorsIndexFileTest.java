@@ -72,7 +72,7 @@ public class DeletionVectorsIndexFileTest {
         index3.delete(3);
         deleteMap.put("file33.parquet", index3);
 
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
 
         // read
@@ -110,7 +110,7 @@ public class DeletionVectorsIndexFileTest {
         }
 
         // read
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
         Map<String, DeletionVector> dvs =
                 deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
@@ -142,7 +142,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // read
         assertThat(indexFiles.size()).isEqualTo(1);
@@ -174,7 +174,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // assert 1
         assertThat(indexFiles.size()).isEqualTo(3);
@@ -196,7 +196,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // assert 2
         assertThat(indexFiles.size()).isGreaterThan(1);
@@ -226,7 +226,7 @@ public class DeletionVectorsIndexFileTest {
             deleteMap1.put(String.format("file%s.parquet", i), index);
             deleteInteger.put(String.format("file%s.parquet", i), num);
         }
-        List<IndexFileMeta> indexFiles1 = v1DeletionVectorsIndexFile.write(deleteMap1);
+        List<IndexFileMeta> indexFiles1 = v1DeletionVectorsIndexFile.writeWithRolling(deleteMap1);
         assertThat(indexFiles1.size()).isEqualTo(1);
 
         // write v2 dv
@@ -238,7 +238,7 @@ public class DeletionVectorsIndexFileTest {
             deleteMap2.put(String.format("file%s.parquet", i), index);
             deleteInteger.put(String.format("file%s.parquet", i), num);
         }
-        List<IndexFileMeta> indexFiles2 = v2DeletionVectorsIndexFile.write(deleteMap2);
+        List<IndexFileMeta> indexFiles2 = v2DeletionVectorsIndexFile.writeWithRolling(deleteMap2);
         assertThat(indexFiles2.size()).isEqualTo(1);
 
         List<IndexFileMeta> totalIndexFiles =
@@ -274,7 +274,7 @@ public class DeletionVectorsIndexFileTest {
         index1.delete(100);
         deleteMap.put("file1.parquet", index1);
 
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
 
         IndexFileMeta indexFileMeta = indexFiles.get(0);

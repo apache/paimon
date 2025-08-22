@@ -21,7 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
@@ -64,7 +64,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final KeyValue reusedAfter = new KeyValue();
     @Nullable private final RecordEqualiser valueEqualiser;
     private final LookupStrategy lookupStrategy;
-    private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
+    private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
 
     public LookupChangelogMergeFunctionWrapper(
@@ -72,7 +72,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
             Function<InternalRow, T> lookup,
             @Nullable RecordEqualiser valueEqualiser,
             LookupStrategy lookupStrategy,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
             @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(

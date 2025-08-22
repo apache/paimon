@@ -141,27 +141,25 @@ public class DeletionVectorsIndexFile extends IndexFile {
         }
     }
 
-    /**
-     * Write deletion vectors to a new file, the format of this file can be referenced at: <a
-     * href="https://cwiki.apache.org/confluence/x/Tws4EQ">PIP-16</a>.
-     *
-     * @param input A map where the key represents which file the DeletionVector belongs to, and the
-     *     value is the corresponding DeletionVector object.
-     * @return A Pair object specifying the name of the written new file and a map where the key
-     *     represents which file the DeletionVector belongs to and the value is a Pair object
-     *     specifying the range (start position and size) within the file where the deletion vector
-     *     data is located.
-     * @throws UncheckedIOException If an I/O error occurs while writing to the file.
-     */
-    public List<IndexFileMeta> write(Map<String, DeletionVector> input) {
+    public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) {
         try {
-            DeletionVectorIndexFileWriter writer =
-                    new DeletionVectorIndexFileWriter(
-                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
-            return writer.write(input);
+            return createWriter().writeSingleFile(input);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write deletion vectors.", e);
         }
+    }
+
+    public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input) {
+        try {
+            return createWriter().writeWithRolling(input);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write deletion vectors.", e);
+        }
+    }
+
+    private DeletionVectorIndexFileWriter createWriter() {
+        return new DeletionVectorIndexFileWriter(
+                this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
     }
 
     private void checkVersion(InputStream in) throws IOException {
