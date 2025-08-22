@@ -19,6 +19,7 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
@@ -36,21 +37,25 @@ public abstract class IndexFile {
         this.pathFactory = pathFactory;
     }
 
+    public Path path(String fileName) {
+        return pathFactory.toPath(fileName);
+    }
+
     public long fileSize(String fileName) {
         try {
-            return fileIO.getFileSize(pathFactory.toPath(fileName));
+            return fileIO.getFileSize(path(fileName));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
     public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toPath(fileName));
+        fileIO.deleteQuietly(path(fileName));
     }
 
     public boolean exists(String fileName) {
         try {
-            return fileIO.exists(pathFactory.toPath(fileName));
+            return fileIO.exists(path(fileName));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

@@ -25,13 +25,11 @@ import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,23 +49,27 @@ public class IndexFileHandler {
     private final PathFactory pathFactory;
     private final IndexManifestFile indexManifestFile;
     private final HashIndexFile hashIndex;
-    private final DeletionVectorsIndexFile deletionVectorsIndex;
+    private final DeletionVectorsIndexFile dvIndex;
 
     public IndexFileHandler(
             SnapshotManager snapshotManager,
             PathFactory pathFactory,
             IndexManifestFile indexManifestFile,
             HashIndexFile hashIndex,
-            DeletionVectorsIndexFile deletionVectorsIndex) {
+            DeletionVectorsIndexFile dvIndex) {
         this.snapshotManager = snapshotManager;
         this.pathFactory = pathFactory;
         this.indexManifestFile = indexManifestFile;
         this.hashIndex = hashIndex;
-        this.deletionVectorsIndex = deletionVectorsIndex;
+        this.dvIndex = dvIndex;
     }
 
-    public DeletionVectorsIndexFile deletionVectorsIndex() {
-        return this.deletionVectorsIndex;
+    public HashIndexFile hashIndex() {
+        return this.hashIndex;
+    }
+
+    public DeletionVectorsIndexFile dvIndex() {
+        return this.dvIndex;
     }
 
     public Optional<IndexFileMeta> scanHashIndex(
@@ -163,38 +165,8 @@ public class IndexFileHandler {
         return result;
     }
 
-    public Path filePath(IndexFileMeta file) {
-        return pathFactory.toPath(file.fileName());
-    }
-
-    public List<Integer> readHashIndexList(IndexFileMeta file) {
-        return IntIterator.toIntList(readHashIndex(file));
-    }
-
-    public IntIterator readHashIndex(IndexFileMeta file) {
-        if (!file.indexType().equals(HASH_INDEX)) {
-            throw new IllegalArgumentException("Input file is not hash index: " + file.indexType());
-        }
-
-        try {
-            return hashIndex.read(file.fileName());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public IndexFileMeta writeHashIndex(int[] ints) {
-        return writeHashIndex(ints.length, IntIterator.create(ints));
-    }
-
-    public IndexFileMeta writeHashIndex(int size, IntIterator iterator) {
-        String file;
-        try {
-            file = hashIndex.write(iterator);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return new IndexFileMeta(HASH_INDEX, file, hashIndex.fileSize(file), size);
+    public Path filePath(IndexManifestEntry entry) {
+        return pathFactory.toPath(entry.indexFile().fileName());
     }
 
     public boolean existsManifest(String indexManifest) {
@@ -215,7 +187,7 @@ public class IndexFileHandler {
             case HASH_INDEX:
                 return hashIndex;
             case DELETION_VECTORS_INDEX:
-                return deletionVectorsIndex;
+                return dvIndex;
             default:
                 throw new IllegalArgumentException("Unknown index type: " + file.indexType());
         }
@@ -225,11 +197,8 @@ public class IndexFileHandler {
         return indexFile(file.indexFile()).exists(file.indexFile().fileName());
     }
 
-    public void deleteIndexFile(IndexManifestEntry file) {
-        deleteIndexFile(file.indexFile());
-    }
-
-    public void deleteIndexFile(IndexFileMeta file) {
+    public void deleteIndexFile(IndexManifestEntry entry) {
+        IndexFileMeta file = entry.indexFile();
         indexFile(file).delete(file.fileName());
     }
 
@@ -243,6 +212,6 @@ public class IndexFileHandler {
                     indexFile.indexType().equals(DELETION_VECTORS_INDEX),
                     "Input file is not deletion vectors index " + indexFile.indexType());
         }
-        return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
+        return dvIndex.readAllDeletionVectors(fileMetas);
     }
 }

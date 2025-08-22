@@ -80,20 +80,20 @@ public interface BaseAppendDeleteFileMaintainer {
                         .collect(Collectors.toList());
         Map<String, DeletionFile> deletionFiles = new HashMap<>();
         for (IndexManifestEntry file : manifestEntries) {
-            IndexFileMeta meta = file.indexFile();
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas =
+                    file.indexFile().deletionVectorMetas();
             checkNotNull(dvMetas);
             for (DeletionVectorMeta dvMeta : dvMetas.values()) {
                 deletionFiles.put(
                         dvMeta.dataFileName(),
                         new DeletionFile(
-                                indexFileHandler.filePath(meta).toString(),
+                                indexFileHandler.filePath(file).toString(),
                                 dvMeta.offset(),
                                 dvMeta.length(),
                                 dvMeta.cardinality()));
             }
         }
         return new AppendDeleteFileMaintainer(
-                indexFileHandler.deletionVectorsIndex(), partition, manifestEntries, deletionFiles);
+                indexFileHandler.dvIndex(), partition, manifestEntries, deletionFiles);
     }
 }

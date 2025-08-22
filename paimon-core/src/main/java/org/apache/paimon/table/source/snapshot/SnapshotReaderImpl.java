@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -392,6 +393,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     if (deletionVectors && deletionIndexFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(
+                                        indexFileHandler.dvIndex(),
                                         dataFiles,
                                         deletionIndexFilesMap.getOrDefault(
                                                 Pair.of(partition, bucket),
@@ -518,11 +520,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         && deletionIndexFilesMap != null) {
                     builder.withBeforeDeletionFiles(
                             getDeletionFiles(
+                                    indexFileHandler.dvIndex(),
                                     before,
                                     beforDeletionIndexFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyList())));
                     builder.withDataDeletionFiles(
                             getDeletionFiles(
+                                    indexFileHandler.dvIndex(),
                                     data,
                                     deletionIndexFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyList())));
@@ -556,7 +560,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     private List<DeletionFile> getDeletionFiles(
-            List<DataFileMeta> dataFiles, List<IndexFileMeta> indexFileMetas) {
+            DeletionVectorsIndexFile indexFile,
+            List<DataFileMeta> dataFiles,
+            List<IndexFileMeta> indexFileMetas) {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
         Map<String, IndexFileMeta> dataFileToIndexFileMeta = new HashMap<>();
         for (IndexFileMeta indexFileMeta : indexFileMetas) {
@@ -574,7 +580,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 if (dvMetas != null && dvMetas.containsKey(file.fileName())) {
                     deletionFiles.add(
                             new DeletionFile(
-                                    indexFileHandler.filePath(indexFileMeta).toString(),
+                                    indexFile.path(indexFileMeta.fileName()).toString(),
                                     dvMetas.get(file.fileName()).offset(),
                                     dvMetas.get(file.fileName()).length(),
                                     dvMetas.get(file.fileName()).cardinality()));

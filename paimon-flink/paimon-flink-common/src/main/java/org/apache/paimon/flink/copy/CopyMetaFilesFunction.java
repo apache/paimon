@@ -186,7 +186,6 @@ public class CopyMetaFilesFunction extends ProcessFunction<Tuple2<String, String
                 List<Path> indexFileList = new ArrayList<>();
                 if (indexManifestEntries != null) {
                     indexManifestEntries.stream()
-                            .map(IndexManifestEntry::indexFile)
                             .map(indexFileHandler::filePath)
                             .forEach(indexFileList::add);
                 }

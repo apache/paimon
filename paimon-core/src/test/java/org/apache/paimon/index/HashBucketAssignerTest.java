@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -44,11 +45,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
     private IndexFileHandler fileHandler;
+    private HashIndexFile indexFile;
     private StreamTableCommit commit;
 
     @BeforeEach
     public void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
+        indexFile = fileHandler.hashIndex();
         commit = table.newStreamWriteBuilder().withCommitUser(commitUser).newCommit();
     }
 
@@ -222,9 +225,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignRestore() {
-        IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
-        IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
+    public void testAssignRestore() throws IOException {
+        IndexFileMeta bucket0 = indexFile.write(new int[] {2, 5});
+        IndexFileMeta bucket2 = indexFile.write(new int[] {4, 7});
         commit.commit(
                 0,
                 Arrays.asList(
@@ -248,9 +251,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignRestoreWithUpperBound() {
-        IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
-        IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
+    public void testAssignRestoreWithUpperBound() throws IOException {
+        IndexFileMeta bucket0 = indexFile.write(new int[] {2, 5});
+        IndexFileMeta bucket2 = indexFile.write(new int[] {4, 7});
         commit.commit(
                 0,
                 Arrays.asList(
@@ -303,7 +306,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexEliminate() {
+    public void testIndexEliminate() throws IOException {
         HashBucketAssigner assigner = createAssigner(1, 1, 0);
 
         // checkpoint 0
@@ -313,10 +316,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(
-                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {0})),
-                        createCommitMessage(
-                                row(2), 0, 1, fileHandler.writeHashIndex(new int[] {0}))));
+                        createCommitMessage(row(1), 0, 1, indexFile.write(new int[] {0})),
+                        createCommitMessage(row(2), 0, 1, indexFile.write(new int[] {0}))));
         assertThat(assigner.currentPartitions()).containsExactlyInAnyOrder(row(1), row(2));
 
         // checkpoint 1, but no commit
@@ -332,8 +333,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 1,
                 Collections.singletonList(
-                        createCommitMessage(
-                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {1}))));
+                        createCommitMessage(row(1), 0, 1, indexFile.write(new int[] {1}))));
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
     }

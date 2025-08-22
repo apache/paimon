@@ -36,25 +36,25 @@ import java.util.List;
 /** An Index Maintainer for dynamic bucket to maintain key hashcode in a bucket. */
 public class DynamicBucketIndexMaintainer {
 
-    private final IndexFileHandler fileHandler;
+    private final HashIndexFile indexFile;
     private final IntHashSet hashcode;
 
     private boolean modified;
 
     private DynamicBucketIndexMaintainer(
-            IndexFileHandler fileHandler, @Nullable IndexFileMeta restoredFile) {
-        this.fileHandler = fileHandler;
+            HashIndexFile indexFile, @Nullable IndexFileMeta restoredFile) {
+        this.indexFile = indexFile;
         IntHashSet hashcode = new IntHashSet();
         if (restoredFile != null) {
             hashcode = new IntHashSet((int) restoredFile.rowCount());
-            restore(fileHandler, hashcode, restoredFile);
+            restore(indexFile, hashcode, restoredFile);
         }
         this.hashcode = hashcode;
         this.modified = false;
     }
 
-    private void restore(IndexFileHandler fileHandler, IntHashSet hashcode, IndexFileMeta file) {
-        try (IntIterator iterator = fileHandler.readHashIndex(file)) {
+    private void restore(HashIndexFile indexFile, IntHashSet hashcode, IndexFileMeta file) {
+        try (IntIterator iterator = indexFile.read(file.fileName())) {
             while (true) {
                 try {
                     hashcode.add(iterator.next());
@@ -80,8 +80,12 @@ public class DynamicBucketIndexMaintainer {
 
     public List<IndexFileMeta> prepareCommit() {
         if (modified) {
-            IndexFileMeta entry =
-                    fileHandler.writeHashIndex(hashcode.size(), hashcode.toIntIterator());
+            IndexFileMeta entry;
+            try {
+                entry = indexFile.write(hashcode.size(), hashcode.toIntIterator());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
             modified = false;
             return Collections.singletonList(entry);
         }
@@ -107,7 +111,7 @@ public class DynamicBucketIndexMaintainer {
         }
 
         public DynamicBucketIndexMaintainer create(@Nullable IndexFileMeta restoredFile) {
-            return new DynamicBucketIndexMaintainer(handler, restoredFile);
+            return new DynamicBucketIndexMaintainer(handler.hashIndex(), restoredFile);
         }
     }
 }

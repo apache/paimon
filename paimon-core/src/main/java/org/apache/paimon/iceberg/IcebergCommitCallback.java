@@ -43,7 +43,6 @@ import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -1148,8 +1147,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return Collections.emptyList();
         }
         for (IndexManifestEntry entry : newIndexes) {
-            IndexFileMeta indexFileMeta = entry.indexFile();
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas = indexFileMeta.deletionVectorMetas();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas =
+                    entry.indexFile().deletionVectorMetas();
             Path bucketPath = fileStorePathFactory.bucketPath(entry.partition(), entry.bucket());
             if (dvMetas != null) {
                 for (DeletionVectorMeta dvMeta : dvMetas.values()) {
@@ -1162,16 +1161,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             "cardinality in DeletionVector is null, stop generate dv for iceberg. "
                                     + "dataFile path is {}, indexFile path is {}",
                             new Path(bucketPath, dvMeta.dataFileName()),
-                            indexFileHandler.filePath(indexFileMeta).toString());
+                            indexFileHandler.filePath(entry).toString());
 
                     IcebergDataFileMeta deleteFileMeta =
                             IcebergDataFileMeta.createForDeleteFile(
                                     IcebergDataFileMeta.Content.POSITION_DELETES,
-                                    indexFileHandler.filePath(indexFileMeta).toString(),
+                                    indexFileHandler.filePath(entry).toString(),
                                     PUFFIN_FORMAT,
                                     entry.partition(),
                                     dvMeta.cardinality(),
-                                    indexFileMeta.fileSize(),
+                                    entry.indexFile().fileSize(),
                                     new Path(bucketPath, dvMeta.dataFileName()).toString(),
                                     (long) dvMeta.offset(),
                                     (long) dvMeta.length());

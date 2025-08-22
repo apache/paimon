@@ -89,7 +89,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
 
-        BucketedDvMaintainer dvMaintainer = factory.create();
+        BucketedDvMaintainer dvMaintainer = factory.create(new HashMap<>());
         DeletionVector deletionVector1 = createDeletionVector(bitmap64);
         deletionVector1.delete(1);
         deletionVector1.delete(3);
@@ -188,7 +188,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         // write first kind dv
         initIndexHandler(bitmap64);
         BucketedDvMaintainer.Factory factory1 = BucketedDvMaintainer.factory(fileHandler);
-        BucketedDvMaintainer dvMaintainer1 = factory1.create();
+        BucketedDvMaintainer dvMaintainer1 = factory1.create(new HashMap<>());
         dvMaintainer1.notifyNewDeletion("f1", 1);
         dvMaintainer1.notifyNewDeletion("f1", 3);
         dvMaintainer1.notifyNewDeletion("f2", 1);

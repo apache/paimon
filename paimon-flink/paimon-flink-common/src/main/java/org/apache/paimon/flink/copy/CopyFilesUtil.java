@@ -91,7 +91,6 @@ public class CopyFilesUtil {
                                 () -> indexFileHandler.readManifestWithIOException(indexManifest));
                 if (indexManifestEntries != null) {
                     indexManifestEntries.stream()
-                            .map(IndexManifestEntry::indexFile)
                             .map(indexFileHandler::filePath)
                             .forEach(fileList::add);
                 }

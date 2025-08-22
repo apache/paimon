@@ -33,16 +33,16 @@ import java.util.Optional;
 /** Maintainer of deletionVectors index. */
 public class BucketedDvMaintainer {
 
-    private final IndexFileHandler indexFileHandler;
+    private final DeletionVectorsIndexFile dvIndexFile;
     private final Map<String, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
 
     private BucketedDvMaintainer(
-            IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
-        this.indexFileHandler = fileHandler;
+            DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
+        this.dvIndexFile = dvIndexFile;
         this.deletionVectors = deletionVectors;
-        this.bitmap64 = indexFileHandler.deletionVectorsIndex().bitmap64();
+        this.bitmap64 = dvIndexFile.bitmap64();
         this.modified = false;
     }
 
@@ -114,8 +114,7 @@ public class BucketedDvMaintainer {
     public Optional<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
-            return Optional.of(
-                    indexFileHandler.deletionVectorsIndex().writeSingleFile(deletionVectors));
+            return Optional.of(dvIndexFile.writeSingleFile(deletionVectors));
         }
         return Optional.empty();
     }
@@ -131,8 +130,8 @@ public class BucketedDvMaintainer {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
-    public IndexFileHandler indexFileHandler() {
-        return indexFileHandler;
+    public DeletionVectorsIndexFile dvIndexFile() {
+        return dvIndexFile;
     }
 
     @VisibleForTesting
@@ -170,12 +169,8 @@ public class BucketedDvMaintainer {
             return create(deletionVectors);
         }
 
-        public BucketedDvMaintainer create() {
-            return create(new HashMap<>());
-        }
-
         public BucketedDvMaintainer create(Map<String, DeletionVector> deletionVectors) {
-            return new BucketedDvMaintainer(handler, deletionVectors);
+            return new BucketedDvMaintainer(handler.dvIndex(), deletionVectors);
         }
     }
 }

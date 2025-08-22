@@ -29,6 +29,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -714,6 +715,7 @@ public class FileStoreCommitTest {
     public void testIndexFiles() throws Exception {
         TestFileStore store = createStore(false, 2);
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
+        HashIndexFile hashIndex = indexFileHandler.hashIndex();
 
         KeyValue record1 = gen.next();
         BinaryRow part1 = gen.getPartition(record1);
@@ -725,15 +727,9 @@ public class FileStoreCommitTest {
         }
 
         // init write
-        store.commitDataIndex(
-                record1,
-                gen::getPartition,
-                0,
-                indexFileHandler.writeHashIndex(new int[] {1, 2, 5}));
-        store.commitDataIndex(
-                record1, gen::getPartition, 1, indexFileHandler.writeHashIndex(new int[] {6, 8}));
-        store.commitDataIndex(
-                record2, gen::getPartition, 2, indexFileHandler.writeHashIndex(new int[] {3, 5}));
+        store.commitDataIndex(record1, gen::getPartition, 0, hashIndex.write(new int[] {1, 2, 5}));
+        store.commitDataIndex(record1, gen::getPartition, 1, hashIndex.write(new int[] {6, 8}));
+        store.commitDataIndex(record2, gen::getPartition, 2, hashIndex.write(new int[] {3, 5}));
 
         Snapshot snapshot = store.snapshotManager().latestSnapshot();
 
@@ -744,12 +740,12 @@ public class FileStoreCommitTest {
 
         IndexManifestEntry indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
-        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
+        assertThat(hashIndex.readList(indexManifestEntry.indexFile().fileName()))
                 .containsExactlyInAnyOrder(1, 2, 5);
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
-        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
+        assertThat(hashIndex.readList(indexManifestEntry.indexFile().fileName()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert part2
@@ -757,12 +753,11 @@ public class FileStoreCommitTest {
                 indexFileHandler.scanEntries(snapshot, HASH_INDEX, part2);
         assertThat(part2Index.size()).isEqualTo(1);
         assertThat(part2Index.get(0).bucket()).isEqualTo(2);
-        assertThat(indexFileHandler.readHashIndexList(part2Index.get(0).indexFile()))
+        assertThat(hashIndex.readList(part2Index.get(0).indexFile().fileName()))
                 .containsExactlyInAnyOrder(3, 5);
 
         // update part1
-        store.commitDataIndex(
-                record1, gen::getPartition, 0, indexFileHandler.writeHashIndex(new int[] {1, 4}));
+        store.commitDataIndex(record1, gen::getPartition, 0, hashIndex.write(new int[] {1, 4}));
         snapshot = store.snapshotManager().latestSnapshot();
 
         // assert update part1
@@ -771,18 +766,18 @@ public class FileStoreCommitTest {
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
-        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
+        assertThat(hashIndex.readList(indexManifestEntry.indexFile().fileName()))
                 .containsExactlyInAnyOrder(1, 4);
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
-        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
+        assertThat(hashIndex.readList(indexManifestEntry.indexFile().fileName()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
         Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot, part1, 0);
         assertThat(file).isPresent();
-        assertThat(indexFileHandler.readHashIndexList(file.get())).containsExactlyInAnyOrder(1, 4);
+        assertThat(hashIndex.readList(file.get().fileName())).containsExactlyInAnyOrder(1, 4);
 
         // overwrite one partition
         store.options().toConfiguration().set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, true);

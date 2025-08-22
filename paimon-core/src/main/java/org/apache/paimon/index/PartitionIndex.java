@@ -124,10 +124,11 @@ public class PartitionIndex {
             IntPredicate loadFilter,
             IntPredicate bucketFilter) {
         List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
+        HashIndexFile hashIndex = indexFileHandler.hashIndex();
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
-            try (IntIterator iterator = indexFileHandler.readHashIndex(file.indexFile())) {
+            try (IntIterator iterator = hashIndex.read(file.indexFile().fileName())) {
                 while (true) {
                     try {
                         int hash = iterator.next();

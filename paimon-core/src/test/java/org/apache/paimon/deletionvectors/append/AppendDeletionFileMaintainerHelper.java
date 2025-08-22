@@ -48,6 +48,6 @@ public class AppendDeletionFileMaintainerHelper {
                                                 indexManifestEntry.indexFile().fileName()))
                         .collect(Collectors.toList());
         return new AppendDeleteFileMaintainer(
-                indexFileHandler.deletionVectorsIndex(), partition, manifests, deletionFiles);
+                indexFileHandler.dvIndex(), partition, manifests, deletionFiles);
     }
 }

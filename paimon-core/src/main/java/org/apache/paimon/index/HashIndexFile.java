@@ -24,6 +24,7 @@ import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.paimon.utils.IntFileUtils.readInts;
 import static org.apache.paimon.utils.IntFileUtils.writeInts;
@@ -45,9 +46,22 @@ public class HashIndexFile extends IndexFile {
         return readInts(fileIO, pathFactory.toPath(fileName));
     }
 
+    public List<Integer> readList(String fileName) throws IOException {
+        return IntIterator.toIntList(read(fileName));
+    }
+
     public String write(IntIterator input) throws IOException {
         Path path = pathFactory.newPath();
         writeInts(fileIO, path, input);
         return path.getName();
+    }
+
+    public IndexFileMeta write(int size, IntIterator input) throws IOException {
+        String fileName = write(input);
+        return new IndexFileMeta(HASH_INDEX, fileName, fileSize(fileName), size);
+    }
+
+    public IndexFileMeta write(int[] ints) throws IOException {
+        return write(ints.length, IntIterator.create(ints));
     }
 }

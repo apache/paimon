@@ -19,7 +19,7 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
-import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.index.IndexFileMeta;
 
 import javax.annotation.Nullable;
@@ -42,7 +42,7 @@ public interface CompactDeletionFile {
      */
     static CompactDeletionFile generateFiles(BucketedDvMaintainer maintainer) {
         Optional<IndexFileMeta> file = maintainer.writeDeletionVectorsIndex();
-        return new GeneratedDeletionFile(file.orElse(null), maintainer.indexFileHandler());
+        return new GeneratedDeletionFile(file.orElse(null), maintainer.dvIndexFile());
     }
 
     /** For sync compaction, only create deletion files when prepareCommit. */
@@ -54,14 +54,14 @@ public interface CompactDeletionFile {
     class GeneratedDeletionFile implements CompactDeletionFile {
 
         @Nullable private final IndexFileMeta deletionFile;
-        private final IndexFileHandler fileHandler;
+        private final DeletionVectorsIndexFile dvIndexFile;
 
         private boolean getInvoked = false;
 
         public GeneratedDeletionFile(
-                @Nullable IndexFileMeta deletionFile, IndexFileHandler fileHandler) {
+                @Nullable IndexFileMeta deletionFile, DeletionVectorsIndexFile dvIndexFile) {
             this.deletionFile = deletionFile;
-            this.fileHandler = fileHandler;
+            this.dvIndexFile = dvIndexFile;
         }
 
         @Override
@@ -92,7 +92,7 @@ public interface CompactDeletionFile {
         @Override
         public void clean() {
             if (deletionFile != null) {
-                fileHandler.deleteIndexFile(deletionFile);
+                dvIndexFile.delete(deletionFile.fileName());
             }
         }
     }

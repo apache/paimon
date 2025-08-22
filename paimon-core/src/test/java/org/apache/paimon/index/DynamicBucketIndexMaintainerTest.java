@@ -34,6 +34,7 @@ import org.apache.paimon.utils.Pair;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,7 +70,8 @@ public class DynamicBucketIndexMaintainerTest extends PrimaryKeyTableTestBase {
         return Pair.of(GenericRow.of(partition, key, value), bucket);
     }
 
-    private Map<BinaryRow, Map<Integer, int[]>> readIndex(List<CommitMessage> messages) {
+    private Map<BinaryRow, Map<Integer, int[]>> readIndex(List<CommitMessage> messages)
+            throws IOException {
         Map<BinaryRow, Map<Integer, int[]>> index = new HashMap<>();
         for (CommitMessage commitMessage : messages) {
             CommitMessageImpl message = (CommitMessageImpl) commitMessage;
@@ -78,7 +80,7 @@ public class DynamicBucketIndexMaintainerTest extends PrimaryKeyTableTestBase {
                 continue;
             }
             int[] ints =
-                    fileHandler.readHashIndexList(files.get(0)).stream()
+                    fileHandler.hashIndex().readList(files.get(0).fileName()).stream()
                             .mapToInt(Integer::intValue)
                             .toArray();
             index.computeIfAbsent(message.partition(), k -> new HashMap<>())
