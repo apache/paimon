@@ -25,20 +25,16 @@ import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,7 +43,6 @@ import java.util.Set;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Handle index files. */
 public class IndexFileHandler {
@@ -83,46 +78,6 @@ public class IndexFileHandler {
                     "Find multiple hash index files for one bucket: " + result);
         }
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
-    }
-
-    public Map<String, DeletionFile> scanDVIndex(
-            @Nullable Snapshot snapshot, BinaryRow partition, int bucket) {
-        if (snapshot == null) {
-            return Collections.emptyMap();
-        }
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return Collections.emptyMap();
-        }
-        List<IndexManifestEntry> manifests = new ArrayList<>();
-        for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
-            IndexFileMeta meta = file.indexFile();
-            if (meta.indexType().equals(DELETION_VECTORS_INDEX)
-                    && file.partition().equals(partition)
-                    && file.bucket() == bucket) {
-                manifests.add(file);
-            }
-        }
-        return scanDVIndex(manifests);
-    }
-
-    public Map<String, DeletionFile> scanDVIndex(List<IndexManifestEntry> manifests) {
-        Map<String, DeletionFile> result = new HashMap<>();
-        for (IndexManifestEntry file : manifests) {
-            IndexFileMeta meta = file.indexFile();
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
-            checkNotNull(dvMetas);
-            for (DeletionVectorMeta dvMeta : dvMetas.values()) {
-                result.put(
-                        dvMeta.dataFileName(),
-                        new DeletionFile(
-                                filePath(meta).toString(),
-                                dvMeta.offset(),
-                                dvMeta.length(),
-                                dvMeta.cardinality()));
-            }
-        }
-        return result;
     }
 
     public List<IndexManifestEntry> scan(String indexType) {

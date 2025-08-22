@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -29,11 +30,14 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A maintainer to maintain deletion files for append table, the core methods:
@@ -74,7 +78,21 @@ public interface BaseAppendDeleteFileMaintainer {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX).stream()
                         .filter(e -> e.partition().equals(partition))
                         .collect(Collectors.toList());
-        Map<String, DeletionFile> deletionFiles = indexFileHandler.scanDVIndex(manifestEntries);
+        Map<String, DeletionFile> deletionFiles = new HashMap<>();
+        for (IndexManifestEntry file : manifestEntries) {
+            IndexFileMeta meta = file.indexFile();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas = meta.deletionVectorMetas();
+            checkNotNull(dvMetas);
+            for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+                deletionFiles.put(
+                        dvMeta.dataFileName(),
+                        new DeletionFile(
+                                indexFileHandler.filePath(meta).toString(),
+                                dvMeta.offset(),
+                                dvMeta.length(),
+                                dvMeta.cardinality()));
+            }
+        }
         return new AppendDeleteFileMaintainer(
                 indexFileHandler.deletionVectorsIndex(), partition, manifestEntries, deletionFiles);
     }
