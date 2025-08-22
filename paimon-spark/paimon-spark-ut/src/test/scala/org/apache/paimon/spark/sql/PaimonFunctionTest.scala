@@ -20,11 +20,10 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
+import org.apache.paimon.spark.function.FunctionResources.MyIntSumClass
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.{FunctionCatalog, Identifier}
-import org.apache.spark.sql.expressions.{MutableAggregationBuffer, UserDefinedAggregateFunction}
-import org.apache.spark.sql.types.{DataType, IntegerType, StructType}
 
 class PaimonFunctionTest extends PaimonHiveTestBase {
 
@@ -100,7 +99,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
   test("Paimon function: show and load function with SparkGenericCatalog") {
     sql(s"USE $sparkCatalogName")
     sql(s"USE $hiveDbName")
-    sql("CREATE FUNCTION myIntSum AS 'org.apache.paimon.spark.sql.MyIntSum'")
+    sql(s"CREATE FUNCTION myIntSum AS '$MyIntSumClass'")
     checkAnswer(
       sql(s"SHOW FUNCTIONS FROM $hiveDbName LIKE 'myIntSum'"),
       Row("spark_catalog.test_hive.myintsum"))
@@ -168,32 +167,5 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
           }
         }
     }
-  }
-}
-
-private class MyIntSum extends UserDefinedAggregateFunction {
-
-  override def inputSchema: StructType = new StructType().add("input", IntegerType)
-
-  override def bufferSchema: StructType = new StructType().add("buffer", IntegerType)
-
-  override def dataType: DataType = IntegerType
-
-  override def deterministic: Boolean = true
-
-  override def initialize(buffer: MutableAggregationBuffer): Unit = {
-    buffer.update(0, 0)
-  }
-
-  override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
-    buffer.update(0, buffer.getInt(0) + input.getInt(0))
-  }
-
-  override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
-    buffer1.update(0, buffer1.getInt(0) + buffer2.getInt(0))
-  }
-
-  override def evaluate(buffer: Row): Any = {
-    buffer.getInt(0)
   }
 }

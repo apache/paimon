@@ -214,6 +214,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (topN != null) {
             read.withTopN(topN);
         }
+        if (limit != null) {
+            read.withLimit(limit);
+        }
         return read;
     }
 

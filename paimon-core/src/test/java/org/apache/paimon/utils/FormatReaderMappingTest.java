@@ -136,6 +136,7 @@ public class FormatReaderMappingTest {
                         null,
                         null,
                         Collections.emptyMap(),
+                        null,
                         null);
 
         Assertions.assertThat(formatReaderMapping.getIndexMapping())

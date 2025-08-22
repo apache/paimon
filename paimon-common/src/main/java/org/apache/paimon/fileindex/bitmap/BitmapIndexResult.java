@@ -22,6 +22,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /** bitmap file index result. */
@@ -52,5 +53,25 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
                     () -> RoaringBitmap32.or(get(), ((BitmapIndexResult) fileIndexResult).get()));
         }
         return FileIndexResult.super.or(fileIndexResult);
+    }
+
+    public BitmapIndexResult andNot(RoaringBitmap32 deletion) {
+        return new BitmapIndexResult(() -> RoaringBitmap32.andNot(get(), deletion));
+    }
+
+    public FileIndexResult limit(int limit) {
+        return new BitmapIndexResult(() -> get().limit(limit));
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        BitmapIndexResult that = (BitmapIndexResult) o;
+        return Objects.equals(this.get(), that.get());
     }
 }

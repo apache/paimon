@@ -132,8 +132,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 options.fileIndexReadEnabled(),
-                false,
-                options.deletionVectorsEnabled());
+                false);
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {

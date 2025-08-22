@@ -91,24 +91,26 @@ CALL sys.drop_function(`function` => 'my_db.area_func');
 
 Users can define functions within a file, providing flexibility and modular support for function definition, only supports jar files now.
 
+Currently, supports Spark or Hive implementations of UDFs and UDAFs, see [Spark UDFs](https://spark.apache.org/docs/latest/sql-ref-functions.html#udfs-user-defined-functions)
+
 This feature requires Spark 3.4 or higher.
 
 **Example**
 
 ```sql
--- Create Function
-CREATE FUNCTION mydb.simple_udf
+-- Create Function or Temporary Function (Temporary function should not specify database name)
+CREATE [TEMPORARY] FUNCTION <mydb>.simple_udf
 AS 'com.example.SimpleUdf' 
 USING JAR '/tmp/SimpleUdf.jar' [, JAR '/tmp/SimpleUdfR.jar'];
 
 -- Create or Replace Function
-CREATE OR REPLACE FUNCTION mydb.simple_udf 
+CREATE OR REPLACE FUNCTION <mydb>.simple_udf 
 AS 'com.example.SimpleUdf'
 USING JAR '/tmp/SimpleUdf.jar';
        
 -- Describe Function
-DESCRIBE FUNCTION [EXTENDED] mydb.simple_udf;
+DESCRIBE FUNCTION [EXTENDED] <mydb>.simple_udf;
 
 -- Drop Function
-DROP FUNCTION mydb.simple_udf;
+DROP [TEMPORARY] FUNCTION <mydb>.simple_udf;
 ```

@@ -114,6 +114,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.format.csv.CsvOptions.FIELD_DELIMITER;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -1487,11 +1488,10 @@ public class HiveCatalog extends AbstractCatalog {
             @Nullable FormatTable.Format provider, Map<String, String> tableParameters) {
         Map<String, String> param = new HashMap<>();
         if (provider == FormatTable.Format.CSV) {
-            String delimiterKey = "field-delimiter";
             param.put(
                     FIELD_DELIM,
                     tableParameters.getOrDefault(
-                            delimiterKey, options.getString(delimiterKey, ",")));
+                            FIELD_DELIMITER.key(), options.get(FIELD_DELIMITER)));
         }
         return param;
     }

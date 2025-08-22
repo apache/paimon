@@ -83,8 +83,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 options.fileIndexReadEnabled(),
-                options.rowTrackingEnabled(),
-                options.deletionVectorsEnabled());
+                options.rowTrackingEnabled());
     }
 
     public DataEvolutionSplitRead newDataEvolutionRead() {

@@ -64,6 +64,7 @@ public class FormatReaderMapping {
     private final List<Predicate> dataFilters;
     private final Map<String, Integer> systemFields;
     @Nullable private final TopN topN;
+    @Nullable private final Integer limit;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -74,7 +75,8 @@ public class FormatReaderMapping {
             TableSchema dataSchema,
             List<Predicate> dataFilters,
             Map<String, Integer> systemFields,
-            @Nullable TopN topN) {
+            @Nullable TopN topN,
+            @Nullable Integer limit) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
@@ -83,6 +85,7 @@ public class FormatReaderMapping {
         this.dataFilters = dataFilters;
         this.systemFields = systemFields;
         this.topN = topN;
+        this.limit = limit;
     }
 
     private int[] combine(@Nullable int[] indexMapping, @Nullable int[] trimmedKeyMapping) {
@@ -141,6 +144,11 @@ public class FormatReaderMapping {
         return topN;
     }
 
+    @Nullable
+    public Integer getLimit() {
+        return limit;
+    }
+
     /** Builder for {@link FormatReaderMapping}. */
     public static class Builder {
 
@@ -149,18 +157,21 @@ public class FormatReaderMapping {
         private final Function<TableSchema, List<DataField>> fieldsExtractor;
         @Nullable private final List<Predicate> filters;
         @Nullable private final TopN topN;
+        @Nullable private final Integer limit;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
                 List<DataField> readFields,
                 Function<TableSchema, List<DataField>> fieldsExtractor,
                 @Nullable List<Predicate> filters,
-                @Nullable TopN topN) {
+                @Nullable TopN topN,
+                @Nullable Integer limit) {
             this.formatDiscover = formatDiscover;
             this.readFields = readFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
             this.topN = topN;
+            this.limit = limit;
         }
 
         /**
@@ -223,7 +234,8 @@ public class FormatReaderMapping {
                     dataSchema,
                     readFilters,
                     systemFields,
-                    evolutionTopN(tableSchema, dataSchema));
+                    evolutionTopN(tableSchema, dataSchema),
+                    limit);
         }
 
         @Nullable

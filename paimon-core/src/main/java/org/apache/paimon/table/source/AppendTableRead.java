@@ -47,6 +47,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
     private TopN topN = null;
+    private Integer limit = null;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -74,6 +75,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
         }
         read.withFilter(predicate);
         read.withTopN(topN);
+        read.withLimit(limit);
     }
 
     @Override
@@ -93,6 +95,13 @@ public final class AppendTableRead extends AbstractDataTableRead {
     public InnerTableRead withTopN(TopN topN) {
         initialized().forEach(r -> r.withTopN(topN));
         this.topN = topN;
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withLimit(int limit) {
+        initialized().forEach(r -> r.withLimit(limit));
+        this.limit = limit;
         return this;
     }
 

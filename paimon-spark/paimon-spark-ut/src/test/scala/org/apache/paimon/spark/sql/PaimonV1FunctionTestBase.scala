@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
-import org.apache.paimon.spark.sql.FunctionResources._
+import org.apache.paimon.spark.function.FunctionResources._
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
@@ -157,6 +157,23 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
       sql("DROP FUNCTION max_pt")
     }
   }
+
+  test("Paimon V1 Function: user defined aggregate function") {
+    for (isTemp <- Seq(true, false)) {
+      withUserDefinedFunction("myIntSum" -> isTemp) {
+        if (isTemp) {
+          sql(s"CREATE TEMPORARY FUNCTION myIntSum AS '$MyIntSumClass'")
+        } else {
+          sql(s"CREATE FUNCTION myIntSum AS '$MyIntSumClass'")
+        }
+        withTable("t") {
+          sql("CREATE TABLE t (id INT) USING paimon")
+          sql("INSERT INTO t VALUES (1), (2), (3)")
+          checkAnswer(sql("SELECT myIntSum(id) FROM t"), Row(6))
+        }
+      }
+    }
+  }
 }
 
 class DisablePaimonV1FunctionTest extends PaimonSparkTestWithRestCatalogBase {
@@ -173,12 +190,4 @@ class DisablePaimonV1FunctionTest extends PaimonSparkTestWithRestCatalogBase {
              |""".stripMargin)
     }
   }
-}
-
-object FunctionResources {
-
-  val testUDFJarPath: String =
-    getClass.getClassLoader.getResource("function/hive-test-udfs.jar").getPath
-
-  val UDFExampleAdd2Class: String = "org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2"
 }

@@ -55,6 +55,10 @@ public interface InnerTableRead extends TableRead {
         return this;
     }
 
+    default InnerTableRead withLimit(int limit) {
+        return this;
+    }
+
     default InnerTableRead forceKeepDelete() {
         return this;
     }

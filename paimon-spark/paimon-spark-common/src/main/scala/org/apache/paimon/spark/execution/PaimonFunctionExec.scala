@@ -68,8 +68,7 @@ case class DropPaimonV1FunctionCommand(
 }
 
 case class DescribePaimonV1FunctionCommand(
-    catalog: SupportV1Function,
-    funcIdent: FunctionIdentifier,
+    function: org.apache.paimon.function.Function,
     isExtended: Boolean)
   extends PaimonLeafRunnableCommand {
 
@@ -78,7 +77,6 @@ case class DescribePaimonV1FunctionCommand(
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val function = catalog.getV1Function(funcIdent)
     val rows = new ArrayBuffer[Row]()
     function.definition(FUNCTION_DEFINITION_NAME) match {
       case functionDefinition: FunctionDefinition.FileFunctionDefinition =>
@@ -96,6 +94,6 @@ case class DescribePaimonV1FunctionCommand(
   }
 
   override def simpleString(maxFields: Int): String = {
-    s"DescribePaimonV1FunctionCommand: $funcIdent"
+    s"DescribePaimonV1FunctionCommand: ${function.fullName()}"
   }
 }

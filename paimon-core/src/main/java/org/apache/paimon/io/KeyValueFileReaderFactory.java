@@ -272,7 +272,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     finalReadKeyType,
                     readValueType,
                     new FormatReaderMapping.Builder(
-                            formatDiscover, readTableFields, fieldsExtractor, filters, null),
+                            formatDiscover, readTableFields, fieldsExtractor, filters, null, null),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,

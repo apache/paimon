@@ -35,7 +35,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   test("Format table: csv with field-delimiter") {
     withTable("t") {
-      sql(s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('field-delimiter' ';')")
+      sql(s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('csv.field-delimiter' ';')")
       val table =
         paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
       val csvFile =
@@ -132,9 +132,9 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   test("Format table: field delimiter in HMS") {
     withTable("t1") {
-      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('field-delimiter' ';')")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('csv.field-delimiter' ';')")
       val row = sql("SHOW CREATE TABLE t1").collect()(0)
-      assert(row.toString().contains("'field-delimiter' = ';'"))
+      assert(row.toString().contains("'csv.field-delimiter' = ';'"))
     }
   }
 }
