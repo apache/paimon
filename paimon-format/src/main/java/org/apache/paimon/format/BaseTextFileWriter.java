@@ -66,7 +66,6 @@ public abstract class BaseTextFileWriter implements FormatWriter {
     public void close() throws IOException {
         writer.flush();
         writer.close();
-        compressedStream.close();
     }
 
     @Override

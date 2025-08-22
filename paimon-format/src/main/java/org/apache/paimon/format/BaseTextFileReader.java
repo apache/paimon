@@ -97,7 +97,6 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
     public void close() throws IOException {
         if (!readerClosed && bufferedReader != null) {
             bufferedReader.close();
-            decompressedStream.close();
             readerClosed = true;
         }
     }
