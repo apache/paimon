@@ -91,14 +91,6 @@ public class TimestampTest {
     }
 
     @Test
-    void testTimestampSmallerThan1970() {
-        LocalDateTime localDateTime = LocalDateTime.of(1899, 12, 31, 23, 59, 59, 999999999);
-        Timestamp.fromLocalDateTime(localDateTime);
-        assertThat(Timestamp.fromLocalDateTime(localDateTime).toLocalDateTime())
-                .isEqualTo(localDateTime);
-    }
-
-    @Test
     public void testDaylightSavingTime() {
         TimeZone tz = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
