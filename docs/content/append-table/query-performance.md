@@ -60,14 +60,7 @@ You can take a look at [Flink COMPACT Action]({{< ref "maintenance/dedicated-com
 
 You can use file index too, it filters files by indexing on the reading side.
 
-```sql
-CREATE TABLE <PAIMON_TABLE> (<COLUMN> <COLUMN_TYPE> , ...) WITH (
-    'file-index.bloom-filter.columns' = 'c1,c2',
-    'file-index.bloom-filter.c1.items' = '200'
-);
-```
-
-Define `file-index.bloom-filter.columns`, Data file index is an external index file and Paimon will create its
+Define `file-index.bitmap.columns`, Data file index is an external index file and Paimon will create its
 corresponding index file for each file. If the index file is too small, it will be stored directly in the manifest,
 otherwise in the directory of the data file. Each data file corresponds to an index file, which has a separate file
 definition and can contain different types of indexes with multiple columns.
