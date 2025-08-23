@@ -19,17 +19,17 @@
 package org.apache.paimon.format.json;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TextCompression;
 import org.apache.paimon.fs.CloseShieldOutputStream;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -44,11 +44,11 @@ public class JsonFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "json";
 
-    private final Options options;
+    private final JsonOptions options;
 
     public JsonFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.options = context.options();
+        this.options = new JsonOptions(context.options());
     }
 
     @Override
@@ -101,13 +101,32 @@ public class JsonFileFormat extends FileFormat {
         }
     }
 
+    /** Factory to create {@link JsonFileReader}. */
+    private static class JsonReaderFactory implements FormatReaderFactory {
+
+        private final RowType projectedRowType;
+        private final JsonOptions options;
+
+        public JsonReaderFactory(RowType projectedRowType, JsonOptions options) {
+            this.projectedRowType = projectedRowType;
+            this.options = options;
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+            FileIO fileIO = context.fileIO();
+            Path filePath = context.filePath();
+            return new JsonFileReader(fileIO, filePath, projectedRowType, options);
+        }
+    }
+
     /** A {@link FormatWriterFactory} to write {@link InternalRow} to JSON. */
     private static class JsonWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
-        private final Options options;
+        private final JsonOptions options;
 
-        public JsonWriterFactory(RowType rowType, Options options) {
+        public JsonWriterFactory(RowType rowType, JsonOptions options) {
             this.rowType = rowType;
             this.options = options;
         }
@@ -115,10 +134,8 @@ public class JsonFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            CompressionType compressionType =
-                    TextCompression.getTextCompressionType(compression, options);
             return new JsonFormatWriter(
-                    new CloseShieldOutputStream(out), rowType, options, compressionType);
+                    new CloseShieldOutputStream(out), rowType, options, compression);
         }
     }
 }

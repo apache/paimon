@@ -23,10 +23,9 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BaseTextFileReader;
+import org.apache.paimon.format.text.BaseTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
@@ -54,10 +53,10 @@ public class CsvFileReader extends BaseTextFileReader {
     private final CsvSchema schema;
     private boolean headerSkipped = false;
 
-    public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
+    public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, CsvOptions options)
             throws IOException {
-        super(fileIO, filePath, rowType, options);
-        this.formatOptions = new CsvOptions(options);
+        super(fileIO, filePath, rowType);
+        this.formatOptions = options;
         this.schema =
                 CsvSchema.emptySchema()
                         .withQuoteChar(formatOptions.quoteCharacter().charAt(0))

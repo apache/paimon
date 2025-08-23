@@ -21,15 +21,15 @@ package org.apache.paimon.format;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import javax.annotation.Nullable;
+
+import java.util.Optional;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
-/** Compression types supported by Paimon file formats. */
-public enum CompressionType implements DescribedEnum {
-    NONE("none", "No compression.", null, ""),
+/** Compression types supported by hadoop compression. */
+public enum HadoopCompressionType implements DescribedEnum {
+    NONE("none", "No compression.", null, null),
     GZIP(
             "gzip",
             "GZIP compression using the deflate algorithm.",
@@ -62,25 +62,15 @@ public enum CompressionType implements DescribedEnum {
             "zst");
 
     private final String value;
-    private final String className;
-    private final String fileExtension;
     private final String description;
+    private final @Nullable String className;
+    private final @Nullable String fileExtension;
 
-    private static final Set<String> SUPPORTED_EXTENSIONS;
-
-    static {
-        Set<String> extensions = new HashSet<>();
-        for (CompressionType type : CompressionType.values()) {
-            if (type != CompressionType.NONE
-                    && type.fileExtension() != null
-                    && !type.fileExtension().isEmpty()) {
-                extensions.add(type.fileExtension().toLowerCase());
-            }
-        }
-        SUPPORTED_EXTENSIONS = Collections.unmodifiableSet(extensions);
-    }
-
-    CompressionType(String value, String description, String className, String fileExtension) {
+    HadoopCompressionType(
+            String value,
+            String description,
+            @Nullable String className,
+            @Nullable String fileExtension) {
         this.value = value;
         this.description = description;
         this.className = className;
@@ -101,37 +91,31 @@ public enum CompressionType implements DescribedEnum {
         return value;
     }
 
+    @Nullable
     public String hadoopCodecClassName() {
         return className;
     }
 
+    @Nullable
     public String fileExtension() {
         return fileExtension;
     }
 
-    public static CompressionType fromValue(String value) {
-        if (value == null || value.isEmpty()) {
-            return NONE;
-        }
-
-        for (CompressionType type : CompressionType.values()) {
+    public static Optional<HadoopCompressionType> fromValue(String value) {
+        for (HadoopCompressionType type : HadoopCompressionType.values()) {
             if (type.value.equalsIgnoreCase(value)) {
-                return type;
+                return Optional.of(type);
             }
         }
-        return NONE;
+        return Optional.empty();
     }
 
-    /**
-     * Check if the given extension is a supported compression extension.
-     *
-     * @param extension the file extension to check
-     * @return true if the extension is a supported compression extension, false otherwise
-     */
-    public static boolean isSupportedExtension(String extension) {
-        if (extension == null || extension.isEmpty()) {
-            return false;
+    public static boolean isCompressExtension(String extension) {
+        for (HadoopCompressionType type : HadoopCompressionType.values()) {
+            if (extension.equalsIgnoreCase(type.fileExtension)) {
+                return true;
+            }
         }
-        return SUPPORTED_EXTENSIONS.contains(extension.toLowerCase());
+        return false;
     }
 }

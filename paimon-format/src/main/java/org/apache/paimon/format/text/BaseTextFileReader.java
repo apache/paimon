@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.format.text;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
@@ -44,13 +43,12 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
     protected boolean readerClosed = false;
     protected BaseTextRecordIterator reader;
 
-    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
-            throws IOException {
+    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType) throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
         this.decompressedStream =
-                TextCompression.createDecompressedInputStream(
-                        fileIO.newInputStream(filePath), filePath, options);
+                HadoopCompressionUtils.createDecompressedInputStream(
+                        fileIO.newInputStream(filePath), filePath);
         this.bufferedReader =
                 new BufferedReader(
                         new InputStreamReader(this.decompressedStream, StandardCharsets.UTF_8));

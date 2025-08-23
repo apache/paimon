@@ -19,7 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.format.CompressionType;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
@@ -30,6 +30,9 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.StringUtils.isEmpty;
 
 /** Factory which produces new {@link Path}s for data files. */
 @ThreadSafe
@@ -45,8 +48,8 @@ public class DataFilePathFactory {
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
-    private final String fileCompression;
-    @Nullable private final ExternalPathProvider externalPathProvider;
+    private final @Nullable String compressExtension;
+    private final @Nullable ExternalPathProvider externalPathProvider;
 
     public DataFilePathFactory(
             Path parent,
@@ -63,7 +66,7 @@ public class DataFilePathFactory {
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
-        this.fileCompression = fileCompression;
+        this.compressExtension = compressFileExtension(fileCompression);
         this.externalPathProvider = externalPathProvider;
     }
 
@@ -89,14 +92,10 @@ public class DataFilePathFactory {
 
     private String newFileName(String prefix) {
         String extension;
-        if (isTextFormat(formatIdentifier)) {
-            String compressionExtension =
-                    CompressionType.fromValue(fileCompression).fileExtension();
-            extension = "." + formatIdentifier + "." + compressionExtension;
-        } else if (fileSuffixIncludeCompression) {
-            String compressionExtension =
-                    CompressionType.fromValue(fileCompression).fileExtension();
-            extension = "." + compressionExtension + "." + formatIdentifier;
+        if (compressExtension != null && isTextFormat(formatIdentifier)) {
+            extension = "." + formatIdentifier + "." + compressExtension;
+        } else if (compressExtension != null && fileSuffixIncludeCompression) {
+            extension = "." + compressExtension + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
@@ -165,20 +164,13 @@ public class DataFilePathFactory {
 
     public static String formatIdentifier(String fileName) {
         int index = fileName.lastIndexOf('.');
-        if (index == -1) {
-            throw new IllegalArgumentException(fileName + " is not a legal file name.");
-        }
+        checkArgument(index != -1, "%s is not a legal file name.", fileName);
 
         String extension = fileName.substring(index + 1);
-        if (CompressionType.isSupportedExtension(extension)) {
+        if (HadoopCompressionType.isCompressExtension(extension)) {
             int secondLastDot = fileName.lastIndexOf('.', index - 1);
-            if (secondLastDot != -1) {
-                String formatIdentifier = fileName.substring(secondLastDot + 1, index);
-                // If the format is json or csv, return that instead of the compression extension
-                if (isTextFormat(formatIdentifier)) {
-                    return formatIdentifier;
-                }
-            }
+            checkArgument(secondLastDot != -1, "%s is not a legal file name.", fileName);
+            return fileName.substring(secondLastDot + 1, index);
         }
 
         return extension;
@@ -196,5 +188,19 @@ public class DataFilePathFactory {
     private static boolean isTextFormat(String formatIdentifier) {
         return "json".equalsIgnoreCase(formatIdentifier)
                 || "csv".equalsIgnoreCase(formatIdentifier);
+    }
+
+    @Nullable
+    private static String compressFileExtension(String compression) {
+        if (isEmpty(compression)) {
+            return null;
+        }
+
+        Optional<HadoopCompressionType> hadoopOptional =
+                HadoopCompressionType.fromValue(compression);
+        if (hadoopOptional.isPresent()) {
+            return hadoopOptional.get().fileExtension();
+        }
+        return compression;
     }
 }

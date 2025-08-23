@@ -16,11 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.format.text;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
 import java.io.BufferedWriter;
@@ -37,19 +38,15 @@ public abstract class BaseTextFileWriter implements FormatWriter {
     protected final RowType rowType;
 
     protected BaseTextFileWriter(
-            PositionOutputStream outputStream,
-            RowType rowType,
-            Options formatOptions,
-            CompressionType compressionType)
+            PositionOutputStream outputStream, RowType rowType, String compression)
             throws IOException {
         this.outputStream = outputStream;
         OutputStream compressedStream =
-                TextCompression.createCompressedOutputStream(
-                        outputStream, compressionType, formatOptions);
+                HadoopCompressionUtils.createCompressedOutputStream(outputStream, compression);
         this.writer =
                 new BufferedWriter(
                         new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8),
-                        getOptimalBufferSize(compressionType));
+                        getOptimalBufferSize(compression));
         this.rowType = rowType;
     }
 
@@ -74,8 +71,11 @@ public abstract class BaseTextFileWriter implements FormatWriter {
         return false;
     }
 
-    private int getOptimalBufferSize(CompressionType compressionType) {
-        switch (compressionType) {
+    private int getOptimalBufferSize(String compression) {
+        HadoopCompressionType type =
+                HadoopCompressionType.fromValue(compression)
+                        .orElseThrow(IllegalArgumentException::new);
+        switch (type) {
             case GZIP:
             case DEFLATE:
                 return 65536; // 64KB for deflate-based compression

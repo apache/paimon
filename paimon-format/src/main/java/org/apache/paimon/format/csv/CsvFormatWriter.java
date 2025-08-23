@@ -21,10 +21,8 @@ package org.apache.paimon.format.csv;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BaseTextFileWriter;
-import org.apache.paimon.format.CompressionType;
+import org.apache.paimon.format.text.BaseTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -47,10 +45,10 @@ public class CsvFormatWriter extends BaseTextFileWriter {
     private final StringBuilder stringBuilder;
 
     public CsvFormatWriter(
-            PositionOutputStream out, RowType rowType, Options options, CompressionType compression)
+            PositionOutputStream out, RowType rowType, CsvOptions options, String compression)
             throws IOException {
-        super(out, rowType, options, compression);
-        this.csvOptions = new CsvOptions(options);
+        super(out, rowType, compression);
+        this.csvOptions = options;
         this.stringBuilder = new StringBuilder();
     }
 

@@ -65,36 +65,47 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCsvFileFormat() {
-        sql("CREATE TABLE CSV (a INT, b INT, c INT) WITH ('file.format'='csv')");
-        sql("INSERT INTO CSV VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM CSV")).containsExactly(Row.of(1, 2, 3));
-
-        sql(
-                "CREATE TABLE CSV_GZIP (a INT, b INT, c INT) WITH ('file.format'='csv', 'file.compression'='gzip')");
-        sql("INSERT INTO CSV_GZIP VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM CSV_GZIP")).containsExactly(Row.of(1, 2, 3));
-        List<String> files =
-                sql("select file_path from `CSV_GZIP$files`").stream()
-                        .map(r -> r.getField(0).toString())
-                        .collect(Collectors.toList());
-        assertThat(files).allMatch(file -> file.endsWith("csv.gz"));
+        innerTestTextFileFormat("csv");
     }
 
     @Test
     public void testJsonFileFormat() {
-        sql("CREATE TABLE JSON_T (a INT, b INT, c INT) WITH ('file.format'='json')");
-        sql("INSERT INTO JSON_T VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM JSON_T")).containsExactly(Row.of(1, 2, 3));
+        innerTestTextFileFormat("json");
+    }
+
+    private void innerTestTextFileFormat(String format) {
+        // TODO zstd dependent on Hadoop 3.x
+        //        sql("CREATE TABLE TEXT_T (a INT, b INT, c INT) WITH ('file.format'='%s')",
+        // format);
+        //        sql("INSERT INTO TEXT_T VALUES (1, 2, 3)");
+        //        assertThat(sql("SELECT * FROM TEXT_T")).containsExactly(Row.of(1, 2, 3));
+        //        List<String> files =
+        //                sql("select file_path from `TEXT_T$files`").stream()
+        //                        .map(r -> r.getField(0).toString())
+        //                        .collect(Collectors.toList());
+        //        assertThat(files).allMatch(file -> file.endsWith(format + ".zst"));
 
         sql(
-                "CREATE TABLE JSON_GZIP (a INT, b INT, c INT) WITH ('file.format'='json', 'file.compression'='gzip')");
-        sql("INSERT INTO JSON_GZIP VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM JSON_GZIP")).containsExactly(Row.of(1, 2, 3));
+                "CREATE TABLE TEXT_NONE (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='none')",
+                format);
+        sql("INSERT INTO TEXT_NONE VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM TEXT_NONE")).containsExactly(Row.of(1, 2, 3));
         List<String> files =
-                sql("select file_path from `JSON_GZIP$files`").stream()
+                sql("select file_path from `TEXT_NONE$files`").stream()
                         .map(r -> r.getField(0).toString())
                         .collect(Collectors.toList());
-        assertThat(files).allMatch(file -> file.endsWith("json.gz"));
+        assertThat(files).allMatch(file -> file.endsWith(format));
+
+        sql(
+                "CREATE TABLE TEXT_GZIP (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='gzip')",
+                format);
+        sql("INSERT INTO TEXT_GZIP VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM TEXT_GZIP")).containsExactly(Row.of(1, 2, 3));
+        files =
+                sql("select file_path from `TEXT_GZIP$files`").stream()
+                        .map(r -> r.getField(0).toString())
+                        .collect(Collectors.toList());
+        assertThat(files).allMatch(file -> file.endsWith(format + ".gz"));
     }
 
     @Test

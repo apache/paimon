@@ -19,17 +19,15 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TextCompression;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -44,15 +42,11 @@ public class CsvFileFormat extends FileFormat {
 
     public static final String CSV_IDENTIFIER = "csv";
 
-    private final Options options;
+    private final CsvOptions options;
 
     public CsvFileFormat(FormatContext context) {
-        this(context, CSV_IDENTIFIER);
-    }
-
-    public CsvFileFormat(FormatContext context, String identifier) {
-        super(identifier);
-        this.options = context.options();
+        super(CSV_IDENTIFIER);
+        this.options = new CsvOptions(context.options());
     }
 
     @Override
@@ -102,13 +96,30 @@ public class CsvFileFormat extends FileFormat {
         }
     }
 
+    /** CSV {@link FormatReaderFactory} implementation. */
+    private static class CsvReaderFactory implements FormatReaderFactory {
+
+        private final RowType rowType;
+        private final CsvOptions options;
+
+        public CsvReaderFactory(RowType rowType, CsvOptions options) {
+            this.rowType = rowType;
+            this.options = options;
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+            return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
+        }
+    }
+
     /** A {@link FormatWriterFactory} to write {@link InternalRow} to CSV. */
     private static class CsvWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
-        private final Options options;
+        private final CsvOptions options;
 
-        public CsvWriterFactory(RowType rowType, Options options) {
+        public CsvWriterFactory(RowType rowType, CsvOptions options) {
             this.rowType = rowType;
             this.options = options;
         }
@@ -116,10 +127,8 @@ public class CsvFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            CompressionType compressionType =
-                    TextCompression.getTextCompressionType(compression, options);
             return new CsvFormatWriter(
-                    new CloseShieldOutputStream(out), rowType, options, compressionType);
+                    new CloseShieldOutputStream(out), rowType, options, compression);
         }
     }
 }

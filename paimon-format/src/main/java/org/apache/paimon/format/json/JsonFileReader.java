@@ -25,10 +25,9 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BaseTextFileReader;
+import org.apache.paimon.format.text.BaseTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -54,10 +53,10 @@ public class JsonFileReader extends BaseTextFileReader {
 
     private final JsonOptions options;
 
-    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
+    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
             throws IOException {
-        super(fileIO, filePath, rowType, options);
-        this.options = new JsonOptions(options);
+        super(fileIO, filePath, rowType);
+        this.options = options;
     }
 
     @Override
