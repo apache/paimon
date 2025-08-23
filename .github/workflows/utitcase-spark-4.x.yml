@@ -57,7 +57,8 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
-          for suffix in ut 4.0; do
+          scala_version=2.13
+          for suffix in ut 4.0_${scala_version}; do
           test_modules+="org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"
