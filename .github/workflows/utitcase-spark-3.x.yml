@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-spark3-2_12:
     runs-on: ubuntu-latest
 
     steps:
@@ -49,8 +49,6 @@ jobs:
           distribution: 'temurin'
       - name: Build Spark 3 with scala 2.12
         run:  mvn -T 2C -B clean install -DskipTests
-      - name: Build Spark 3 with scala 2.13
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark3_2.13
       - name: Test Spark 3 with scala 2.12
         timeout-minutes: 60
         run: |
@@ -65,6 +63,20 @@ jobs:
           done
           test_modules="${test_modules%,}"
           mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+
+  build-spark3-2_13:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+      - name: Build Spark 3 with scala 2.13
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark3_2.13
       - name: Test Spark 3 with scala 2.13
         timeout-minutes: 60
         run: |
