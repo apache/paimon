@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
@@ -29,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
@@ -37,17 +39,21 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
 
     protected final Path filePath;
     protected final RowType rowType;
+    protected final InputStream decompressedStream;
     protected final BufferedReader bufferedReader;
     protected boolean readerClosed = false;
     protected BaseTextRecordIterator reader;
 
-    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType) throws IOException {
+    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
+            throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
+        this.decompressedStream =
+                TextCompression.createDecompressedInputStream(
+                        fileIO.newInputStream(filePath), filePath, options);
         this.bufferedReader =
                 new BufferedReader(
-                        new InputStreamReader(
-                                fileIO.newInputStream(filePath), StandardCharsets.UTF_8));
+                        new InputStreamReader(this.decompressedStream, StandardCharsets.UTF_8));
         this.reader = createRecordIterator();
     }
 
@@ -89,8 +95,15 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
 
     @Override
     public void close() throws IOException {
-        if (!readerClosed && bufferedReader != null) {
-            bufferedReader.close();
+        if (!readerClosed) {
+            // Close the buffered reader first
+            if (bufferedReader != null) {
+                bufferedReader.close();
+            }
+            // Explicitly close the decompressed stream to prevent resource leaks
+            if (decompressedStream != null) {
+                decompressedStream.close();
+            }
             readerClosed = true;
         }
     }

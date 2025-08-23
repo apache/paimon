@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BaseTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -53,10 +54,10 @@ public class JsonFileReader extends BaseTextFileReader {
 
     private final JsonOptions options;
 
-    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
+    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, Options options)
             throws IOException {
-        super(fileIO, filePath, rowType);
-        this.options = options;
+        super(fileIO, filePath, rowType, options);
+        this.options = new JsonOptions(options);
     }
 
     @Override
@@ -67,7 +68,8 @@ public class JsonFileReader extends BaseTextFileReader {
     @Override
     protected InternalRow parseLine(String line) throws IOException {
         try {
-            return convertJsonStringToRow(line, rowType, options);
+            JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
+            return (InternalRow) convertJsonValue(jsonNode, rowType, options);
         } catch (JsonProcessingException e) {
             if (options.ignoreParseErrors()) {
                 return null;
@@ -86,12 +88,6 @@ public class JsonFileReader extends BaseTextFileReader {
     private class JsonRecordIterator extends BaseTextRecordIterator {
         // Inherits all functionality from BaseTextRecordIterator
         // No additional JSON-specific iterator logic needed
-    }
-
-    private InternalRow convertJsonStringToRow(String line, RowType rowType, JsonOptions options)
-            throws JsonProcessingException {
-        JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
-        return (InternalRow) convertJsonValue(jsonNode, rowType, options);
     }
 
     private Object convertJsonValue(JsonNode node, DataType dataType, JsonOptions options) {

@@ -18,11 +18,13 @@
 
 package org.apache.paimon.format.json;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReadWriteTest;
@@ -56,7 +58,14 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
     @Override
     protected FileFormat fileFormat() {
-        return new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        Options options = new Options();
+        options.set(CoreOptions.FILE_COMPRESSION, compression());
+        return new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+    }
+
+    @Override
+    public String compression() {
+        return CompressionType.NONE.value();
     }
 
     @Test

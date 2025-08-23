@@ -20,10 +20,12 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 
@@ -34,11 +36,21 @@ public abstract class BaseTextFileWriter implements FormatWriter {
     protected final BufferedWriter writer;
     protected final RowType rowType;
 
-    protected BaseTextFileWriter(PositionOutputStream outputStream, RowType rowType) {
+    protected BaseTextFileWriter(
+            PositionOutputStream outputStream,
+            RowType rowType,
+            Options formatOptions,
+            CompressionType compressionType)
+            throws IOException {
         this.outputStream = outputStream;
-        this.rowType = rowType;
+        OutputStream compressedStream =
+                TextCompression.createCompressedOutputStream(
+                        outputStream, compressionType, formatOptions);
         this.writer =
-                new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+                new BufferedWriter(
+                        new OutputStreamWriter(compressedStream, StandardCharsets.UTF_8),
+                        getOptimalBufferSize(compressionType));
+        this.rowType = rowType;
     }
 
     /**
@@ -60,5 +72,22 @@ public abstract class BaseTextFileWriter implements FormatWriter {
             return outputStream.getPos() >= targetSize;
         }
         return false;
+    }
+
+    private int getOptimalBufferSize(CompressionType compressionType) {
+        switch (compressionType) {
+            case GZIP:
+            case DEFLATE:
+                return 65536; // 64KB for deflate-based compression
+            case SNAPPY:
+            case LZ4:
+                return 131072; // 128KB for fast compression
+            case ZSTD:
+                return 262144; // 256KB for high compression ratio
+            case BZIP2:
+                return 65536; // 64KB for bzip2
+            default:
+                return 65536; // Default 64KB buffer size
+        }
     }
 }

@@ -19,11 +19,13 @@
 package org.apache.paimon.format.json;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TextCompression;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -34,6 +36,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
 
 /** JSON {@link FileFormat}. */
@@ -45,18 +48,18 @@ public class JsonFileFormat extends FileFormat {
 
     public JsonFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.options = getIdentifierPrefixOptions(context.options());
+        this.options = context.options();
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new JsonReaderFactory(projectedRowType, new JsonOptions(options));
+        return new JsonReaderFactory(projectedRowType, options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new JsonWriterFactory(type, new JsonOptions(options));
+        return new JsonWriterFactory(type, options);
     }
 
     @Override
@@ -102,16 +105,20 @@ public class JsonFileFormat extends FileFormat {
     private static class JsonWriterFactory implements FormatWriterFactory {
 
         private final RowType rowType;
-        private final JsonOptions options;
+        private final Options options;
 
-        public JsonWriterFactory(RowType rowType, JsonOptions options) {
+        public JsonWriterFactory(RowType rowType, Options options) {
             this.rowType = rowType;
             this.options = options;
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression) {
-            return new JsonFormatWriter(new CloseShieldOutputStream(out), rowType, options);
+        public FormatWriter create(PositionOutputStream out, String compression)
+                throws IOException {
+            CompressionType compressionType =
+                    TextCompression.getTextCompressionType(compression, options);
+            return new JsonFormatWriter(
+                    new CloseShieldOutputStream(out), rowType, options, compressionType);
         }
     }
 }

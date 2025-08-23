@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.format.CompressionType;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
@@ -88,8 +89,14 @@ public class DataFilePathFactory {
 
     private String newFileName(String prefix) {
         String extension;
-        if (fileSuffixIncludeCompression) {
-            extension = "." + fileCompression + "." + formatIdentifier;
+        if (isTextFormat(formatIdentifier)) {
+            String compressionExtension =
+                    CompressionType.fromValue(fileCompression).fileExtension();
+            extension = "." + formatIdentifier + "." + compressionExtension;
+        } else if (fileSuffixIncludeCompression) {
+            String compressionExtension =
+                    CompressionType.fromValue(fileCompression).fileExtension();
+            extension = "." + compressionExtension + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
@@ -162,7 +169,19 @@ public class DataFilePathFactory {
             throw new IllegalArgumentException(fileName + " is not a legal file name.");
         }
 
-        return fileName.substring(index + 1);
+        String extension = fileName.substring(index + 1);
+        if (CompressionType.isSupportedExtension(extension)) {
+            int secondLastDot = fileName.lastIndexOf('.', index - 1);
+            if (secondLastDot != -1) {
+                String formatIdentifier = fileName.substring(secondLastDot + 1, index);
+                // If the format is json or csv, return that instead of the compression extension
+                if (isTextFormat(formatIdentifier)) {
+                    return formatIdentifier;
+                }
+            }
+        }
+
+        return extension;
     }
 
     public boolean isExternalPath() {
@@ -172,5 +191,10 @@ public class DataFilePathFactory {
     @VisibleForTesting
     String uuid() {
         return uuid;
+    }
+
+    private static boolean isTextFormat(String formatIdentifier) {
+        return "json".equalsIgnoreCase(formatIdentifier)
+                || "csv".equalsIgnoreCase(formatIdentifier);
     }
 }

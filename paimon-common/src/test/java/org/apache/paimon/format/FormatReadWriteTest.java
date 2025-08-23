@@ -140,6 +140,10 @@ public abstract class FormatReadWriteTest {
         return true;
     }
 
+    public String compression() {
+        return "zstd";
+    }
+
     @Test
     public void testNestedReadPruning() throws Exception {
         if (!supportNestedReadPruning()) {
@@ -250,10 +254,10 @@ public abstract class FormatReadWriteTest {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
-            writer = ((SupportsDirectWrite) factory).create(fileIO, file, "zstd");
+            writer = ((SupportsDirectWrite) factory).create(fileIO, file, this.compression());
         } else {
             out = fileIO.newOutputStream(file, false);
-            writer = factory.create(out, "zstd");
+            writer = factory.create(out, this.compression());
         }
         for (InternalRow row : rows) {
             writer.addElement(row);
@@ -381,7 +385,7 @@ public abstract class FormatReadWriteTest {
         Path filePath = new Path(parent, UUID.randomUUID().toString());
         FormatWriterFactory writerFactory = jsonFormat.createWriterFactory(rowType);
         try (FormatWriter writer =
-                writerFactory.create(fileIO.newOutputStream(filePath, false), "none")) {
+                writerFactory.create(fileIO.newOutputStream(filePath, false), compression())) {
             for (InternalRow row : testData) {
                 writer.addElement(row);
             }

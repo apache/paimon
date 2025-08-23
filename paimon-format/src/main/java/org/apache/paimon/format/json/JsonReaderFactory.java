@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
@@ -31,9 +32,9 @@ import java.io.IOException;
 public class JsonReaderFactory implements FormatReaderFactory {
 
     private final RowType projectedRowType;
-    private final JsonOptions options;
+    private final Options options;
 
-    public JsonReaderFactory(RowType projectedRowType, JsonOptions options) {
+    public JsonReaderFactory(RowType projectedRowType, Options options) {
         this.projectedRowType = projectedRowType;
         this.options = options;
     }
