@@ -22,11 +22,13 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
@@ -40,36 +42,39 @@ import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Handle index files. */
 public class IndexFileHandler {
 
+    private final FileIO fileIO;
     private final SnapshotManager snapshotManager;
-    private final PathFactory pathFactory;
     private final IndexManifestFile indexManifestFile;
-    private final HashIndexFile hashIndex;
-    private final DeletionVectorsIndexFile dvIndex;
+    private final IndexFilePathFactories pathFactories;
+    private final MemorySize dvTargetFileSize;
+    private final boolean dvBitmap64;
 
     public IndexFileHandler(
+            FileIO fileIO,
             SnapshotManager snapshotManager,
-            PathFactory pathFactory,
             IndexManifestFile indexManifestFile,
-            HashIndexFile hashIndex,
-            DeletionVectorsIndexFile dvIndex) {
+            IndexFilePathFactories pathFactories,
+            MemorySize dvTargetFileSize,
+            boolean dvBitmap64) {
+        this.fileIO = fileIO;
         this.snapshotManager = snapshotManager;
-        this.pathFactory = pathFactory;
+        this.pathFactories = pathFactories;
         this.indexManifestFile = indexManifestFile;
-        this.hashIndex = hashIndex;
-        this.dvIndex = dvIndex;
+        this.dvTargetFileSize = dvTargetFileSize;
+        this.dvBitmap64 = dvBitmap64;
     }
 
-    public HashIndexFile hashIndex() {
-        return this.hashIndex;
+    public HashIndexFile hashIndex(BinaryRow partition, int bucket) {
+        return new HashIndexFile(fileIO, pathFactories.get(partition, bucket));
     }
 
-    public DeletionVectorsIndexFile dvIndex() {
-        return this.dvIndex;
+    public DeletionVectorsIndexFile dvIndex(BinaryRow partition, int bucket) {
+        return new DeletionVectorsIndexFile(
+                fileIO, pathFactories.get(partition, bucket), dvTargetFileSize, dvBitmap64);
     }
 
     public Optional<IndexFileMeta> scanHashIndex(
@@ -166,7 +171,9 @@ public class IndexFileHandler {
     }
 
     public Path filePath(IndexManifestEntry entry) {
-        return pathFactory.toPath(entry.indexFile().fileName());
+        return pathFactories
+                .get(entry.partition(), entry.bucket())
+                .toPath(entry.indexFile().fileName());
     }
 
     public boolean existsManifest(String indexManifest) {
@@ -182,36 +189,36 @@ public class IndexFileHandler {
         return indexManifestFile.readWithIOException(indexManifest);
     }
 
-    private IndexFile indexFile(IndexFileMeta file) {
+    private IndexFile indexFile(IndexManifestEntry entry) {
+        IndexFileMeta file = entry.indexFile();
         switch (file.indexType()) {
             case HASH_INDEX:
-                return hashIndex;
+                return hashIndex(entry.partition(), entry.bucket());
             case DELETION_VECTORS_INDEX:
-                return dvIndex;
+                return dvIndex(entry.partition(), entry.bucket());
             default:
                 throw new IllegalArgumentException("Unknown index type: " + file.indexType());
         }
     }
 
     public boolean existsIndexFile(IndexManifestEntry file) {
-        return indexFile(file.indexFile()).exists(file.indexFile().fileName());
+        return indexFile(file).exists(file.indexFile().fileName());
     }
 
     public void deleteIndexFile(IndexManifestEntry entry) {
-        IndexFileMeta file = entry.indexFile();
-        indexFile(file).delete(file.fileName());
+        indexFile(entry).delete(entry.indexFile().fileName());
     }
 
     public void deleteManifest(String indexManifest) {
         indexManifestFile.delete(indexManifest);
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {
-        for (IndexFileMeta indexFile : fileMetas) {
-            checkArgument(
-                    indexFile.indexType().equals(DELETION_VECTORS_INDEX),
-                    "Input file is not deletion vectors index " + indexFile.indexType());
-        }
-        return dvIndex.readAllDeletionVectors(fileMetas);
+    public Map<String, DeletionVector> readAllDeletionVectors(
+            BinaryRow partition, int bucket, List<IndexFileMeta> fileMetas) {
+        return dvIndex(partition, bucket).readAllDeletionVectors(fileMetas);
+    }
+
+    public Map<String, DeletionVector> readAllDeletionVectors(IndexManifestEntry entry) {
+        return dvIndex(entry.partition(), entry.bucket()).readAllDeletionVectors(entry.indexFile());
     }
 }

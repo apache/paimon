@@ -110,8 +110,10 @@ public class DynamicBucketIndexMaintainer {
             return handler;
         }
 
-        public DynamicBucketIndexMaintainer create(@Nullable IndexFileMeta restoredFile) {
-            return new DynamicBucketIndexMaintainer(handler.hashIndex(), restoredFile);
+        public DynamicBucketIndexMaintainer create(
+                BinaryRow partition, int bucket, @Nullable IndexFileMeta restoredFile) {
+            return new DynamicBucketIndexMaintainer(
+                    handler.hashIndex(partition, bucket), restoredFile);
         }
     }
 }

@@ -268,7 +268,7 @@ public class FileStorePathFactory {
         };
     }
 
-    public PathFactory indexFileFactory() {
+    public PathFactory indexFileFactory(BinaryRow partition, int bucket) {
         return new PathFactory() {
             @Override
             public Path newPath() {

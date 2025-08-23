@@ -132,7 +132,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         List<IndexFileMeta> indexFiles =
                 fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        return factory.create(indexFiles);
+        return factory.create(partition, bucket, indexFiles);
     }
 
     public CommitMessageImpl writeDVIndexFiles(

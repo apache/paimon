@@ -393,7 +393,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     if (deletionVectors && deletionIndexFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(
-                                        indexFileHandler.dvIndex(),
+                                        indexFileHandler.dvIndex(partition, bucket),
                                         dataFiles,
                                         deletionIndexFilesMap.getOrDefault(
                                                 Pair.of(partition, bucket),
@@ -520,13 +520,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         && deletionIndexFilesMap != null) {
                     builder.withBeforeDeletionFiles(
                             getDeletionFiles(
-                                    indexFileHandler.dvIndex(),
+                                    indexFileHandler.dvIndex(part, bucket),
                                     before,
                                     beforDeletionIndexFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyList())));
                     builder.withDataDeletionFiles(
                             getDeletionFiles(
-                                    indexFileHandler.dvIndex(),
+                                    indexFileHandler.dvIndex(part, bucket),
                                     data,
                                     deletionIndexFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyList())));

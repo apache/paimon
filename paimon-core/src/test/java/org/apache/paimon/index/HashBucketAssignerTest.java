@@ -45,13 +45,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
     private IndexFileHandler fileHandler;
-    private HashIndexFile indexFile;
     private StreamTableCommit commit;
 
     @BeforeEach
     public void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
-        indexFile = fileHandler.hashIndex();
         commit = table.newStreamWriteBuilder().withCommitUser(commitUser).newCommit();
     }
 
@@ -226,13 +224,19 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
     @Test
     public void testAssignRestore() throws IOException {
-        IndexFileMeta bucket0 = indexFile.write(new int[] {2, 5});
-        IndexFileMeta bucket2 = indexFile.write(new int[] {4, 7});
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, 3, bucket0),
-                        createCommitMessage(row(1), 2, 3, bucket2)));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {2, 5})),
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 7}))));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2);
@@ -252,13 +256,19 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
     @Test
     public void testAssignRestoreWithUpperBound() throws IOException {
-        IndexFileMeta bucket0 = indexFile.write(new int[] {2, 5});
-        IndexFileMeta bucket2 = indexFile.write(new int[] {4, 7});
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, 3, bucket0),
-                        createCommitMessage(row(1), 2, 3, bucket2)));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {2, 5})),
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 7}))));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0, 1);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2, 1);
@@ -316,8 +326,17 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, 1, indexFile.write(new int[] {0})),
-                        createCommitMessage(row(2), 0, 1, indexFile.write(new int[] {0}))));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0})),
+                        createCommitMessage(
+                                row(2),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(2), 0).write(new int[] {0}))));
+
         assertThat(assigner.currentPartitions()).containsExactlyInAnyOrder(row(1), row(2));
 
         // checkpoint 1, but no commit
@@ -333,7 +352,12 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 1,
                 Collections.singletonList(
-                        createCommitMessage(row(1), 0, 1, indexFile.write(new int[] {1}))));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {1}))));
+
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
     }

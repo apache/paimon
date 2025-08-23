@@ -429,11 +429,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         DynamicBucketIndexMaintainer indexMaintainer =
                 dbMaintainerFactory == null
                         ? null
-                        : dbMaintainerFactory.create(restored.dynamicBucketIndex());
+                        : dbMaintainerFactory.create(
+                                partition, bucket, restored.dynamicBucketIndex());
         BucketedDvMaintainer dvMaintainer =
                 dvMaintainerFactory == null
                         ? null
-                        : dvMaintainerFactory.create(restored.deleteVectorsIndex());
+                        : dvMaintainerFactory.create(
+                                partition, bucket, restored.deleteVectorsIndex());
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {

@@ -22,13 +22,11 @@ import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
-import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -61,6 +59,7 @@ import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -221,15 +220,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public IndexFileHandler newIndexFileHandler() {
         return new IndexFileHandler(
+                fileIO,
                 snapshotManager(),
-                pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
-                new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
-                new DeletionVectorsIndexFile(
-                        fileIO,
-                        pathFactory().indexFileFactory(),
-                        options.dvIndexFileTargetSize(),
-                        options.deletionVectorBitmap64()));
+                new IndexFilePathFactories(pathFactory()),
+                options.dvIndexFileTargetSize(),
+                options.deletionVectorBitmap64());
     }
 
     @Override

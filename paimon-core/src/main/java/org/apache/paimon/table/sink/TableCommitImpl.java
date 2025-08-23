@@ -35,6 +35,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -278,12 +279,14 @@ public class TableCommitImpl implements InnerTableCommit {
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
-        PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
+        IndexFilePathFactories indexFactories = new IndexFilePathFactories(commit.pathFactory());
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
                 DataFilePathFactory pathFactory =
                         factories.get(message.partition(), message.bucket());
+                PathFactory indexFileFactory =
+                        indexFactories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);

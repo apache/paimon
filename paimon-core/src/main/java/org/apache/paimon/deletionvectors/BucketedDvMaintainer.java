@@ -19,6 +19,7 @@
 package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 
@@ -160,17 +161,19 @@ public class BucketedDvMaintainer {
             return handler;
         }
 
-        public BucketedDvMaintainer create(@Nullable List<IndexFileMeta> restoredFiles) {
+        public BucketedDvMaintainer create(
+                BinaryRow partition, int bucket, @Nullable List<IndexFileMeta> restoredFiles) {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
             Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(restoredFiles));
-            return create(deletionVectors);
+                    new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
+            return create(partition, bucket, deletionVectors);
         }
 
-        public BucketedDvMaintainer create(Map<String, DeletionVector> deletionVectors) {
-            return new BucketedDvMaintainer(handler.dvIndex(), deletionVectors);
+        public BucketedDvMaintainer create(
+                BinaryRow partition, int bucket, Map<String, DeletionVector> deletionVectors) {
+            return new BucketedDvMaintainer(handler.dvIndex(partition, bucket), deletionVectors);
         }
     }
 }

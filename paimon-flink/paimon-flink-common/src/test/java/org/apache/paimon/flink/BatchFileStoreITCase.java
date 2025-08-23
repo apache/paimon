@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -121,10 +120,9 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         List<IndexManifestEntry> indexManifestEntries =
                 table.indexManifestFileReader().read(snapshot.indexManifest());
         assertThat(indexManifestEntries.size()).isEqualTo(1);
-        IndexFileMeta indexFileMeta = indexManifestEntries.get(0).indexFile();
         return table.store()
                 .newIndexFileHandler()
-                .readAllDeletionVectors(singletonList(indexFileMeta));
+                .readAllDeletionVectors(indexManifestEntries.get(0));
     }
 
     @Test

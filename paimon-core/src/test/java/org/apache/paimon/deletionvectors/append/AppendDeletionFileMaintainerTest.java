@@ -66,7 +66,7 @@ class AppendDeletionFileMaintainerTest {
                         Collections.singletonMap("f3", Arrays.asList(1, 2, 3)));
         store.commit(commitMessage1, commitMessage2);
 
-        PathFactory indexPathFactory = store.pathFactory().indexFileFactory();
+        PathFactory indexPathFactory = store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0);
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         dataFileToDeletionFiles.putAll(
                 createDeletionFileMapFromIndexFileMetas(

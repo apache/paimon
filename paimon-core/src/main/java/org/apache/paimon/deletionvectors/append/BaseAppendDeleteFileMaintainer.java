@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -68,7 +69,8 @@ public interface BaseAppendDeleteFileMaintainer {
         List<IndexFileMeta> indexFiles =
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partition, bucket);
         BucketedDvMaintainer maintainer =
-                BucketedDvMaintainer.factory(indexFileHandler).create(indexFiles);
+                BucketedDvMaintainer.factory(indexFileHandler)
+                        .create(partition, bucket, indexFiles);
         return new BucketedAppendDeleteFileMaintainer(partition, bucket, maintainer);
     }
 
@@ -94,6 +96,9 @@ public interface BaseAppendDeleteFileMaintainer {
             }
         }
         return new AppendDeleteFileMaintainer(
-                indexFileHandler.dvIndex(), partition, manifestEntries, deletionFiles);
+                indexFileHandler.dvIndex(partition, UNAWARE_BUCKET),
+                partition,
+                manifestEntries,
+                deletionFiles);
     }
 }

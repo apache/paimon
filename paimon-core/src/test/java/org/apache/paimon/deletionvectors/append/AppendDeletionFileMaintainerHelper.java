@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+
 /** Helper for {@link BaseAppendDeleteFileMaintainer}. */
 public class AppendDeletionFileMaintainerHelper {
 
@@ -48,6 +50,9 @@ public class AppendDeletionFileMaintainerHelper {
                                                 indexManifestEntry.indexFile().fileName()))
                         .collect(Collectors.toList());
         return new AppendDeleteFileMaintainer(
-                indexFileHandler.dvIndex(), partition, manifests, deletionFiles);
+                indexFileHandler.dvIndex(partition, UNAWARE_BUCKET),
+                partition,
+                manifests,
+                deletionFiles);
     }
 }
