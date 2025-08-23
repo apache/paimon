@@ -28,8 +28,8 @@ under the License.
         <version>1.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-spark-3.5</artifactId>
-    <name>Paimon : Spark : 3.5</name>
+    <artifactId>paimon-spark-3.5_${scala.binary.version}</artifactId>
+    <name>Paimon : Spark : 3.5: ${scala.binary.version}</name>
 
     <properties>
         <spark.version>3.5.6</spark.version>

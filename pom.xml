@@ -416,6 +416,31 @@ under the License.
         </profile>
 
         <profile>
+            <id>spark3_2.13</id>
+            <modules>
+                <module>paimon-spark/paimon-spark3-common</module>
+                <module>paimon-spark/paimon-spark-3.5</module>
+                <module>paimon-spark/paimon-spark-3.4</module>
+                <module>paimon-spark/paimon-spark-3.3</module>
+                <module>paimon-spark/paimon-spark-3.2</module>
+            </modules>
+            <properties>
+                <scala.binary.version>2.13</scala.binary.version>
+                <scala.version>${scala213.version}</scala.version>
+                <paimon-spark-common.spark.version>3.5.6</paimon-spark-common.spark.version>
+                <paimon-sparkx-common>paimon-spark3-common</paimon-sparkx-common>
+                <!-- todo: support the latest spark in paimon e2e test2 -->
+                <test.spark.main.version>3.3</test.spark.main.version>
+                <test.spark.version>3.3.0</test.spark.version>
+            </properties>
+            <activation>
+                <property>
+                    <name>spark3_2.13</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
             <id>spark4</id>
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
@@ -1025,7 +1050,7 @@ under the License.
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-enforcer-plugin</artifactId>
-                    <version>3.0.0-M1</version>
+                    <version>3.0.0-M2</version>
                 </plugin>
 
                 <!-- Pin the version of the maven shade plugin -->
