@@ -66,5 +66,6 @@ jobs:
           echo "</server></servers></settings>" >> $tmp_settings
           
           mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,flink1
+          mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3_2.13,flink1
 
           rm $tmp_settings
