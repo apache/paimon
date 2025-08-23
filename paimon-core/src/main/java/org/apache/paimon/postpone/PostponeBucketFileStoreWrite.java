@@ -182,23 +182,25 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
-        Preconditions.checkArgument(
-                restoreFiles.isEmpty(),
-                "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(
-                fileIO,
-                pathFactory.createDataFilePathFactory(partition, bucket),
-                options.spillCompressOptions(),
-                options.writeBufferSpillDiskSize(),
-                ioManager,
-                mfFactory.create(),
-                writerFactory,
-                files -> newFileRead(partition, bucket, files),
-                forceBufferSpill,
-                forceBufferSpill,
-                restoreIncrement);
+        PostponeBucketWriter writer =
+                new PostponeBucketWriter(
+                        fileIO,
+                        pathFactory.createDataFilePathFactory(partition, bucket),
+                        options.spillCompressOptions(),
+                        options.writeBufferSpillDiskSize(),
+                        ioManager,
+                        mfFactory.create(),
+                        writerFactory,
+                        files -> newFileRead(partition, bucket, files),
+                        forceBufferSpill,
+                        forceBufferSpill,
+                        restoreIncrement);
+        if (restoreFiles != null && !restoreFiles.isEmpty()) {
+            writer.addNewFiles(restoreFiles);
+        }
+        return writer;
     }
 
     private RecordReaderIterator<KeyValue> newFileRead(
