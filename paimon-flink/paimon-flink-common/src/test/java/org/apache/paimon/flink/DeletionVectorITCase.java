@@ -22,10 +22,12 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -40,6 +42,8 @@ import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 /** ITCase for deletion vector table. */
 public class DeletionVectorITCase extends CatalogITCaseBase {
+
+    @TempDir java.nio.file.Path tempExternalPath;
 
     private static Stream<Arguments> parameters1() {
         // parameters: changelogProducer, dvBitmap64
@@ -433,6 +437,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                         + "'deletion-vectors.enabled' = 'true', "
                         + "'index-file-in-data-file-dir' = 'true')");
         sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM IT")).containsExactly(Row.of(1, 1));
         Path path = getTableDirectory("IT");
         LocalFileIO fileIO = LocalFileIO.create();
         List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
@@ -445,9 +450,32 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 "CREATE TABLE IT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
                         + "'deletion-vectors.enabled' = 'true')");
         sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM IT")).containsExactly(Row.of(1, 1));
         Path path = getTableDirectory("IT");
         LocalFileIO fileIO = LocalFileIO.create();
         List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
         assertThat(result.toString()).contains("default.db/IT/index/index-");
+    }
+
+    @Test
+    public void testIndexFileInDataFileDirWithExternalPath() throws IOException {
+        String externalPaths = TraceableFileIO.SCHEME + "://" + tempExternalPath.toString();
+        sql(
+                "CREATE TABLE IT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'index-file-in-data-file-dir' = 'true', "
+                        + "'data-file.external-paths.strategy' = 'round-robin', "
+                        + String.format("'data-file.external-paths' = '%s')", externalPaths));
+        sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM IT")).containsExactly(Row.of(1, 1));
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        Path path = getTableDirectory("IT");
+        assertThat(Arrays.asList(fileIO.listFiles(path, true)).toString())
+                .doesNotContain("default.db/IT/bucket-0/index-");
+
+        Path externalPath = new Path(externalPaths);
+        assertThat(Arrays.asList(fileIO.listFiles(externalPath, true)).toString())
+                .contains("bucket-0/index-");
     }
 }
