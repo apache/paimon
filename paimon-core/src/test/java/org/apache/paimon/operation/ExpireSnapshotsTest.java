@@ -266,7 +266,7 @@ public class ExpireSnapshotsTest {
         // create DataFileMeta and ManifestEntry
         List<String> extraFiles = Arrays.asList("extra1", "extra2");
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "myDataFile",
                         1,
                         1,
@@ -287,8 +287,8 @@ public class ExpireSnapshotsTest {
                         null,
                         null,
                         null);
-        ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
-        ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
+        ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
+        ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
         expire.snapshotDeletion()
@@ -329,7 +329,7 @@ public class ExpireSnapshotsTest {
         // create DataFileMeta and ManifestEntry
         List<String> extraFiles = Arrays.asList("extra1", "extra2");
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         fileName,
                         1,
                         1,
@@ -350,8 +350,8 @@ public class ExpireSnapshotsTest {
                         myDataFile.toString(),
                         null,
                         null);
-        ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
-        ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
+        ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
+        ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
         expire.snapshotDeletion()

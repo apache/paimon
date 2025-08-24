@@ -129,7 +129,7 @@ public class DataFileMeta12LegacySerializer implements Serializable {
         byte[] bytes = new byte[in.readInt()];
         in.readFully(bytes);
         SafeBinaryRow row = new SafeBinaryRow(rowSerializer.getArity(), bytes, 0);
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),

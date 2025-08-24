@@ -180,7 +180,7 @@ public class ChangelogCompactSortOperatorTest {
     }
 
     private DataFileMeta createDataFileMeta(int mb, long creationMillis) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 UUID.randomUUID().toString(),
                 MemorySize.ofMebiBytes(mb).getBytes(),
                 0,

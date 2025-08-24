@@ -74,7 +74,7 @@ public class ManifestTestDataGenerator {
         List<DataFileTestDataGenerator.Data> level = bucketLevels.get(file.meta.level());
         level.add(file);
         bufferedResults.push(
-                new ManifestEntry(
+                ManifestEntry.create(
                         FileKind.ADD, file.partition, file.bucket, numBuckets, file.meta));
         mergeLevelsIfNeeded(file.partition, file.bucket);
 
@@ -144,7 +144,7 @@ public class ManifestTestDataGenerator {
 
             for (DataFileTestDataGenerator.Data file : currentLevel) {
                 bufferedResults.push(
-                        new ManifestEntry(
+                        ManifestEntry.create(
                                 FileKind.DELETE, partition, bucket, numBuckets, file.meta));
                 kvs.addAll(file.content);
             }
@@ -152,7 +152,7 @@ public class ManifestTestDataGenerator {
 
             for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
-                        new ManifestEntry(
+                        ManifestEntry.create(
                                 FileKind.DELETE, partition, bucket, numBuckets, file.meta));
                 kvs.addAll(file.content);
             }
@@ -164,7 +164,8 @@ public class ManifestTestDataGenerator {
             nextLevel.addAll(merged);
             for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
-                        new ManifestEntry(FileKind.ADD, partition, bucket, numBuckets, file.meta));
+                        ManifestEntry.create(
+                                FileKind.ADD, partition, bucket, numBuckets, file.meta));
             }
 
             lastModifiedLevel += 1;
