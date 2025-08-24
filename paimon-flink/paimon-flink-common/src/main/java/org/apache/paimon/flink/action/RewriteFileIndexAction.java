@@ -27,16 +27,19 @@ import java.util.Map;
 /** Rewrite-file-index action for Flink. */
 public class RewriteFileIndexAction extends ActionBase {
 
-    private String identifier;
+    private final String identifier;
+    private final String partitions;
 
-    public RewriteFileIndexAction(String identifier, Map<String, String> catalogConfig) {
+    public RewriteFileIndexAction(
+            String identifier, String partitions, Map<String, String> catalogConfig) {
         super(catalogConfig);
         this.identifier = identifier;
+        this.partitions = partitions;
     }
 
     public void run() throws Exception {
         RewriteFileIndexProcedure rewriteFileIndexProcedure = new RewriteFileIndexProcedure();
         rewriteFileIndexProcedure.withCatalog(catalog);
-        rewriteFileIndexProcedure.call(new DefaultProcedureContext(env), identifier, "");
+        rewriteFileIndexProcedure.call(new DefaultProcedureContext(env), identifier, partitions);
     }
 }
