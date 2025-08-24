@@ -16,27 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.index;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.fs.Path;
 
-import java.util.HashMap;
-import java.util.Map;
+/** Path factory to create an index path. */
+public interface IndexPathFactory {
 
-/** Cache for index {@link PathFactory}s. */
-public class IndexFilePathFactories {
+    Path newPath();
 
-    private final Map<Pair<BinaryRow, Integer>, IndexPathFactory> cache = new HashMap<>();
-    private final FileStorePathFactory pathFactory;
+    Path toPath(IndexFileMeta file);
 
-    public IndexFilePathFactories(FileStorePathFactory pathFactory) {
-        this.pathFactory = pathFactory;
-    }
-
-    public IndexPathFactory get(BinaryRow partition, int bucket) {
-        return cache.computeIfAbsent(
-                Pair.of(partition, bucket),
-                k -> pathFactory.indexFileFactory(k.getKey(), k.getValue()));
-    }
+    boolean isExternalPath();
 }

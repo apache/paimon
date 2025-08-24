@@ -172,7 +172,8 @@ public class ManifestListTest {
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
-                null);
+                null,
+                false);
     }
 
     private ManifestList createManifestList(String pathStr) {

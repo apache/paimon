@@ -22,9 +22,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,7 +52,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndex(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
@@ -76,7 +76,7 @@ public class DeletionVectorsIndexFileTest {
         assertThat(indexFiles.size()).isEqualTo(1);
 
         // read
-        String fileName = indexFiles.get(0).fileName();
+        IndexFileMeta file = indexFiles.get(0);
         Map<String, DeletionVector> actualDeleteMap =
                 deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(1)).isTrue();
@@ -86,14 +86,14 @@ public class DeletionVectorsIndexFileTest {
         assertThat(actualDeleteMap.get("file33.parquet").isDeleted(3)).isTrue();
 
         // delete
-        deletionVectorsIndexFile.delete(fileName);
-        assertThat(deletionVectorsIndexFile.exists(fileName)).isFalse();
+        deletionVectorsIndexFile.delete(file);
+        assertThat(deletionVectorsIndexFile.exists(file)).isFalse();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndexWithCopiousDv(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -125,7 +125,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndexWithEnormousDv(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -157,7 +157,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteDVIndexWithLimitedTargetSizePerIndexFile(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, MemorySize.parse("2MB"), bitmap64);
 
@@ -208,7 +208,7 @@ public class DeletionVectorsIndexFileTest {
 
     @Test
     public void testReadV1AndV2() {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile v1DeletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, false);
         DeletionVectorsIndexFile v2DeletionVectorsIndexFile =
@@ -263,7 +263,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDeletionFile(boolean bitmap64) throws IOException {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -278,12 +278,11 @@ public class DeletionVectorsIndexFileTest {
         assertThat(indexFiles.size()).isEqualTo(1);
 
         IndexFileMeta indexFileMeta = indexFiles.get(0);
-        DeletionVectorMeta deletionVectorMeta =
-                indexFileMeta.deletionVectorMetas().get("file1.parquet");
+        DeletionVectorMeta deletionVectorMeta = indexFileMeta.dvRanges().get("file1.parquet");
 
         DeletionFile deletionFile =
                 new DeletionFile(
-                        pathFactory.toPath(indexFileMeta.fileName()).toString(),
+                        pathFactory.toPath(indexFileMeta).toString(),
                         deletionVectorMeta.offset(),
                         deletionVectorMeta.length(),
                         deletionVectorMeta.cardinality());
@@ -341,27 +340,32 @@ public class DeletionVectorsIndexFileTest {
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, boolean bitmap64) {
+            IndexPathFactory pathFactory, boolean bitmap64) {
         return deletionVectorsIndexFile(pathFactory, MemorySize.ofBytes(Long.MAX_VALUE), bitmap64);
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean bitmap64) {
+            IndexPathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean bitmap64) {
         return new DeletionVectorsIndexFile(
                 LocalFileIO.create(), pathFactory, targetSizePerIndexFile, bitmap64);
     }
 
-    private PathFactory getPathFactory() {
+    private IndexPathFactory getPathFactory() {
         Path dir = new Path(tempPath.toUri());
-        return new PathFactory() {
+        return new IndexPathFactory() {
             @Override
             public Path newPath() {
                 return new Path(dir, UUID.randomUUID().toString());
             }
 
             @Override
-            public Path toPath(String fileName) {
-                return new Path(dir, fileName);
+            public boolean isExternalPath() {
+                return false;
+            }
+
+            @Override
+            public Path toPath(IndexFileMeta file) {
+                return new Path(dir, file.fileName());
             }
         };
     }

@@ -21,7 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -36,7 +36,6 @@ import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
-import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
@@ -285,7 +284,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
                 DataFilePathFactory pathFactory =
                         factories.get(message.partition(), message.bucket());
-                PathFactory indexFileFactory =
+                IndexPathFactory indexFileFactory =
                         indexFactories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
@@ -293,11 +292,9 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.compactIncrement().compactBefore().forEach(collector);
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.indexIncrement().newIndexFiles().stream()
-                        .map(IndexFileMeta::fileName)
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
                 msg.indexIncrement().deletedIndexFiles().stream()
-                        .map(IndexFileMeta::fileName)
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
             }

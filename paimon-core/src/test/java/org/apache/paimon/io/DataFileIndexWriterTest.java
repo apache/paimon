@@ -171,7 +171,8 @@ public class DataFileIndexWriterTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        null);
+                        null,
+                        false);
 
         Table table = fileSystemCatalog.getTable(Identifier.create(tableName, tableName));
         ReadBuilder readBuilder = table.newReadBuilder();

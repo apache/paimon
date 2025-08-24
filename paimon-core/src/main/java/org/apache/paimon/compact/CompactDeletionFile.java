@@ -92,7 +92,7 @@ public interface CompactDeletionFile {
         @Override
         public void clean() {
             if (deletionFile != null) {
-                dvIndexFile.delete(deletionFile.fileName());
+                dvIndexFile.delete(deletionFile);
             }
         }
     }

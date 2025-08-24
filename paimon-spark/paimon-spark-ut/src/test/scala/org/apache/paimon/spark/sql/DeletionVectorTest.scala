@@ -655,7 +655,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     val fileStore = loadTable("T").store()
     val indexManifest = fileStore.snapshotManager().latestSnapshot().indexManifest()
     val entry = fileStore.newIndexFileHandler().readManifest(indexManifest).get(0)
-    val dvMeta = entry.indexFile().deletionVectorMetas().values().iterator().next()
+    val dvMeta = entry.indexFile().dvRanges().values().iterator().next()
 
     assert(dvMeta.cardinality() == 334)
   }

@@ -186,6 +186,7 @@ public class CommitMessageLegacyV2Serializer {
                     row.getString(1).toString(),
                     row.getLong(2),
                     row.getLong(3),
+                    null,
                     null);
         }
     }

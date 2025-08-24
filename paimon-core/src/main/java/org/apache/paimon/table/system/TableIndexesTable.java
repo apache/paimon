@@ -214,7 +214,7 @@ public class TableIndexesTable implements ReadonlyTable {
                 IndexManifestEntry indexManifestEntry,
                 CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             LinkedHashMap<String, DeletionVectorMeta> dvMetas =
-                    indexManifestEntry.indexFile().deletionVectorMetas();
+                    indexManifestEntry.indexFile().dvRanges();
             return GenericRow.of(
                     partitionCastExecutor.cast(indexManifestEntry.partition()),
                     indexManifestEntry.bucket(),

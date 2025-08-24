@@ -20,8 +20,8 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -33,12 +33,12 @@ import java.util.Map;
 /** Writer for deletion vector index file. */
 public class DeletionVectorIndexFileWriter {
 
-    private final PathFactory indexPathFactory;
+    private final IndexPathFactory indexPathFactory;
     private final FileIO fileIO;
     private final long targetSizeInBytes;
 
     public DeletionVectorIndexFileWriter(
-            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
+            FileIO fileIO, IndexPathFactory pathFactory, MemorySize targetSizePerIndexFile) {
         this.indexPathFactory = pathFactory;
         this.fileIO = fileIO;
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
@@ -53,7 +53,7 @@ public class DeletionVectorIndexFileWriter {
      */
     public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
 
-        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
+        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
         try {
             for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {
                 writer.write(entry.getKey(), entry.getValue());
@@ -79,7 +79,7 @@ public class DeletionVectorIndexFileWriter {
 
     private IndexFileMeta tryWriter(Iterator<Map.Entry<String, DeletionVector>> iterator)
             throws IOException {
-        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory.newPath(), fileIO);
+        DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
         try {
             while (iterator.hasNext()) {
                 Map.Entry<String, DeletionVector> entry = iterator.next();

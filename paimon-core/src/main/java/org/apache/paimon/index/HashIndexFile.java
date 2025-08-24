@@ -21,7 +21,6 @@ package org.apache.paimon.index;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
 import java.util.List;
@@ -34,34 +33,31 @@ public class HashIndexFile extends IndexFile {
 
     public static final String HASH_INDEX = "HASH";
 
-    public HashIndexFile(FileIO fileIO, PathFactory pathFactory) {
+    public HashIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
         super(fileIO, pathFactory);
     }
 
-    public Path path(String fileName) {
-        return pathFactory.toPath(fileName);
+    public IntIterator read(IndexFileMeta file) throws IOException {
+        return readInts(fileIO, pathFactory.toPath(file));
     }
 
-    public IntIterator read(String fileName) throws IOException {
-        return readInts(fileIO, pathFactory.toPath(fileName));
+    public List<Integer> readList(IndexFileMeta file) throws IOException {
+        return IntIterator.toIntList(read(file));
     }
 
-    public List<Integer> readList(String fileName) throws IOException {
-        return IntIterator.toIntList(read(fileName));
-    }
-
-    public String write(IntIterator input) throws IOException {
+    public IndexFileMeta write(IntIterator input) throws IOException {
         Path path = pathFactory.newPath();
-        writeInts(fileIO, path, input);
-        return path.getName();
-    }
-
-    public IndexFileMeta write(int size, IntIterator input) throws IOException {
-        String fileName = write(input);
-        return new IndexFileMeta(HASH_INDEX, fileName, fileSize(fileName), size);
+        int count = writeInts(fileIO, path, input);
+        return new IndexFileMeta(
+                HASH_INDEX,
+                path.getName(),
+                fileSize(path),
+                count,
+                null,
+                isExternalPath() ? path.toString() : null);
     }
 
     public IndexFileMeta write(int[] ints) throws IOException {
-        return write(ints.length, IntIterator.create(ints));
+        return write(IntIterator.create(ints));
     }
 }

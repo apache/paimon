@@ -70,6 +70,10 @@ public class DataFilePathFactory {
         this.externalPathProvider = externalPathProvider;
     }
 
+    public Path parent() {
+        return parent;
+    }
+
     public String dataFilePrefix() {
         return dataFilePrefix;
     }
@@ -106,7 +110,7 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(dataFilePrefix, extension));
     }
 
-    private Path newPathFromName(String fileName) {
+    public Path newPathFromName(String fileName) {
         if (externalPathProvider != null) {
             return externalPathProvider.getNextExternalDataPath(fileName);
         }

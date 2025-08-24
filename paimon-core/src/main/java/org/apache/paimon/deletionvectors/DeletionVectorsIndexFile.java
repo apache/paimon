@@ -24,9 +24,9 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.PathFactory;
 
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -51,7 +51,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
 
     public DeletionVectorsIndexFile(
             FileIO fileIO,
-            PathFactory pathFactory,
+            IndexPathFactory pathFactory,
             MemorySize targetSizePerIndexFile,
             boolean bitmap64) {
         super(fileIO, pathFactory);
@@ -71,13 +71,11 @@ public class DeletionVectorsIndexFile extends IndexFile {
      * @throws UncheckedIOException If an I/O error occurs while reading from the file.
      */
     public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
-        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas =
-                fileMeta.deletionVectorMetas();
+        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas = fileMeta.dvRanges();
         checkNotNull(deletionVectorMetas);
 
-        String indexFileName = fileMeta.fileName();
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
-        Path filePath = pathFactory.toPath(indexFileName);
+        Path filePath = pathFactory.toPath(fileMeta);
         try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);

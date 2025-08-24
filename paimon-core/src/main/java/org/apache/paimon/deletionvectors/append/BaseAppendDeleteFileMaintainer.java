@@ -82,8 +82,7 @@ public interface BaseAppendDeleteFileMaintainer {
                         .collect(Collectors.toList());
         Map<String, DeletionFile> deletionFiles = new HashMap<>();
         for (IndexManifestEntry file : manifestEntries) {
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas =
-                    file.indexFile().deletionVectorMetas();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas = file.indexFile().dvRanges();
             checkNotNull(dvMetas);
             for (DeletionVectorMeta dvMeta : dvMetas.values()) {
                 deletionFiles.put(

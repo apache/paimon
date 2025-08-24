@@ -58,7 +58,8 @@ public class IndexManifestEntry {
                             new DataField(
                                     7,
                                     "_DELETIONS_VECTORS_RANGES",
-                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
+                                    new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(8, "_EXTERNAL_PATH", newStringType(true))));
 
     private final FileKind kind;
     private final BinaryRow partition;

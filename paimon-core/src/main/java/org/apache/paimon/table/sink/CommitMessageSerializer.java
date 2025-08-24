@@ -20,8 +20,9 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.IndexFileMeta09Serializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
+import org.apache.paimon.index.IndexFileMetaV1Deserializer;
+import org.apache.paimon.index.IndexFileMetaV2Deserializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
@@ -58,7 +59,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private DataFileMeta10LegacySerializer dataFileMeta10LegacySerializer;
     private DataFileMeta09Serializer dataFile09Serializer;
     private DataFileMeta08Serializer dataFile08Serializer;
-    private IndexFileMeta09Serializer indexEntry09Serializer;
+    private IndexFileMetaV1Deserializer indexEntryV1Deserializer;
+    private IndexFileMetaV2Deserializer indexEntryV2Deserializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
@@ -171,13 +173,18 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer(
             int version, DataInputView view) {
-        if (version >= 5) {
+        if (version >= 8) {
             return () -> indexEntrySerializer.deserializeList(view);
-        } else {
-            if (indexEntry09Serializer == null) {
-                indexEntry09Serializer = new IndexFileMeta09Serializer();
+        } else if (version >= 5) {
+            if (indexEntryV2Deserializer == null) {
+                indexEntryV2Deserializer = new IndexFileMetaV2Deserializer();
             }
-            return () -> indexEntry09Serializer.deserializeList(view);
+            return () -> indexEntryV2Deserializer.deserializeList(view);
+        } else {
+            if (indexEntryV1Deserializer == null) {
+                indexEntryV1Deserializer = new IndexFileMetaV1Deserializer();
+            }
+            return () -> indexEntryV1Deserializer.deserializeList(view);
         }
     }
 }

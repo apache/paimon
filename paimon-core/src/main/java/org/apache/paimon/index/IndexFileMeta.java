@@ -52,7 +52,8 @@ public class IndexFileMeta {
                             new DataField(
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
-                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
+                                    new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(5, "_EXTERNAL_PATH", newStringType(true))));
 
     private final String indexType;
     private final String fileName;
@@ -63,23 +64,23 @@ public class IndexFileMeta {
      * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
      * order of DeletionVectorMetas and the written DeletionVectors is consistent.
      */
-    private final @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas;
+    private final @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges;
 
-    public IndexFileMeta(String indexType, String fileName, long fileSize, long rowCount) {
-        this(indexType, fileName, fileSize, rowCount, null);
-    }
+    private final @Nullable String externalPath;
 
     public IndexFileMeta(
             String indexType,
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas) {
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable String externalPath) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
-        this.deletionVectorMetas = deletionVectorMetas;
+        this.dvRanges = dvRanges;
+        this.externalPath = externalPath;
     }
 
     public String indexType() {
@@ -98,8 +99,13 @@ public class IndexFileMeta {
         return rowCount;
     }
 
-    public @Nullable LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas() {
-        return deletionVectorMetas;
+    public @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges() {
+        return dvRanges;
+    }
+
+    @Nullable
+    public String externalPath() {
+        return externalPath;
     }
 
     @Override
@@ -115,12 +121,13 @@ public class IndexFileMeta {
                 && Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
-                && Objects.equals(deletionVectorMetas, that.deletionVectorMetas);
+                && Objects.equals(dvRanges, that.dvRanges)
+                && Objects.equals(externalPath, that.externalPath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(indexType, fileName, fileSize, rowCount, deletionVectorMetas);
+        return Objects.hash(indexType, fileName, fileSize, rowCount, dvRanges, externalPath);
     }
 
     @Override
@@ -135,8 +142,10 @@ public class IndexFileMeta {
                 + fileSize
                 + ", rowCount="
                 + rowCount
-                + ", deletionVectorMetas="
-                + deletionVectorMetas
+                + ", dvRanges="
+                + dvRanges
+                + ", externalPath='"
+                + externalPath
                 + '}';
     }
 }

@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
@@ -28,6 +31,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -418,5 +424,30 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
             assertThat(iter.collect(3))
                     .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2), Row.of(3, 3));
         }
+    }
+
+    @Test
+    public void testIndexFileInDataFileDir() throws IOException {
+        sql(
+                "CREATE TABLE IT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'index-file-in-data-file-dir' = 'true')");
+        sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        Path path = getTableDirectory("IT");
+        LocalFileIO fileIO = LocalFileIO.create();
+        List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
+        assertThat(result.toString()).contains("default.db/IT/bucket-0/index-");
+    }
+
+    @Test
+    public void testIndexFileInIndexDir() throws IOException {
+        sql(
+                "CREATE TABLE IT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
+                        + "'deletion-vectors.enabled' = 'true')");
+        sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        Path path = getTableDirectory("IT");
+        LocalFileIO fileIO = LocalFileIO.create();
+        List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
+        assertThat(result.toString()).contains("default.db/IT/index/index-");
     }
 }

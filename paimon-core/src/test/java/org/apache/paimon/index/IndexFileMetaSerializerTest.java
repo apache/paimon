@@ -53,17 +53,19 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 HashIndexFile.HASH_INDEX,
                 "my_file_name" + rnd.nextLong(),
                 rnd.nextInt(),
-                rnd.nextInt());
+                rnd.nextInt(),
+                null,
+                null);
     }
 
     public static IndexFileMeta randomDeletionVectorIndexFile() {
         Random rnd = new Random();
-        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas = new LinkedHashMap<>();
-        deletionVectorMetas.put(
+        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
                 "my_file_name1",
                 new DeletionVectorMeta(
                         "my_file_name1", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
-        deletionVectorMetas.put(
+        dvRanges.put(
                 "my_file_name2",
                 new DeletionVectorMeta(
                         "my_file_name2", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
@@ -72,6 +74,7 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 "deletion_vectors_index_file_name" + rnd.nextLong(),
                 rnd.nextInt(),
                 rnd.nextInt(),
-                deletionVectorMetas);
+                dvRanges,
+                null);
     }
 }
