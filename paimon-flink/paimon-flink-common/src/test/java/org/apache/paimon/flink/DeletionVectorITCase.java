@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
@@ -35,7 +34,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -436,12 +434,13 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 "CREATE TABLE IT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
                         + "'deletion-vectors.enabled' = 'true', "
                         + "'index-file-in-data-file-dir' = 'true')");
-        sql("INSERT INTO IT (a, b) VALUES (1, 1)");
+        sql("INSERT INTO IT VALUES (1, 1)");
         assertThat(sql("SELECT * FROM IT")).containsExactly(Row.of(1, 1));
         Path path = getTableDirectory("IT");
         LocalFileIO fileIO = LocalFileIO.create();
-        List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
-        assertThat(result.toString()).contains("default.db/IT/bucket-0/index-");
+        String result = Arrays.asList(fileIO.listFiles(path, true)).toString();
+        assertThat(result).contains("default.db/IT/bucket-0/index-");
+        assertThat(result).doesNotContain("default.db/IT/index/index-");
     }
 
     @Test
@@ -453,8 +452,9 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM IT")).containsExactly(Row.of(1, 1));
         Path path = getTableDirectory("IT");
         LocalFileIO fileIO = LocalFileIO.create();
-        List<FileStatus> result = Arrays.asList(fileIO.listFiles(path, true));
-        assertThat(result.toString()).contains("default.db/IT/index/index-");
+        String result = Arrays.asList(fileIO.listFiles(path, true)).toString();
+        assertThat(result).doesNotContain("default.db/IT/bucket-0/index-");
+        assertThat(result).contains("default.db/IT/index/index-");
     }
 
     @Test
@@ -471,11 +471,13 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         LocalFileIO fileIO = LocalFileIO.create();
 
         Path path = getTableDirectory("IT");
-        assertThat(Arrays.asList(fileIO.listFiles(path, true)).toString())
-                .doesNotContain("default.db/IT/bucket-0/index-");
+        String inTablePath = Arrays.asList(fileIO.listFiles(path, true)).toString();
+        assertThat(inTablePath).doesNotContain("bucket-0/index-");
+        assertThat(inTablePath).doesNotContain("index/index-");
 
         Path externalPath = new Path(externalPaths);
-        assertThat(Arrays.asList(fileIO.listFiles(externalPath, true)).toString())
-                .contains("bucket-0/index-");
+        String inExternalPath = Arrays.asList(fileIO.listFiles(externalPath, true)).toString();
+        assertThat(inExternalPath).contains("bucket-0/index-");
+        assertThat(inExternalPath).doesNotContain("index/index-");
     }
 }
