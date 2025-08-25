@@ -27,6 +27,7 @@ under the License.
 # Iceberg Tags
 
 When enable iceberg compatibility, Paimon Tags will also be synced to [Iceberg Tags](https://iceberg.apache.org/docs/nightly/branching/#historical-tags).
+Tags are only synced to Iceberg if the referenced snapshot exists in the Iceberg table.
 
 ```sql
 CREATE CATALOG paimon WITH (
