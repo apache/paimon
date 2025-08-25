@@ -45,7 +45,7 @@ class ManifestListManager:
         manifest_files.extend(base_manifests)
         delta_manifests = self.read(snapshot.delta_manifest_list)
         manifest_files.extend(delta_manifests)
-        return list(set([file.file_name for file in manifest_files]))
+        return [file.file_name for file in manifest_files]
 
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         manifest_files = []
@@ -80,10 +80,7 @@ class ManifestListManager:
 
         return manifest_files
 
-    def write(self, manifest_file_names: List[str]) -> Optional[str]:
-        if not manifest_file_names:
-            return None
-
+    def write(self, file_name, manifest_file_names: List[str]):
         avro_records = []
         for manifest_file_name in manifest_file_names:
             avro_record = {
@@ -101,15 +98,13 @@ class ManifestListManager:
             }
             avro_records.append(avro_record)
 
-        list_filename = f"manifest-list-{str(uuid.uuid4())}.avro"
-        list_path = self.manifest_path / list_filename
+        list_path = self.manifest_path / file_name
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, avro_records)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(list_path) as output_stream:
                 output_stream.write(avro_bytes)
-            return list_filename
         except Exception as e:
             self.file_io.delete_quietly(list_path)
             raise RuntimeError(f"Failed to write manifest list file: {e}") from e

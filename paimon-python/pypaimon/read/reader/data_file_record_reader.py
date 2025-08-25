@@ -87,6 +87,7 @@ class DataFileBatchReader(RecordBatchReader):
             inter_arrays = mapped_arrays
             inter_names = mapped_names
 
+        # to contains 'not null' property
         final_fields = []
         for i, name in enumerate(inter_names):
             array = inter_arrays[i]

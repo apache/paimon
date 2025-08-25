@@ -247,7 +247,6 @@ class BatchTableWritePy4j:
 
     def write_arrow(self, table):
         for record_batch in table.to_reader():
-            # TODO: can we use a reusable stream in #_write_arrow_batch ?
             self._write_arrow_batch(record_batch)
 
     def write_arrow_batch(self, record_batch):

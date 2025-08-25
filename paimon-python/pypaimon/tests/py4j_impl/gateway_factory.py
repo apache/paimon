@@ -49,9 +49,7 @@ def get_gateway():
                 _gateway.java_gateway_server,
                 callback_server_listening_address,
                 callback_server_listening_port)
-            # import the paimon view
             import_paimon_view(_gateway)
-            # TODO add exception handler for better exception stacktrace
             install_py4j_hooks()
             _gateway.entry_point.put("Watchdog", Watchdog())
     return _gateway

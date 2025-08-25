@@ -123,22 +123,20 @@ class DataWriter(ABC):
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # key stats & value stats
-        stat_map = dict()
-        min_values = []
-        max_values = []
-        null_counts = []
-        for field in self.table.table_schema.fields:
-            stats = self._get_column_stats(data, field.name)
-            stat_map[field.name] = stats
-            min_values.append(stats['min_value'])
-            max_values.append(stats['max_value'])
-            null_counts.append(stats['null_count'])
-        min_keys = []
-        max_keys = []
-        for field in self.trimmed_primary_key_fields:
-            stats = stat_map[field.name]
-            min_keys.append(stats['min_value'])
-            max_keys.append(stats['max_value'])
+        column_stats = {
+            field.name: self._get_column_stats(data, field.name)
+            for field in self.table.table_schema.fields
+        }
+        all_fields = self.table.table_schema.fields
+        min_value_stats = [column_stats[field.name]['min_value'] for field in all_fields]
+        max_value_stats = [column_stats[field.name]['max_value'] for field in all_fields]
+        value_null_counts = [column_stats[field.name]['null_count'] for field in all_fields]
+        key_fields = self.trimmed_primary_key_fields
+        min_key_stats = [column_stats[field.name]['min_value'] for field in key_fields]
+        max_key_stats = [column_stats[field.name]['max_value'] for field in key_fields]
+        key_null_counts = [column_stats[field.name]['null_count'] for field in key_fields]
+        if not all(count == 0 for count in key_null_counts):
+            raise RuntimeError(f"Primary key should not be null")
 
         self.committed_files.append(DataFileMeta(
             file_name=file_name,
@@ -147,14 +145,14 @@ class DataWriter(ABC):
             min_key=BinaryRow(min_key, self.trimmed_primary_key_fields),
             max_key=BinaryRow(max_key, self.trimmed_primary_key_fields),
             key_stats=SimpleStats(
-                BinaryRow(min_keys, self.trimmed_primary_key_fields),
-                BinaryRow(max_keys, self.trimmed_primary_key_fields),
-                [0] * len(self.trimmed_primary_key_fields),
+                BinaryRow(min_key_stats, self.trimmed_primary_key_fields),
+                BinaryRow(max_key_stats, self.trimmed_primary_key_fields),
+                key_null_counts,
             ),
             value_stats=SimpleStats(
-                BinaryRow(min_values, self.trimmed_primary_key_fields),
-                BinaryRow(max_values, self.trimmed_primary_key_fields),
-                null_counts,
+                BinaryRow(min_value_stats, self.trimmed_primary_key_fields),
+                BinaryRow(max_value_stats, self.trimmed_primary_key_fields),
+                value_null_counts,
             ),
             min_sequence_number=0, # TODO
             max_sequence_number=0, # TODO
@@ -204,14 +202,13 @@ class DataWriter(ABC):
     @staticmethod
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> dict:
         column_array = record_batch.column(column_name)
-
         if column_array.null_count == len(column_array):
-            return {
-                "min_value": None,
-                "max_value": None,
-                "null_count": column_array.null_count,
-            }
-
+            raise RuntimeError("test")
+            # return {
+            #     "min_value": None,
+            #     "max_value": None,
+            #     "null_count": column_array.null_count,
+            # }
         min_value = pc.min(column_array).as_py()
         max_value = pc.max(column_array).as_py()
         null_count = column_array.null_count

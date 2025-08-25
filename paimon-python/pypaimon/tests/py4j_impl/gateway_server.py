@@ -44,7 +44,6 @@ def find_java_executable():
 
 def launch_gateway_server_process(env):
     java_executable = find_java_executable()
-    # TODO construct Java module log settings
     log_settings = []
     jvm_args = env.get(constants.PYPAIMON_JVM_ARGS, '').split()
     classpath = _get_classpath(env)
