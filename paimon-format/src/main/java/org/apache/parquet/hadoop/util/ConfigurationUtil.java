@@ -36,22 +36,26 @@ public class ConfigurationUtil {
 
     public static Class<?> getClassFromConfig(
             ParquetConfiguration configuration, String configName, Class<?> assignableFrom) {
-        String className = configuration.get(configName);
+        final String className = configuration.get(configName);
         if (className == null) {
             return null;
         }
-        className = "org.apache.paimon.shade." + className;
 
+        Class<?> foundClass;
         try {
-            final Class<?> foundClass = configuration.getClassByName(className);
+            foundClass = configuration.getClassByName(className);
             if (!assignableFrom.isAssignableFrom(foundClass)) {
-                throw new BadConfigurationException(
-                        "class "
-                                + className
-                                + " set in job conf at "
-                                + configName
-                                + " is not a subclass of "
-                                + assignableFrom.getCanonicalName());
+                final String paimonSharedClassName = "org.apache.paimon.shade." + className;
+                foundClass = configuration.getClassByName(paimonSharedClassName);
+                if (!assignableFrom.isAssignableFrom(foundClass)) {
+                    throw new BadConfigurationException(
+                            "class "
+                                    + className
+                                    + " set in job conf at "
+                                    + configName
+                                    + " is not a subclass of "
+                                    + assignableFrom.getCanonicalName());
+                }
             }
             return foundClass;
         } catch (ClassNotFoundException e) {
