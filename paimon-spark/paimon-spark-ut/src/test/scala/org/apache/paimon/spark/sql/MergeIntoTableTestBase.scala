@@ -135,6 +135,53 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: partial insert with null") {
+    withTable("source", "target") {
+
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN NOT MATCHED
+                   |THEN INSERT (a) values (a)
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 10, "c1") :: Row(2, 20, "c2") :: Row(3, null, null) :: Nil)
+    }
+  }
+
+  test(s"Paimon MergeInto: partial insert with default value") {
+    // The syntax for specifying column default values when creating Paimon tables is only supported in Spark 3.4 and above
+    if (gteqSpark3_4) {
+      withTable("source", "target") {
+
+        Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+        createTable("target", "a INT, b INT DEFAULT 6, c STRING DEFAULT 'test'", Seq("a"))
+        spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+        spark.sql(s"""
+                     |MERGE INTO target
+                     |USING source
+                     |ON target.a = source.a
+                     |WHEN NOT MATCHED
+                     |THEN INSERT (a) values (a)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql("SELECT * FROM target ORDER BY a, b"),
+          Row(1, 10, "c1") :: Row(2, 20, "c2") :: Row(3, 6, "test") :: Nil)
+      }
+    }
+  }
+
   test(s"Paimon MergeInto: update + insert with data file path") {
     withTable("source", "target") {
 
@@ -418,7 +465,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
   test("Paimon MergeInto: fail in case that miss some columns in insert") {
     withTable("source", "target") {
 
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+      Seq((1, "c11"), (3, "c33")).toDF("a", "c").createOrReplaceTempView("source")
 
       createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
@@ -431,10 +478,10 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |WHEN MATCHED THEN
                      |UPDATE SET *
                      |WHEN NOT MATCHED
-                     |THEN INSERT (a, b) VALUES (a, b)
+                     |THEN INSERT *
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("Can't align the table's columns in insert clause."))
+      assert(error.contains("cannot resolve b from Project"))
     }
   }
 

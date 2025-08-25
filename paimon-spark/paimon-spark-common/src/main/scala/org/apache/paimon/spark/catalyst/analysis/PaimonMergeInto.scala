@@ -30,7 +30,9 @@ case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
 
   override def resolveNotMatchedBySourceActions(
       merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference]): Seq[MergeAction] = {
-    merge.notMatchedBySourceActions.map(checkAndAlignActionAssignment(_, targetOutput))
+      targetOutput: Seq[AttributeReference],
+      dataEvolutionEnabled: Boolean): Seq[MergeAction] = {
+    merge.notMatchedBySourceActions.map(
+      checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
   }
 }
