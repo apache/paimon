@@ -27,9 +27,10 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.ResolvedNamespace
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, MergeRows, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.{SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.datasources.v2.MergeRowsExec
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
 import scala.collection.JavaConverters._
@@ -107,6 +108,25 @@ case class PaimonStrategy(spark: SparkSession)
     case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
       DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
 
+    case MergeRows(
+          isSourceRowPresent,
+          isTargetRowPresent,
+          matchedInstructions,
+          notMatchedInstructions,
+          notMatchedBySourceInstructions,
+          checkCardinality,
+          output,
+          child) =>
+      MergeRowsExec(
+        isSourceRowPresent,
+        isTargetRowPresent,
+        matchedInstructions,
+        notMatchedInstructions,
+        notMatchedBySourceInstructions,
+        checkCardinality,
+        output,
+        planLater(child)
+      ) :: Nil
     case _ => Nil
   }
 
