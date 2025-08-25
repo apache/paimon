@@ -27,9 +27,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Represents the TopN predicate.
- */
+/** Represents the TopN predicate. */
 public class TopN implements Serializable {
 
     private static final long serialVersionUID = 1L;
