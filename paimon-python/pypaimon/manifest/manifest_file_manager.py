@@ -103,13 +103,13 @@ class ManifestFileManager:
         avro_records = []
         for message in commit_messages:
             partition_bytes = BinaryRowSerializer.to_bytes(
-                BinaryRow(list(message.partition()), self.table.table_schema.get_partition_key_fields()))
-            for file in message.new_files():
+                BinaryRow(list(message.partition), self.table.table_schema.get_partition_key_fields()))
+            for file in message.new_files:
                 avro_record = {
                     "_VERSION": 2,
                     "_KIND": 0,
                     "_PARTITION": partition_bytes,
-                    "_BUCKET": message.bucket(),
+                    "_BUCKET": message.bucket,
                     "_TOTAL_BUCKETS": self.table.total_buckets,
                     "_FILE": {
                         "_FILE_NAME": file.file_name,

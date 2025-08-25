@@ -35,7 +35,7 @@ if __name__ == '__main__':
     # java append表
     # /var/folders/df/wn6fl15j37z40yw877brfq8m0000gp/T/tmphoxj21h3/warehouse/default.db/test_alternative_write/manifest/
     # warehouse = "/var/folders/df/wn6fl15j37z40yw877brfq8m0000gp/T/tmpxpwzougv/warehouse"
-    warehouse = "/var/folders/df/wn6fl15j37z40yw877brfq8m0000gp/T/tmpjmwlp7q2/warehouse"
+    warehouse = "/var/folders/df/wn6fl15j37z40yw877brfq8m0000gp/T/tmp8rgevxq4/warehouse"
     option = {
         'warehouse': warehouse
     }

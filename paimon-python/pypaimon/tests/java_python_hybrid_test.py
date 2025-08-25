@@ -56,7 +56,7 @@ class AlternativeWriteTest(unittest.TestCase):
         cls.expected_data = {
             'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
             'item_id': [1001, 2001, 3001, 4007, 5007, 6007, 7007, 8007, 9007, 1006, 1106, 1206],
-            'behavior': ['l', 'k', 'j', 'i-new', None, 'g-new', 'f-new', 'e-new', 'd-new', 'c-new', 'b-new', 'a-new'],
+            'behavior': ['l', 'k', 'j', 'i', None, 'g', 'f', 'e', 'd', 'c', 'b', 'a'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
         }
         cls.expected_result = pa.Table.from_pydict(cls.expected_data, schema=cls.pa_schema)
@@ -68,9 +68,9 @@ class AlternativeWriteTest(unittest.TestCase):
 
     def testAlternativeWrite(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
-                                            partition_keys=['dt'],
-                                            primary_keys=['user_id', 'dt'],
-                                            options={'bucket': '2'}
+                                            partition_keys=['dt', 'behavior'],
+                                            primary_keys=['user_id', 'dt', 'behavior'],
+                                            options={'bucket': '1'}
                                             )
         self.py_catalog.create_database('default', False)
         self.py_catalog.create_table('default.test_alternative_write', schema, False)
@@ -81,19 +81,19 @@ class AlternativeWriteTest(unittest.TestCase):
         self._write_data({
             'user_id': self.expected_data.get('user_id')[0:6],
             'item_id': [1001, 2001, 3001, 4001, 5001, 6001],
-            'behavior': ['l', 'k', 'j', 'i', None, 'g'],
+            'behavior': ['l', 'k', 'j', 'i', 'h', 'g'],
             'dt': self.expected_data.get('dt')[0:6]
         }, 0)
         data1 = {
             'user_id': self.expected_data.get('user_id')[6:12],
             'item_id': [7001, 8001, 9001, 1001, 1101, 1201],
-            'behavior': ['f-new', 'e-new', 'd-new', 'c-new', 'b-new', 'a-new'],
+            'behavior': ['f', 'e', 'd', 'c', 'b', 'a'],
             'dt': self.expected_data.get('dt')[6:12]
         }
         data2 = {
             'user_id': self.expected_data.get('user_id')[3:9],
             'item_id': [4001, 5001, 6001, 7001, 8001, 9001],
-            'behavior': ['i-new', None, 'g-new', 'f-new', 'e-new', 'd-new'],
+            'behavior': ['i', 'h', 'g', 'f', 'e', 'd'],
             'dt': self.expected_data.get('dt')[3:9]
         }
         datas = [data1, data2]

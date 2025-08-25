@@ -52,7 +52,7 @@ class DataWriter(ABC):
                                        if self.bucket != BucketMode.POSTPONE_BUCKET.value
                                        else CoreOptions.FILE_FORMAT_AVRO)
         self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
-        self.sequence_generator = SequenceGenerator()
+        self.sequence_generator = sequence_generator
 
         self.pending_data: Optional[pa.RecordBatch] = None
         self.committed_files: List[DataFileMeta] = []
@@ -154,8 +154,8 @@ class DataWriter(ABC):
                 BinaryRow(max_value_stats, self.table.table_schema.fields),
                 value_null_counts,
             ),
-            min_sequence_number=0,  # TODO
-            max_sequence_number=0,  # TODO
+            min_sequence_number=0,
+            max_sequence_number=0,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
@@ -203,12 +203,11 @@ class DataWriter(ABC):
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> dict:
         column_array = record_batch.column(column_name)
         if column_array.null_count == len(column_array):
-            raise RuntimeError("test")
-            # return {
-            #     "min_value": None,
-            #     "max_value": None,
-            #     "null_count": column_array.null_count,
-            # }
+            return {
+                "min_value": None,
+                "max_value": None,
+                "null_count": column_array.null_count,
+            }
         min_value = pc.min(column_array).as_py()
         max_value = pc.max(column_array).as_py()
         null_count = column_array.null_count
@@ -229,3 +228,6 @@ class SequenceGenerator:
 
     def current(self) -> int:
         return self.current
+
+
+sequence_generator = SequenceGenerator()
