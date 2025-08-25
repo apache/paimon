@@ -67,7 +67,9 @@ class FileStoreCommit:
 
         if latest_snapshot:
             existing_manifest_files = self.manifest_list_manager.read_all_manifest_files(latest_snapshot)
-            total_record_count += latest_snapshot.total_record_count
+            previous_record_count = latest_snapshot.total_record_count
+            if previous_record_count:
+                total_record_count += previous_record_count
 
         new_manifest_files.extend(existing_manifest_files)
         manifest_list = self.manifest_list_manager.write(new_manifest_files)
