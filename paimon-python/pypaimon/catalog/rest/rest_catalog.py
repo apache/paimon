@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
-from pypaimon.api import CatalogOptions, NoSuchResourceException, RESTApi
+from pypaimon.api import (CatalogOptions,
+                          NoSuchResourceException, RESTApi)
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
