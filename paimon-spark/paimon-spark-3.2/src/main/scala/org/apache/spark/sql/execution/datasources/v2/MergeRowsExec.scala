@@ -19,7 +19,6 @@
 package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, BasePredicate, Expression, Projection, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
@@ -136,6 +135,7 @@ case class MergeRowsExec(
       otherProjection: Projection)
     extends InstructionExec {
     def projectRow(row: InternalRow): InternalRow = projection.apply(row)
+
     def projectExtraRow(row: InternalRow): InternalRow = otherProjection.apply(row)
   }
 

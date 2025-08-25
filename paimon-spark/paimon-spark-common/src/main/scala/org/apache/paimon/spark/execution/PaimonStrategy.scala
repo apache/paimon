@@ -108,25 +108,6 @@ case class PaimonStrategy(spark: SparkSession)
     case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
       DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
 
-    case MergeRows(
-          isSourceRowPresent,
-          isTargetRowPresent,
-          matchedInstructions,
-          notMatchedInstructions,
-          notMatchedBySourceInstructions,
-          checkCardinality,
-          output,
-          child) =>
-      MergeRowsExec(
-        isSourceRowPresent,
-        isTargetRowPresent,
-        matchedInstructions,
-        notMatchedInstructions,
-        notMatchedBySourceInstructions,
-        checkCardinality,
-        output,
-        planLater(child)
-      ) :: Nil
     case _ => Nil
   }
 
