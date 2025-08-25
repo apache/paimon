@@ -714,7 +714,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
-                        .parallelism(1)
+                        .parallelism(2)
                         .checkpointIntervalMs(500)
                         .build();
         String createCatalog =
@@ -750,15 +750,27 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         bEnv.executeSql("INSERT INTO T VALUES (1, 101), (3, 31)").await();
         bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
 
+        TableResult streamingSelect = sEnv.executeSql("SELECT * FROM T");
+        Thread.sleep(1000);
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 102), (4, 42)").await();
+        bEnv.executeSql("INSERT INTO T VALUES (1, 103), (5, 53)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
         assertThat(collect(bEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder("+I[1, 101]", "+I[2, 20]", "+I[3, 31]");
-        TableResult streamingSelect =
-                sEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id' = '1') */");
+                .containsExactlyInAnyOrder(
+                        "+I[1, 103]", "+I[2, 20]", "+I[3, 31]", "+I[4, 42]", "+I[5, 53]");
         JobClient client = streamingSelect.getJobClient().get();
         CloseableIterator<Row> it = streamingSelect.collect();
-        assertThat(collect(client, it, 5))
+        assertThat(collect(client, it, 7))
                 .containsExactlyInAnyOrder(
-                        "+I[1, 10]", "+I[2, 20]", "+I[1, 100]", "+I[1, 101]", "+I[3, 31]");
+                        "+I[1, 101]",
+                        "+I[2, 20]",
+                        "+I[3, 31]",
+                        "+I[1, 102]",
+                        "+I[4, 42]",
+                        "+I[1, 103]",
+                        "+I[5, 53]");
     }
 
     private List<String> collect(TableResult result) throws Exception {

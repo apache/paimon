@@ -28,13 +28,13 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -55,8 +55,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Source for compacting postpone bucket tables. This source scans all files from {@code bucket =
@@ -163,27 +161,19 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
     private static class SplitChannelComputer implements ChannelComputer<Split> {
 
         private transient int numChannels;
-        private transient Pattern pattern;
 
         @Override
         public void setup(int numChannels) {
             this.numChannels = numChannels;
-            // see PostponeBucketTableWriteOperator
-            this.pattern = Pattern.compile("-s-(\\d+?)-");
         }
 
         @Override
         public int channel(Split record) {
             DataSplit dataSplit = (DataSplit) record;
-            String fileName = dataSplit.dataFiles().get(0).fileName();
-
-            Matcher matcher = pattern.matcher(fileName);
-            Preconditions.checkState(
-                    matcher.find(),
-                    "Data file name %s does not match the pattern. This is unexpected.",
-                    fileName);
-            return ChannelComputer.select(
-                    dataSplit.partition(), Integer.parseInt(matcher.group(1)), numChannels);
+            int bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(dataSplit.dataFiles().get(0).fileName())
+                            % numChannels;
+            return ChannelComputer.select(dataSplit.partition(), bucketId, numChannels);
         }
     }
 }
