@@ -82,4 +82,3 @@ This statement updates only the `b` column in the target table `target_table` ba
 Note that: 
 * Data Evolution Table does not support 'Delete' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
-* Only Spark version greater than 3.5.0 is supported for Data Evolution Table.
