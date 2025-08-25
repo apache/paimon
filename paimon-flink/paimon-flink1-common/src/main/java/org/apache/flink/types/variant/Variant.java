@@ -24,4 +24,8 @@ import java.io.Serializable;
 
 /** Variant represent a semi-structured data. */
 @PublicEvolving
-public interface Variant extends Serializable {}
+public interface Variant extends Serializable {
+    static VariantBuilder newBuilder() {
+        throw new UnsupportedOperationException();
+    }
+}

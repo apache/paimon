@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
@@ -121,7 +122,9 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Variant getVariant(int pos) {
-        throw new UnsupportedOperationException();
+        org.apache.flink.types.variant.BinaryVariant variant =
+                (org.apache.flink.types.variant.BinaryVariant) row.getVariant(pos);
+        return new GenericVariant(variant.getValue(), variant.getMetadata());
     }
 
     @Override
@@ -214,7 +217,9 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Variant getVariant(int pos) {
-            throw new UnsupportedOperationException();
+            org.apache.flink.types.variant.BinaryVariant variant =
+                    (org.apache.flink.types.variant.BinaryVariant) array.getVariant(pos);
+            return new GenericVariant(variant.getValue(), variant.getMetadata());
         }
 
         @Override
