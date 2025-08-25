@@ -88,6 +88,32 @@ public class SimpleStatsEvolution {
         return result;
     }
 
+    public InternalArray evolution(
+            InternalArray array, Long rowCount, @Nullable List<String> denseFields) {
+        InternalArray nullCounts = array;
+
+        if (denseFields != null && denseFields.isEmpty()) {
+            // optimize for empty dense fields
+            nullCounts = emptyNullCounts;
+        } else if (denseFields != null) {
+            int[] denseIndexMapping =
+                    indexMappings.computeIfAbsent(
+                            denseFields,
+                            k -> fieldNames.stream().mapToInt(denseFields::indexOf).toArray());
+            nullCounts = ProjectedArray.from(denseIndexMapping).replaceArray(nullCounts);
+        }
+
+        if (indexMapping != null) {
+            if (rowCount == null) {
+                throw new RuntimeException("Schema Evolution for stats needs row count.");
+            }
+
+            nullCounts = new NullCountsEvoArray(indexMapping, nullCounts, rowCount);
+        }
+
+        return nullCounts;
+    }
+
     public Result evolution(
             SimpleStats stats, @Nullable Long rowCount, @Nullable List<String> denseFields) {
         InternalRow minValues = stats.minValues();

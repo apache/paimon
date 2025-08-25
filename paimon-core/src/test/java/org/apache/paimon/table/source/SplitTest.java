@@ -161,6 +161,40 @@ public class SplitTest {
     }
 
     @Test
+    public void testSplitNullCount() {
+        Map<Long, List<DataField>> schemas = new HashMap<>();
+        DataField intField = new DataField(0, "c_int", new IntType());
+        DataField longField = new DataField(1, "c_long", new BigIntType());
+        schemas.put(1L, Arrays.asList(intField, longField));
+
+        // test common
+        BinaryRow min1 = newBinaryRow(new Object[] {10, 123L});
+        BinaryRow max1 = newBinaryRow(new Object[] {99, 456L});
+        SimpleStats valueStats1 = new SimpleStats(min1, max1, fromLongArray(new Long[] {5L, 1L}));
+
+        BinaryRow min2 = newBinaryRow(new Object[] {5, 0L});
+        BinaryRow max2 = newBinaryRow(new Object[] {90, 789L});
+        SimpleStats valueStats2 = new SimpleStats(min2, max2, fromLongArray(new Long[] {3L, 2L}));
+
+        DataFileMeta d1 = newDataFile(100, valueStats1, null);
+        DataFileMeta d2 = newDataFile(100, valueStats2, null);
+        DataSplit split1 = newDataSplit(true, Arrays.asList(d1, d2), null);
+
+        SimpleStatsEvolutions evolutions = new SimpleStatsEvolutions(schemas::get, 1);
+        assertThat(split1.nullCount(0, evolutions)).isEqualTo(8);
+        assertThat(split1.nullCount(1, evolutions)).isEqualTo(3);
+
+        // test schema evolution
+        DataField doubleField = new DataField(2, "c_double", new DoubleType());
+        schemas.put(2L, Arrays.asList(intField, longField, doubleField));
+        evolutions = new SimpleStatsEvolutions(schemas::get, 2);
+
+        assertThat(split1.nullCount(0, evolutions)).isEqualTo(8);
+        assertThat(split1.nullCount(1, evolutions)).isEqualTo(3);
+        assertThat(split1.nullCount(2, evolutions)).isEqualTo(200);
+    }
+
+    @Test
     public void testSerializer() throws IOException {
         DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
         DataFileTestDataGenerator.Data data = gen.next();

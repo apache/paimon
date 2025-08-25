@@ -285,57 +285,68 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
   test("Paimon pushDown: topN for append-only tables") {
     assume(gteqSpark3_3)
     spark.sql("""
-                |CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)
+                |CREATE TABLE T (pt INT, id INT, price BIGINT) PARTITIONED BY (pt)
                 |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
                 |""".stripMargin)
     Assertions.assertTrue(getScanBuilder().isInstanceOf[SupportsPushDownTopN])
 
     spark.sql("""
                 |INSERT INTO T VALUES
-                |(1, "a1", "2023"),
-                |(1, "a1", "2023"),
-                |(3, "d1", "2023"),
-                |(4, "e1", "2023")
+                |(1, 10, 100L),
+                |(2, 20, 200L),
+                |(3, 30, 300L)
                 |""".stripMargin)
     spark.sql("""
                 |INSERT INTO T VALUES
-                |(5, "a2", "2025"),
-                |(NULL, "b2", "2025"),
-                |(6, "c2", "2025"),
-                |(7, "d2", "2025"),
-                |(8, "e2", "2025")
+                |(4, 40, 400L),
+                |(5, 50, 500L)
                 |""".stripMargin)
     spark.sql("""
                 |INSERT INTO T VALUES
-                |(5, "a3", "2023"),
-                |(9, "a3", "2023"),
-                |(2, "c3", "2025"),
-                |(NULL, "b2", "2025")
+                |(6, NULL, 600L),
+                |(6, NULL, 600L),
+                |(6, 60, 600L),
+                |(7, NULL, 700L),
+                |(7, NULL, 700L),
+                |(7, 70, 700L)
+                |""".stripMargin)
+
+    // disable stats
+    spark.sql("""
+                |ALTER TABLE T SET TBLPROPERTIES ('metadata.stats-mode' = 'none')
+                |""".stripMargin)
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |(8, 80, 800L),
+                |(9, 90, 900L)
+                |""".stripMargin)
+    spark.sql("""
+                |ALTER TABLE T UNSET TBLPROPERTIES ('metadata.stats-mode')
                 |""".stripMargin)
 
     // test ASC
     checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id ASC NULLS LAST LIMIT 3"),
-      Row(1, "a1", "2023") :: Row(1, "a1", "2023") :: Row(2, "c3", "2025") :: Nil)
+      spark.sql("SELECT id FROM T ORDER BY id ASC NULLS LAST LIMIT 5"),
+      Row(10) :: Row(20) :: Row(30) :: Row(40) :: Row(50) :: Nil)
     checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id ASC NULLS FIRST LIMIT 3"),
-      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(1, "a1", "2023") :: Nil)
+      spark.sql("SELECT id FROM T ORDER BY id ASC NULLS FIRST LIMIT 5"),
+      Row(null) :: Row(null) :: Row(null) :: Row(null) :: Row(10) :: Nil)
 
     // test DESC
     checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id DESC NULLS LAST LIMIT 3"),
-      Row(9, "a3", "2023") :: Row(8, "e2", "2025") :: Row(7, "d2", "2025") :: Nil)
+      spark.sql("SELECT id FROM T ORDER BY id DESC NULLS LAST LIMIT 5"),
+      Row(90) :: Row(80) :: Row(70) :: Row(60) :: Row(50) :: Nil)
     checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id DESC NULLS FIRST LIMIT 3"),
-      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(9, "a3", "2023") :: Nil)
+      spark.sql("SELECT id FROM T ORDER BY id DESC NULLS FIRST LIMIT 5"),
+      Row(null) :: Row(null) :: Row(null) :: Row(null) :: Row(90) :: Nil)
 
     // test with partition
     checkAnswer(
-      spark.sql("SELECT * FROM T WHERE pt='2023' ORDER BY id DESC LIMIT 3"),
-      Row(9, "a3", "2023") :: Row(5, "a3", "2023") :: Row(4, "e1", "2023") :: Nil)
+      spark.sql("SELECT id FROM T WHERE pt=6 ORDER BY id DESC LIMIT 5"),
+      Row(60) :: Row(null) :: Row(null) :: Nil)
     checkAnswer(
-      spark.sql("SELECT * FROM T WHERE pt='2025' ORDER BY id ASC LIMIT 3"),
-      Row(null, "b2", "2025") :: Row(null, "b2", "2025") :: Row(2, "c3", "2025") :: Nil)
+      spark.sql("SELECT id FROM T WHERE pt=6 ORDER BY id ASC LIMIT 3"),
+      Row(null) :: Row(null) :: Row(60) :: Nil)
 
     // test plan
     val df1 = spark.sql("SELECT * FROM T ORDER BY id DESC LIMIT 1")

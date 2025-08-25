@@ -32,7 +32,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -213,8 +212,7 @@ public class RangeBitmapIndexPushDownBenchmark {
                     () -> {
                         Table table = tables.get(name);
                         FieldRef ref = new FieldRef(0, "k", DataTypes.INT());
-                        SortValue sort = new SortValue(ref, DESCENDING, NULLS_LAST);
-                        TopN topN = new TopN(Collections.singletonList(sort), k);
+                        TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
                         List<Split> splits = table.newReadBuilder().newScan().plan().splits();
                         AtomicLong readCount = new AtomicLong(0);
                         try {

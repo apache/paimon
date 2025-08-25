@@ -167,6 +167,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (limit != null) {
             tableScan.withLimit(limit);
         }
+        if (topN != null) {
+            tableScan.withTopN(topN);
+        }
         return tableScan;
     }
 

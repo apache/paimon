@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
@@ -74,6 +75,10 @@ public interface InnerTableScan extends TableScan {
     @Override
     default InnerTableScan withMetricRegistry(MetricRegistry metricRegistry) {
         // do nothing, should implement this if need
+        return this;
+    }
+
+    default InnerTableScan withTopN(TopN topN) {
         return this;
     }
 

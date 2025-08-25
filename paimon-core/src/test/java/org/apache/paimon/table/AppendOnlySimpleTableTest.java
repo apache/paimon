@@ -43,7 +43,6 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -101,6 +100,8 @@ import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -882,13 +883,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             RoaringBitmap32 bitmap = new RoaringBitmap32();
             expected.forEach(bitmap::add);
             DataField field = rowType.getField("price");
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
-            TableScan.Plan plan = table.newScan().plan();
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
+            TableScan.Plan plan = table.newScan().withTopN(topN).plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
             AtomicInteger cnt = new AtomicInteger(0);
@@ -906,13 +903,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         // test TopK without index
         {
             DataField field = rowType.getField("id");
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
-            TableScan.Plan plan = table.newScan().plan();
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
+            TableScan.Plan plan = table.newScan().withTopN(topN).plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
             AtomicInteger cnt = new AtomicInteger(0);
@@ -933,12 +926,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             .build();
             table = createUnawareBucketFileStoreTable(rowType, configure);
             DataField field = rowType.getField("price");
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());

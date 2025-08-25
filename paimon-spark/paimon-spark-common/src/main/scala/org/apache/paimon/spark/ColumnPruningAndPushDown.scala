@@ -73,7 +73,13 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
     }
     pushDownLimit.foreach(_readBuilder.withLimit)
     pushDownTopN.foreach(_readBuilder.withTopN)
-    _readBuilder.dropStats()
+
+    // when TopN is not empty, we need the stats to pick the TopN DataSplits
+    if (pushDownTopN.nonEmpty) {
+      _readBuilder
+    } else {
+      _readBuilder.dropStats()
+    }
   }
 
   final def metadataColumns: Seq[PaimonMetadataColumn] = {
