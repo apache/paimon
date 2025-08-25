@@ -26,7 +26,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.catalog.database import Database
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
@@ -67,7 +67,7 @@ class FileSystemCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if CoreOptions.SCAN_FALLBACK_BRANCH in self.catalog_options:
-            raise ValueError(CoreOptions.SCAN_FALLBACK_BRANCH)
+            raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
 

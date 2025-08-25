@@ -17,10 +17,11 @@
 ################################################################################
 
 import time
+import uuid
 from pathlib import Path
 from typing import List
 
-from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.snapshot.snapshot import Snapshot
@@ -55,28 +56,33 @@ class FileStoreCommit:
         if not commit_messages:
             return
 
+        unique_id = uuid.uuid4()
+        base_manifest_list = f"manifest-list-{unique_id}-0"
+        delta_manifest_list = f"manifest-list-{unique_id}-1"
+
         new_manifest_files = self.manifest_file_manager.write(commit_messages)
         if not new_manifest_files:
             return
+        self.manifest_list_manager.write(delta_manifest_list, new_manifest_files)
+
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-        existing_manifest_files = []
         if latest_snapshot:
             existing_manifest_files = self.manifest_list_manager.read_all_manifest_files(latest_snapshot)
-        new_manifest_files.extend(existing_manifest_files)
-        manifest_list = self.manifest_list_manager.write(new_manifest_files)
+        else:
+            existing_manifest_files = []
+        self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
 
         new_snapshot_id = self._generate_snapshot_id()
         snapshot_data = Snapshot(
-            version=3,
+            version=1,
             id=new_snapshot_id,
-            schema_id=0,
-            base_manifest_list=manifest_list,
-            delta_manifest_list=manifest_list,
+            schema_id=self.table.table_schema.id,
+            base_manifest_list=base_manifest_list,
+            delta_manifest_list=delta_manifest_list,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="APPEND",
             time_millis=int(time.time() * 1000),
-            log_offsets={},
         )
 
         # Generate partition statistics for the commit
@@ -102,16 +108,15 @@ class FileStoreCommit:
 
         new_snapshot_id = self._generate_snapshot_id()
         snapshot_data = Snapshot(
-            version=3,
+            version=1,
             id=new_snapshot_id,
-            schema_id=0,
+            schema_id=self.table.table_schema.id,
             base_manifest_list=manifest_list,
             delta_manifest_list=manifest_list,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="OVERWRITE",
             time_millis=int(time.time() * 1000),
-            log_offsets={},
         )
 
         # Generate partition statistics for the commit

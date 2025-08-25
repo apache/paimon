@@ -279,13 +279,16 @@ class DataTypeParser:
 
         if "(" in type_upper:
             base_type = type_upper.split("(")[0]
+        elif " " in type_upper:
+            base_type = type_upper.split(" ")[0]
+            type_upper = base_type
         else:
             base_type = type_upper
 
         try:
             Keyword(base_type)
             return AtomicType(
-                type_string, DataTypeParser.parse_nullability(type_string)
+                type_upper, DataTypeParser.parse_nullability(type_string)
             )
         except ValueError:
             raise Exception(f"Unknown type: {base_type}")
@@ -345,11 +348,7 @@ class DataTypeParser:
     def parse_data_field(
             json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
     ) -> DataField:
-
-        if (
-                DataField.FIELD_ID in json_data
-                and json_data[DataField.FIELD_ID] is not None
-        ):
+        if DataField.FIELD_ID in json_data and json_data[DataField.FIELD_ID] is not None:
             if field_id is not None and field_id.get() != -1:
                 raise ValueError("Partial field id is not allowed.")
             field_id_value = int(json_data["id"])
@@ -486,7 +485,7 @@ class PyarrowFieldParser:
             return MapType(nullable, key_type, value_type)
         else:
             raise ValueError(f"Unknown type: {type_name}")
-        return AtomicType(type_name)
+        return AtomicType(type_name, nullable)
 
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:

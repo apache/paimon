@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.rest_json import JSON
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
@@ -42,15 +43,11 @@ class SchemaManager:
         except Exception as e:
             raise RuntimeError(f"Failed to load schema from path: {self.schema_path}") from e
 
-    def create_table(self, schema: Schema, external_table: bool = False) -> TableSchema:
+    def create_table(self, schema: Schema) -> TableSchema:
         while True:
             latest = self.latest()
             if latest is not None:
-                if external_table:
-                    self._check_schema_for_external_table(latest.to_schema(), schema)
-                    return latest
-                else:
-                    raise RuntimeError("Schema in filesystem exists, creation is not allowed.")
+                raise RuntimeError("Schema in filesystem exists, creation is not allowed.")
 
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
@@ -60,7 +57,7 @@ class SchemaManager:
     def commit(self, new_schema: TableSchema) -> bool:
         schema_path = self._to_schema_path(new_schema.id)
         try:
-            return self.file_io.try_to_write_atomic(schema_path, new_schema.to_json())
+            return self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
         except Exception as e:
             raise RuntimeError(f"Failed to commit schema: {e}") from e
 

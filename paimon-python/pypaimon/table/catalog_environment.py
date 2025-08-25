@@ -18,9 +18,9 @@ limitations under the License.
 from typing import Optional
 
 from pypaimon.catalog.catalog_loader import CatalogLoader
-from pypaimon.catalog.catalog_snapshot_commit import CatalogSnapshotCommit
-from pypaimon.catalog.renaming_snapshot_commit import RenamingSnapshotCommit
-from pypaimon.catalog.snapshot_commit import SnapshotCommit
+from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
+from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+from pypaimon.snapshot.snapshot_commit import SnapshotCommit
 from pypaimon.common.identifier import Identifier
 
 
