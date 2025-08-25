@@ -199,119 +199,109 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution: insert into table with data-evolution") {
-    if (gteqSpark3_5) {
-      withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT)")
-        sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
 
-        sql(
-          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
 
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
-              |""".stripMargin)
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+            |""".stripMargin)
 
-        checkAnswer(
-          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-          Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 1), Row(3, 3, 3, 1, 1))
-        )
-      }
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 1), Row(3, 3, 3, 1, 1))
+      )
     }
   }
 
   test("Data Evolution: merge into table with data-evolution") {
-    if (gteqSpark3_5) {
-      withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT)")
-        sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
 
-        sql(
-          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
 
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.b = s.b
-              |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
-              |""".stripMargin)
-        checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
-        checkAnswer(
-          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-          Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
-        )
-      }
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+            |""".stripMargin)
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+      )
     }
   }
 
   test("Data Evolution: merge into table with data-evolution complex") {
-    if (gteqSpark3_5) {
-      withTable("source", "target") {
-        sql("CREATE TABLE source (a INT, b INT, c STRING)")
-        sql(
-          "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
+    withTable("source", "target") {
+      sql("CREATE TABLE source (a INT, b INT, c STRING)")
+      sql(
+        "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
 
-        sql(
-          "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql(
-          "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-        sql(s"""
-               |MERGE INTO target
-               |USING source
-               |ON target.a = source.a
-               |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
-               |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
-               |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
-               |WHEN NOT MATCHED THEN INSERT *
-               |""".stripMargin)
-        checkAnswer(
-          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
-          Seq(
-            Row(1, 10, "c1", 0, 2),
-            Row(2, 20, "c2", 1, 2),
-            Row(3, 300, "c33", 2, 2),
-            Row(4, 40, "c4", 3, 2),
-            Row(5, 550, "c5", 4, 2),
-            Row(7, 700, "c77", 5, 2),
-            Row(9, 990, "c99", 6, 2))
-        )
-      }
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON target.a = source.a
+             |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
+             |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+             |WHEN NOT MATCHED THEN INSERT *
+             |""".stripMargin)
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 20, "c2", 1, 2),
+          Row(3, 300, "c33", 2, 2),
+          Row(4, 40, "c4", 3, 2),
+          Row(5, 550, "c5", 4, 2),
+          Row(7, 700, "c77", 5, 2),
+          Row(9, 990, "c99", 6, 2))
+      )
     }
   }
 
   test("Data Evolution: update table throws exception") {
-    if (gteqSpark3_5) {
-      withTable("t") {
-        sql(
-          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-        assert(
-          intercept[RuntimeException] {
-            sql("UPDATE t SET b = 22")
-          }.getMessage
-            .contains("Update operation is not supported when data evolution is enabled yet."))
-      }
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      assert(
+        intercept[RuntimeException] {
+          sql("UPDATE t SET b = 22")
+        }.getMessage
+          .contains("Update operation is not supported when data evolution is enabled yet."))
     }
   }
 
   test("Data Evolution: delete table throws exception") {
-    if (gteqSpark3_5) {
-      withTable("t") {
-        sql(
-          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-        assert(
-          intercept[RuntimeException] {
-            sql("DELETE FROM t WHERE id = 2")
-          }.getMessage
-            .contains("Delete operation is not supported when data evolution is enabled yet."))
-      }
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+      assert(
+        intercept[RuntimeException] {
+          sql("DELETE FROM t WHERE id = 2")
+        }.getMessage
+          .contains("Delete operation is not supported when data evolution is enabled yet."))
     }
   }
 
