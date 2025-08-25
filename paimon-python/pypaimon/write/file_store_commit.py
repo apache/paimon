@@ -58,10 +58,17 @@ class FileStoreCommit:
         new_manifest_files = self.manifest_file_manager.write(commit_messages)
         if not new_manifest_files:
             return
+
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+
         existing_manifest_files = []
+        record_count_add = self._generate_record_count_add(commit_messages)
+        total_record_count = record_count_add
+
         if latest_snapshot:
             existing_manifest_files = self.manifest_list_manager.read_all_manifest_files(latest_snapshot)
+            total_record_count += latest_snapshot.total_record_count
+
         new_manifest_files.extend(existing_manifest_files)
         manifest_list = self.manifest_list_manager.write(new_manifest_files)
 
@@ -72,6 +79,8 @@ class FileStoreCommit:
             schema_id=0,
             base_manifest_list=manifest_list,
             delta_manifest_list=manifest_list,
+            total_record_count=total_record_count,
+            delta_record_count=record_count_add,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="APPEND",
@@ -100,6 +109,8 @@ class FileStoreCommit:
         # In overwrite mode, we don't merge with existing manifests
         manifest_list = self.manifest_list_manager.write(new_manifest_files)
 
+        record_count_add = self._generate_record_count_add(commit_messages)
+
         new_snapshot_id = self._generate_snapshot_id()
         snapshot_data = Snapshot(
             version=3,
@@ -107,6 +118,8 @@ class FileStoreCommit:
             schema_id=0,
             base_manifest_list=manifest_list,
             delta_manifest_list=manifest_list,
+            total_record_count=record_count_add,
+            delta_record_count=record_count_add,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="OVERWRITE",
@@ -234,3 +247,25 @@ class FileStoreCommit:
             )
             for stats in partition_stats.values()
         ]
+
+    def _generate_record_count_add(self, commit_messages: List[CommitMessage]) -> int:
+        """
+        Generate record count add from commit messages.
+
+        This method follows the Java implementation pattern from
+        org.apache.paimon.manifest.ManifestEntry.recordCountAdd().
+
+        Args:
+            commit_messages: List of commit messages to analyze
+
+        Returns:
+            Count of add record
+        """
+        record_count = 0
+
+        for message in commit_messages:
+            new_files = message.new_files()
+            for file_meta in new_files:
+                record_count += file_meta.row_count
+
+        return record_count
