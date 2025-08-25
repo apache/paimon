@@ -23,6 +23,8 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 
+import java.util.TimeZone;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -33,16 +35,34 @@ public class ParquetTimestampVector implements TimestampColumnVector {
 
     private final ColumnVector vector;
 
+    private final TimeZone sourceTimezone;
+    private final TimeZone targetTimezone;
+
     public ParquetTimestampVector(ColumnVector vector) {
+        this(vector, null, null);
+    }
+
+    public ParquetTimestampVector(
+            ColumnVector vector, TimeZone sourceTimezone, TimeZone targetTimezone) {
         this.vector = vector;
+        this.sourceTimezone = sourceTimezone;
+        this.targetTimezone = targetTimezone;
     }
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         if (precision <= 3 && vector instanceof LongColumnVector) {
-            return Timestamp.fromEpochMillis(((LongColumnVector) vector).getLong(i));
+            long millis = ((LongColumnVector) vector).getLong(i);
+            if (needsTimezoneConversion()) {
+                millis = convertTimezone(millis, true);
+            }
+            return Timestamp.fromEpochMillis(millis);
         } else if (precision <= 6 && vector instanceof LongColumnVector) {
-            return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
+            long micros = ((LongColumnVector) vector).getLong(i);
+            if (needsTimezoneConversion()) {
+                micros = convertTimezone(micros, false);
+            }
+            return Timestamp.fromMicros(micros);
         } else {
             checkArgument(
                     vector instanceof TimestampColumnVector,
@@ -51,6 +71,31 @@ public class ParquetTimestampVector implements TimestampColumnVector {
             return ((TimestampColumnVector) vector).getTimestamp(i, precision);
         }
     }
+
+    private boolean needsTimezoneConversion() {
+        return sourceTimezone != null && targetTimezone != null;
+    }
+
+    private long convertTimezone(long timestamp, boolean isMillis) {
+        // Convert to milliseconds if needed
+        long millis = isMillis ? timestamp : timestamp / 1000;
+
+        // Apply timezone conversion
+        // Hive stores timestamps in UTC in Parquet files, so source timezone is UTC
+        // Target timezone is the system default timezone
+        TimeZone sourceTz = sourceTimezone;
+        TimeZone targetTz = targetTimezone;
+
+        int sourceOffset = sourceTz.getOffset(millis);
+        int targetOffset = targetTz.getOffset(millis);
+        int offsetDiff = targetOffset - sourceOffset;
+
+        long convertedMillis = millis + offsetDiff;
+
+        // Convert back to original precision
+        return isMillis ? convertedMillis : convertedMillis * 1000;
+    }
+
 
     public ColumnVector getVector() {
         return vector;

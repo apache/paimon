@@ -88,6 +88,16 @@ public class ParquetFileFormat extends FileFormat {
                     "parquet.compression.codec.zstd.level", String.valueOf(context.zstdLevel()));
         }
 
+        String[] tzKeys = {
+                "timestamp.timezone.conversion.enabled",
+                "hive.writer.timezone",
+                "system.timezone"};
+        for (String k : tzKeys) {
+            if (context.options().containsKey(k)) {
+                parquetOptions.set(k, context.options().get(k));
+            }
+        }
+
         MemorySize blockSize = context.blockSize();
         if (blockSize != null) {
             parquetOptions.set(

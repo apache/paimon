@@ -78,7 +78,7 @@ public class ListCloneFilesFunction
                 HiveCloneUtils.getDatabaseOptions(hiveCatalog, tuple.f0.getDatabaseName());
         targetCatalog.createDatabase(tuple.f1.getDatabaseName(), true, databaseOptions);
 
-        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
+        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0, true);
         Map<String, String> options = schema.options();
         // only support Hive to unaware-bucket table now
         options.put(CoreOptions.BUCKET.key(), "-1");

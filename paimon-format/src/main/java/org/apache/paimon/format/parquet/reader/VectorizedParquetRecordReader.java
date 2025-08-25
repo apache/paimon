@@ -54,6 +54,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
@@ -93,6 +94,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
+    // Timezone conversion parameters
+    private final boolean timezoneConversionEnabled;
+    private final TimeZone sourceTimezone;
+    private final TimeZone targetTimezone;
 
     public VectorizedParquetRecordReader(
             Path filePath,
@@ -102,6 +107,21 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             WritableColumnVector[] vectors,
             int batchSize)
             throws IOException {
+        this(filePath, reader, fileSchema, fields, vectors, batchSize, false, null, null);
+    }
+
+    public VectorizedParquetRecordReader(
+            Path filePath,
+            ParquetFileReader reader,
+            MessageType fileSchema,
+            List<ParquetField> fields,
+            WritableColumnVector[] vectors,
+            int batchSize,
+            boolean timezoneConversionEnabled,
+            String sourceTimezoneId,
+            String targetTimezoneId)
+            throws IOException {
+
         this.filePath = filePath;
         this.reader = reader;
         this.fileSchema = fileSchema;
@@ -110,7 +130,17 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
 
-        // fetch writer version from file metadata
+        // debug print removed
+
+        // Initialize timezone conversion parameters
+        this.timezoneConversionEnabled = timezoneConversionEnabled;
+        this.sourceTimezone =
+                sourceTimezoneId != null ? TimeZone.getTimeZone(sourceTimezoneId) : null;
+        this.targetTimezone =
+                targetTimezoneId != null ? TimeZone.getTimeZone(targetTimezoneId) : null;
+
+        // fetch writer version from file
+        //  metadata
         try {
             this.writerVersion = VersionParser.parse(reader.getFileMetaData().getCreatedBy());
         } catch (Exception e) {
@@ -155,7 +185,15 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    vectors[i] = new ParquetTimestampVector(writableVectors[i]);
+                    if (timezoneConversionEnabled
+                            && sourceTimezone != null
+                            && targetTimezone != null) {
+                        vectors[i] =
+                                new ParquetTimestampVector(
+                                        writableVectors[i], sourceTimezone, targetTimezone);
+                    } else {
+                        vectors[i] = new ParquetTimestampVector(writableVectors[i]);
+                    }
                     break;
                 case ARRAY:
                     vectors[i] =

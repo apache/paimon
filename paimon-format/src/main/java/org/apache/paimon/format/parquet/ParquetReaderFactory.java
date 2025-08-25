@@ -115,6 +115,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
+        // Check if timezone conversion is enabled
+        boolean timezoneConversionEnabled =
+                conf.getBoolean("timestamp.timezone.conversion.enabled", false);
+        String hiveWriterTimezone = conf.getString("hive.writer.timezone", null);
+        String systemTimezone = conf.getString("system.timezone", null);
+
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
     }
