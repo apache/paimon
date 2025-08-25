@@ -143,6 +143,7 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1280,7 +1281,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(max - k, max);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
             FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
-            TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, k);
+            TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
