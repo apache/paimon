@@ -25,6 +25,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
@@ -34,6 +35,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.BooleanStatistics;
 import org.apache.parquet.column.statistics.DoubleStatistics;
@@ -56,14 +58,17 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
+    private final Configuration conf;
 
     public ParquetSimpleStatsExtractor(
-            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
+            Options options, RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
                 rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
+        this.conf = new Configuration(false);
+        options.toMap().forEach(conf::set);
     }
 
     @Override
@@ -75,7 +80,7 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
-                ParquetUtil.extractColumnStats(fileIO, path, length);
+                ParquetUtil.extractColumnStats(fileIO, path, length, conf);
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())

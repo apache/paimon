@@ -139,6 +139,8 @@ The following table lists the type mapping from Paimon type to Parquet type.
     </tbody>
 </table>
 
+Parquet format supports encryption, see [Encryption](https://parquet.apache.org/docs/file-format/data-pages/encryption/).
+
 Limitations:
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps).
 
