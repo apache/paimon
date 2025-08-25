@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -88,15 +89,13 @@ public class ParquetFileFormat extends FileFormat {
                     "parquet.compression.codec.zstd.level", String.valueOf(context.zstdLevel()));
         }
 
-        String[] tzKeys = {
-                "timestamp.timezone.conversion.enabled",
-                "hive.writer.timezone",
-                "system.timezone"};
-        for (String k : tzKeys) {
-            if (context.options().containsKey(k)) {
-                parquetOptions.set(k, context.options().get(k));
-            }
-        }
+        // Propagate timestamp-timezone conversion keys (not prefixed by "parquet.")
+        TimezoneOptionUtils.KEYS.forEach(
+                k -> {
+                    if (context.options().containsKey(k)) {
+                        parquetOptions.set(k, context.options().get(k));
+                    }
+                });
 
         MemorySize blockSize = context.blockSize();
         if (blockSize != null) {

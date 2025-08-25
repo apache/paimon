@@ -130,8 +130,6 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
 
-        // debug print removed
-
         // Initialize timezone conversion parameters
         this.timezoneConversionEnabled = timezoneConversionEnabled;
         this.sourceTimezone =
@@ -139,8 +137,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.targetTimezone =
                 targetTimezoneId != null ? TimeZone.getTimeZone(targetTimezoneId) : null;
 
-        // fetch writer version from file
-        //  metadata
+        // fetch writer version from file metadata
         try {
             this.writerVersion = VersionParser.parse(reader.getFileMetaData().getCreatedBy());
         } catch (Exception e) {

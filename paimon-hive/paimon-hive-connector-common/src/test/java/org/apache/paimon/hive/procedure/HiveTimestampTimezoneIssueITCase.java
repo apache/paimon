@@ -57,7 +57,7 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     public static void beforeAll() {
         HMS.start(PORT);
         TimeZone.setDefault(TimeZone.getTimeZone(TEST_ZONE));
-        System.out.println("JVM timezone set to: " + TimeZone.getDefault().getID());
+        // JVM timezone set to Asia/Shanghai for testing
     }
 
     @AfterAll
@@ -101,15 +101,10 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     @Test
     public void timestampsShouldMatchAfterClone_spec() throws Exception {
         TableEnvironment tEnv = freshEnv();
-        System.out.println(
-                "104 timestampsShouldMatchAfterClone_spec: " + TimeZone.getDefault().getID());
-
         Setup s = new Setup();
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql("CREATE DATABASE " + s.db);
-        System.out.println(
-                "110 timestampsShouldMatchAfterClone_spec: " + TimeZone.getDefault().getID());
         sql(tEnv, "CREATE TABLE %s.%s (`a` INT, `ts` TIMESTAMP) STORED AS PARQUET", s.db, s.tbl);
         sql(tEnv, "INSERT INTO %s.%s VALUES (1, '2025-06-03 16:00:00')", s.db, s.tbl);
 
@@ -117,8 +112,6 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
         List<Row> hiveRows =
                 sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM HIVE.%s.%s", s.db, s.tbl);
         assertThat(hiveRows).hasSize(1);
-        System.out.println(
-                "118 timestampsShouldMatchAfterClone_spec: " + TimeZone.getDefault().getID());
 
         assertThat(hiveRows.get(0).getField(0)).isEqualTo(1);
         String hiveTsStr = hiveRows.get(0).getField(1).toString();
@@ -142,17 +135,12 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
                         "--target_catalog_conf",
                         "warehouse=" + warehouse.toString())
                 .run();
-        System.out.println(
-                "142 timestampsShouldMatchAfterClone_spec: " + TimeZone.getDefault().getID());
-
         tEnv.useCatalog("PAIMON");
         List<Row> paimonRows =
                 sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM test.test_table");
         assertThat(paimonRows).hasSize(1);
         assertThat(paimonRows.get(0).getField(0)).isEqualTo(1);
         String paimonTsStr = paimonRows.get(0).getField(1).toString();
-        System.out.println(
-                "150 timestampsShouldMatchAfterClone_spec: " + TimeZone.getDefault().getID());
 
         LocalDateTime paimonTs = parseTs(paimonTsStr);
 

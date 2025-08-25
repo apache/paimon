@@ -96,7 +96,6 @@ public class ParquetTimestampVector implements TimestampColumnVector {
         return isMillis ? convertedMillis : convertedMillis * 1000;
     }
 
-
     public ColumnVector getVector() {
         return vector;
     }

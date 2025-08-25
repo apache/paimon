@@ -33,6 +33,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -116,10 +117,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
         // Check if timezone conversion is enabled
-        boolean timezoneConversionEnabled =
-                conf.getBoolean("timestamp.timezone.conversion.enabled", false);
-        String hiveWriterTimezone = conf.getString("hive.writer.timezone", null);
-        String systemTimezone = conf.getString("system.timezone", null);
+        boolean timezoneConversionEnabled = TimezoneOptionUtils.isEnabled(conf);
+        String hiveWriterTimezone = conf.getString(TimezoneOptionUtils.HIVE_WRITER_TZ, null);
+        String systemTimezone = conf.getString(TimezoneOptionUtils.SYSTEM_TZ, null);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),

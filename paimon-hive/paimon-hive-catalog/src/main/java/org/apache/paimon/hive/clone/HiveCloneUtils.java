@@ -24,6 +24,7 @@ import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -38,11 +39,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -63,29 +59,8 @@ public class HiveCloneUtils {
     private static final String HIVE_WRITER_TIMEZONE_PROP = "hive.writer.timezone";
     private static final String PARQUET_WRITER_TIMEZONE_PROP = "parquet.writer.timezone";
 
-    // Debug file location
-    private static final String DEBUG_LOG_FILE = "/tmp/paimon-hive-clone-debug.log";
-    private static final DateTimeFormatter TIMESTAMP_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-
     public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
-
-    /** Write debug message to file for debugging forked processes. */
-    private static void debugLog(String message) {
-        // Also write to stderr for immediate visibility
-        System.err.println("DEBUG_LOG: " + message);
-
-        try (PrintWriter writer = new PrintWriter(new FileWriter(DEBUG_LOG_FILE, true))) {
-            String timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
-            String threadName = Thread.currentThread().getName();
-            writer.println(String.format("[%s] [%s] %s", timestamp, threadName, message));
-            writer.flush();
-        } catch (IOException e) {
-            // Write error to stderr so we can see what's happening
-            System.err.println("DEBUG_LOG ERROR: " + e.getMessage());
-        }
-    }
 
     public static Map<String, String> getDatabaseOptions(
             HiveCatalog hiveCatalog, String databaseName) throws Exception {
@@ -159,7 +134,7 @@ public class HiveCloneUtils {
 
     public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
             throws Exception {
-        return hiveTableToPaimonSchema(hiveCatalog, identifier, false);
+        return hiveTableToPaimonSchema(hiveCatalog, identifier, true);
     }
 
     public static Schema hiveTableToPaimonSchema(
@@ -186,56 +161,40 @@ public class HiveCloneUtils {
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
 
-
         // Handle timestamp timezone conversion
         if (enableTimezoneConversion && hasTimestampColumns(hiveTable)) {
-            TimeZone hiveWriterTimezone = getHiveWriterTimezone(hiveTable);
             TimeZone systemTimezone = TimeZone.getDefault();
-            debugLog(
-                    "[arnavb log test] 162 - Timezone conversion enabled. Hive timezone: "
-                            + hiveWriterTimezone.getID()
-                            + ", System timezone: "
-                            + systemTimezone.getID());
 
             // For Parquet files, timestamps are typically stored in UTC regardless of session
             // timezone
             // Always enable timezone conversion for Parquet to handle UTC to local timezone
             // conversion
             if (parseFormat(hiveTable).equals("parquet")) {
-                options.put("hive.writer.timezone", "UTC");
-                options.put("system.timezone", systemTimezone.getID());
-                options.put("timestamp.timezone.conversion.enabled", "true");
-                debugLog(
-                        "Timestamp timezone conversion enabled for Parquet table "
-                                + database
-                                + "."
-                                + table
-                                + ": Hive timezone=UTC, System timezone="
-                                + systemTimezone.getID());
-            } else if (!hiveWriterTimezone.equals(systemTimezone)) {
-                options.put("hive.writer.timezone", hiveWriterTimezone.getID());
-                options.put("system.timezone", systemTimezone.getID());
-                options.put("timestamp.timezone.conversion.enabled", "true");
-                debugLog(
-                        "Timestamp timezone conversion enabled for table "
-                                + database
-                                + "."
-                                + table
-                                + ": Hive timezone="
-                                + hiveWriterTimezone.getID()
-                                + ", System timezone="
-                                + systemTimezone.getID());
+                TimezoneOptionUtils.enableUtcToLocal(options, systemTimezone);
+                LOG.debug(
+                        "Timestamp timezone conversion enabled for Parquet table {}.{}: UTC → {}",
+                        database,
+                        table,
+                        systemTimezone.getID());
             } else {
-                debugLog(
-                        "No timezone conversion needed for table "
-                                + database
-                                + "."
-                                + table
-                                + " - timezones are the same: "
-                                + hiveWriterTimezone.getID());
+                TimeZone hiveWriterTimezone = getHiveWriterTimezone(hiveTable);
+                if (!hiveWriterTimezone.equals(systemTimezone)) {
+                    TimezoneOptionUtils.enableWriterToLocal(options, hiveWriterTimezone, systemTimezone);
+                    LOG.debug(
+                            "Timestamp timezone conversion enabled for table {}.{}: {} → {}",
+                            database,
+                            table,
+                            hiveWriterTimezone.getID(),
+                            systemTimezone.getID());
+                } else {
+                    LOG.debug(
+                            "No timezone conversion needed for table {}.{} - timezones are the same: {}",
+                            database,
+                            table,
+                            hiveWriterTimezone.getID());
+                }
             }
         }
-
 
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
@@ -302,6 +261,7 @@ public class HiveCloneUtils {
         }
         return format;
     }
+
     /**
      * Get the Hive writer timezone from table properties or use system default. This is used to
      * handle timestamp timezone conversion during clone.
@@ -328,19 +288,7 @@ public class HiveCloneUtils {
         List<FieldSchema> allCols = new ArrayList<>(hiveTable.getSd().getCols());
         allCols.addAll(hiveTable.getPartitionKeys());
 
-        boolean hasTimestamp =
-                allCols.stream()
-                        .anyMatch(field -> field.getType().toLowerCase().contains("timestamp"));
-
-        debugLog(
-                "hasTimestampColumns check: "
-                        + hasTimestamp
-                        + " for columns: "
-                        + allCols.stream()
-                                .map(FieldSchema::getType)
-                                .collect(java.util.stream.Collectors.joining(", ")));
-
-        return hasTimestamp;
+        return allCols.stream()
+                .anyMatch(field -> field.getType().toLowerCase().contains("timestamp"));
     }
-
 }
