@@ -25,7 +25,8 @@ from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.row.binary_row import (BinaryRowDeserializer, BinaryRowSerializer)
+from pypaimon.table.row.binary_row import (BinaryRowDeserializer,
+                                           BinaryRowSerializer)
 
 
 class ManifestListManager:

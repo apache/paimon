@@ -28,6 +28,7 @@ from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.catalog.table_metadata import TableMetadata
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
@@ -35,7 +36,6 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 
