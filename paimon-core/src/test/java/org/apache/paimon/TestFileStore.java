@@ -224,7 +224,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 watermark,
                 Collections.emptyList(),
-                (commit, committable) -> commit.commit(committable, false));
+                (commit, committable) -> commit.commit(committable, false, false));
     }
 
     public List<Snapshot> commitData(
@@ -244,7 +244,7 @@ public class TestFileStore extends KeyValueFileStore {
                 (commit, committable) -> {
                     logOffsets.forEach(
                             (bucket, offset) -> committable.addLogOffset(bucket, offset, false));
-                    commit.commit(committable, false);
+                    commit.commit(committable, false, false);
                 });
     }
 
@@ -263,7 +263,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 Collections.emptyList(),
                 (commit, committable) ->
-                        commit.overwrite(partition, committable, Collections.emptyMap()));
+                        commit.overwrite(partition, committable, Collections.emptyMap(), false));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
@@ -298,7 +298,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 Arrays.asList(indexFiles),
-                (commit, committable) -> commit.commit(committable, false));
+                (commit, committable) -> commit.commit(committable, false, false));
     }
 
     public List<Snapshot> commitDataImpl(

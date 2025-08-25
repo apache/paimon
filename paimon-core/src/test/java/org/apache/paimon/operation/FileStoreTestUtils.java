@@ -109,7 +109,7 @@ public class FileStoreTestUtils {
         }
 
         try (FileStoreCommit commit = store.newCommit()) {
-            commit.commit(committable, false);
+            commit.commit(committable, false, false);
         }
 
         writers.values().stream()

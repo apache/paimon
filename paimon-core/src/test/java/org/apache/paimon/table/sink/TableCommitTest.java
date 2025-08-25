@@ -188,7 +188,8 @@ public class TableCommitTest {
                 List<SimpleFileEntry> baseFiles,
                 List<ManifestEntry> deltaFiles,
                 List<IndexManifestEntry> indexFiles,
-                Snapshot snapshot) {
+                Snapshot snapshot,
+                boolean endInput) {
             commitCallbackResult.get(testId).add(snapshot.commitIdentifier());
         }
 

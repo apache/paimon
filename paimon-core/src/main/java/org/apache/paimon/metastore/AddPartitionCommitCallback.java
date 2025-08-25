@@ -65,7 +65,8 @@ public class AddPartitionCommitCallback implements CommitCallback {
             List<SimpleFileEntry> baseFiles,
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+            Snapshot snapshot,
+            boolean endInput) {
         Set<BinaryRow> partitions =
                 deltaFiles.stream()
                         .filter(e -> FileKind.ADD.equals(e.kind()))

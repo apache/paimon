@@ -102,7 +102,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);
         }
-        newCommit().commit(committable, false);
+        newCommit().commit(committable, false, false);
     }
 
     public CommitMessage removeIndexFiles(

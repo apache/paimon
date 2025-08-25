@@ -56,7 +56,8 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
     int filterAndCommit(
             List<GlobalCommitT> globalCommittables,
             boolean checkAppendFiles,
-            boolean partitionMarkDoneRecoverFromState)
+            boolean partitionMarkDoneRecoverFromState,
+            boolean endInput)
             throws IOException;
 
     Map<Long, List<CommitT>> groupByCheckpoint(Collection<CommitT> committables);
