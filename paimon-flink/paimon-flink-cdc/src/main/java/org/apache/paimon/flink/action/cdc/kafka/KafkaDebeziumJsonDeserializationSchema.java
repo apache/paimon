@@ -67,7 +67,12 @@ public class KafkaDebeziumJsonDeserializationSchema
             byte[] key = message.key();
             JsonNode keyNode = null;
             if (key != null && key.length > 0) {
-                keyNode = objectMapper.readValue(key, JsonNode.class);
+                try {
+                    keyNode = objectMapper.readValue(key, JsonNode.class);
+                } catch (Exception ignore) {
+                    // If the key is not valid JSON, ignore it to avoid failing deserialization.
+                    // The CDC pipeline only relies on the JSON value payload.
+                }
             }
 
             JsonNode valueNode = objectMapper.readValue(message.value(), JsonNode.class);
