@@ -657,6 +657,35 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testCalcDataBytesSendViaFilterAndCommit() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        StreamTableWrite write = table.newWrite(initialCommitUser);
+        write.write(GenericRow.of(1, 10L));
+        write.write(GenericRow.of(1, 20L));
+        List<CommitMessage> committable = write.prepareCommit(false, 0);
+        write.close();
+
+        ManifestCommittable manifestCommittable = new ManifestCommittable(0);
+        for (CommitMessage commitMessage : committable) {
+            manifestCommittable.addFileCommittable(commitMessage);
+        }
+
+        StreamTableCommit commit = table.newCommit(initialCommitUser);
+        OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
+        StoreCommitter committer =
+                new StoreCommitter(
+                        table,
+                        commit,
+                        Committer.createContext("", metricGroup, true, false, null, 1, 1));
+        committer.filterAndCommit(Collections.singletonList(manifestCommittable), true, false);
+        CommitterMetrics metrics = committer.getCommitterMetrics();
+        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(572);
+        assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
+        committer.close();
+    }
+
+    @Test
     public void testCommitMetrics() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
