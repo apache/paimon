@@ -34,10 +34,10 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
@@ -58,7 +58,7 @@ import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetLis
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWritableColumnVector;
-import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
+import static org.apache.paimon.utils.HadoopUtils.getHadoopConfiguration;
 
 /**
  * Parquet {@link FormatReaderFactory} that reads data from the file to {@link
@@ -68,16 +68,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(ParquetReaderFactory.class);
 
-    private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
-
-    private final Options conf;
+    private final Configuration conf;
     private final DataField[] readFields;
     private final int batchSize;
     private final FilterCompat.Filter filter;
 
     public ParquetReaderFactory(
-            Options conf, RowType readType, int batchSize, FilterCompat.Filter filter) {
-        this.conf = conf;
+            Options options, RowType readType, int batchSize, FilterCompat.Filter filter) {
+        this.conf = getHadoopConfiguration(options);
+        options.toMap().forEach(conf::set);
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
@@ -87,8 +86,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(0, context.fileSize());
-        setReadOptions(builder);
+                ParquetUtil.getParquetReadOptionsBuilder(conf, context.filePath())
+                        .withRecordFilter(filter)
+                        .withRange(0, context.fileSize());
 
         ParquetFileReader reader =
                 new ParquetFileReader(
@@ -117,26 +117,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
-    }
-
-    private void setReadOptions(ParquetReadOptions.Builder builder) {
-        builder.useSignedStringMinMax(
-                conf.getBoolean("parquet.strings.signed-min-max.enabled", false));
-        builder.useDictionaryFilter(
-                conf.getBoolean(ParquetInputFormat.DICTIONARY_FILTERING_ENABLED, true));
-        builder.useStatsFilter(conf.getBoolean(ParquetInputFormat.STATS_FILTERING_ENABLED, true));
-        builder.useRecordFilter(conf.getBoolean(ParquetInputFormat.RECORD_FILTERING_ENABLED, true));
-        builder.useColumnIndexFilter(
-                conf.getBoolean(ParquetInputFormat.COLUMN_INDEX_FILTERING_ENABLED, true));
-        builder.usePageChecksumVerification(
-                conf.getBoolean(ParquetInputFormat.PAGE_VERIFY_CHECKSUM_ENABLED, false));
-        builder.useBloomFilter(conf.getBoolean(ParquetInputFormat.BLOOM_FILTERING_ENABLED, true));
-        builder.withMaxAllocationInBytes(conf.getInteger(ALLOCATION_SIZE, 8388608));
-        String badRecordThresh = conf.getString(BAD_RECORD_THRESHOLD_CONF_KEY, null);
-        if (badRecordThresh != null) {
-            builder.set(BAD_RECORD_THRESHOLD_CONF_KEY, badRecordThresh);
-        }
-        builder.withRecordFilter(filter);
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */

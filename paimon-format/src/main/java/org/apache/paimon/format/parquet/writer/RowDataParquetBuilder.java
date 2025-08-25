@@ -32,6 +32,8 @@ import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.HadoopUtils.getHadoopConfiguration;
+
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
@@ -40,7 +42,7 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     public RowDataParquetBuilder(RowType rowType, Options options) {
         this.rowType = rowType;
-        this.conf = new Configuration(false);
+        this.conf = getHadoopConfiguration(options);
         options.toMap().forEach(conf::set);
     }
 

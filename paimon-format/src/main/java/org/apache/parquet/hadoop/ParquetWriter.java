@@ -19,8 +19,10 @@
 package org.apache.parquet.hadoop;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.crypto.EncryptionPropertiesFactory;
 import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -67,10 +69,24 @@ public class ParquetWriter<T> implements Closeable {
             boolean validating,
             Configuration conf,
             int maxPaddingSize,
-            ParquetProperties encodingProps)
+            ParquetProperties encodingProps,
+            FileEncryptionProperties encryptionProperties)
             throws IOException {
         WriteSupport.WriteContext writeContext = writeSupport.init(conf);
         MessageType schema = writeContext.getSchema();
+
+        // encryptionProperties could be built from the implementation of
+        // EncryptionPropertiesFactory when it is attached.
+        if (encryptionProperties == null) {
+            EncryptionPropertiesFactory cryptoFactory =
+                    EncryptionPropertiesFactory.loadFactory(conf);
+            if (cryptoFactory != null) {
+                Path tempFilePath =
+                        file != null && file.getPath() != null ? new Path(file.getPath()) : null;
+                encryptionProperties =
+                        cryptoFactory.getFileEncryptionProperties(conf, tempFilePath, writeContext);
+            }
+        }
 
         ParquetFileWriter fileWriter =
                 new ParquetFileWriter(
@@ -82,7 +98,7 @@ public class ParquetWriter<T> implements Closeable {
                         encodingProps.getColumnIndexTruncateLength(),
                         encodingProps.getStatisticsTruncateLength(),
                         encodingProps.getPageWriteChecksumEnabled(),
-                        (FileEncryptionProperties) null);
+                        encryptionProperties);
         fileWriter.start();
 
         this.codecFactory = new CodecFactory(conf, encodingProps.getPageSizeThreshold());
@@ -169,6 +185,7 @@ public class ParquetWriter<T> implements Closeable {
 
         private final OutputFile file;
 
+        private FileEncryptionProperties encryptionProperties = null;
         private Configuration conf = new Configuration(false);
         private ParquetFileWriter.Mode mode;
         private CompressionCodecName codecName = DEFAULT_COMPRESSION_CODEC_NAME;
@@ -221,6 +238,18 @@ public class ParquetWriter<T> implements Closeable {
          */
         public SELF withCompressionCodec(CompressionCodecName codecName) {
             this.codecName = codecName;
+            return self();
+        }
+
+        /**
+         * Set the {@link FileEncryptionProperties file encryption properties} used by the
+         * constructed writer.
+         *
+         * @param encryptionProperties a {@code FileEncryptionProperties}
+         * @return this builder for method chaining.
+         */
+        public SELF withEncryption(FileEncryptionProperties encryptionProperties) {
+            this.encryptionProperties = encryptionProperties;
             return self();
         }
 
@@ -500,7 +529,8 @@ public class ParquetWriter<T> implements Closeable {
                     enableValidation,
                     conf,
                     maxPaddingSize,
-                    encodingPropsBuilder.build());
+                    encodingPropsBuilder.build(),
+                    encryptionProperties);
         }
     }
 }
