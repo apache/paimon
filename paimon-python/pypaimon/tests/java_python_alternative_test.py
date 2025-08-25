@@ -24,8 +24,8 @@ import pyarrow as pa
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
-from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
 from pypaimon.tests.py4j_impl import constants
+from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
 
 
 class AlternativeWriteTest(unittest.TestCase):
@@ -83,7 +83,7 @@ class AlternativeWriteTest(unittest.TestCase):
             'item_id': [1001, 2001, 3001, 4001, 5001, 6001],
             'behavior': ['l', 'k', 'j', 'i', None, 'g'],
             'dt': self.expected_data.get('dt')[0:6]
-        }, 1)
+        }, 0)
         data1 = {
             'user_id': self.expected_data.get('user_id')[6:12],
             'item_id': [7001, 8001, 9001, 1001, 1101, 1201],
@@ -101,19 +101,20 @@ class AlternativeWriteTest(unittest.TestCase):
             data1['item_id'] = [item + 1 for item in data1['item_id']]
             data2['item_id'] = [item + 1 for item in data2['item_id']]
             data = datas[idx % 2]
-            # self._write_data(data, using_py)
+            self._write_data(data, using_py)
 
         j_read_builder = self.j_table.new_read_builder()
         j_table_read = j_read_builder.new_read()
         j_splits = j_read_builder.new_scan().plan().splits()
         j_actual = j_table_read.to_arrow(j_splits).sort_by('user_id')
         print(j_actual)
-        # self.assertEqual(j_actual, self.expected_result)
+        self.assertEqual(j_actual, self.expected_result)
 
         # py_read_builder = self.py_table.new_read_builder()
         # py_table_read = py_read_builder.new_read()
         # py_splits = py_read_builder.new_scan().plan().splits()
         # py_actual = py_table_read.to_arrow(py_splits)
+        # print(py_actual)
         # self.assertEqual(py_actual, self.expected_result)
 
     def _write_data(self, data, using_py_table: int):

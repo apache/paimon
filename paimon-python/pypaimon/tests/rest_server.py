@@ -495,8 +495,8 @@ class RESTCatalogServer:
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
-        import os
         import json
+        import os
         import uuid
 
         # Construct table path: {warehouse}/{database}/{table}

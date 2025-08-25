@@ -22,12 +22,14 @@ import struct
 import tempfile
 import time
 from logging import WARN
-from py4j.java_gateway import (java_import, logger, JavaGateway, GatewayParameters,
-                               CallbackServerParameters, JavaPackage)
 from threading import RLock
 
-from pypaimon.tests.py4j_impl.gateway_server import launch_gateway_server_process
+from py4j.java_gateway import (CallbackServerParameters, GatewayParameters,
+                               JavaGateway, JavaPackage, java_import, logger)
+
 from pypaimon.tests.py4j_impl import constants
+from pypaimon.tests.py4j_impl.gateway_server import \
+    launch_gateway_server_process
 
 _gateway = None
 _lock = RLock()

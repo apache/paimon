@@ -19,7 +19,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
                                                    SimpleStats)

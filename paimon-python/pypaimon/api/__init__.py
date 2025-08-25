@@ -19,24 +19,23 @@ import logging
 from typing import Callable, Dict, List, Optional
 from urllib.parse import unquote
 
+from pypaimon.api.api_request import (AlterDatabaseRequest, CommitTableRequest,
+                                      CreateDatabaseRequest,
+                                      CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetTableResponse,
                                        GetTableTokenResponse,
                                        ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
                                        PagedResponse)
-from pypaimon.api.api_request import (AlterDatabaseRequest,
-                                      CommitTableRequest,
-                                      CreateDatabaseRequest,
-                                      CreateTableRequest, RenameTableRequest)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.typedef import T
-from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 
 class RESTException(Exception):

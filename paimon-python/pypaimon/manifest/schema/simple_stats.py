@@ -37,8 +37,11 @@ SIMPLE_STATS_SCHEMA = {
         {"name": "_MAX_VALUES", "type": "bytes"},
         {"name": "_NULL_COUNTS",
          "type": [
-            "null",
-             {"type": "array", "items": ["null", "long"]}
+             "null",
+             {
+                 "type": "array",
+                 "items": ["null", "long"]
+             }
          ],
          "default": None},
     ]

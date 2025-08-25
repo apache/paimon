@@ -136,7 +136,7 @@ class DataWriter(ABC):
         max_key_stats = [column_stats[field.name]['max_value'] for field in key_fields]
         key_null_counts = [column_stats[field.name]['null_count'] for field in key_fields]
         if not all(count == 0 for count in key_null_counts):
-            raise RuntimeError(f"Primary key should not be null")
+            raise RuntimeError("Primary key should not be null")
 
         self.committed_files.append(DataFileMeta(
             file_name=file_name,
@@ -150,12 +150,12 @@ class DataWriter(ABC):
                 key_null_counts,
             ),
             value_stats=SimpleStats(
-                BinaryRow(min_value_stats, self.trimmed_primary_key_fields),
-                BinaryRow(max_value_stats, self.trimmed_primary_key_fields),
+                BinaryRow(min_value_stats, self.table.table_schema.fields),
+                BinaryRow(max_value_stats, self.table.table_schema.fields),
                 value_null_counts,
             ),
-            min_sequence_number=0, # TODO
-            max_sequence_number=0, # TODO
+            min_sequence_number=0,  # TODO
+            max_sequence_number=0,  # TODO
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],

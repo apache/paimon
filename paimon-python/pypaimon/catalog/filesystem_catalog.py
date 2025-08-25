@@ -17,7 +17,7 @@
 #################################################################################
 
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 from urllib.parse import urlparse
 
 from pypaimon.catalog.catalog import Catalog
@@ -26,13 +26,13 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.catalog.database import Database
-from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.common.config import CatalogOptions
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table

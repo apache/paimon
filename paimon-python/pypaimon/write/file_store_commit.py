@@ -21,11 +21,15 @@ import uuid
 from pathlib import Path
 from typing import List
 
-from pypaimon.snapshot.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
+                                               SnapshotCommit)
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -60,14 +64,31 @@ class FileStoreCommit:
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
 
-        new_manifest_files = self.manifest_file_manager.write(commit_messages)
-        if not new_manifest_files:
-            return
-        self.manifest_list_manager.write(delta_manifest_list, new_manifest_files)
+        new_manifest_file = f"manifest-{str(uuid.uuid4())}-0"
+        self.manifest_file_manager.write(new_manifest_file, commit_messages)
+        new_manifest_list = ManifestFileMeta(
+            file_name=new_manifest_file,
+            file_size=self.table.file_io.get_file_size(self.manifest_file_manager.manifest_path / new_manifest_file),
+            num_added_files=sum(len(msg.new_files()) for msg in commit_messages),
+            num_deleted_files=0,
+            partition_stats=SimpleStats(  # TODO
+                min_value=BinaryRow(
+                    values=list(commit_messages[0].partition()),
+                    fields=self.table.table_schema.get_partition_key_fields(),
+                ),
+                max_value=BinaryRow(
+                    values=list(commit_messages[0].partition()),
+                    fields=self.table.table_schema.get_partition_key_fields(),
+                ),
+                null_count=[0]*len(self.table.table_schema.get_partition_key_fields()),
+            ),
+            schema_id=self.table.table_schema.id,
+        )
+        self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
 
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if latest_snapshot:
-            existing_manifest_files = self.manifest_list_manager.read_all_manifest_files(latest_snapshot)
+            existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
         else:
             existing_manifest_files = []
         self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)

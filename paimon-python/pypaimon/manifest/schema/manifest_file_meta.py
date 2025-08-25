@@ -18,7 +18,8 @@
 
 from dataclasses import dataclass
 
-from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA, SimpleStats)
+from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
+                                                   SimpleStats)
 
 
 @dataclass

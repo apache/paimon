@@ -15,8 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import time
-import uuid
 from io import BytesIO
 from typing import List
 
@@ -28,6 +26,7 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.binary_row import (BinaryRow, BinaryRowDeserializer,
                                            BinaryRowSerializer)
+from pypaimon.write.commit_message import CommitMessage
 
 
 class ManifestFileManager:
@@ -100,7 +99,7 @@ class ManifestFileManager:
             entries.append(entry)
         return entries
 
-    def write(self, commit_messages: List['CommitMessage']) -> List[str]:
+    def write(self, file_name, commit_messages: List[CommitMessage]):
         avro_records = []
         for message in commit_messages:
             partition_bytes = BinaryRowSerializer.to_bytes(
@@ -141,15 +140,13 @@ class ManifestFileManager:
                 }
                 avro_records.append(avro_record)
 
-        manifest_filename = f"manifest-{str(uuid.uuid4())}.avro"
-        manifest_path = self.manifest_path / manifest_filename
+        manifest_path = self.manifest_path / file_name
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, avro_records)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(manifest_path) as output_stream:
                 output_stream.write(avro_bytes)
-            return [str(manifest_filename)]
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e

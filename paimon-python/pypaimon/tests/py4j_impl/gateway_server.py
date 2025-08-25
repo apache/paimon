@@ -20,7 +20,7 @@ import importlib.resources
 import os
 import platform
 import signal
-from subprocess import Popen, PIPE
+from subprocess import PIPE, Popen
 
 from pypaimon.tests.py4j_impl import constants
 

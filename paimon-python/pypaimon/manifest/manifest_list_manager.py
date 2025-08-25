@@ -16,17 +16,16 @@
 # limitations under the License.
 ################################################################################
 
-import uuid
 from io import BytesIO
-from typing import List, Optional
+from typing import List
 
 import fastavro
 
-from pypaimon.manifest.schema.manifest_file_meta import \
-    MANIFEST_FILE_META_SCHEMA, ManifestFileMeta
+from pypaimon.manifest.schema.manifest_file_meta import (
+    MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.row.binary_row import BinaryRowDeserializer, BinaryRow, BinaryRowSerializer
+from pypaimon.table.row.binary_row import (BinaryRowDeserializer, BinaryRowSerializer)
 
 
 class ManifestListManager:
@@ -39,13 +38,13 @@ class ManifestListManager:
         self.manifest_path = self.table.table_path / "manifest"
         self.file_io = self.table.file_io
 
-    def read_all_manifest_files(self, snapshot: Snapshot) -> List[str]:
+    def read_all(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
         manifest_files = []
         base_manifests = self.read(snapshot.base_manifest_list)
         manifest_files.extend(base_manifests)
         delta_manifests = self.read(snapshot.delta_manifest_list)
         manifest_files.extend(delta_manifests)
-        return [file.file_name for file in manifest_files]
+        return manifest_files
 
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         manifest_files = []
@@ -57,7 +56,7 @@ class ManifestListManager:
         reader = fastavro.reader(buffer)
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
-            partition_stats= SimpleStats(
+            partition_stats = SimpleStats(
                 min_value=BinaryRowDeserializer.from_bytes(
                     stats_dict['_MIN_VALUES'],
                     self.table.table_schema.get_partition_key_fields()
@@ -80,21 +79,21 @@ class ManifestListManager:
 
         return manifest_files
 
-    def write(self, file_name, manifest_file_names: List[str]):
+    def write(self, file_name, manifest_file_metas: List[ManifestFileMeta]):
         avro_records = []
-        for manifest_file_name in manifest_file_names:
+        for meta in manifest_file_metas:
             avro_record = {
                 "_VERSION": 2,
-                "_FILE_NAME": manifest_file_name,
-                "_FILE_SIZE": self.file_io.get_file_size(self.manifest_path / manifest_file_name),
-                "_NUM_ADDED_FILES": 0, # TODO
-                "_NUM_DELETED_FILES": 0,
+                "_FILE_NAME": meta.file_name,
+                "_FILE_SIZE": meta.file_size,
+                "_NUM_ADDED_FILES": meta.num_added_files,
+                "_NUM_DELETED_FILES": meta.num_deleted_files,
                 "_PARTITION_STATS": {
-                    "_MIN_VALUES": BinaryRowSerializer.to_bytes(BinaryRow(["p1"], self.table.table_schema.get_partition_key_fields())), # TODO
-                    "_MAX_VALUES": BinaryRowSerializer.to_bytes(BinaryRow(["p1"], self.table.table_schema.get_partition_key_fields())), # TODO
-                    "_NULL_COUNTS": None, # TODO
+                    "_MIN_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.min_value),
+                    "_MAX_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.max_value),
+                    "_NULL_COUNTS": meta.partition_stats.null_count,
                 },
-                "_SCHEMA_ID": self.table.table_schema.id,
+                "_SCHEMA_ID": meta.schema_id,
             }
             avro_records.append(avro_record)
 
