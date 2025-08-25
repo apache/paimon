@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.SparkConf
+import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
@@ -56,4 +57,21 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
     Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
   }
 
+  test("Paimon : Partial Update Write") {
+    spark.sql(
+      "CREATE TABLE T( f1 int, f2 string, f3 string, f4 string)\n" +
+        "TBLPROPERTIES (\n" + "  'bucket'='1',\n" +
+        "  'primary-key'='f1',\n" +
+        "  'write-only'='true',\n" +
+        "  'merge-engine'='partial-update',\n" + "" +
+        "  'file.format'='parquet',\n" +
+        "  'file.compression' = 'zstd'\n" + ")")
+
+    spark.sql("INSERT INTO T(f1, f4) VALUES(1, 'test')")
+
+    checkAnswer(
+      spark.sql("SELECT * FROM T"),
+      Row(1, null, null, "test")
+    )
+  }
 }
