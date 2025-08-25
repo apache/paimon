@@ -198,7 +198,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -263,7 +263,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -328,7 +328,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -397,7 +397,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -466,7 +466,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -535,7 +535,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -605,7 +605,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,

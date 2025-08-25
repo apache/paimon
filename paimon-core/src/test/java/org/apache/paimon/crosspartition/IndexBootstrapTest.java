@@ -140,7 +140,7 @@ public class IndexBootstrapTest extends TableTestBase {
     }
 
     private static DataFileMeta newFile(long timeMillis) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 1,
                 1,

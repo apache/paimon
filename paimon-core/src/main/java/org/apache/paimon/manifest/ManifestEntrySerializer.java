@@ -69,7 +69,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
             }
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
-        return new ManifestEntry(
+        return ManifestEntry.create(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),

@@ -37,7 +37,7 @@ public class DataEvolutionSplitGeneratorTest {
 
     private static DataFileMeta createFile(
             String name, @Nullable Long firstRowId, long maxSequence) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 name,
                 10000L,
                 1,

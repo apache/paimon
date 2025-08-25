@@ -44,7 +44,7 @@ public class SplitGeneratorTest {
 
     public static DataFileMeta newFileFromSequence(
             String name, int fileSize, long minSequence, long maxSequence) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 name,
                 fileSize,
                 1,

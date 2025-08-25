@@ -19,7 +19,7 @@
 package org.apache.paimon.manifest;
 
 /** Wrap a {@link ManifestEntry} to contain {@link #selected}. */
-public class FilteredManifestEntry extends ManifestEntry {
+public class FilteredManifestEntry extends PojoManifestEntry {
 
     private final boolean selected;
 

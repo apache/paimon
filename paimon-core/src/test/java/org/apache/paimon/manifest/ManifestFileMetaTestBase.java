@@ -73,12 +73,12 @@ public abstract class ManifestFileMetaTestBase {
             binaryRow = BinaryRow.EMPTY_ROW;
         }
 
-        return new ManifestEntry(
+        return ManifestEntry.create(
                 isAdd ? FileKind.ADD : FileKind.DELETE,
                 binaryRow,
                 0, // not used
                 0, // not used
-                new DataFileMeta(
+                DataFileMeta.create(
                         fileName,
                         0, // not used
                         0, // not used
@@ -262,12 +262,12 @@ public abstract class ManifestFileMetaTestBase {
 
     public static ManifestEntry makeEntry(
             FileKind fileKind, int partition, int bucket, long rowCount) {
-        return new ManifestEntry(
+        return ManifestEntry.create(
                 fileKind,
                 row(partition),
                 bucket,
                 0, // not used
-                new DataFileMeta(
+                DataFileMeta.create(
                         "", // not used
                         0, // not used
                         rowCount,
