@@ -21,8 +21,7 @@ import uuid
 from pathlib import Path
 from typing import List
 
-from pypaimon.catalog.snapshot_commit import (PartitionStatistics,
-                                              SnapshotCommit)
+from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta

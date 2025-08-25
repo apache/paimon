@@ -18,8 +18,7 @@
 
 from typing import List
 
-from pypaimon.catalog.snapshot_commit import (PartitionStatistics,
-                                              SnapshotCommit)
+from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.rest_json import JSON
 from pypaimon.snapshot.snapshot import Snapshot
