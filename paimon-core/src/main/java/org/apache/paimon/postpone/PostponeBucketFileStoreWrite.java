@@ -216,4 +216,17 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
         return createNoConflictAwareWriterCleanChecker();
     }
+
+    public static int getWriteId(String fileName) {
+        try {
+            String[] parts = fileName.split("-s-");
+            return Integer.parseInt(parts[1].substring(0, parts[1].indexOf('-')));
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Data file name "
+                            + fileName
+                            + " does not match the pattern. This is unexpected.",
+                    e);
+        }
+    }
 }

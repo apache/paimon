@@ -22,6 +22,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -304,11 +306,22 @@ public class ContinuousFileSplitEnumerator
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
         DataSplit dataSplit = ((DataSplit) split.split());
-        if (shuffleBucketWithPartition) {
-            return ChannelComputer.select(
-                    dataSplit.partition(), dataSplit.bucket(), context.currentParallelism());
+        int parallelism = context.currentParallelism();
+
+        int bucketId;
+        if (dataSplit.bucket() == BucketMode.POSTPONE_BUCKET) {
+            bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(dataSplit.dataFiles().get(0).fileName())
+                            % parallelism;
+        } else {
+            bucketId = dataSplit.bucket();
         }
-        return ChannelComputer.select(dataSplit.bucket(), context.currentParallelism());
+
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(dataSplit.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
     }
 
     protected SplitAssigner createSplitAssigner(boolean unordered) {
