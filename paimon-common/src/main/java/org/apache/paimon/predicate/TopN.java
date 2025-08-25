@@ -18,13 +18,18 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.predicate.SortValue.NullOrdering;
+import org.apache.paimon.predicate.SortValue.SortDirection;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** Represents the TopN predicate. */
+/**
+ * Represents the TopN predicate.
+ */
 public class TopN implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -34,6 +39,12 @@ public class TopN implements Serializable {
 
     public TopN(List<SortValue> orders, int limit) {
         this.orders = Preconditions.checkNotNull(orders);
+        this.limit = limit;
+    }
+
+    public TopN(FieldRef ref, SortDirection direction, NullOrdering nullOrdering, int limit) {
+        SortValue order = new SortValue(ref, direction, nullOrdering);
+        this.orders = Collections.singletonList(order);
         this.limit = limit;
     }
 

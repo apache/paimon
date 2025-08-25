@@ -44,7 +44,6 @@ import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -142,6 +141,8 @@ import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1256,12 +1257,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             int k = new Random().nextInt(100);
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(min, min + k);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.ASCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
@@ -1282,12 +1279,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             int k = new Random().nextInt(100);
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(max - k, max);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());

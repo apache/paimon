@@ -34,6 +34,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataFilePlan;
@@ -363,6 +364,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withMetricRegistry(MetricRegistry metricRegistry) {
             mainScan.withMetricRegistry(metricRegistry);
             fallbackScan.withMetricRegistry(metricRegistry);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withTopN(TopN topN) {
+            mainScan.withTopN(topN);
+            fallbackScan.withTopN(topN);
             return this;
         }
 
