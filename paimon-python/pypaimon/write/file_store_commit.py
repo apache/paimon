@@ -63,14 +63,15 @@ class FileStoreCommit:
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
 
+        # process new_manifest
         new_manifest_file = f"manifest-{str(uuid.uuid4())}-0"
         self.manifest_file_manager.write(new_manifest_file, commit_messages)
 
         partition_columns = list(zip(*(msg.partition for msg in commit_messages)))
-        min_partition = [min(col) for col in partition_columns]
-        max_partition = [max(col) for col in partition_columns]
-        partition_null_count = [sum(value == 0 for value in col) for col in partition_columns]
-        if not all(count == 0 for count in partition_null_count):
+        partition_min_stats = [min(col) for col in partition_columns]
+        partition_max_stats = [max(col) for col in partition_columns]
+        partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
+        if not all(count == 0 for count in partition_null_counts):
             raise RuntimeError("Partition value should not be null")
 
         new_manifest_list = ManifestFileMeta(
@@ -80,33 +81,43 @@ class FileStoreCommit:
             num_deleted_files=0,
             partition_stats=SimpleStats(
                 min_value=BinaryRow(
-                    values=min_partition,
+                    values=partition_min_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
                 max_value=BinaryRow(
-                    values=max_partition,
+                    values=partition_max_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
-                null_count=partition_null_count,
+                null_count=partition_null_counts,
             ),
             schema_id=self.table.table_schema.id,
         )
         self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
 
+        # process existing_manifest
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        total_record_count = 0
         if latest_snapshot:
             existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+            previous_record_count = latest_snapshot.total_record_count
+            if previous_record_count:
+                total_record_count += previous_record_count
         else:
             existing_manifest_files = []
         self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
 
+        # process snapshot
         new_snapshot_id = self._generate_snapshot_id()
+        record_count_add = self._generate_record_count_add(commit_messages)
+        total_record_count += record_count_add
         snapshot_data = Snapshot(
             version=1,
             id=new_snapshot_id,
             schema_id=self.table.table_schema.id,
             base_manifest_list=base_manifest_list,
             delta_manifest_list=delta_manifest_list,
+            total_record_count=total_record_count,
+            delta_record_count=record_count_add,
             commit_user=self.commit_user,
             commit_identifier=commit_identifier,
             commit_kind="APPEND",
@@ -124,37 +135,7 @@ class FileStoreCommit:
 
     def overwrite(self, partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
-        if not commit_messages:
-            return
-
-        new_manifest_files = self.manifest_file_manager.write(commit_messages)
-        if not new_manifest_files:
-            return
-
-        # In overwrite mode, we don't merge with existing manifests
-        manifest_list = self.manifest_list_manager.write(new_manifest_files)
-
-        new_snapshot_id = self._generate_snapshot_id()
-        snapshot_data = Snapshot(
-            version=1,
-            id=new_snapshot_id,
-            schema_id=self.table.table_schema.id,
-            base_manifest_list=manifest_list,
-            delta_manifest_list=manifest_list,
-            commit_user=self.commit_user,
-            commit_identifier=commit_identifier,
-            commit_kind="OVERWRITE",
-            time_millis=int(time.time() * 1000),
-        )
-
-        # Generate partition statistics for the commit
-        statistics = self._generate_partition_statistics(commit_messages)
-
-        # Use SnapshotCommit for atomic commit
-        with self.snapshot_commit:
-            success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
-            if not success:
-                raise RuntimeError(f"Failed to commit snapshot {new_snapshot_id}")
+        raise RuntimeError(f"overwrite unsupported yet")
 
     def abort(self, commit_messages: List[CommitMessage]):
         for message in commit_messages:
@@ -266,3 +247,25 @@ class FileStoreCommit:
             )
             for stats in partition_stats.values()
         ]
+
+    def _generate_record_count_add(self, commit_messages: List[CommitMessage]) -> int:
+        """
+        Generate record count add from commit messages.
+
+        This method follows the Java implementation pattern from
+        org.apache.paimon.manifest.ManifestEntry.recordCountAdd().
+
+        Args:
+            commit_messages: List of commit messages to analyze
+
+        Returns:
+            Count of add record
+        """
+        record_count = 0
+
+        for message in commit_messages:
+            new_files = message.new_files()
+            for file_meta in new_files:
+                record_count += file_meta.row_count
+
+        return record_count
