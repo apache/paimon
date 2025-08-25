@@ -73,3 +73,22 @@ class WriterTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/bucket-0"))
         self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/manifest/*.avro")), 2)
         self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/bucket-0/*.parquet")), 1)
+
+        with open(self.warehouse + '/test_db.db/test_table/snapshot/snapshot-1', 'r', encoding='utf-8') as file:
+            content = ''.join(file.readlines())
+            self.assertTrue(content.__contains__('\"totalRecordCount\": 3'))
+            self.assertTrue(content.__contains__('\"deltaRecordCount\": 3'))
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(expect)
+        commit_messages = table_write.prepare_commit()
+        table_commit.commit(commit_messages)
+        table_write.close()
+        table_commit.close()
+
+        with open(self.warehouse + '/test_db.db/test_table/snapshot/snapshot-2', 'r', encoding='utf-8') as file:
+            content = ''.join(file.readlines())
+            self.assertTrue(content.__contains__('\"totalRecordCount\": 6'))
+            self.assertTrue(content.__contains__('\"deltaRecordCount\": 3'))
