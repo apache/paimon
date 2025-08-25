@@ -1178,8 +1178,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return Collections.emptyList();
         }
         for (IndexManifestEntry entry : newIndexes) {
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas =
-                    entry.indexFile().deletionVectorMetas();
+            LinkedHashMap<String, DeletionVectorMeta> dvMetas = entry.indexFile().dvRanges();
             Path bucketPath = fileStorePathFactory.bucketPath(entry.partition(), entry.bucket());
             if (dvMetas != null) {
                 for (DeletionVectorMeta dvMeta : dvMetas.values()) {

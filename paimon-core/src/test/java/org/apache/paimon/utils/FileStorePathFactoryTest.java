@@ -93,7 +93,8 @@ public class FileStorePathFactoryTest {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        null);
+                        null,
+                        false);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
@@ -136,6 +137,7 @@ public class FileStorePathFactoryTest {
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
-                null);
+                null,
+                false);
     }
 }

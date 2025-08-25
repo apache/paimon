@@ -566,8 +566,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
         Map<String, IndexFileMeta> dataFileToIndexFileMeta = new HashMap<>();
         for (IndexFileMeta indexFileMeta : indexFileMetas) {
-            if (indexFileMeta.deletionVectorMetas() != null) {
-                for (DeletionVectorMeta dvMeta : indexFileMeta.deletionVectorMetas().values()) {
+            if (indexFileMeta.dvRanges() != null) {
+                for (DeletionVectorMeta dvMeta : indexFileMeta.dvRanges().values()) {
                     dataFileToIndexFileMeta.put(dvMeta.dataFileName(), indexFileMeta);
                 }
             }
@@ -575,12 +575,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         for (DataFileMeta file : dataFiles) {
             IndexFileMeta indexFileMeta = dataFileToIndexFileMeta.get(file.fileName());
             if (indexFileMeta != null) {
-                LinkedHashMap<String, DeletionVectorMeta> dvMetas =
-                        indexFileMeta.deletionVectorMetas();
+                LinkedHashMap<String, DeletionVectorMeta> dvMetas = indexFileMeta.dvRanges();
                 if (dvMetas != null && dvMetas.containsKey(file.fileName())) {
                     deletionFiles.add(
                             new DeletionFile(
-                                    indexFile.path(indexFileMeta.fileName()).toString(),
+                                    indexFile.path(indexFileMeta).toString(),
                                     dvMetas.get(file.fileName()).offset(),
                                     dvMetas.get(file.fileName()).length(),
                                     dvMetas.get(file.fileName()).cardinality()));

@@ -171,9 +171,7 @@ public class IndexFileHandler {
     }
 
     public Path filePath(IndexManifestEntry entry) {
-        return pathFactories
-                .get(entry.partition(), entry.bucket())
-                .toPath(entry.indexFile().fileName());
+        return pathFactories.get(entry.partition(), entry.bucket()).toPath(entry.indexFile());
     }
 
     public boolean existsManifest(String indexManifest) {
@@ -202,11 +200,11 @@ public class IndexFileHandler {
     }
 
     public boolean existsIndexFile(IndexManifestEntry file) {
-        return indexFile(file).exists(file.indexFile().fileName());
+        return indexFile(file).exists(file.indexFile());
     }
 
     public void deleteIndexFile(IndexManifestEntry entry) {
-        indexFile(entry).delete(entry.indexFile().fileName());
+        indexFile(entry).delete(entry.indexFile());
     }
 
     public void deleteManifest(String indexManifest) {

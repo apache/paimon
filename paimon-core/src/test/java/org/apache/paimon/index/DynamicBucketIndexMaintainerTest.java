@@ -81,7 +81,7 @@ public class DynamicBucketIndexMaintainerTest extends PrimaryKeyTableTestBase {
             }
             int[] ints =
                     fileHandler.hashIndex(message.partition(), message.bucket())
-                            .readList(files.get(0).fileName()).stream()
+                            .readList(files.get(0)).stream()
                             .mapToInt(Integer::intValue)
                             .toArray();
             index.computeIfAbsent(message.partition(), k -> new HashMap<>())

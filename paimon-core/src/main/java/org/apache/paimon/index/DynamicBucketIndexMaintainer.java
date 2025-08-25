@@ -54,7 +54,7 @@ public class DynamicBucketIndexMaintainer {
     }
 
     private void restore(HashIndexFile indexFile, IntHashSet hashcode, IndexFileMeta file) {
-        try (IntIterator iterator = indexFile.read(file.fileName())) {
+        try (IntIterator iterator = indexFile.read(file)) {
             while (true) {
                 try {
                     hashcode.add(iterator.next());
@@ -82,7 +82,7 @@ public class DynamicBucketIndexMaintainer {
         if (modified) {
             IndexFileMeta entry;
             try {
-                entry = indexFile.write(hashcode.size(), hashcode.toIntIterator());
+                entry = indexFile.write(hashcode.toIntIterator());
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 
 import java.io.Closeable;
 import java.io.DataOutputStream;
@@ -35,11 +36,13 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION
 public class DeletionFileWriter implements Closeable {
 
     private final Path path;
+    private final boolean isExternalPath;
     private final DataOutputStream out;
     private final LinkedHashMap<String, DeletionVectorMeta> dvMetas;
 
-    public DeletionFileWriter(Path path, FileIO fileIO) throws IOException {
-        this.path = path;
+    public DeletionFileWriter(IndexPathFactory pathFactory, FileIO fileIO) throws IOException {
+        this.path = pathFactory.newPath();
+        this.isExternalPath = pathFactory.isExternalPath();
         this.out = new DataOutputStream(fileIO.newOutputStream(path, true));
         out.writeByte(VERSION_ID_V1);
         this.dvMetas = new LinkedHashMap<>();
@@ -63,6 +66,11 @@ public class DeletionFileWriter implements Closeable {
 
     public IndexFileMeta result() {
         return new IndexFileMeta(
-                DELETION_VECTORS_INDEX, path.getName(), getPos(), dvMetas.size(), dvMetas);
+                DELETION_VECTORS_INDEX,
+                path.getName(),
+                getPos(),
+                dvMetas.size(),
+                dvMetas,
+                isExternalPath ? path.toString() : null);
     }
 }

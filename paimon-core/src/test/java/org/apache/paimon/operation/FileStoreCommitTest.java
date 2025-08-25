@@ -752,18 +752,12 @@ public class FileStoreCommitTest {
 
         IndexManifestEntry indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
-        assertThat(
-                        indexFileHandler
-                                .hashIndex(part1, 0)
-                                .readList(indexManifestEntry.indexFile().fileName()))
+        assertThat(indexFileHandler.hashIndex(part1, 0).readList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 2, 5);
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
-        assertThat(
-                        indexFileHandler
-                                .hashIndex(part1, 1)
-                                .readList(indexManifestEntry.indexFile().fileName()))
+        assertThat(indexFileHandler.hashIndex(part1, 1).readList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert part2
@@ -771,10 +765,7 @@ public class FileStoreCommitTest {
                 indexFileHandler.scanEntries(snapshot, HASH_INDEX, part2);
         assertThat(part2Index.size()).isEqualTo(1);
         assertThat(part2Index.get(0).bucket()).isEqualTo(2);
-        assertThat(
-                        indexFileHandler
-                                .hashIndex(part2, 2)
-                                .readList(part2Index.get(0).indexFile().fileName()))
+        assertThat(indexFileHandler.hashIndex(part2, 2).readList(part2Index.get(0).indexFile()))
                 .containsExactlyInAnyOrder(3, 5);
 
         // update part1
@@ -791,24 +782,18 @@ public class FileStoreCommitTest {
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
-        assertThat(
-                        indexFileHandler
-                                .hashIndex(part1, 0)
-                                .readList(indexManifestEntry.indexFile().fileName()))
+        assertThat(indexFileHandler.hashIndex(part1, 0).readList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 4);
 
         indexManifestEntry =
                 part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
-        assertThat(
-                        indexFileHandler
-                                .hashIndex(part1, 1)
-                                .readList(indexManifestEntry.indexFile().fileName()))
+        assertThat(indexFileHandler.hashIndex(part1, 1).readList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
         Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot, part1, 0);
         assertThat(file).isPresent();
-        assertThat(indexFileHandler.hashIndex(part1, 0).readList(file.get().fileName()))
+        assertThat(indexFileHandler.hashIndex(part1, 0).readList(file.get()))
                 .containsExactlyInAnyOrder(1, 4);
 
         // overwrite one partition

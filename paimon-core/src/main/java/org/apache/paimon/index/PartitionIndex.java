@@ -130,7 +130,7 @@ public class PartitionIndex {
             try (IntIterator iterator =
                     indexFileHandler
                             .hashIndex(file.partition(), file.bucket())
-                            .read(file.indexFile().fileName())) {
+                            .read(file.indexFile())) {
                 while (true) {
                     try {
                         int hash = iterator.next();
