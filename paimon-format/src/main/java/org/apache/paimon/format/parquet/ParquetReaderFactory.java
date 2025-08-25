@@ -122,7 +122,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         String systemTimezone = conf.getString("system.timezone", null);
 
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize,
+                timezoneConversionEnabled,
+                hiveWriterTimezone,
+                systemTimezone);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
