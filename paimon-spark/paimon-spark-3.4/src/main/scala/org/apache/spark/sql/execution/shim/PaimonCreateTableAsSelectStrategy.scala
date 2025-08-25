@@ -53,8 +53,10 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           throw new RuntimeException("Paimon can't extend StagingTableCatalog for now.")
         case _ =>
           val coreOptionKeys = CoreOptions.getOptions.asScala.map(_.key()).toSeq
+          val formatType = CoreOptions.fromMap(options.asJava).formatType()
           val (coreOptions, writeOptions) = options.partition {
-            case (key, _) => coreOptionKeys.contains(key)
+            case (key, _) =>
+              coreOptionKeys.contains(key) || key.startsWith(formatType)
           }
           val newTableSpec = tableSpec.copy(properties = tableSpec.properties ++ coreOptions)
 
