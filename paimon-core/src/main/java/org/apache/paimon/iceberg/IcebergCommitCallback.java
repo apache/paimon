@@ -1054,7 +1054,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
 
             if (!tagSnapshotInIceberg) {
-                LOG.info(
+                LOG.warn(
                         "Snapshot {} does not exist in Iceberg metadata. Unable to create tag {}.",
                         snapshotId,
                         tagName);
