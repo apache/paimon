@@ -229,16 +229,13 @@ public class FormatReaderMapping {
             FileFormat fileFormat = formatDiscover.discover(formatIdentifier);
             FormatReaderFactory readerFactory;
 
-            if ("csv".equals(formatIdentifier)
-                    && fileFormat instanceof org.apache.paimon.format.csv.CsvFileFormat) {
-                // For CSV, we want to read the full file schema but project to actualReadRowType
+            if (fileFormat instanceof org.apache.paimon.format.csv.CsvFileFormat) {
                 RowType fullFileRowType = new RowType(allDataFieldsInFile);
                 readerFactory =
                         ((org.apache.paimon.format.csv.CsvFileFormat) fileFormat)
                                 .createReaderFactory(
                                         fullFileRowType, actualReadRowType, readFilters);
             } else {
-                // For other formats, use the standard approach
                 readerFactory = fileFormat.createReaderFactory(actualReadRowType, readFilters);
             }
 

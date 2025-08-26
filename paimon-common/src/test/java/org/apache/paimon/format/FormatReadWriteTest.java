@@ -83,6 +83,10 @@ public abstract class FormatReadWriteTest {
 
     protected abstract FileFormat fileFormat();
 
+    public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
+        return format.createReaderFactory(rowType);
+    }
+
     @Test
     public void testSimpleTypes() throws IOException {
         FileFormat format = fileFormat();
@@ -100,7 +104,7 @@ public abstract class FormatReadWriteTest {
         FormatWriterFactory factory = format.createWriterFactory(rowType);
         write(factory, file, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                this.createReaderFactory(format, rowType)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
@@ -125,7 +129,7 @@ public abstract class FormatReadWriteTest {
         FormatWriterFactory factory = format.createWriterFactory(rowType);
         write(factory, file, expected);
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                this.createReaderFactory(format, rowType)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
@@ -177,7 +181,7 @@ public abstract class FormatReadWriteTest {
 
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(readType)
+                createReaderFactory(format, readType)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readType);
@@ -205,7 +209,7 @@ public abstract class FormatReadWriteTest {
                 GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType)
+                createReaderFactory(format, writeType)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
@@ -237,7 +241,7 @@ public abstract class FormatReadWriteTest {
 
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType)
+                createReaderFactory(format, writeType)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
@@ -379,11 +383,11 @@ public abstract class FormatReadWriteTest {
         testData.add(GenericRow.of(3, BinaryString.fromString("Charlie"), true));
 
         // Create file format
-        FileFormat jsonFormat = fileFormat();
+        FileFormat format = fileFormat();
 
         // Write data
         Path filePath = new Path(parent, UUID.randomUUID().toString());
-        FormatWriterFactory writerFactory = jsonFormat.createWriterFactory(rowType);
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         try (FormatWriter writer =
                 writerFactory.create(fileIO.newOutputStream(filePath, false), compression())) {
             for (InternalRow row : testData) {
@@ -392,7 +396,7 @@ public abstract class FormatReadWriteTest {
         }
 
         // Read data
-        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = this.createReaderFactory(format, rowType);
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
                         new FormatReaderFactory.Context() {

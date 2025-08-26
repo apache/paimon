@@ -52,7 +52,8 @@ public class CsvFileFormat extends FileFormat {
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, options);
+        throw new UnsupportedOperationException(
+                "CSV format support projection pushdown must with all row type");
     }
 
     /**
@@ -118,23 +119,15 @@ public class CsvFileFormat extends FileFormat {
         private final RowType projectedRowType;
         private final CsvOptions options;
 
-        public CsvReaderFactory(RowType rowType, CsvOptions options) {
-            // Backward compatibility constructor - use same type for both read and projection
-            this(rowType, rowType, options);
-        }
-
         public CsvReaderFactory(RowType rowReadType, RowType projectedRowType, CsvOptions options) {
             this.rowReadType = rowReadType;
             this.projectedRowType = projectedRowType;
             this.options = options;
-
-            // Validate projection mapping at factory creation time
             validateProjection(rowReadType, projectedRowType);
         }
 
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            // Pass both read type and projected type to the reader for projection pushdown
             return new CsvFileReader(
                     context.fileIO(), context.filePath(), rowReadType, projectedRowType, options);
         }

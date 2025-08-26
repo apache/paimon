@@ -65,6 +65,10 @@ public abstract class TextCompressionTest {
     /** Returns the file extension for the format. */
     protected abstract String getFormatExtension();
 
+    public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
+        return format.createReaderFactory(rowType);
+    }
+
     @Disabled // TODO fix dependencies
     @ParameterizedTest(name = "compression = {0}")
     @EnumSource(HadoopCompressionType.class)
@@ -112,7 +116,7 @@ public abstract class TextCompressionTest {
         }
 
         // Read data back
-        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = this.createReaderFactory(format, rowType);
         List<InternalRow> readData = new ArrayList<>();
 
         try (RecordReader<InternalRow> reader =
