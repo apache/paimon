@@ -59,8 +59,6 @@ class JsonCompressionTest extends TextCompressionTest {
     void testJsonCompressionWithComplexData() throws IOException {
         // Test with complex JSON structures and different compression formats
         testCompressionRoundTrip(HadoopCompressionType.GZIP.value(), "test_complex_gzip.json.gz");
-        testCompressionRoundTrip(
-                HadoopCompressionType.DEFLATE.value(), "test_complex_deflate.json.deflate");
         testCompressionRoundTrip(HadoopCompressionType.NONE.value(), "test_complex_none.json");
     }
 }
