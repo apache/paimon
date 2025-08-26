@@ -70,9 +70,10 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Override
-    public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
+    public FormatReaderFactory createReaderFactory(
+            FileFormat format, RowType allFields, RowType rowType) {
         return ((org.apache.paimon.format.csv.CsvFileFormat) format)
-                .createReaderFactory(rowType, rowType, null);
+                .createReaderFactory(allFields, rowType, null);
     }
 
     @Test
@@ -567,7 +568,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testCsvProjectionPushdownWithMissingField() {
+    public void testProjectionPushdownWithMissingField() {
         RowType fullRowType =
                 RowType.builder()
                         .field("id", DataTypes.INT().notNull())

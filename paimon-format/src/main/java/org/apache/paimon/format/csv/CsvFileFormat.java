@@ -53,7 +53,7 @@ public class CsvFileFormat extends FileFormat {
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
         throw new UnsupportedOperationException(
-                "CSV format support projection pushdown must with all row type");
+                "CSV format support projection push down must with all row type");
     }
 
     /**

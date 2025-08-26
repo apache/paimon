@@ -224,8 +224,8 @@ public class FormatReaderMapping {
             List<Predicate> readFilters =
                     enabledFilterPushDown ? readFilters(filters, tableSchema, dataSchema) : null;
 
-            // For CSV format, support projection pushdown by passing both full schema and projected
-            // schema
+            // For CSV format, support projection push down by passing both all fields and read
+            // fields
             FileFormat fileFormat = formatDiscover.discover(formatIdentifier);
             FormatReaderFactory readerFactory;
 
