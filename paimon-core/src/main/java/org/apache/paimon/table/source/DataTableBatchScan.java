@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -40,15 +41,18 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private Integer pushDownLimit;
     private TopN topN;
 
+    private final SchemaManager schemaManager;
+
     public DataTableBatchScan(
             TableSchema schema,
+            SchemaManager schemaManager,
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         super(schema, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-
+        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             if (options.toConfiguration()
                     .get(CoreOptions.BATCH_SCAN_MODE)
@@ -147,7 +151,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             return result;
         }
 
-        TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema);
+        TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
         List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(topN, splits));
         SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
         return new ScannedResult(newPlan);

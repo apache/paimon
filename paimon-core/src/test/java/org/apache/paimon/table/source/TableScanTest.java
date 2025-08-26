@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
@@ -26,6 +27,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -153,7 +155,8 @@ public class TableScanTest extends ScannerTestBase {
         DataField field = table.schema().fields().get(1);
         FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
         SimpleStatsEvolutions evolutions =
-                new SimpleStatsEvolutions((id) -> table.schema().fields(), table.schema().id());
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
 
         // with bottom1 null first
         TableScan.Plan plan2 =
@@ -286,6 +289,54 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    public void testPushDownTopNSchemaEvolution() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // schema evolution
+        updateColumn("a", DataTypes.STRING());
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(4, BinaryString.fromString("40"), 400L));
+        write.write(rowData(5, BinaryString.fromString("50"), 500L));
+        write.write(rowData(6, BinaryString.fromString("60"), 600L));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        TableScan.Plan plan1 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
+        assertThat(plan1.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan1.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(BinaryString.fromString("60"));
+        assertThat(((DataSplit) plan1.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(BinaryString.fromString("60"));
+
+        TableScan.Plan plan2 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).plan();
+        assertThat(plan2.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan2.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(BinaryString.fromString("10"));
+        assertThat(((DataSplit) plan2.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(BinaryString.fromString("10"));
+    }
+
+    @Test
     public void testPushDownTopNOnlyNull() throws Exception {
         createAppendOnlyTable();
 
@@ -302,7 +353,8 @@ public class TableScanTest extends ScannerTestBase {
         DataField field = table.schema().fields().get(1);
         FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
         SimpleStatsEvolutions evolutions =
-                new SimpleStatsEvolutions((id) -> table.schema().fields(), table.schema().id());
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
 
         // the min/max will be null, and the null count is not null.
         TableScan.Plan plan1 =

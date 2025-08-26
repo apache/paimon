@@ -22,6 +22,7 @@ import org.apache.paimon.predicate.CompareUtils;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.DataField;
@@ -43,9 +44,11 @@ import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 public class TopNDataSplitEvaluator {
 
     private final TableSchema schema;
+    private final SchemaManager schemaManager;
 
-    public TopNDataSplitEvaluator(TableSchema schema) {
+    public TopNDataSplitEvaluator(TableSchema schema, SchemaManager schemaManager) {
         this.schema = schema;
+        this.schemaManager = schemaManager;
     }
 
     public List<DataSplit> evaluate(TopN topN, List<DataSplit> splits) {
@@ -72,7 +75,7 @@ public class TopNDataSplitEvaluator {
         int index = ref.index();
         DataField field = schema.fields().get(index);
         SimpleStatsEvolutions evolutions =
-                new SimpleStatsEvolutions((id) -> schema.fields(), schema.id());
+                new SimpleStatsEvolutions((id) -> schemaManager.schema(id).fields(), schema.id());
 
         // extract the stats
         List<DataSplit> results = new ArrayList<>();
