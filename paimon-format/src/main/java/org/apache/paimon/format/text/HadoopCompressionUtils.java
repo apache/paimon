@@ -30,6 +30,7 @@ import org.apache.hadoop.io.compress.CompressionCodecFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Optional;
 
 /** Utility class for handling file compression and decompression using Hadoop codecs. */
 public class HadoopCompressionUtils {
@@ -44,21 +45,11 @@ public class HadoopCompressionUtils {
      */
     public static OutputStream createCompressedOutputStream(
             PositionOutputStream out, String compression) throws IOException {
-        try {
-            HadoopCompressionType compressionType =
-                    HadoopCompressionType.fromValue(compression)
-                            .orElseThrow(IllegalArgumentException::new);
-            if (HadoopCompressionType.NONE == compressionType) {
-                return out;
-            }
-            String codecName = compressionType.hadoopCodecClassName();
-            Class<?> codecClass = Class.forName(codecName);
-            CompressionCodec codec =
-                    (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
-            return codec.createOutputStream(out);
-        } catch (Exception | UnsatisfiedLinkError e) {
-            throw new IOException("Failed to create compression stream", e);
+        Optional<CompressionCodec> codecOpt = getCompressionCodecByCompression(compression);
+        if (codecOpt.isPresent()) {
+            return codecOpt.get().createOutputStream(out);
         }
+        return out;
     }
 
     /**
@@ -87,7 +78,33 @@ public class HadoopCompressionUtils {
             }
             return inputStream;
         } catch (Exception | UnsatisfiedLinkError e) {
-            throw new IOException("Failed to create decompression stream", e);
+            throw new RuntimeException("Failed to create decompression stream", e);
+        }
+    }
+
+    /**
+     * Gets a compression codec by compression type.
+     *
+     * @param compression The compression type
+     * @return Optional CompressionCodec instance
+     */
+    public static Optional<CompressionCodec> getCompressionCodecByCompression(String compression) {
+        HadoopCompressionType compressionType =
+                HadoopCompressionType.fromValue(compression)
+                        .orElseThrow(IllegalArgumentException::new);
+        if (HadoopCompressionType.NONE == compressionType) {
+            return Optional.empty();
+        }
+
+        try {
+            String codecName = compressionType.hadoopCodecClassName();
+            Class<?> codecClass = Class.forName(codecName);
+            CompressionCodec codec =
+                    (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
+            codec.createOutputStream(new java.io.ByteArrayOutputStream());
+            return Optional.of(codec);
+        } catch (Exception | UnsatisfiedLinkError e) {
+            throw new RuntimeException("Failed to get compression codec", e);
         }
     }
 }

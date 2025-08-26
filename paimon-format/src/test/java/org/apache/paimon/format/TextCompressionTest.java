@@ -43,6 +43,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base class for compression tests across different file formats. */
 public abstract class TextCompressionTest {
@@ -71,8 +72,7 @@ public abstract class TextCompressionTest {
      * is not available or cannot be found.
      */
     @Test
-    void testWriteFileWithCompressionExtensionButCompressionNotFound() throws IOException {
-        // Use a fictional compression extension that doesn't have a corresponding codec
+    void testWriteFileWithCompressionExtensionButCompressionNotFound() {
         String fileName = "test_unsupported." + getFormatExtension() + ".xyz";
         Options options = new Options();
         options.set(CoreOptions.FILE_COMPRESSION, "xyz"); // Non-existent compression type
@@ -81,24 +81,10 @@ public abstract class TextCompressionTest {
         Path filePath = new Path(tempDir.resolve(fileName).toString());
         FileIO fileIO = new LocalFileIO();
 
-        // Attempt to write with unsupported compression should handle gracefully
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
-
-        // This should either:
-        // 1. Fall back to no compression and succeed, or
-        // 2. Throw an appropriate exception
-        try (FormatWriter writer =
-                writerFactory.create(
-                        fileIO.newOutputStream(filePath, false),
-                        "xyz")) { // Using unsupported compression
-            writer.addElement(testData.get(0));
-            // If we reach here, the implementation handles unsupported compression gracefully
-        } catch (IOException e) {
-            // This is expected behavior when compression is not available
-            assertThat(e.getMessage())
-                    .containsAnyOf(
-                            "compression", "codec", "not found", "not available", "unsupported");
-        }
+        assertThatThrownBy(
+                        () -> writerFactory.create(fileIO.newOutputStream(filePath, false), "xyz"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Disabled // TODO fix dependencies
