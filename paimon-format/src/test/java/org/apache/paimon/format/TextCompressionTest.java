@@ -32,6 +32,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -42,6 +43,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base class for compression tests across different file formats. */
 public abstract class TextCompressionTest {
@@ -67,6 +69,27 @@ public abstract class TextCompressionTest {
 
     public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
         return format.createReaderFactory(rowType);
+    }
+
+  
+    /**
+     * Test case for when a file has a compression extension but the corresponding compression codec
+     * is not available or cannot be found.
+     */
+    @Test
+    void testWriteFileWithCompressionExtensionButCompressionNotFound() {
+        String fileName = "test_unsupported." + getFormatExtension() + ".xyz";
+        Options options = new Options();
+        options.set(CoreOptions.FILE_COMPRESSION, "xyz"); // Non-existent compression type
+
+        FileFormat format = createFileFormat(options);
+        Path filePath = new Path(tempDir.resolve(fileName).toString());
+        FileIO fileIO = new LocalFileIO();
+
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        assertThatThrownBy(
+                        () -> writerFactory.create(fileIO.newOutputStream(filePath, false), "xyz"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Disabled // TODO fix dependencies

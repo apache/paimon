@@ -221,6 +221,43 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: insert into table with data-evolution partial insert") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN INSERT (id, b) VALUES (-1, b)
+            |""".stripMargin)
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN INSERT (b) VALUES (b)
+            |""".stripMargin)
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN INSERT (id, c) VALUES (3, 4)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(null, 11, null), Row(-1, 11, null), Row(2, 2, 2), Row(3, 3, 3), Row(3, null, 4))
+      )
+    }
+  }
+
   test("Data Evolution: merge into table with data-evolution") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT)")
