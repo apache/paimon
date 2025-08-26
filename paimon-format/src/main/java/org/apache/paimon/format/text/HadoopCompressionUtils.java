@@ -30,7 +30,6 @@ import org.apache.hadoop.io.compress.CompressionCodecFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.Optional;
 
 /** Utility class for handling file compression and decompression using Hadoop codecs. */
 public class HadoopCompressionUtils {
@@ -45,11 +44,21 @@ public class HadoopCompressionUtils {
      */
     public static OutputStream createCompressedOutputStream(
             PositionOutputStream out, String compression) throws IOException {
-        Optional<CompressionCodec> codecOpt = getCompressionCodecByCompression(compression);
-        if (codecOpt.isPresent()) {
-            return codecOpt.get().createOutputStream(out);
+        try {
+            HadoopCompressionType compressionType =
+                    HadoopCompressionType.fromValue(compression)
+                            .orElseThrow(IllegalArgumentException::new);
+            if (HadoopCompressionType.NONE == compressionType) {
+                return out;
+            }
+            String codecName = compressionType.hadoopCodecClassName();
+            Class<?> codecClass = Class.forName(codecName);
+            CompressionCodec codec =
+                    (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
+            return codec.createOutputStream(out);
+        } catch (Exception | UnsatisfiedLinkError e) {
+            throw new IOException("Failed to create compression stream", e);
         }
-        return out;
     }
 
     /**
@@ -58,10 +67,16 @@ public class HadoopCompressionUtils {
      * @param inputStream The underlying input stream
      * @param filePath The file path (used to detect compression from extension)
      * @return Decompressed input stream
+     * @throws IOException If decompression stream creation fails
      */
     public static InputStream createDecompressedInputStream(
-            SeekableInputStream inputStream, Path filePath) {
+            SeekableInputStream inputStream, Path filePath) throws IOException {
         try {
+            // Handle null filePath gracefully
+            if (filePath == null) {
+                return inputStream;
+            }
+
             CompressionCodecFactory codecFactory =
                     new CompressionCodecFactory(new Configuration(false));
 
@@ -71,34 +86,8 @@ public class HadoopCompressionUtils {
                 return codec.createInputStream(inputStream);
             }
             return inputStream;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create decompression stream", e);
-        }
-    }
-
-    /**
-     * Gets a compression codec by compression type.
-     *
-     * @param compression The compression type
-     * @return Optional CompressionCodec instance
-     */
-    public static Optional<CompressionCodec> getCompressionCodecByCompression(String compression) {
-        HadoopCompressionType compressionType =
-                HadoopCompressionType.fromValue(compression)
-                        .orElseThrow(IllegalArgumentException::new);
-        if (HadoopCompressionType.NONE == compressionType) {
-            return Optional.empty();
-        }
-
-        try {
-            String codecName = compressionType.hadoopCodecClassName();
-            Class<?> codecClass = Class.forName(codecName);
-            CompressionCodec codec =
-                    (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
-            codec.createOutputStream(new java.io.ByteArrayOutputStream());
-            return Optional.of(codec);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get compression codec", e);
+        } catch (Exception | UnsatisfiedLinkError e) {
+            throw new IOException("Failed to create decompression stream", e);
         }
     }
 }
