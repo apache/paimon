@@ -39,11 +39,13 @@ import java.util.Map;
 public abstract class PartitionExpireStrategy {
 
     protected final List<String> partitionKeys;
+    protected final String partitionDefaultName;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
 
-    public PartitionExpireStrategy(RowType partitionType) {
+    public PartitionExpireStrategy(RowType partitionType, String partitionDefaultName) {
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.partitionKeys = partitionType.getFieldNames();
+        this.partitionDefaultName = partitionDefaultName;
     }
 
     public Map<String, String> toPartitionString(Object[] array) {
@@ -57,7 +59,11 @@ public abstract class PartitionExpireStrategy {
     public List<String> toPartitionValue(Object[] array) {
         List<String> list = new ArrayList<>(partitionKeys.size());
         for (int i = 0; i < partitionKeys.size(); i++) {
-            list.add(array[i].toString());
+            if (array[i] != null) {
+                list.add(array[i].toString());
+            } else {
+                list.add(partitionDefaultName);
+            }
         }
         return list;
     }
@@ -76,13 +82,13 @@ public abstract class PartitionExpireStrategy {
             @Nullable Identifier identifier) {
         switch (options.partitionExpireStrategy()) {
             case UPDATE_TIME:
-                return new PartitionUpdateTimeExpireStrategy(partitionType);
+                return new PartitionUpdateTimeExpireStrategy(options, partitionType);
             case VALUES_TIME:
                 return new PartitionValuesTimeExpireStrategy(options, partitionType);
             case CUSTOM:
                 return PartitionExpireStrategyFactory.INSTANCE
                         .get()
-                        .create(catalogLoader, identifier, partitionType);
+                        .create(catalogLoader, identifier, options, partitionType);
             default:
                 throw new IllegalArgumentException(
                         "Unknown partitionExpireStrategy: " + options.partitionExpireStrategy());

@@ -61,6 +61,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -215,6 +216,34 @@ public class PartitionExpireTest {
                         .filter(snapshot -> snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE)
                         .count();
         assertThat(overwriteSnapshotCnt).isEqualTo(3L);
+    }
+
+    @Test
+    public void testExpireWithNullOrEmptyPartition() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        Arrays.asList("f0", "f1"),
+                        emptyList(),
+                        Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), "true"),
+                        ""));
+        newTable();
+        write("20230101", "11");
+        write("20230101", "12");
+        // sub partition is null
+        write("20230101", null);
+        // sub partition is empty string
+        write("20230103", "");
+        write("20230103", "32");
+        write("20230105", "51");
+
+        PartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        Assertions.assertDoesNotThrow(() -> expire.expire(date(6), Long.MAX_VALUE));
+
+        // null partition and empty string partition should be expired
+        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
     }
 
     @Test
