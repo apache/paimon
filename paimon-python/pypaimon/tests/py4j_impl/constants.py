@@ -16,32 +16,13 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
+# ---------------------------- for env var ----------------------------
+PYPAIMON_CONN_INFO_PATH = '_PYPAIMON_CONN_INFO_PATH'
+PYPAIMON_JVM_ARGS = '_PYPAIMON_JVM_ARGS'
+PYPAIMON_JAVA_CLASSPATH = '_PYPAIMON_JAVA_CLASSPATH'
+PYPAIMON_HADOOP_CLASSPATH = '_PYPAIMON_HADOOP_CLASSPATH'
+PYPAIMON_MAIN_CLASS = 'org.apache.paimon.python.PythonGatewayServer'
+PYPAIMON_MAIN_ARGS = '_PYPAIMON_MAIN_ARGS'
 
-from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
-                                                   SimpleStats)
-
-
-@dataclass
-class ManifestFileMeta:
-    file_name: str
-    file_size: int
-    num_added_files: int
-    num_deleted_files: int
-    partition_stats: SimpleStats
-    schema_id: int
-
-
-MANIFEST_FILE_META_SCHEMA = {
-    "type": "record",
-    "name": "ManifestFileMeta",
-    "fields": [
-        {"name": "_VERSION", "type": "int"},
-        {"name": "_FILE_NAME", "type": "string"},
-        {"name": "_FILE_SIZE", "type": "long"},
-        {"name": "_NUM_ADDED_FILES", "type": "long"},
-        {"name": "_NUM_DELETED_FILES", "type": "long"},
-        {"name": "_PARTITION_STATS", "type": SIMPLE_STATS_SCHEMA},
-        {"name": "_SCHEMA_ID", "type": "long"},
-    ]
-}
+# ------------------ for tests (Please don't use it) ------------------
+PYPAIMON4J_TEST_MODE = '_PYPAIMON4J_TEST_MODE'

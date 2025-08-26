@@ -19,7 +19,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
                                                    SimpleStats)
@@ -31,34 +31,32 @@ class DataFileMeta:
     file_name: str
     file_size: int
     row_count: int
-    min_key: Optional[BinaryRow]
-    max_key: Optional[BinaryRow]
-    key_stats: Optional[SimpleStats]
-    value_stats: Optional[SimpleStats]
+    min_key: BinaryRow
+    max_key: BinaryRow
+    key_stats: SimpleStats
+    value_stats: SimpleStats
     min_sequence_number: int
     max_sequence_number: int
     schema_id: int
     level: int
-    extra_files: Optional[List[str]]
+    extra_files: List[str]
 
-    creation_time: Optional[datetime] = None
-    delete_row_count: Optional[int] = None
-    embedded_index: Optional[bytes] = None
-    file_source: Optional[str] = None
-    value_stats_cols: Optional[List[str]] = None
-    external_path: Optional[str] = None
+    creation_time: datetime | None = None
+    delete_row_count: int | None = None
+    embedded_index: bytes | None = None
+    file_source: str | None = None
+    value_stats_cols: List[str] | None = None
+    external_path: str | None = None
 
+    # not a schema field, just for internal usage
     file_path: str = None
 
     def set_file_path(self, table_path: Path, partition: BinaryRow, bucket: int):
         path_builder = table_path
-
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
             path_builder = path_builder / (field_name + "=" + str(field_value))
-
         path_builder = path_builder / ("bucket-" + str(bucket)) / self.file_name
-
         self.file_path = str(path_builder)
 
 
@@ -78,11 +76,13 @@ DATA_FILE_META_SCHEMA = {
         {"name": "_SCHEMA_ID", "type": "long"},
         {"name": "_LEVEL", "type": "int"},
         {"name": "_EXTRA_FILES", "type": {"type": "array", "items": "string"}},
-        {"name": "_CREATION_TIME", "type": ["null", "long"], "default": None},
+        {"name": "_CREATION_TIME",
+         "type": [
+             "null",
+             {"type": "long", "logicalType": "timestamp-millis"}],
+         "default": None},
         {"name": "_DELETE_ROW_COUNT", "type": ["null", "long"], "default": None},
         {"name": "_EMBEDDED_FILE_INDEX", "type": ["null", "bytes"], "default": None},
         {"name": "_FILE_SOURCE", "type": ["null", "int"], "default": None},
-        {"name": "_VALUE_STATS_COLS", "type": ["null", {"type": "array", "items": "string"}], "default": None},
-        {"name": "_EXTERNAL_PATH", "type": ["null", "string"], "default": None},
     ]
 }

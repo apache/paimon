@@ -22,18 +22,6 @@ import pyarrow.compute as pc
 from pypaimon.write.writer.data_writer import DataWriter
 
 
-class SequenceGenerator:
-    def __init__(self, start: int = 0):
-        self.current = start
-
-    def next(self) -> int:
-        self.current += 1
-        return self.current
-
-
-sequence_generator = SequenceGenerator()
-
-
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting."""
 
@@ -55,11 +43,11 @@ class KeyValueDataWriter(DataWriter):
                 key_column = data.column(pk_key)
                 enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
 
-        sequence_column = pa.array([sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
+        sequence_column = pa.array([self.sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key), '_SEQUENCE_NUMBER', sequence_column)
 
         # TODO: support real row kind here
-        value_kind_column = pa.repeat(0, num_rows)
+        value_kind_column = pa.array([0] * num_rows, type=pa.int32())
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key) + 1, '_VALUE_KIND',
                                                    value_kind_column)
 

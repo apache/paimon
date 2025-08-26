@@ -63,11 +63,11 @@ class TableScan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
             return Plan([])
-        manifest_files = self.manifest_list_manager.read_all_manifest_files(latest_snapshot)
+        manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
 
         file_entries = []
-        for manifest_file_path in manifest_files:
-            manifest_entries = self.manifest_file_manager.read(manifest_file_path,
+        for manifest_file in manifest_files:
+            manifest_entries = self.manifest_file_manager.read(manifest_file.file_name,
                                                                lambda row: self._bucket_filter(row))
             for entry in manifest_entries:
                 if entry.kind == 0:

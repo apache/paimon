@@ -49,10 +49,11 @@ class FileStoreTable(Table):
         self.primary_keys = table_schema.primary_keys
         self.partition_keys = table_schema.partition_keys
         self.options = table_schema.options
+        self.cross_partition_update = self.table_schema.cross_partition_update()
+        self.is_primary_key_table = bool(self.primary_keys)
+        self.total_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
 
         self.schema_manager = SchemaManager(file_io, table_path)
-        self.is_primary_key_table = bool(self.primary_keys)
-        self.cross_partition_update = self.table_schema.cross_partition_update()
 
     def current_branch(self) -> str:
         """Get the current branch name from options."""

@@ -15,33 +15,3 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-from dataclasses import dataclass
-
-from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
-                                                   SimpleStats)
-
-
-@dataclass
-class ManifestFileMeta:
-    file_name: str
-    file_size: int
-    num_added_files: int
-    num_deleted_files: int
-    partition_stats: SimpleStats
-    schema_id: int
-
-
-MANIFEST_FILE_META_SCHEMA = {
-    "type": "record",
-    "name": "ManifestFileMeta",
-    "fields": [
-        {"name": "_VERSION", "type": "int"},
-        {"name": "_FILE_NAME", "type": "string"},
-        {"name": "_FILE_SIZE", "type": "long"},
-        {"name": "_NUM_ADDED_FILES", "type": "long"},
-        {"name": "_NUM_DELETED_FILES", "type": "long"},
-        {"name": "_PARTITION_STATS", "type": SIMPLE_STATS_SCHEMA},
-        {"name": "_SCHEMA_ID", "type": "long"},
-    ]
-}

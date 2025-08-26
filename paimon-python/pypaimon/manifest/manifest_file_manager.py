@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import uuid
 from io import BytesIO
 from typing import List
 
@@ -24,8 +23,10 @@ import fastavro
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.binary_row import (BinaryRow, BinaryRowDeserializer,
                                            BinaryRowSerializer)
+from pypaimon.write.commit_message import CommitMessage
 
 
 class ManifestFileManager:
@@ -51,20 +52,40 @@ class ManifestFileManager:
         reader = fastavro.reader(buffer)
 
         for record in reader:
-            file_info = dict(record['_FILE'])
+            file_dict = dict(record['_FILE'])
+            key_dict = dict(file_dict['_KEY_STATS'])
+            key_stats = SimpleStats(
+                min_value=BinaryRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
+                                                           self.trimmed_primary_key_fields),
+                max_value=BinaryRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
+                                                           self.trimmed_primary_key_fields),
+                null_count=key_dict['_NULL_COUNTS'],
+            )
+            value_dict = dict(file_dict['_VALUE_STATS'])
+            value_stats = SimpleStats(
+                min_value=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'],
+                                                           self.table.table_schema.fields),
+                max_value=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'],
+                                                           self.table.table_schema.fields),
+                null_count=value_dict['_NULL_COUNTS'],
+            )
             file_meta = DataFileMeta(
-                file_name=file_info['_FILE_NAME'],
-                file_size=file_info['_FILE_SIZE'],
-                row_count=file_info['_ROW_COUNT'],
-                min_key=BinaryRowDeserializer.from_bytes(file_info['_MIN_KEY'], self.trimmed_primary_key_fields),
-                max_key=BinaryRowDeserializer.from_bytes(file_info['_MAX_KEY'], self.trimmed_primary_key_fields),
-                key_stats=None,  # TODO
-                value_stats=None,  # TODO
-                min_sequence_number=file_info['_MIN_SEQUENCE_NUMBER'],
-                max_sequence_number=file_info['_MAX_SEQUENCE_NUMBER'],
-                schema_id=file_info['_SCHEMA_ID'],
-                level=file_info['_LEVEL'],
-                extra_files=None,  # TODO
+                file_name=file_dict['_FILE_NAME'],
+                file_size=file_dict['_FILE_SIZE'],
+                row_count=file_dict['_ROW_COUNT'],
+                min_key=BinaryRowDeserializer.from_bytes(file_dict['_MIN_KEY'], self.trimmed_primary_key_fields),
+                max_key=BinaryRowDeserializer.from_bytes(file_dict['_MAX_KEY'], self.trimmed_primary_key_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=file_dict['_MIN_SEQUENCE_NUMBER'],
+                max_sequence_number=file_dict['_MAX_SEQUENCE_NUMBER'],
+                schema_id=file_dict['_SCHEMA_ID'],
+                level=file_dict['_LEVEL'],
+                extra_files=file_dict['_EXTRA_FILES'],
+                creation_time=file_dict['_CREATION_TIME'],
+                delete_row_count=file_dict['_DELETE_ROW_COUNT'],
+                embedded_index=file_dict['_EMBEDDED_FILE_INDEX'],
+                file_source=file_dict['_FILE_SOURCE'],
             )
             entry = ManifestEntry(
                 kind=record['_KIND'],
@@ -73,22 +94,23 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
-            if not shard_filter(entry):
+            if shard_filter is not None and not shard_filter(entry):
                 continue
             entries.append(entry)
         return entries
 
-    def write(self, commit_messages: List['CommitMessage']) -> List[str]:
+    def write(self, file_name, commit_messages: List[CommitMessage]):
         avro_records = []
         for message in commit_messages:
             partition_bytes = BinaryRowSerializer.to_bytes(
-                BinaryRow(list(message.partition()), self.table.table_schema.get_partition_key_fields()))
-            for file in message.new_files():
+                BinaryRow(list(message.partition), self.table.table_schema.get_partition_key_fields()))
+            for file in message.new_files:
                 avro_record = {
+                    "_VERSION": 2,
                     "_KIND": 0,
                     "_PARTITION": partition_bytes,
-                    "_BUCKET": message.bucket(),
-                    "_TOTAL_BUCKETS": -1,  # TODO
+                    "_BUCKET": message.bucket,
+                    "_TOTAL_BUCKETS": self.table.total_buckets,
                     "_FILE": {
                         "_FILE_NAME": file.file_name,
                         "_FILE_SIZE": file.file_size,
@@ -96,33 +118,35 @@ class ManifestFileManager:
                         "_MIN_KEY": BinaryRowSerializer.to_bytes(file.min_key),
                         "_MAX_KEY": BinaryRowSerializer.to_bytes(file.max_key),
                         "_KEY_STATS": {
-                            "_MIN_VALUES": None,
-                            "_MAX_VALUES": None,
-                            "_NULL_COUNTS": 0,
+                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.min_value),
+                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.max_value),
+                            "_NULL_COUNTS": file.key_stats.null_count,
                         },
                         "_VALUE_STATS": {
-                            "_MIN_VALUES": None,
-                            "_MAX_VALUES": None,
-                            "_NULL_COUNTS": 0,
+                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.min_value),
+                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.max_value),
+                            "_NULL_COUNTS": file.value_stats.null_count,
                         },
-                        "_MIN_SEQUENCE_NUMBER": 0,
-                        "_MAX_SEQUENCE_NUMBER": 0,
-                        "_SCHEMA_ID": 0,
-                        "_LEVEL": 0,
-                        "_EXTRA_FILES": [],
+                        "_MIN_SEQUENCE_NUMBER": file.min_sequence_number,
+                        "_MAX_SEQUENCE_NUMBER": file.max_sequence_number,
+                        "_SCHEMA_ID": file.schema_id,
+                        "_LEVEL": file.level,
+                        "_EXTRA_FILES": file.extra_files,
+                        "_CREATION_TIME": file.creation_time,
+                        "_DELETE_ROW_COUNT": file.delete_row_count,
+                        "_EMBEDDED_FILE_INDEX": file.embedded_index,
+                        "_FILE_SOURCE": file.file_source,
                     }
                 }
                 avro_records.append(avro_record)
 
-        manifest_filename = f"manifest-{str(uuid.uuid4())}.avro"
-        manifest_path = self.manifest_path / manifest_filename
+        manifest_path = self.manifest_path / file_name
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, avro_records)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(manifest_path) as output_stream:
                 output_stream.write(avro_bytes)
-            return [str(manifest_filename)]
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
