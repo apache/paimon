@@ -32,6 +32,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -64,6 +65,41 @@ public abstract class TextCompressionTest {
 
     /** Returns the file extension for the format. */
     protected abstract String getFormatExtension();
+
+    /**
+     * Test case for when a file has a compression extension but the corresponding compression codec
+     * is not available or cannot be found.
+     */
+    @Test
+    void testWriteFileWithCompressionExtensionButCompressionNotFound() throws IOException {
+        // Use a fictional compression extension that doesn't have a corresponding codec
+        String fileName = "test_unsupported." + getFormatExtension() + ".xyz";
+        Options options = new Options();
+        options.set(CoreOptions.FILE_COMPRESSION, "xyz"); // Non-existent compression type
+
+        FileFormat format = createFileFormat(options);
+        Path filePath = new Path(tempDir.resolve(fileName).toString());
+        FileIO fileIO = new LocalFileIO();
+
+        // Attempt to write with unsupported compression should handle gracefully
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+
+        // This should either:
+        // 1. Fall back to no compression and succeed, or
+        // 2. Throw an appropriate exception
+        try (FormatWriter writer =
+                writerFactory.create(
+                        fileIO.newOutputStream(filePath, false),
+                        "xyz")) { // Using unsupported compression
+            writer.addElement(testData.get(0));
+            // If we reach here, the implementation handles unsupported compression gracefully
+        } catch (IOException e) {
+            // This is expected behavior when compression is not available
+            assertThat(e.getMessage())
+                    .containsAnyOf(
+                            "compression", "codec", "not found", "not available", "unsupported");
+        }
+    }
 
     @Disabled // TODO fix dependencies
     @ParameterizedTest(name = "compression = {0}")
