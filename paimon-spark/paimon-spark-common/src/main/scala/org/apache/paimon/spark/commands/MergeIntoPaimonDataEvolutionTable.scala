@@ -31,7 +31,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -258,7 +258,14 @@ case class MergeIntoPaimonDataEvolutionTable(
         case insertAction: InsertAction =>
           Keep(
             insertAction.condition.getOrElse(TrueLiteral),
-            insertAction.assignments.map(a => a.value))
+            insertAction.assignments.map(
+              a =>
+                if (
+                  !a.value.isInstanceOf[AttributeReference] || joinPlan.output.exists(
+                    attr => attr.toString().equals(a.value.toString()))
+                ) a.value
+                else Literal(null))
+          )
       }.toSeq,
       notMatchedBySourceInstructions = Nil,
       checkCardinality = false,

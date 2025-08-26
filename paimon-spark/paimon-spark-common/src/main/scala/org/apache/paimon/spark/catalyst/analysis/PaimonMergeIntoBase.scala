@@ -110,9 +110,6 @@ trait PaimonMergeIntoBase
         u.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case i @ InsertAction(_, assignments) =>
-        if (assignments.length != targetOutput.length && dataEvolutionEnabled) {
-          throw new RuntimeException("Can't align the table's columns in insert clause.")
-        }
         i.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case _: UpdateStarAction =>
