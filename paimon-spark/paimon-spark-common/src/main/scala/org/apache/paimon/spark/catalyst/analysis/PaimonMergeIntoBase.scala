@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.commands.MergeIntoPaimonTable
+import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
@@ -45,6 +45,7 @@ trait PaimonMergeIntoBase
           if merge.resolved && PaimonRelation.isPaimonTable(merge.targetTable) =>
         val relation = PaimonRelation.getPaimonRelation(merge.targetTable)
         val v2Table = relation.table.asInstanceOf[SparkTable]
+        val dataEvolutionEnabled = v2Table.coreOptions.dataEvolutionEnabled()
         val targetOutput = relation.output
 
         checkPaimonTable(v2Table.getTable)
@@ -62,39 +63,53 @@ trait PaimonMergeIntoBase
             primaryKeys)
         }
         val alignedMatchedActions =
-          merge.matchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
+          merge.matchedActions.map(
+            checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
         val alignedNotMatchedActions =
-          merge.notMatchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
-        val alignedNotMatchedBySourceActions = resolveNotMatchedBySourceActions(merge, targetOutput)
+          merge.notMatchedActions.map(
+            checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
+        val alignedNotMatchedBySourceActions =
+          resolveNotMatchedBySourceActions(merge, targetOutput, dataEvolutionEnabled)
 
-        MergeIntoPaimonTable(
-          v2Table,
-          merge.targetTable,
-          merge.sourceTable,
-          merge.mergeCondition,
-          alignedMatchedActions,
-          alignedNotMatchedActions,
-          alignedNotMatchedBySourceActions
-        )
+        if (dataEvolutionEnabled) {
+          MergeIntoPaimonDataEvolutionTable(
+            v2Table,
+            merge.targetTable,
+            merge.sourceTable,
+            merge.mergeCondition,
+            alignedMatchedActions,
+            alignedNotMatchedActions,
+            alignedNotMatchedBySourceActions
+          )
+        } else {
+          MergeIntoPaimonTable(
+            v2Table,
+            merge.targetTable,
+            merge.sourceTable,
+            merge.mergeCondition,
+            alignedMatchedActions,
+            alignedNotMatchedActions,
+            alignedNotMatchedBySourceActions
+          )
+        }
     }
   }
 
   def resolveNotMatchedBySourceActions(
       merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference]): Seq[MergeAction]
+      targetOutput: Seq[AttributeReference],
+      dataEvolutionEnabled: Boolean): Seq[MergeAction]
 
   protected def checkAndAlignActionAssignment(
       action: MergeAction,
-      targetOutput: Seq[AttributeReference]): MergeAction = {
+      targetOutput: Seq[AttributeReference],
+      dataEvolutionEnabled: Boolean): MergeAction = {
     action match {
       case d @ DeleteAction(_) => d
       case u @ UpdateAction(_, assignments) =>
         u.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case i @ InsertAction(_, assignments) =>
-        if (assignments.length != targetOutput.length) {
-          throw new RuntimeException("Can't align the table's columns in insert clause.")
-        }
         i.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case _: UpdateStarAction =>

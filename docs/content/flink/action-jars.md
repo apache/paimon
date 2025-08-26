@@ -294,6 +294,7 @@ Run the following command to submit a 'rewrite_file_index' job for the table.
     rewrite_file_index \
     --warehouse <warehouse-path> \
     --identifier <database.table> \
+    [--partitions <partition_spec>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 

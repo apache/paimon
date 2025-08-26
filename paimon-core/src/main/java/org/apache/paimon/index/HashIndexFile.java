@@ -21,9 +21,9 @@ package org.apache.paimon.index;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.paimon.utils.IntFileUtils.readInts;
 import static org.apache.paimon.utils.IntFileUtils.writeInts;
@@ -33,21 +33,31 @@ public class HashIndexFile extends IndexFile {
 
     public static final String HASH_INDEX = "HASH";
 
-    public HashIndexFile(FileIO fileIO, PathFactory pathFactory) {
+    public HashIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
         super(fileIO, pathFactory);
     }
 
-    public Path path(String fileName) {
-        return pathFactory.toPath(fileName);
+    public IntIterator read(IndexFileMeta file) throws IOException {
+        return readInts(fileIO, pathFactory.toPath(file));
     }
 
-    public IntIterator read(String fileName) throws IOException {
-        return readInts(fileIO, pathFactory.toPath(fileName));
+    public List<Integer> readList(IndexFileMeta file) throws IOException {
+        return IntIterator.toIntList(read(file));
     }
 
-    public String write(IntIterator input) throws IOException {
+    public IndexFileMeta write(IntIterator input) throws IOException {
         Path path = pathFactory.newPath();
-        writeInts(fileIO, path, input);
-        return path.getName();
+        int count = writeInts(fileIO, path, input);
+        return new IndexFileMeta(
+                HASH_INDEX,
+                path.getName(),
+                fileSize(path),
+                count,
+                null,
+                isExternalPath() ? path.toString() : null);
+    }
+
+    public IndexFileMeta write(int[] ints) throws IOException {
+        return write(IntIterator.create(ints));
     }
 }

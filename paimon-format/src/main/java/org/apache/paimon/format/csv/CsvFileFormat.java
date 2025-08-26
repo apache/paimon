@@ -26,14 +26,15 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
 
 /** CSV {@link FileFormat}. */
@@ -41,26 +42,24 @@ public class CsvFileFormat extends FileFormat {
 
     public static final String CSV_IDENTIFIER = "csv";
 
-    private final Options options;
+    private final CsvOptions options;
 
     public CsvFileFormat(FormatContext context) {
-        this(context, CSV_IDENTIFIER);
-    }
-
-    public CsvFileFormat(FormatContext context, String identifier) {
-        super(identifier);
-        this.options = context.options();
+        super(CSV_IDENTIFIER);
+        this.options = new CsvOptions(context.options());
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, new CsvOptions(options));
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
+        return new CsvReaderFactory(projectedRowType, options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new CsvWriterFactory(type, new CsvOptions(options));
+        return new CsvWriterFactory(type, options);
     }
 
     @Override
@@ -86,6 +85,8 @@ public class CsvFileFormat extends FileFormat {
             case FLOAT:
             case DOUBLE:
             case DATE:
+            case BINARY:
+            case VARBINARY:
             case TIME_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -94,6 +95,23 @@ public class CsvFileFormat extends FileFormat {
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported data type for CSV format: " + dataType);
+        }
+    }
+
+    /** CSV {@link FormatReaderFactory} implementation. */
+    private static class CsvReaderFactory implements FormatReaderFactory {
+
+        private final RowType rowType;
+        private final CsvOptions options;
+
+        public CsvReaderFactory(RowType rowType, CsvOptions options) {
+            this.rowType = rowType;
+            this.options = options;
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+            return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
         }
     }
 
@@ -109,8 +127,10 @@ public class CsvFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression) {
-            return new CsvFormatWriter(new CloseShieldOutputStream(out), rowType, options);
+        public FormatWriter create(PositionOutputStream out, String compression)
+                throws IOException {
+            return new CsvFormatWriter(
+                    new CloseShieldOutputStream(out), rowType, options, compression);
         }
     }
 }

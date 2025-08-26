@@ -72,7 +72,7 @@ public class FileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                avro.createReaderFactory(rowType)
+                avro.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         LocalFileIO.create(),

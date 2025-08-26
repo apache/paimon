@@ -531,6 +531,10 @@ public class ParquetVectorUpdaterFactory {
 
             if (utcTimestamp) {
                 int nanoOfMillisecond = (int) (nanosOfDay % NANOS_PER_MILLISECOND);
+                if (nanoOfMillisecond < 0) {
+                    millisecond -= 1;
+                    nanoOfMillisecond += (int) NANOS_PER_MILLISECOND;
+                }
                 return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
             } else {
                 java.sql.Timestamp timestamp = new java.sql.Timestamp(millisecond);

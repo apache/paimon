@@ -21,7 +21,7 @@ package org.apache.paimon.postpone;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroSchemaConverter;
 import org.apache.paimon.fs.FileIO;
@@ -180,7 +180,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
         Preconditions.checkArgument(
                 restoreFiles.isEmpty(),
@@ -215,5 +215,18 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     @Override
     protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
         return createNoConflictAwareWriterCleanChecker();
+    }
+
+    public static int getWriteId(String fileName) {
+        try {
+            String[] parts = fileName.split("-s-");
+            return Integer.parseInt(parts[1].substring(0, parts[1].indexOf('-')));
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Data file name "
+                            + fileName
+                            + " does not match the pattern. This is unexpected.",
+                    e);
+        }
     }
 }

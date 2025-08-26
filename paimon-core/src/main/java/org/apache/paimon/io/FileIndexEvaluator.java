@@ -47,12 +47,18 @@ public class FileIndexEvaluator {
             TableSchema dataSchema,
             List<Predicate> dataFilter,
             @Nullable TopN topN,
+            @Nullable Integer limit,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
-            @Nullable DeletionVector deletionVector)
+            @Nullable DeletionVector dv)
             throws IOException {
         if (isNullOrEmpty(dataFilter) && topN == null) {
-            return FileIndexResult.REMAIN;
+            if (limit == null) {
+                return FileIndexResult.REMAIN;
+            } else {
+                // limit can not work with other predicates.
+                return createBaseSelection(file, dv).limit(limit);
+            }
         }
 
         try (FileIndexPredicate predicate =
@@ -61,18 +67,17 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             }
 
-            FileIndexResult selection =
-                    new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
-            if (deletionVector instanceof BitmapDeletionVector) {
-                RoaringBitmap32 deletion = ((BitmapDeletionVector) deletionVector).get();
-                selection = ((BitmapIndexResult) selection).andNot(deletion);
-            }
+            BitmapIndexResult selection = createBaseSelection(file, dv);
             FileIndexResult result;
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
                 result = predicate.evaluate(filter);
                 result.and(selection);
             } else if (topN != null) {
+                // 1. TopN cannot work with filter, because a filter may not completely filter out
+                // all records, any unfiltered records can affect the calculation results of TopN
+                // 2. evaluateTopN with selection, because we must filter out the data based on
+                // deletion vector before selecting TopN records.
                 result = predicate.evaluateTopN(topN, selection);
             } else {
                 return FileIndexResult.REMAIN;
@@ -90,6 +95,17 @@ public class FileIndexEvaluator {
 
             return result;
         }
+    }
+
+    private static BitmapIndexResult createBaseSelection(
+            DataFileMeta file, @Nullable DeletionVector dv) {
+        BitmapIndexResult selection =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0, file.rowCount()));
+        if (dv instanceof BitmapDeletionVector) {
+            RoaringBitmap32 deletion = ((BitmapDeletionVector) dv).get();
+            selection = selection.andNot(deletion);
+        }
+        return selection;
     }
 
     @Nullable

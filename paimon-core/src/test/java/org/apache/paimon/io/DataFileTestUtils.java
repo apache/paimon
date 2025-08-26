@@ -40,7 +40,7 @@ public class DataFileTestUtils {
     }
 
     public static DataFileMeta newFile(long minSeq, long maxSeq) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 maxSeq - minSeq + 1,
                 0L,
@@ -64,7 +64,7 @@ public class DataFileTestUtils {
     }
 
     public static DataFileMeta newFile() {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 0,
                 0,
@@ -91,7 +91,7 @@ public class DataFileTestUtils {
 
     public static DataFileMeta newFile(
             String name, int level, int minKey, int maxKey, long maxSequence, Long deleteRowCount) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 name,
                 maxKey - minKey + 1,
                 maxKey - minKey + 1,

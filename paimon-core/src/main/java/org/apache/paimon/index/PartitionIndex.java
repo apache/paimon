@@ -127,7 +127,10 @@ public class PartitionIndex {
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
-            try (IntIterator iterator = indexFileHandler.readHashIndex(file.indexFile())) {
+            try (IntIterator iterator =
+                    indexFileHandler
+                            .hashIndex(file.partition(), file.bucket())
+                            .read(file.indexFile())) {
                 while (true) {
                     try {
                         int hash = iterator.next();

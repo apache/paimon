@@ -24,7 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
@@ -73,7 +73,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private final int writerNumberMax;
     @Nullable private final DynamicBucketIndexMaintainer.Factory dbMaintainerFactory;
-    @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
+    @Nullable private final BucketedDvMaintainer.Factory dvMaintainerFactory;
     private final int numBuckets;
     private final RowType partitionType;
 
@@ -95,7 +95,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
-            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
             String tableName,
             CoreOptions options,
             RowType partitionType) {
@@ -429,11 +429,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         DynamicBucketIndexMaintainer indexMaintainer =
                 dbMaintainerFactory == null
                         ? null
-                        : dbMaintainerFactory.create(restored.dynamicBucketIndex());
-        DeletionVectorsMaintainer dvMaintainer =
+                        : dbMaintainerFactory.create(
+                                partition, bucket, restored.dynamicBucketIndex());
+        BucketedDvMaintainer dvMaintainer =
                 dvMaintainerFactory == null
                         ? null
-                        : dvMaintainerFactory.create(restored.deleteVectorsIndex());
+                        : dvMaintainerFactory.create(
+                                partition, bucket, restored.deleteVectorsIndex());
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {
@@ -524,7 +526,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer);
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer);
 
     // force buffer spill to avoid out of memory in batch mode
     protected void forceBufferSpill() throws Exception {}
@@ -538,7 +540,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         public final RecordWriter<T> writer;
         public final int totalBuckets;
         @Nullable public final DynamicBucketIndexMaintainer dynamicBucketMaintainer;
-        @Nullable public final DeletionVectorsMaintainer deletionVectorsMaintainer;
+        @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
 
@@ -546,7 +548,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 RecordWriter<T> writer,
                 int totalBuckets,
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;

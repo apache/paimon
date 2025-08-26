@@ -26,11 +26,11 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -66,7 +66,8 @@ class AppendDeletionFileMaintainerTest {
                         Collections.singletonMap("f3", Arrays.asList(1, 2, 3)));
         store.commit(commitMessage1, commitMessage2);
 
-        PathFactory indexPathFactory = store.pathFactory().indexFileFactory();
+        IndexPathFactory indexPathFactory =
+                store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0);
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         dataFileToDeletionFiles.putAll(
                 createDeletionFileMapFromIndexFileMetas(
@@ -99,7 +100,7 @@ class AppendDeletionFileMaintainerTest {
         assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();
-        assertThat(entry.indexFile().deletionVectorMetas().containsKey("f2")).isTrue();
+        assertThat(entry.indexFile().dvRanges().containsKey("f2")).isTrue();
         entry =
                 res.stream()
                         .filter(file -> file.kind() == FileKind.DELETE)
@@ -119,15 +120,15 @@ class AppendDeletionFileMaintainerTest {
     }
 
     private Map<String, DeletionFile> createDeletionFileMapFromIndexFileMetas(
-            PathFactory indexPathFactory, List<IndexFileMeta> fileMetas) {
+            IndexPathFactory indexPathFactory, List<IndexFileMeta> fileMetas) {
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         for (IndexFileMeta indexFileMeta : fileMetas) {
             for (Map.Entry<String, DeletionVectorMeta> dvMeta :
-                    indexFileMeta.deletionVectorMetas().entrySet()) {
+                    indexFileMeta.dvRanges().entrySet()) {
                 dataFileToDeletionFiles.put(
                         dvMeta.getKey(),
                         new DeletionFile(
-                                indexPathFactory.toPath(indexFileMeta.fileName()).toString(),
+                                indexPathFactory.toPath(indexFileMeta).toString(),
                                 dvMeta.getValue().offset(),
                                 dvMeta.getValue().length(),
                                 dvMeta.getValue().cardinality()));

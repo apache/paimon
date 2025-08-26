@@ -1943,6 +1943,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Whether ignore empty commit.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> INDEX_FILE_IN_DATA_FILE_DIR =
+            key("index-file-in-data-file-dir")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether index file in data file directory.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2484,6 +2491,10 @@ public class CoreOptions implements Serializable {
         return options.get(DISABLE_EXPLICIT_TYPE_CASTING);
     }
 
+    public boolean indexFileInDataFileDir() {
+        return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
+    }
+
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
@@ -2863,7 +2874,7 @@ public class CoreOptions implements Serializable {
         return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
     }
 
-    public MemorySize deletionVectorIndexFileTargetSize() {
+    public MemorySize dvIndexFileTargetSize() {
         return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
     }
 

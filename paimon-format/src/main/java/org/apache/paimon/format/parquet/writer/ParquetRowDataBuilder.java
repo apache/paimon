@@ -80,11 +80,7 @@ public class ParquetRowDataBuilder
 
         @Override
         public void write(InternalRow record) {
-            try {
-                this.writer.write(record);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            this.writer.write(record);
         }
     }
 }

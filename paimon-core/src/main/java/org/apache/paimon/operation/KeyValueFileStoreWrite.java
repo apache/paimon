@@ -29,8 +29,8 @@ import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
@@ -131,7 +131,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
-            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
             String tableName) {
@@ -185,7 +185,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Creating merge tree writer for partition {} bucket {} from restored files {}",
@@ -260,7 +260,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
             Levels levels,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
@@ -299,7 +299,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer) {
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
         FileReaderFactory<KeyValue> readerFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);

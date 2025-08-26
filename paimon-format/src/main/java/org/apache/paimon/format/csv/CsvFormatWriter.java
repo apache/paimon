@@ -21,47 +21,41 @@ package org.apache.paimon.format.csv;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.text.BaseTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV format writer implementation. */
-public class CsvFormatWriter implements FormatWriter {
+public class CsvFormatWriter extends BaseTextFileWriter {
 
+    private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
     // Performance optimization: Cache frequently used cast executors
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>(32);
 
-    private final RowType rowType;
-    private final CsvOptions options;
-
-    private final BufferedWriter writer;
-    private final PositionOutputStream outputStream;
+    private final CsvOptions csvOptions;
     private boolean headerWritten = false;
-
     private final StringBuilder stringBuilder;
 
-    public CsvFormatWriter(PositionOutputStream out, RowType rowType, CsvOptions options) {
-        this.rowType = rowType;
-        this.options = options;
-        this.outputStream = out;
-        this.writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
+    public CsvFormatWriter(
+            PositionOutputStream out, RowType rowType, CsvOptions options, String compression)
+            throws IOException {
+        super(out, rowType, compression);
+        this.csvOptions = options;
         this.stringBuilder = new StringBuilder();
     }
 
     @Override
     public void addElement(InternalRow element) throws IOException {
         // Write header if needed
-        if (options.includeHeader() && !headerWritten) {
+        if (csvOptions.includeHeader() && !headerWritten) {
             writeHeader();
             headerWritten = true;
         }
@@ -72,7 +66,7 @@ public class CsvFormatWriter implements FormatWriter {
         int fieldCount = rowType.getFieldCount();
         for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                stringBuilder.append(options.fieldDelimiter());
+                stringBuilder.append(csvOptions.fieldDelimiter());
             }
 
             Object value =
@@ -80,23 +74,9 @@ public class CsvFormatWriter implements FormatWriter {
             String fieldValue = escapeField(castToStringOptimized(value, rowType.getTypeAt(i)));
             stringBuilder.append(fieldValue);
         }
-        stringBuilder.append(options.lineDelimiter());
+        stringBuilder.append(csvOptions.lineDelimiter());
 
         writer.write(stringBuilder.toString());
-    }
-
-    @Override
-    public void close() throws IOException {
-        writer.flush();
-        writer.close();
-    }
-
-    @Override
-    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (suggestedCheck) {
-            return outputStream.getPos() >= targetSize;
-        }
-        return false;
     }
 
     private void writeHeader() throws IOException {
@@ -105,24 +85,24 @@ public class CsvFormatWriter implements FormatWriter {
         int fieldCount = rowType.getFieldCount();
         for (int i = 0; i < fieldCount; i++) {
             if (i > 0) {
-                stringBuilder.append(options.fieldDelimiter());
+                stringBuilder.append(csvOptions.fieldDelimiter());
             }
             stringBuilder.append(escapeField(rowType.getFieldNames().get(i)));
         }
-        stringBuilder.append(options.lineDelimiter());
+        stringBuilder.append(csvOptions.lineDelimiter());
         writer.write(stringBuilder.toString());
     }
 
     private String escapeField(String field) {
         if (field == null) {
-            return options.nullLiteral();
+            return csvOptions.nullLiteral();
         }
 
         // Optimized escaping with early exit checks
         boolean needsQuoting =
-                field.indexOf(options.fieldDelimiter().charAt(0)) >= 0
-                        || field.indexOf(options.lineDelimiter().charAt(0)) >= 0
-                        || field.indexOf(options.quoteCharacter().charAt(0)) >= 0;
+                field.indexOf(csvOptions.fieldDelimiter().charAt(0)) >= 0
+                        || field.indexOf(csvOptions.lineDelimiter().charAt(0)) >= 0
+                        || field.indexOf(csvOptions.quoteCharacter().charAt(0)) >= 0;
 
         if (!needsQuoting) {
             return field;
@@ -131,9 +111,9 @@ public class CsvFormatWriter implements FormatWriter {
         // Only escape if needed
         String escaped =
                 field.replace(
-                        options.quoteCharacter(),
-                        options.escapeCharacter() + options.quoteCharacter());
-        return options.quoteCharacter() + escaped + options.quoteCharacter();
+                        csvOptions.quoteCharacter(),
+                        csvOptions.escapeCharacter() + csvOptions.quoteCharacter());
+        return csvOptions.quoteCharacter() + escaped + csvOptions.quoteCharacter();
     }
 
     /** Optimized string casting with caching and fast paths for common types. */
@@ -154,6 +134,9 @@ public class CsvFormatWriter implements FormatWriter {
             case CHAR:
             case VARCHAR:
                 return value.toString();
+            case BINARY:
+            case VARBINARY:
+                return BASE64_ENCODER.encodeToString((byte[]) value);
             default:
                 return useCachedStringCastExecutor(value, dataType);
         }

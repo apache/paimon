@@ -59,6 +59,29 @@ Min max query can be also accelerated during compilation and returns very quickl
 For a regular bucketed table (For example, bucket = 5), the filtering conditions of the primary key will greatly
 accelerate queries and reduce the reading of a large number of files.
 
+## Data Skipping By File Index
+
+For full-compacted file, or for primary-key table with `'deletion-vectors.enabled'`, you can use file index, it filters
+files by indexing on the reading side.
+
+Define `file-index.bitmap.columns`, Data file index is an external index file and Paimon will create its
+corresponding index file for each file. If the index file is too small, it will be stored directly in the manifest,
+otherwise in the directory of the data file. Each data file corresponds to an index file, which has a separate file
+definition and can contain different types of indexes with multiple columns.
+
+Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
+scenario. Using a bitmap may consume more space but can result in greater accuracy.
+
+* [BloomFilter]({{< ref "concepts/spec/fileindex#index-bloomfilter" >}}): `file-index.bloom-filter.columns`.
+* [Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}): `file-index.bitmap.columns`.
+* [Range Bitmap]({{< ref "concepts/spec/fileindex#index-range-bitmap" >}}): `file-index.range-bitmap.columns`.
+
+If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
+we use the procedure, you should config appropriate configurations in target table. You can use ALTER clause to config
+`file-index.<filter-type>.columns` to the table.
+
+How to invoke: see [flink procedures]({{< ref "flink/procedures#procedures" >}})
+
 ## Bucketed Join
 
 Fixed Bucketed table (e.g. bucket = 10) can be used to avoid shuffle if necessary in batch query, for example, you can

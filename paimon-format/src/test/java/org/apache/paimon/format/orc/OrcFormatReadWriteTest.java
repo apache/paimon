@@ -99,7 +99,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
         RecordReader<InternalRow> reader =
                 legacyFormat
-                        .createReaderFactory(rowType)
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
@@ -126,7 +126,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
         RecordReader<InternalRow> reader =
                 newFormat
-                        .createReaderFactory(rowType)
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
@@ -153,7 +153,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
         RecordReader<InternalRow> reader =
                 legacyFormat
-                        .createReaderFactory(rowType)
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
@@ -185,7 +185,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
         RecordReader<InternalRow> reader =
                 newFormat
-                        .createReaderFactory(rowType)
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();

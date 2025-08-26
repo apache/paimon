@@ -119,7 +119,7 @@ public class ManifestListTest {
                 LocalFileIO.create(),
                 new LegacyManifestFileMetaSerializerPaimon10(),
                 legacyMetaType,
-                avro.createReaderFactory(legacyMetaType),
+                avro.createReaderFactory(legacyMetaType, legacyMetaType, new ArrayList<>()),
                 avro.createWriterFactory(legacyMetaType),
                 "zstd",
                 pathFactory.manifestListFactory(),
@@ -172,7 +172,8 @@ public class ManifestListTest {
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
-                null);
+                null,
+                false);
     }
 
     private ManifestList createManifestList(String pathStr) {

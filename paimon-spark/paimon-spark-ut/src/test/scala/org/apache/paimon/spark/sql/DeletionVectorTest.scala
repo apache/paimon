@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer, DeletionVectorsMaintainerTest}
+import org.apache.paimon.deletionvectors.{BucketedDvMaintainer, BucketedDvMaintainerTest, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -117,7 +117,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val table = loadTable("target")
           val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+            BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
           runAndCheckSplitScan(s"""
                                   |MERGE INTO target
                                   |USING source
@@ -167,7 +167,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val table = loadTable("T")
           val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+            BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
 
           spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
           val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
@@ -239,7 +239,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val table = loadTable("T")
           val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+            BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
 
           spark.sql(
             "INSERT INTO T VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')")
@@ -326,7 +326,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val table = loadTable("T")
           val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+            BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
 
           spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
           val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
@@ -383,7 +383,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
           val table = loadTable("T")
           val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+            BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
 
           def getDeletionVectors(ptValues: Seq[String]): Map[String, DeletionVector] = {
             getLatestDeletionVectors(
@@ -467,7 +467,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
         Row(1, "a_new1") :: Row(2, "b") :: Row(3, "c_new1") :: Nil)
 
       val dvMaintainerFactory =
-        new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+        BucketedDvMaintainer.factory(table.store().newIndexFileHandler())
 
       val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
       // 1, 3 deleted, their row positions are 0, 2
@@ -655,7 +655,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     val fileStore = loadTable("T").store()
     val indexManifest = fileStore.snapshotManager().latestSnapshot().indexManifest()
     val entry = fileStore.newIndexFileHandler().readManifest(indexManifest).get(0)
-    val dvMeta = entry.indexFile().deletionVectorMetas().values().iterator().next()
+    val dvMeta = entry.indexFile().dvRanges().values().iterator().next()
 
     assert(dvMeta.cardinality() == 334)
   }
@@ -705,17 +705,17 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   private def getAllLatestDeletionVectors(
       table: FileStoreTable,
-      dvMaintainerFactory: DeletionVectorsMaintainer.Factory): Map[String, DeletionVector] = {
+      dvMaintainerFactory: BucketedDvMaintainer.Factory): Map[String, DeletionVector] = {
     getLatestDeletionVectors(table, dvMaintainerFactory, Seq(BinaryRow.EMPTY_ROW))
   }
 
   private def getLatestDeletionVectors(
       table: FileStoreTable,
-      dvMaintainerFactory: DeletionVectorsMaintainer.Factory,
+      dvMaintainerFactory: BucketedDvMaintainer.Factory,
       partitions: Seq[BinaryRow]): Map[String, DeletionVector] = {
     partitions.flatMap {
       partition =>
-        DeletionVectorsMaintainerTest
+        BucketedDvMaintainerTest
           .createOrRestore(
             dvMaintainerFactory,
             table.snapshotManager().latestSnapshot(),

@@ -46,7 +46,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -71,6 +70,7 @@ import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
@@ -97,6 +97,9 @@ public class CompactAction extends TableActionBase {
                             "Only FileStoreTable supports compact action. The table type is '%s'.",
                             table.getClass().getName()));
         }
+        checkArgument(
+                !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
+                "Compact action does not support data evolution table yet. ");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
@@ -154,7 +157,7 @@ public class CompactAction extends TableActionBase {
         if (fullCompaction == null) {
             fullCompaction = !isStreaming;
         } else {
-            Preconditions.checkArgument(
+            checkArgument(
                     !(fullCompaction && isStreaming),
                     "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
         }
@@ -196,7 +199,7 @@ public class CompactAction extends TableActionBase {
     }
 
     protected PartitionPredicate getPartitionPredicate() throws Exception {
-        Preconditions.checkArgument(
+        checkArgument(
                 partitions == null || whereSql == null,
                 "partitions and where cannot be used together.");
         Predicate predicate = null;
@@ -237,7 +240,7 @@ public class CompactAction extends TableActionBase {
             LOGGER.info("the partition predicate of compaction is {}", predicate);
             PartitionPredicateVisitor partitionPredicateVisitor =
                     new PartitionPredicateVisitor(table.partitionKeys());
-            Preconditions.checkArgument(
+            checkArgument(
                     predicate.visit(partitionPredicateVisitor),
                     "Only partition key can be specialized in compaction action.");
             predicate =
@@ -256,12 +259,12 @@ public class CompactAction extends TableActionBase {
 
     private boolean buildForPostponeBucketCompaction(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
-        Preconditions.checkArgument(
+        checkArgument(
                 !isStreaming, "Postpone bucket compaction currently only supports batch mode");
-        Preconditions.checkArgument(
+        checkArgument(
                 partitions == null,
                 "Postpone bucket compaction currently does not support specifying partitions");
-        Preconditions.checkArgument(
+        checkArgument(
                 whereSql == null,
                 "Postpone bucket compaction currently does not support predicates");
 

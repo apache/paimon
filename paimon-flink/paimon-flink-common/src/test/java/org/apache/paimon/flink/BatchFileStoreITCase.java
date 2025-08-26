@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -66,9 +65,47 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCsvFileFormat() {
-        sql("CREATE TABLE CSV (a INT, b INT, c INT) WITH ('file.format'='csv')");
-        sql("INSERT INTO CSV VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM CSV")).containsExactly(Row.of(1, 2, 3));
+        innerTestTextFileFormat("csv");
+    }
+
+    @Test
+    public void testJsonFileFormat() {
+        innerTestTextFileFormat("json");
+    }
+
+    private void innerTestTextFileFormat(String format) {
+        // TODO zstd dependent on Hadoop 3.x
+        //        sql("CREATE TABLE TEXT_T (a INT, b INT, c INT) WITH ('file.format'='%s')",
+        // format);
+        //        sql("INSERT INTO TEXT_T VALUES (1, 2, 3)");
+        //        assertThat(sql("SELECT * FROM TEXT_T")).containsExactly(Row.of(1, 2, 3));
+        //        List<String> files =
+        //                sql("select file_path from `TEXT_T$files`").stream()
+        //                        .map(r -> r.getField(0).toString())
+        //                        .collect(Collectors.toList());
+        //        assertThat(files).allMatch(file -> file.endsWith(format + ".zst"));
+
+        sql(
+                "CREATE TABLE TEXT_NONE (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='none')",
+                format);
+        sql("INSERT INTO TEXT_NONE VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM TEXT_NONE")).containsExactly(Row.of(1, 2, 3));
+        List<String> files =
+                sql("select file_path from `TEXT_NONE$files`").stream()
+                        .map(r -> r.getField(0).toString())
+                        .collect(Collectors.toList());
+        assertThat(files).allMatch(file -> file.endsWith(format));
+
+        sql(
+                "CREATE TABLE TEXT_GZIP (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='gzip')",
+                format);
+        sql("INSERT INTO TEXT_GZIP VALUES (1, 2, 3)");
+        assertThat(sql("SELECT * FROM TEXT_GZIP")).containsExactly(Row.of(1, 2, 3));
+        files =
+                sql("select file_path from `TEXT_GZIP$files`").stream()
+                        .map(r -> r.getField(0).toString())
+                        .collect(Collectors.toList());
+        assertThat(files).allMatch(file -> file.endsWith(format + ".gz"));
     }
 
     @Test
@@ -114,10 +151,9 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         List<IndexManifestEntry> indexManifestEntries =
                 table.indexManifestFileReader().read(snapshot.indexManifest());
         assertThat(indexManifestEntries.size()).isEqualTo(1);
-        IndexFileMeta indexFileMeta = indexManifestEntries.get(0).indexFile();
         return table.store()
                 .newIndexFileHandler()
-                .readAllDeletionVectors(singletonList(indexFileMeta));
+                .readAllDeletionVectors(indexManifestEntries.get(0));
     }
 
     @Test

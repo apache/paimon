@@ -59,7 +59,7 @@ public class CsvOptions {
     public static final ConfigOption<String> NULL_LITERAL =
             ConfigOptions.key("csv.null-literal")
                     .stringType()
-                    .defaultValue("null")
+                    .defaultValue("")
                     .withDescription("The literal for null values in CSV format");
 
     private final String fieldDelimiter;

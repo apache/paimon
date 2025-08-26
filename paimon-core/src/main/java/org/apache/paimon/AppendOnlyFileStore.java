@@ -19,7 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.operation.AppendFileStoreWrite;
@@ -107,10 +107,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BaseAppendFileStoreWrite newWrite(String commitUser, @Nullable Integer writeId) {
-        DeletionVectorsMaintainer.Factory dvMaintainerFactory =
-                options.deletionVectorsEnabled()
-                        ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
-                        : null;
         if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
             RawFileSplitRead readForCompact = newRead();
             if (options.rowTrackingEnabled()) {
@@ -126,9 +122,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     snapshotManager(),
                     newScan(),
                     options,
-                    dvMaintainerFactory,
                     tableName);
         } else {
+            BucketedDvMaintainer.Factory dvMaintainerFactory =
+                    options.deletionVectorsEnabled()
+                            ? BucketedDvMaintainer.factory(newIndexFileHandler())
+                            : null;
             return new BucketedAppendFileStoreWrite(
                     fileIO,
                     newRead(),

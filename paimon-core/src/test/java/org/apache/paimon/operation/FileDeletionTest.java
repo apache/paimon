@@ -912,7 +912,7 @@ public class FileDeletionTest {
                 bucketEntries.stream()
                         .map(
                                 entry ->
-                                        new ManifestEntry(
+                                        ManifestEntry.create(
                                                 FileKind.DELETE,
                                                 partition,
                                                 bucket,

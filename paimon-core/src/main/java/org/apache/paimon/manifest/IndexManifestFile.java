@@ -33,6 +33,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Index manifest file. */
@@ -97,7 +98,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             return new IndexManifestFile(
                     fileIO,
                     schema,
-                    fileFormat.createReaderFactory(schema),
+                    fileFormat.createReaderFactory(schema, schema, new ArrayList<>()),
                     fileFormat.createWriterFactory(schema),
                     compression,
                     pathFactory.indexManifestFileFactory(),

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
@@ -38,8 +39,11 @@ public class CustomPartitionExpirationFactory implements PartitionExpireStrategy
 
     @Override
     public PartitionExpireStrategy create(
-            CatalogLoader catalogLoader, Identifier identifier, RowType partitionType) {
-        return new PartitionExpireStrategy(partitionType) {
+            CatalogLoader catalogLoader,
+            Identifier identifier,
+            CoreOptions options,
+            RowType partitionType) {
+        return new PartitionExpireStrategy(partitionType, options.partitionDefaultName()) {
             @Override
             public List<PartitionEntry> selectExpiredPartitions(
                     FileStoreScan scan, LocalDateTime expirationTime) {

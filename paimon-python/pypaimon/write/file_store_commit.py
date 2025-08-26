@@ -135,7 +135,7 @@ class FileStoreCommit:
 
     def overwrite(self, partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
-        raise RuntimeError(f"overwrite unsupported yet")
+        raise RuntimeError("overwrite unsupported yet")
 
     def abort(self, commit_messages: List[CommitMessage]):
         for message in commit_messages:
@@ -264,7 +264,7 @@ class FileStoreCommit:
         record_count = 0
 
         for message in commit_messages:
-            new_files = message.new_files()
+            new_files = message.new_files
             for file_meta in new_files:
                 record_count += file_meta.row_count
 

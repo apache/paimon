@@ -111,7 +111,8 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
-                        null);
+                        null,
+                        false);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
     }

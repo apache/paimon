@@ -34,6 +34,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -59,7 +61,9 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, List<Predicate> filters) {
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
         return new ParquetReaderFactory(
                 options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
     }

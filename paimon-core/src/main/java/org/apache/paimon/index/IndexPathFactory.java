@@ -16,28 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.csv;
+package org.apache.paimon.index;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.fs.Path;
 
-import java.io.IOException;
+/** Path factory to create an index path. */
+public interface IndexPathFactory {
 
-/** CSV {@link FormatReaderFactory} implementation. */
-public class CsvReaderFactory implements FormatReaderFactory {
+    Path newPath();
 
-    private final RowType rowType;
-    private final CsvOptions options;
+    Path toPath(IndexFileMeta file);
 
-    public CsvReaderFactory(RowType rowType, CsvOptions options) {
-        this.rowType = rowType;
-        this.options = options;
-    }
-
-    @Override
-    public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-        return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
-    }
+    boolean isExternalPath();
 }

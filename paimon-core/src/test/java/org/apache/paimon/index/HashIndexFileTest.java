@@ -21,7 +21,6 @@ package org.apache.paimon.index;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,16 +41,21 @@ public class HashIndexFileTest {
     @Test
     public void test() throws IOException {
         Path dir = new Path(tempPath.toUri());
-        PathFactory pathFactory =
-                new PathFactory() {
+        IndexPathFactory pathFactory =
+                new IndexPathFactory() {
                     @Override
                     public Path newPath() {
                         return new Path(dir, UUID.randomUUID().toString());
                     }
 
                     @Override
-                    public Path toPath(String fileName) {
-                        return new Path(dir, fileName);
+                    public Path toPath(IndexFileMeta file) {
+                        return new Path(dir, file.fileName());
+                    }
+
+                    @Override
+                    public boolean isExternalPath() {
+                        return false;
                     }
                 };
 
@@ -63,13 +67,13 @@ public class HashIndexFileTest {
             random.add(rnd.nextInt());
         }
 
-        String name =
+        IndexFileMeta meta =
                 file.write(
                         IntIterator.create(random.stream().mapToInt(Integer::intValue).toArray()));
 
-        List<Integer> result = IntIterator.toIntList(file.read(name));
+        List<Integer> result = IntIterator.toIntList(file.read(meta));
         assertThat(result).containsExactlyInAnyOrderElementsOf(random);
 
-        assertThat(file.fileSize(name)).isEqualTo(random.size() * 4L);
+        assertThat(file.fileSize(meta)).isEqualTo(random.size() * 4L);
     }
 }

@@ -37,6 +37,9 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
 
@@ -94,7 +97,8 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
             written = newWritten;
         }
 
-        boolean enableCompaction = !table.coreOptions().writeOnly();
+        boolean enableCompaction =
+                !table.coreOptions().writeOnly() && !table.coreOptions().dataEvolutionEnabled();
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()
@@ -119,6 +123,10 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
                             .startNewChain();
             setParallelism(newWritten, written.getParallelism(), false);
             written = newWritten;
+
+            if (options.get(SINK_USE_MANAGED_MEMORY)) {
+                declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
+            }
         }
 
         return written;

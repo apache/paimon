@@ -198,13 +198,8 @@ public abstract class FlinkSink<T> implements Serializable {
 
         Options options = Options.fromMap(table.options());
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
-                new CommitterOperatorFactory<>(
-                        streamingCheckpointEnabled,
-                        true,
-                        commitUser,
-                        createCommitterFactory(),
-                        createCommittableStateManager(),
-                        options.get(END_INPUT_WATERMARK));
+                createCommitterOperatorFactory(
+                        streamingCheckpointEnabled, commitUser, options.get(END_INPUT_WATERMARK));
 
         if (options.get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
@@ -293,6 +288,20 @@ public abstract class FlinkSink<T> implements Serializable {
         } catch (NoClassDefFoundError ignored) {
             // before 1.17, there is no adaptive parallelism
         }
+    }
+
+    protected CommitterOperatorFactory<Committable, ManifestCommittable>
+            createCommitterOperatorFactory(
+                    boolean streamingCheckpointEnabled,
+                    String commitUser,
+                    @Nullable Long endInputWatermark) {
+        return new CommitterOperatorFactory<>(
+                streamingCheckpointEnabled,
+                true,
+                commitUser,
+                createCommitterFactory(),
+                createCommittableStateManager(),
+                endInputWatermark);
     }
 
     protected abstract OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(

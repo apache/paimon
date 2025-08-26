@@ -442,7 +442,7 @@ public class UniversalCompactionTest {
     }
 
     static DataFileMeta file(long size) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 size,
                 1,

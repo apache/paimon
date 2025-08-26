@@ -23,6 +23,9 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexInDataFileDirPathFactory;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
@@ -67,6 +70,7 @@ public class FileStorePathFactory {
     private final String fileCompression;
 
     @Nullable private final String dataFilePathDirectory;
+    private final boolean indexFileInDataFileDir;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
@@ -86,9 +90,11 @@ public class FileStorePathFactory {
             boolean fileSuffixIncludeCompression,
             String fileCompression,
             @Nullable String dataFilePathDirectory,
-            List<Path> externalPaths) {
+            List<Path> externalPaths,
+            boolean indexFileInDataFileDir) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
+        this.indexFileInDataFileDir = indexFileInDataFileDir;
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer =
@@ -268,18 +274,32 @@ public class FileStorePathFactory {
         };
     }
 
-    public PathFactory indexFileFactory() {
-        return new PathFactory() {
-            @Override
-            public Path newPath() {
-                return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
-            }
+    public IndexPathFactory indexFileFactory(BinaryRow partition, int bucket) {
+        if (indexFileInDataFileDir) {
+            DataFilePathFactory dataFilePathFactory = createDataFilePathFactory(partition, bucket);
+            return new IndexInDataFileDirPathFactory(uuid, indexFileCount, dataFilePathFactory);
+        } else {
+            return new IndexPathFactory() {
+                @Override
+                public Path newPath() {
+                    return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
+                }
 
-            @Override
-            public Path toPath(String fileName) {
-                return new Path(indexPath(), fileName);
-            }
-        };
+                @Override
+                public Path toPath(IndexFileMeta file) {
+                    return toPath(file.fileName());
+                }
+
+                @Override
+                public boolean isExternalPath() {
+                    return false;
+                }
+
+                private Path toPath(String fileName) {
+                    return new Path(indexPath(), fileName);
+                }
+            };
+        }
     }
 
     public PathFactory statsFileFactory() {

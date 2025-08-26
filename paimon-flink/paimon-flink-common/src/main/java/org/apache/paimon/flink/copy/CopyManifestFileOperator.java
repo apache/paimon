@@ -150,7 +150,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CopyFileInf
                 // path is null
                 for (ManifestEntry manifestEntry : manifestEntries) {
                     ManifestEntry newManifestEntry =
-                            new ManifestEntry(
+                            ManifestEntry.create(
                                     manifestEntry.kind(),
                                     manifestEntry.partition(),
                                     manifestEntry.bucket(),

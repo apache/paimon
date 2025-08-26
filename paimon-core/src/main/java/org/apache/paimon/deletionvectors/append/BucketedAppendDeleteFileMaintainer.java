@@ -19,23 +19,23 @@
 package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** A {@link BaseAppendDeleteFileMaintainer} of bucketed append table. */
 public class BucketedAppendDeleteFileMaintainer implements BaseAppendDeleteFileMaintainer {
 
     private final BinaryRow partition;
     private final int bucket;
-    private final DeletionVectorsMaintainer maintainer;
+    private final BucketedDvMaintainer maintainer;
 
     BucketedAppendDeleteFileMaintainer(
-            BinaryRow partition, int bucket, DeletionVectorsMaintainer maintainer) {
+            BinaryRow partition, int bucket, BucketedDvMaintainer maintainer) {
         this.partition = partition;
         this.bucket = bucket;
         this.maintainer = maintainer;
@@ -58,8 +58,11 @@ public class BucketedAppendDeleteFileMaintainer implements BaseAppendDeleteFileM
 
     @Override
     public List<IndexManifestEntry> persist() {
-        return maintainer.writeDeletionVectorsIndex().stream()
+        List<IndexManifestEntry> result = new ArrayList<>();
+        maintainer
+                .writeDeletionVectorsIndex()
                 .map(fileMeta -> new IndexManifestEntry(FileKind.ADD, partition, bucket, fileMeta))
-                .collect(Collectors.toList());
+                .ifPresent(result::add);
+        return result;
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 
@@ -31,18 +32,18 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Maintainer of deletionVectors index. */
-public class DeletionVectorsMaintainer {
+public class BucketedDvMaintainer {
 
-    private final IndexFileHandler indexFileHandler;
+    private final DeletionVectorsIndexFile dvIndexFile;
     private final Map<String, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
 
-    private DeletionVectorsMaintainer(
-            IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
-        this.indexFileHandler = fileHandler;
+    private BucketedDvMaintainer(
+            DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
+        this.dvIndexFile = dvIndexFile;
         this.deletionVectors = deletionVectors;
-        this.bitmap64 = indexFileHandler.deletionVectorsIndex().bitmap64();
+        this.bitmap64 = dvIndexFile.bitmap64();
         this.modified = false;
     }
 
@@ -108,15 +109,15 @@ public class DeletionVectorsMaintainer {
     /**
      * Write new deletion vectors index file if any modifications have been made.
      *
-     * @return A list containing the metadata of the deletion vectors index file, or an empty list
-     *     if no changes need to be committed.
+     * @return None if no modifications have been made, otherwise the new deletion vectors index
+     *     file.
      */
-    public List<IndexFileMeta> writeDeletionVectorsIndex() {
+    public Optional<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
-            return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
+            return Optional.of(dvIndexFile.writeSingleFile(deletionVectors));
         }
-        return Collections.emptyList();
+        return Optional.empty();
     }
 
     /**
@@ -130,8 +131,8 @@ public class DeletionVectorsMaintainer {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
-    public IndexFileHandler indexFileHandler() {
-        return indexFileHandler;
+    public DeletionVectorsIndexFile dvIndexFile() {
+        return dvIndexFile;
     }
 
     @VisibleForTesting
@@ -147,12 +148,12 @@ public class DeletionVectorsMaintainer {
         return new Factory(handler);
     }
 
-    /** Factory to restore {@link DeletionVectorsMaintainer}. */
+    /** Factory to restore {@link BucketedDvMaintainer}. */
     public static class Factory {
 
         private final IndexFileHandler handler;
 
-        public Factory(IndexFileHandler handler) {
+        private Factory(IndexFileHandler handler) {
             this.handler = handler;
         }
 
@@ -160,21 +161,19 @@ public class DeletionVectorsMaintainer {
             return handler;
         }
 
-        public DeletionVectorsMaintainer create(@Nullable List<IndexFileMeta> restoredFiles) {
+        public BucketedDvMaintainer create(
+                BinaryRow partition, int bucket, @Nullable List<IndexFileMeta> restoredFiles) {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
             Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(restoredFiles));
-            return create(deletionVectors);
+                    new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
+            return create(partition, bucket, deletionVectors);
         }
 
-        public DeletionVectorsMaintainer create() {
-            return create(new HashMap<>());
-        }
-
-        public DeletionVectorsMaintainer create(Map<String, DeletionVector> deletionVectors) {
-            return new DeletionVectorsMaintainer(handler, deletionVectors);
+        public BucketedDvMaintainer create(
+                BinaryRow partition, int bucket, Map<String, DeletionVector> deletionVectors) {
+            return new BucketedDvMaintainer(handler.dvIndex(partition, bucket), deletionVectors);
         }
     }
 }

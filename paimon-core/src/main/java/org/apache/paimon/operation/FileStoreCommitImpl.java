@@ -774,7 +774,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             totalBuckets = numBucket;
         }
 
-        return new ManifestEntry(
+        return ManifestEntry.create(
                 kind, commitMessage.partition(), commitMessage.bucket(), totalBuckets, file);
     }
 
@@ -853,7 +853,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> currentEntries = scan.plan().files();
             for (ManifestEntry entry : currentEntries) {
                 changesWithOverwrite.add(
-                        new ManifestEntry(
+                        ManifestEntry.create(
                                 FileKind.DELETE,
                                 entry.partition(),
                                 entry.bucket(),

@@ -19,7 +19,7 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -29,30 +29,42 @@ public abstract class IndexFile {
 
     protected final FileIO fileIO;
 
-    protected final PathFactory pathFactory;
+    protected final IndexPathFactory pathFactory;
 
-    public IndexFile(FileIO fileIO, PathFactory pathFactory) {
+    public IndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
     }
 
-    public long fileSize(String fileName) {
+    public Path path(IndexFileMeta file) {
+        return pathFactory.toPath(file);
+    }
+
+    public long fileSize(IndexFileMeta file) {
+        return fileSize(path(file));
+    }
+
+    public long fileSize(Path file) {
         try {
-            return fileIO.getFileSize(pathFactory.toPath(fileName));
+            return fileIO.getFileSize(file);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toPath(fileName));
+    public void delete(IndexFileMeta file) {
+        fileIO.deleteQuietly(path(file));
     }
 
-    public boolean exists(String fileName) {
+    public boolean exists(IndexFileMeta file) {
         try {
-            return fileIO.exists(pathFactory.toPath(fileName));
+            return fileIO.exists(path(file));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    public boolean isExternalPath() {
+        return pathFactory.isExternalPath();
     }
 }

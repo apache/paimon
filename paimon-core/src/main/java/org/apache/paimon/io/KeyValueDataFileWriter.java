@@ -159,7 +159,7 @@ public abstract class KeyValueDataFileWriter
                         : dataFileIndexWriter.result();
 
         String externalPath = isExternalPath ? path.toString() : null;
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 path.getName(),
                 fileSize,
                 recordCount(),

@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan}
 import org.apache.spark.sql.types.StructType
 
@@ -48,6 +49,22 @@ case class PaimonSplitScan(
       getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
       readBuilder,
       metadataColumns)
+  }
+
+  override def supportedCustomMetrics: Array[CustomMetric] = {
+    Array(
+      PaimonNumSplitMetric(),
+      PaimonSplitSizeMetric(),
+      PaimonAvgSplitSizeMetric(),
+      PaimonResultedTableFilesMetric()
+    )
+  }
+
+  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+    val filesCount = dataSplits.map(_.dataFiles().size).sum
+    Array(
+      PaimonResultedTableFilesTaskMetric(filesCount)
+    )
   }
 
   override def description(): String = {

@@ -22,7 +22,7 @@ import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTa
 import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueries}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
-import org.apache.paimon.spark.execution.PaimonStrategy
+import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
 import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
 
 import org.apache.spark.sql.SparkSessionExtensions
@@ -70,6 +70,8 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
+    // old compatible
+    extensions.injectPlannerStrategy(spark => OldCompatibleStrategy(spark))
 
     // query stage preparation
     extensions.injectQueryStagePrepRule(_ => DisableUnnecessaryPaimonBucketedScan)

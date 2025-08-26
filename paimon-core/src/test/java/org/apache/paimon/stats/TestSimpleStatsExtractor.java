@@ -67,7 +67,8 @@ public class TestSimpleStatsExtractor implements SimpleStatsExtractor {
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
-        FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>());
         List<InternalRow> records = readListFromFile(fileIO, path, serializer, readerFactory);
 
         SimpleStatsCollector statsCollector = new SimpleStatsCollector(rowType, stats);

@@ -706,7 +706,7 @@ All available procedures are listed below.
       <td>
          -- rewrite the file index for the whole table<br/>
          CALL sys.rewrite_file_index(`table` => 'test_db.T')<br/><br/>
-         -- repair all tables in a specific partition<br/>
+         -- rewrite the file index for the specified partition in the table<br/>
          CALL sys.rewrite_file_index(`table` => 'test_db.T', partitions => 'pt=a')<br/><br/>
      </td>
    <tr>

@@ -24,8 +24,8 @@ import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -88,7 +88,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
             String tableName) {
         super(snapshotManager, scan, options, partitionType, null, dvMaintainerFactory, tableName);
         this.fileIO = fileIO;
@@ -111,7 +111,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer) {
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -161,7 +161,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             int bucket,
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer dvMaintainer);
+            @Nullable BucketedDvMaintainer dvMaintainer);
 
     public List<DataFileMeta> compactRewrite(
             BinaryRow partition,

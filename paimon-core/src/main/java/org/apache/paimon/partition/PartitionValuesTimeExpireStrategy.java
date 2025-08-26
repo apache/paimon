@@ -48,7 +48,7 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
     private final PartitionTimeExtractor timeExtractor;
 
     public PartitionValuesTimeExpireStrategy(CoreOptions options, RowType partitionType) {
-        super(partitionType);
+        super(partitionType, options.partitionDefaultName());
         String timePattern = options.partitionTimestampPattern();
         String timeFormatter = options.partitionTimestampFormatter();
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);

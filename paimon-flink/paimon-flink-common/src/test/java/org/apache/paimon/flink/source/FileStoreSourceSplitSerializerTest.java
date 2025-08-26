@@ -74,7 +74,7 @@ public class FileStoreSourceSplitSerializerTest {
     // ------------------------------------------------------------------------
 
     public static DataFileMeta newFile(int level) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 0,
                 1,

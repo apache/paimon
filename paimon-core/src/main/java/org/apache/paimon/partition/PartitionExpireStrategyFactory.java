@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.FactoryUtil;
@@ -30,7 +31,10 @@ import org.apache.paimon.shade.guava30.com.google.common.base.Suppliers;
 public interface PartitionExpireStrategyFactory {
 
     PartitionExpireStrategy create(
-            CatalogLoader catalogLoader, Identifier identifier, RowType partitionType);
+            CatalogLoader catalogLoader,
+            Identifier identifier,
+            CoreOptions options,
+            RowType partitionType);
 
     Supplier<PartitionExpireStrategyFactory> INSTANCE =
             Suppliers.memoize(

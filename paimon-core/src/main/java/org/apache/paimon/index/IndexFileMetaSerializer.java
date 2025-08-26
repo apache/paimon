@@ -18,7 +18,6 @@
 
 package org.apache.paimon.index;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
@@ -28,6 +27,8 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+
+import static org.apache.paimon.data.BinaryString.fromString;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
@@ -39,13 +40,12 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
     @Override
     public InternalRow toRow(IndexFileMeta record) {
         return GenericRow.of(
-                BinaryString.fromString(record.indexType()),
-                BinaryString.fromString(record.fileName()),
+                fromString(record.indexType()),
+                fromString(record.fileName()),
                 record.fileSize(),
                 record.rowCount(),
-                record.deletionVectorMetas() == null
-                        ? null
-                        : dvMetasToRowArrayData(record.deletionVectorMetas().values()));
+                dvMetasToRowArrayData(record.dvRanges()),
+                fromString(record.externalPath()));
     }
 
     @Override
@@ -55,7 +55,16 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
-                row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)));
+                row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
+                row.isNullAt(5) ? null : row.getString(5).toString());
+    }
+
+    public static InternalArray dvMetasToRowArrayData(
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges) {
+        if (dvRanges == null) {
+            return null;
+        }
+        return dvMetasToRowArrayData(dvRanges.values());
     }
 
     public static InternalArray dvMetasToRowArrayData(Collection<DeletionVectorMeta> dvMetas) {
@@ -64,7 +73,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                         .map(
                                 dvMeta ->
                                         GenericRow.of(
-                                                BinaryString.fromString(dvMeta.dataFileName()),
+                                                fromString(dvMeta.dataFileName()),
                                                 dvMeta.offset(),
                                                 dvMeta.length(),
                                                 dvMeta.cardinality()))
