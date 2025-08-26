@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -46,7 +47,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore HMS = new TestHiveMetastore();
-    private static final int PORT = 9088;
+    private static final int PORT = findFreePort();
+
+    private static int findFreePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
+        } catch (Exception e) {
+            throw new RuntimeException("Could not find a free port", e);
+        }
+    }
 
     private static final TimeZone ORIGINAL_TZ = TimeZone.getDefault();
     private static final ZoneId TEST_ZONE = ZoneId.of("Asia/Shanghai");
