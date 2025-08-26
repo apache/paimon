@@ -57,7 +57,7 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     public static void beforeAll() {
         HMS.start(PORT);
         TimeZone.setDefault(TimeZone.getTimeZone(TEST_ZONE));
-        // JVM timezone set to Asia/Shanghai for testing
+        // set JVM timezone to Asia/Shanghai for this test run
     }
 
     @AfterAll
@@ -83,9 +83,10 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
         return LocalDateTime.parse(iso);
     }
 
-    private static class Setup {
-        final String db = "hivedb" + StringUtils.randomNumericString(10);
-        final String tbl = "hivetable" + StringUtils.randomNumericString(10);
+    // Holds random db/table identifiers for each test run
+    private static class TableIds {
+        final String database = "hivedb" + StringUtils.randomNumericString(10);
+        final String table = "hivetable" + StringUtils.randomNumericString(10);
     }
 
     private TableEnvironment freshEnv() {
@@ -99,7 +100,7 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void timestampsShouldMatchAfterClone_spec() throws Exception {
+    public void clonePreservesTimestamp_parquetHiveToPaimon() throws Exception {
         TableEnvironment tEnv = freshEnv();
         Setup s = new Setup();
         tEnv.useCatalog("HIVE");
@@ -142,58 +143,58 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
         assertThat(paimonRows.get(0).getField(0)).isEqualTo(1);
         String paimonTsStr = paimonRows.get(0).getField(1).toString();
 
-        LocalDateTime paimonTs = parseTs(paimonTsStr);
-
-        assertThat(paimonTs).as("Paimon ts should equal Hive ts").isEqualTo(hiveTs);
-    }
-
-    @Test
-    public void timestampsShowEightHourSkew_currentBehavior() throws Exception {
-        TableEnvironment tEnv = freshEnv();
-
-        Setup s = new Setup();
-
-        tEnv.useCatalog("HIVE");
-        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
-        tEnv.executeSql("CREATE DATABASE " + s.db);
-        sql(tEnv, "CREATE TABLE %s.%s (`a` INT, `ts` TIMESTAMP) STORED AS PARQUET", s.db, s.tbl);
-        sql(tEnv, "INSERT INTO %s.%s VALUES (1, '2025-06-03 16:00:00')", s.db, s.tbl);
-
-        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
-        List<Row> hiveRows =
-                sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM HIVE.%s.%s", s.db, s.tbl);
-        assertThat(hiveRows).hasSize(1);
-        assertThat(hiveRows.get(0).getField(0)).isEqualTo(1);
-        String hiveTsStr = hiveRows.get(0).getField(1).toString();
-        LocalDateTime hiveTs = parseTs(hiveTsStr);
-
-        createAction(
-                        CloneAction.class,
-                        "clone",
-                        "--database",
-                        s.db,
-                        "--table",
-                        s.tbl,
-                        "--catalog_conf",
-                        "metastore=hive",
-                        "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
-                        "--target_database",
-                        "test",
-                        "--target_table",
-                        "test_table",
-                        "--target_catalog_conf",
-                        "warehouse=" + warehouse.toString())
-                .run();
-
-        tEnv.useCatalog("PAIMON");
-        List<Row> paimonRows =
-                sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM test.test_table");
-        assertThat(paimonRows).hasSize(1);
-        assertThat(paimonRows.get(0).getField(0)).isEqualTo(1);
-        String paimonTsStr = paimonRows.get(0).getField(1).toString();
         LocalDateTime paimonTs = parseTs(paimonTsStr);
 
         assertThat(paimonTs).isEqualTo(hiveTs);
+    }
+
+    @Test
+    public void cloneShowsEightHourSkew_withoutTZConversion() throws Exception {
+        TableEnvironment tEnv = freshEnv();
+
+        Setup s = new Setup();
+
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE " + s.db);
+        sql(tEnv, "CREATE TABLE %s.%s (`a` INT, `ts` TIMESTAMP) STORED AS PARQUET", s.db, s.tbl);
+        sql(tEnv, "INSERT INTO %s.%s VALUES (1, '2025-06-03 16:00:00')", s.db, s.tbl);
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        List<Row> hiveRows =
+                sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM HIVE.%s.%s", s.db, s.tbl);
+        assertThat(hiveRows).hasSize(1);
+        assertThat(hiveRows.get(0).getField(0)).isEqualTo(1);
+        String hiveTsStr = hiveRows.get(0).getField(1).toString();
+        LocalDateTime hiveTs = parseTs(hiveTsStr);
+
+        createAction(
+                        CloneAction.class,
+                        "clone",
+                        "--database",
+                        s.db,
+                        "--table",
+                        s.tbl,
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--target_database",
+                        "test",
+                        "--target_table",
+                        "test_table",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse.toString())
+                .run();
+
+        tEnv.useCatalog("PAIMON");
+        List<Row> paimonRows =
+                sql(tEnv, "SELECT a, CAST(ts AS STRING) AS ts_str FROM test.test_table");
+        assertThat(paimonRows).hasSize(1);
+        assertThat(paimonRows.get(0).getField(0)).isEqualTo(1);
+        String paimonTsStr = paimonRows.get(0).getField(1).toString();
+        LocalDateTime paimonTs = parseTs(paimonTsStr);
+
+        assertThat(paimonTs).isNotEqualTo(hiveTs);
     }
 }
