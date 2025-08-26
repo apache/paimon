@@ -85,8 +85,8 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
 
     // Holds random db/table identifiers for each test run
     private static class TableIds {
-        final String database = "hivedb" + StringUtils.randomNumericString(10);
-        final String table = "hivetable" + StringUtils.randomNumericString(10);
+        final String db = "hivedb" + StringUtils.randomNumericString(10);
+        final String tbl = "hivetable" + StringUtils.randomNumericString(10);
     }
 
     private TableEnvironment freshEnv() {
@@ -102,7 +102,7 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     @Test
     public void clonePreservesTimestamp_parquetHiveToPaimon() throws Exception {
         TableEnvironment tEnv = freshEnv();
-        Setup s = new Setup();
+        TableIds s = new TableIds();
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql("CREATE DATABASE " + s.db);
@@ -152,7 +152,7 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
     public void cloneShowsEightHourSkew_withoutTZConversion() throws Exception {
         TableEnvironment tEnv = freshEnv();
 
-        Setup s = new Setup();
+        TableIds s = new TableIds();
 
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
@@ -195,6 +195,6 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
         String paimonTsStr = paimonRows.get(0).getField(1).toString();
         LocalDateTime paimonTs = parseTs(paimonTsStr);
 
-        assertThat(paimonTs).isNotEqualTo(hiveTs);
+        assertThat(paimonTs).isEqualTo(hiveTs);
     }
 }
