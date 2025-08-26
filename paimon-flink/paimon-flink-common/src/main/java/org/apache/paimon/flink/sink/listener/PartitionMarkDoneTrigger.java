@@ -132,19 +132,23 @@ public class PartitionMarkDoneTrigger {
         if (timeInterval == null || idleTime == null) {
             return Collections.emptyList();
         }
+        LOG.debug("Pending partitions: {}", String.join(",", pendingPartitions.keySet()));
 
         List<String> needDone = new ArrayList<>();
         Iterator<Map.Entry<String, Long>> iter = pendingPartitions.entrySet().iterator();
         while (iter.hasNext()) {
             Map.Entry<String, Long> entry = iter.next();
             String partition = entry.getKey();
+            LOG.debug("Partition {} is in progress", partition);
 
             long lastUpdateTime = entry.getValue();
+            LOG.debug("Partition {} last update time: {}", partition, lastUpdateTime);
             long partitionStartTime;
 
             Optional<LocalDateTime> partitionLocalDateTimeOpt = extractDateTime(partition);
             // skip illegal partition
             if (!partitionLocalDateTimeOpt.isPresent()) {
+                LOG.debug("Partition {} is illegal, skip it", partition);
                 iter.remove();
                 continue;
             }
@@ -165,14 +169,29 @@ public class PartitionMarkDoneTrigger {
                                 .toInstant()
                                 .toEpochMilli();
             }
+            LOG.debug("Partition {} start time: {}", partition, partitionStartTime);
             long partitionEndTime = partitionStartTime + timeInterval;
+            LOG.debug("Partition {} end time: {}", partition, partitionEndTime);
             lastUpdateTime = Math.max(lastUpdateTime, partitionEndTime);
+            LOG.debug("Partition {} last update time after compare: {}", partition, lastUpdateTime);
 
             if (currentTimeMillis - lastUpdateTime > idleTime) {
+                LOG.debug("idleTime: {}", idleTime);
+                LOG.debug(
+                        "Partition {} is idle for {} greater than idleTime, mark it done",
+                        partition,
+                        currentTimeMillis - lastUpdateTime);
                 needDone.add(partition);
                 iter.remove();
+            } else {
+                LOG.debug("idleTime: {}", idleTime);
+                LOG.debug(
+                        "Partition {} is idle for {} less than idleTime, no not mark it done",
+                        partition,
+                        currentTimeMillis - lastUpdateTime);
             }
         }
+        LOG.debug("Need done partitions: {}", String.join(",", needDone));
         return needDone;
     }
 
