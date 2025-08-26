@@ -185,7 +185,8 @@ public class PartitionExpire {
         return expiredPartValues.stream()
                 .map(values -> String.join(DELIMITER, values))
                 .sorted()
-                .map(s -> s.split(DELIMITER))
+                // Use split(DELIMITER, -1) to preserve trailing empty strings
+                .map(s -> s.split(DELIMITER, -1))
                 .map(strategy::toPartitionString)
                 .limit(Math.min(expiredPartValues.size(), maxExpireNum))
                 .collect(Collectors.toList());
