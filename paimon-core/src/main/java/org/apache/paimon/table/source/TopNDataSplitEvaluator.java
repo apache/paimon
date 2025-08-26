@@ -32,7 +32,9 @@ import org.apache.paimon.utils.Pair;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -45,10 +47,12 @@ import static org.apache.paimon.stats.StatsUtils.minmaxAvailable;
 /** Evaluate DataSplit TopN result. */
 public class TopNDataSplitEvaluator {
 
+    private final Map<Long, TableSchema> tableSchemas;
     private final TableSchema schema;
     private final SchemaManager schemaManager;
 
     public TopNDataSplitEvaluator(TableSchema schema, SchemaManager schemaManager) {
+        this.tableSchemas = new HashMap<>();
         this.schema = schema;
         this.schemaManager = schemaManager;
     }
@@ -82,7 +86,7 @@ public class TopNDataSplitEvaluator {
         int index = ref.index();
         DataField field = schema.fields().get(index);
         SimpleStatsEvolutions evolutions =
-                new SimpleStatsEvolutions((id) -> schemaManager.schema(id).fields(), schema.id());
+                new SimpleStatsEvolutions((id) -> scanTableSchema(id).fields(), schema.id());
 
         // extract the stats
         List<DataSplit> results = new ArrayList<>();
@@ -241,6 +245,11 @@ public class TopNDataSplitEvaluator {
         } else {
             return -CompareUtils.compareLiteral(field.type(), left, right);
         }
+    }
+
+    private TableSchema scanTableSchema(long id) {
+        return tableSchemas.computeIfAbsent(
+                id, key -> key == schema.id() ? schema : schemaManager.schema(id));
     }
 
     /** The DataSplit's stats. */
