@@ -231,7 +231,9 @@ public class FormatReaderMapping {
                     formatDiscover
                             .discover(formatIdentifier)
                             .createReaderFactory(
-                                    dataSchema.logicalRowType(), actualReadRowType, readFilters),
+                                    new RowType(allDataFieldsInFile),
+                                    actualReadRowType,
+                                    readFilters),
                     dataSchema,
                     readFilters,
                     systemFields,
