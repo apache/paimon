@@ -26,6 +26,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.stats.StatsUtils.minmaxAvailable;
 
 /** Evaluate DataSplit TopN result. */
 public class TopNDataSplitEvaluator {
@@ -64,6 +66,11 @@ public class TopNDataSplitEvaluator {
         }
 
         SortValue order = orders.get(0);
+        DataType type = order.field().type();
+        if (!minmaxAvailable(type)) {
+            return splits;
+        }
+
         return getTopNSplits(order, limit, splits);
     }
 

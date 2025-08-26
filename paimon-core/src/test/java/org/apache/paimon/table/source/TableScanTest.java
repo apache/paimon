@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
@@ -303,12 +302,12 @@ public class TableScanTest extends ScannerTestBase {
         commit.close();
 
         // schema evolution
-        updateColumn("a", DataTypes.STRING());
+        updateColumn("a", DataTypes.BIGINT());
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
-        write.write(rowData(4, BinaryString.fromString("40"), 400L));
-        write.write(rowData(5, BinaryString.fromString("50"), 500L));
-        write.write(rowData(6, BinaryString.fromString("60"), 600L));
+        write.write(rowData(4, 40L, 400L));
+        write.write(rowData(5, 50L, 500L));
+        write.write(rowData(6, 60L, 600L));
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
         commit.close();
@@ -323,17 +322,17 @@ public class TableScanTest extends ScannerTestBase {
                 table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
         assertThat(plan1.splits().size()).isEqualTo(1);
         assertThat(((DataSplit) plan1.splits().get(0)).maxValue(field.id(), field, evolutions))
-                .isEqualTo(BinaryString.fromString("60"));
+                .isEqualTo(60L);
         assertThat(((DataSplit) plan1.splits().get(0)).minValue(field.id(), field, evolutions))
-                .isEqualTo(BinaryString.fromString("60"));
+                .isEqualTo(60L);
 
         TableScan.Plan plan2 =
                 table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).plan();
         assertThat(plan2.splits().size()).isEqualTo(1);
         assertThat(((DataSplit) plan2.splits().get(0)).maxValue(field.id(), field, evolutions))
-                .isEqualTo(BinaryString.fromString("10"));
+                .isEqualTo(10L);
         assertThat(((DataSplit) plan2.splits().get(0)).minValue(field.id(), field, evolutions))
-                .isEqualTo(BinaryString.fromString("10"));
+                .isEqualTo(10L);
     }
 
     @Test
