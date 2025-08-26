@@ -523,7 +523,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             }
         }
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {

@@ -100,7 +100,7 @@ public abstract class FormatReadWriteTest {
         FormatWriterFactory factory = format.createWriterFactory(rowType);
         write(factory, file, GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
@@ -125,7 +125,7 @@ public abstract class FormatReadWriteTest {
         FormatWriterFactory factory = format.createWriterFactory(rowType);
         write(factory, file, expected);
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
@@ -177,7 +177,7 @@ public abstract class FormatReadWriteTest {
 
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(readType)
+                format.createReaderFactory(readType, readType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readType);
@@ -205,7 +205,7 @@ public abstract class FormatReadWriteTest {
                 GenericRow.of(GenericVariant.fromJson("{\"age\":35,\"city\":\"Chicago\"}")));
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType)
+                format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
@@ -237,7 +237,7 @@ public abstract class FormatReadWriteTest {
 
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType)
+                format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
@@ -392,7 +392,7 @@ public abstract class FormatReadWriteTest {
         }
 
         // Read data
-        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, rowType, null);
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
                         new FormatReaderFactory.Context() {

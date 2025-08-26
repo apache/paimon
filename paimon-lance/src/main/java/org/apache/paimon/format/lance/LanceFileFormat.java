@@ -68,7 +68,7 @@ public class LanceFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> list) {
+            RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> list) {
         return new LanceReaderFactory(projectedRowType, formatContext.readBatchSize());
     }
 

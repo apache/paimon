@@ -36,7 +36,7 @@ public class LanceFileFormatTest {
         LanceFileFormat format =
                 new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
-        assertDoesNotThrow(() -> format.createReaderFactory(rowType, null));
+        assertDoesNotThrow(() -> format.createReaderFactory(rowType, rowType, null));
     }
 
     @Test

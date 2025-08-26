@@ -230,7 +230,8 @@ public class FormatReaderMapping {
                     partitionMapping,
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(actualReadRowType, readFilters),
+                            .createReaderFactory(
+                                    dataSchema.logicalRowType(), actualReadRowType, readFilters),
                     dataSchema,
                     readFilters,
                     systemFields,

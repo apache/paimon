@@ -98,7 +98,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should skip malformed lines and return only valid ones
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -147,7 +147,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should throw exception on malformed JSON
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -207,7 +207,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should handle type conversion errors gracefully
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -416,7 +416,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             }
         }
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {

@@ -41,8 +41,8 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType type, @Nullable List<Predicate> filters) {
-        return avro.createReaderFactory(type, filters);
+            RowType dataSchemaRowType, RowType type, @Nullable List<Predicate> filters) {
+        return avro.createReaderFactory(dataSchemaRowType, type, filters);
     }
 
     @Override

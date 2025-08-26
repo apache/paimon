@@ -118,7 +118,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,
-                manifestFileAvro.createReaderFactory(entryType),
+                manifestFileAvro.createReaderFactory(entryType, entryType, new ArrayList<>()),
                 manifestFileAvro.createWriterFactory(entryType),
                 avroOptions.get(IcebergOptions.MANIFEST_COMPRESSION),
                 pathFactory.manifestFileFactory(),

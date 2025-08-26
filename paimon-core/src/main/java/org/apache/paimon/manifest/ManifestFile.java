@@ -230,7 +230,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     partitionType,
                     new ManifestEntrySerializer(),
                     entryType,
-                    fileFormat.createReaderFactory(entryType),
+                    fileFormat.createReaderFactory(entryType, entryType, new ArrayList<>()),
                     fileFormat.createWriterFactory(entryType),
                     compression,
                     pathFactory.manifestFileFactory(),
