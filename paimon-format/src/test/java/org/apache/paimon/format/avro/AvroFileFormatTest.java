@@ -126,7 +126,7 @@ public class AvroFileFormatTest {
         }
 
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             reader.forEachRemainingWithPosition(
@@ -190,7 +190,7 @@ public class AvroFileFormatTest {
                     }
                 };
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         failingFileIO, file, failingFileIO.getFileSize(file)));

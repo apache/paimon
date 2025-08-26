@@ -28,7 +28,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,10 +67,6 @@ public abstract class FileFormat {
 
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);
-
-    public FormatReaderFactory createReaderFactory(RowType rowType) {
-        return createReaderFactory(rowType, rowType, new ArrayList<>());
-    }
 
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
