@@ -89,7 +89,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE TEXT_NONE (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='none')",
                 format);
         sql("INSERT INTO TEXT_NONE VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM TEXT_NONE")).containsExactly(Row.of(1, 2, 3));
+        assertThat(sql("SELECT a FROM TEXT_NONE")).containsExactly(Row.of(1));
         List<String> files =
                 sql("select file_path from `TEXT_NONE$files`").stream()
                         .map(r -> r.getField(0).toString())
@@ -100,7 +100,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE TEXT_GZIP (a INT, b INT, c INT) WITH ('file.format'='%s', 'file.compression'='gzip')",
                 format);
         sql("INSERT INTO TEXT_GZIP VALUES (1, 2, 3)");
-        assertThat(sql("SELECT * FROM TEXT_GZIP")).containsExactly(Row.of(1, 2, 3));
+        assertThat(sql("SELECT b FROM TEXT_GZIP")).containsExactly(Row.of(2));
         files =
                 sql("select file_path from `TEXT_GZIP$files`").stream()
                         .map(r -> r.getField(0).toString())
