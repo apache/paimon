@@ -28,8 +28,10 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
@@ -80,16 +82,17 @@ public class TopNDataSplitEvaluator {
                 return splits;
             }
 
+            Set<String> cols = Collections.singleton(field.name());
+            if (!split.statsAvailable(cols)) {
+                results.add(split);
+                continue;
+            }
+
             Object min = split.minValue(index, field, evolutions);
             Object max = split.maxValue(index, field, evolutions);
             Long nullCount = split.nullCount(index, evolutions);
             Stats stats = new Stats(min, max, nullCount);
-
-            if (stats.isEmpty()) {
-                results.add(split);
-            } else {
-                pairs.add(Pair.of(stats, split));
-            }
+            pairs.add(Pair.of(stats, split));
         }
 
         // pick the TopN splits
@@ -115,9 +118,9 @@ public class TopNDataSplitEvaluator {
                     (x, y) -> {
                         Stats left = x.getKey();
                         Stats right = y.getKey();
-                        int result = -Long.compare(left.nullCount, right.nullCount);
+                        int result = nullsFirst(left.nullCount, right.nullCount);
                         if (result == 0) {
-                            result = CompareUtils.compareLiteral(field.type(), left.min, right.min);
+                            result = asc(field, left.min, right.min);
                         }
                         return result;
                     };
@@ -126,10 +129,9 @@ public class TopNDataSplitEvaluator {
                     (x, y) -> {
                         Stats left = x.getKey();
                         Stats right = y.getKey();
-                        int result = -Long.compare(left.nullCount, right.nullCount);
+                        int result = nullsFirst(left.nullCount, right.nullCount);
                         if (result == 0) {
-                            result =
-                                    -CompareUtils.compareLiteral(field.type(), left.max, right.max);
+                            result = desc(field, left.max, right.max);
                         }
                         return result;
                     };
@@ -163,9 +165,9 @@ public class TopNDataSplitEvaluator {
                     (x, y) -> {
                         Stats left = x.getKey();
                         Stats right = y.getKey();
-                        int result = CompareUtils.compareLiteral(field.type(), left.min, right.min);
+                        int result = asc(field, left.min, right.min);
                         if (result == 0) {
-                            result = -Long.compare(left.nullCount, right.nullCount);
+                            result = nullsLast(left.nullCount, right.nullCount);
                         }
                         return result;
                     };
@@ -174,10 +176,9 @@ public class TopNDataSplitEvaluator {
                     (x, y) -> {
                         Stats left = x.getKey();
                         Stats right = y.getKey();
-                        int result =
-                                -CompareUtils.compareLiteral(field.type(), left.max, right.max);
+                        int result = desc(field, left.max, right.max);
                         if (result == 0) {
-                            result = -Long.compare(left.nullCount, right.nullCount);
+                            result = nullsLast(left.nullCount, right.nullCount);
                         }
                         return result;
                     };
@@ -192,6 +193,46 @@ public class TopNDataSplitEvaluator {
                 .collect(Collectors.toList());
     }
 
+    private int nullsFirst(Long left, Long right) {
+        if (left == null) {
+            return -1;
+        } else if (right == null) {
+            return 1;
+        } else {
+            return -Long.compare(left, right);
+        }
+    }
+
+    private int nullsLast(Long left, Long right) {
+        if (left == null) {
+            return -1;
+        } else if (right == null) {
+            return 1;
+        } else {
+            return Long.compare(left, right);
+        }
+    }
+
+    private int asc(FieldRef field, Object left, Object right) {
+        if (left == null) {
+            return -1;
+        } else if (right == null) {
+            return 1;
+        } else {
+            return CompareUtils.compareLiteral(field.type(), left, right);
+        }
+    }
+
+    private int desc(FieldRef field, Object left, Object right) {
+        if (left == null) {
+            return -1;
+        } else if (right == null) {
+            return 1;
+        } else {
+            return -CompareUtils.compareLiteral(field.type(), left, right);
+        }
+    }
+
     /** The DataSplit's stats. */
     private static class Stats {
         Object min;
@@ -202,10 +243,6 @@ public class TopNDataSplitEvaluator {
             this.min = min;
             this.max = max;
             this.nullCount = nullCount;
-        }
-
-        public boolean isEmpty() {
-            return min == null || max == null || nullCount == null;
         }
     }
 }

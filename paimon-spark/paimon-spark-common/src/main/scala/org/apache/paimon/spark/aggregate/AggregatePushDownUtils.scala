@@ -95,15 +95,7 @@ object AggregatePushDownUtils {
     }
 
     if (hasMinMax) {
-      dataSplits.forall {
-        dataSplit =>
-          dataSplit.dataFiles().asScala.forall {
-            dataFile =>
-              // It means there are all column statistics when valueStatsCols == null
-              dataFile.valueStatsCols() == null ||
-              minmaxColumns.forall(dataFile.valueStatsCols().contains)
-          }
-      }
+      dataSplits.forall(_.statsAvailable(minmaxColumns.toSet.asJava))
     } else if (hasCount) {
       dataSplits.forall(_.mergedRowCountAvailable())
     } else {
