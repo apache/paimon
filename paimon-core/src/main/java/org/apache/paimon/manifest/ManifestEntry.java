@@ -26,7 +26,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -62,8 +61,6 @@ public interface ManifestEntry extends FileEntry {
     ManifestEntry assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
     ManifestEntry assignFirstRowId(long firstRowId);
-
-    byte[] toBytes() throws IOException;
 
     static long recordCount(List<ManifestEntry> manifestEntries) {
         return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();

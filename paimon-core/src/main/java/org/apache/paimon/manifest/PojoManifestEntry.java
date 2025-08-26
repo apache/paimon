@@ -23,15 +23,11 @@ import org.apache.paimon.io.DataFileMeta;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 
 /** A {@link ManifestEntry} using pojo objects. */
 public class PojoManifestEntry implements ManifestEntry {
-
-    private static final ThreadLocal<ManifestEntrySerializer> SERIALIZER_THREAD_LOCAL =
-            ThreadLocal.withInitial(ManifestEntrySerializer::new);
 
     private final FileKind kind;
     // for tables without partition this field should be a row with 0 columns (not null)
@@ -137,11 +133,6 @@ public class PojoManifestEntry implements ManifestEntry {
     public PojoManifestEntry assignFirstRowId(long firstRowId) {
         return new PojoManifestEntry(
                 kind, partition, bucket, totalBuckets, file.assignFirstRowId(firstRowId));
-    }
-
-    @Override
-    public byte[] toBytes() throws IOException {
-        return SERIALIZER_THREAD_LOCAL.get().serializeToBytes(this);
     }
 
     @Override
