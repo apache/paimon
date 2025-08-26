@@ -77,8 +77,28 @@ SELECT * FROM my_table;
 ```
 
 This statement updates only the `b` column in the target table `target_table` based on the matching records from the source table
-`source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values.
+`source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values. The difference between this and table those are not enabled with data evolution is that only the `b` column data is written to new files.
 
 Note that: 
 * Data Evolution Table does not support 'Delete' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
+
+## Spec
+
+When writing: MERGE INTO clause for Data Evolution Table only updates the specified columns, and writes the updated column data to new files. The original data files remain unchanged.
+
+When reading: Paimon reads both the original data files and the new files containing the updated column data. It then merges the data from these two sources to present a unified view of the table. This merging process is optimized to ensure that read performance is not significantly impacted.
+
+After writing, the files in `target_table` like below:
+
+{{< img src="/img/data-evolution.png">}}
+
+When reading, the files with the same `first row id` will merge fields.
+
+{{< img src="/img/data-evolution2.png">}}
+
+The advantage to the mode is:
+
+* Avoid rewriting the whole file when updating partial columns, reducing I/O cost.
+* The read performance is not significantly impacted, as the merge process is optimized.
+* The disk space is used more efficiently, as only the updated columns are written to new files.
