@@ -77,23 +77,19 @@ public class ParquetTimestampVector implements TimestampColumnVector {
     }
 
     private long convertTimezone(long timestamp, boolean isMillis) {
-        // Convert to milliseconds if needed
-        long millis = isMillis ? timestamp : timestamp / 1000;
+        long millis = isMillis ? timestamp : Math.floorDiv(timestamp, 1000L);
 
-        // Apply timezone conversion
-        // Hive stores timestamps in UTC in Parquet files, so source timezone is UTC
-        // Target timezone is the system default timezone
-        TimeZone sourceTz = sourceTimezone;
-        TimeZone targetTz = targetTimezone;
+        int sourceOffset = sourceTimezone.getOffset(millis);
+        int targetOffset = targetTimezone.getOffset(millis);
 
-        int sourceOffset = sourceTz.getOffset(millis);
-        int targetOffset = targetTz.getOffset(millis);
         int offsetDiff = targetOffset - sourceOffset;
 
         long convertedMillis = millis + offsetDiff;
-
-        // Convert back to original precision
-        return isMillis ? convertedMillis : convertedMillis * 1000;
+        if (isMillis) {
+            return convertedMillis;
+        } else {
+            return timestamp + offsetDiff * 1000L;
+        }
     }
 
     public ColumnVector getVector() {

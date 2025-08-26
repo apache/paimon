@@ -132,10 +132,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
         // Initialize timezone conversion parameters
         this.timezoneConversionEnabled = timezoneConversionEnabled;
-        this.sourceTimezone =
-                sourceTimezoneId != null ? TimeZone.getTimeZone(sourceTimezoneId) : null;
-        this.targetTimezone =
-                targetTimezoneId != null ? TimeZone.getTimeZone(targetTimezoneId) : null;
+        this.sourceTimezone = tzOrNull(sourceTimezoneId);
+        this.targetTimezone = tzOrNull(targetTimezoneId);
 
         // fetch writer version from file metadata
         try {
@@ -149,6 +147,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         checkMissingColumns();
         // Initialize the columnarBatch and columnVectors,
         initBatch(vectors);
+    }
+
+    private static TimeZone tzOrNull(String id) {
+        return id == null ? null : TimeZone.getTimeZone(id);
     }
 
     private void initBatch(WritableColumnVector[] vectors) {
@@ -181,16 +183,16 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
-                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    if (timezoneConversionEnabled
-                            && sourceTimezone != null
-                            && targetTimezone != null) {
+                    if (timezoneConversionEnabled) {
                         vectors[i] =
                                 new ParquetTimestampVector(
                                         writableVectors[i], sourceTimezone, targetTimezone);
                     } else {
                         vectors[i] = new ParquetTimestampVector(writableVectors[i]);
                     }
+                    break;
+                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                    vectors[i] = new ParquetTimestampVector(writableVectors[i]);
                     break;
                 case ARRAY:
                     vectors[i] =

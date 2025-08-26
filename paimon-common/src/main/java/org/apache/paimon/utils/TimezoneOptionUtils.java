@@ -20,46 +20,14 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.options.Options;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.TimeZone;
-
-/** Helper for propagating timestamp-timezone-conversion options through the option chain. */
+/** Helper for timestamp timezone conversion option. */
 public final class TimezoneOptionUtils {
 
     public static final String CONVERSION_ENABLED = "timestamp.timezone.conversion.enabled";
-    public static final String HIVE_WRITER_TZ = "hive.writer.timezone";
-    public static final String SYSTEM_TZ = "system.timezone";
-
-    /** Unmodifiable list of all option keys handled here. */
-    public static final List<String> KEYS =
-            Collections.unmodifiableList(
-                    Arrays.asList(CONVERSION_ENABLED, HIVE_WRITER_TZ, SYSTEM_TZ));
 
     private TimezoneOptionUtils() {}
 
-    /** Enable UTC→local timestamp conversion (Hive writes UTC in Parquet). */
-    public static void enableUtcToLocal(Options opts, TimeZone systemTz) {
-        opts.set(HIVE_WRITER_TZ, "UTC");
-        opts.set(SYSTEM_TZ, systemTz.getID());
-        opts.set(CONVERSION_ENABLED, "true");
-    }
-
-    public static void enableUtcToLocal(Map<String, String> target, TimeZone systemTz) {
-        target.put(HIVE_WRITER_TZ, "UTC");
-        target.put(SYSTEM_TZ, systemTz.getID());
-        target.put(CONVERSION_ENABLED, "true");
-    }
-
     public static boolean isEnabled(Options opts) {
         return opts.getBoolean(CONVERSION_ENABLED, false);
-    }
-
-    public static void enableWriterToLocal(Map<String, String> target, TimeZone writerTz, TimeZone systemTz) {
-        target.put(HIVE_WRITER_TZ, writerTz.getID());
-        target.put(SYSTEM_TZ, systemTz.getID());
-        target.put(CONVERSION_ENABLED, "true");
     }
 }

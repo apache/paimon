@@ -45,7 +45,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.function.Predicate;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
@@ -54,10 +53,6 @@ import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 public class HiveCloneUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCloneUtils.class);
-
-    // Hive table properties that might contain timezone information
-    private static final String HIVE_WRITER_TIMEZONE_PROP = "hive.writer.timezone";
-    private static final String PARQUET_WRITER_TIMEZONE_PROP = "parquet.writer.timezone";
 
     public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
@@ -161,39 +156,13 @@ public class HiveCloneUtils {
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
 
-        // Handle timestamp timezone conversion
-        if (enableTimezoneConversion && hasTimestampColumns(hiveTable)) {
-            TimeZone systemTimezone = TimeZone.getDefault();
-
-            // For Parquet files, timestamps are typically stored in UTC regardless of session
-            // timezone
-            // Always enable timezone conversion for Parquet to handle UTC to local timezone
-            // conversion
-            if (parseFormat(hiveTable).equals("parquet")) {
-                TimezoneOptionUtils.enableUtcToLocal(options, systemTimezone);
-                LOG.debug(
-                        "Timestamp timezone conversion enabled for Parquet table {}.{}: UTC → {}",
-                        database,
-                        table,
-                        systemTimezone.getID());
-            } else {
-                TimeZone hiveWriterTimezone = getHiveWriterTimezone(hiveTable);
-                if (!hiveWriterTimezone.equals(systemTimezone)) {
-                    TimezoneOptionUtils.enableWriterToLocal(options, hiveWriterTimezone, systemTimezone);
-                    LOG.debug(
-                            "Timestamp timezone conversion enabled for table {}.{}: {} → {}",
-                            database,
-                            table,
-                            hiveWriterTimezone.getID(),
-                            systemTimezone.getID());
-                } else {
-                    LOG.debug(
-                            "No timezone conversion needed for table {}.{} - timezones are the same: {}",
-                            database,
-                            table,
-                            hiveWriterTimezone.getID());
-                }
-            }
+        if (enableTimezoneConversion
+                && hasTimestampColumns(hiveTable)
+                && "parquet".equals(parseFormat(hiveTable))
+                && !options.containsKey(TimezoneOptionUtils.CONVERSION_ENABLED)) {
+            options.put(TimezoneOptionUtils.CONVERSION_ENABLED, "true");
+            LOG.debug(
+                    "Enabled timestamp timezone conversion for {}.{} (Parquet).", database, table);
         }
 
         Schema.Builder schemaBuilder =
@@ -260,27 +229,6 @@ public class HiveCloneUtils {
             throw new UnsupportedOperationException("Unknown partition format: " + partition);
         }
         return format;
-    }
-
-    /**
-     * Get the Hive writer timezone from table properties or use system default. This is used to
-     * handle timestamp timezone conversion during clone.
-     */
-    public static TimeZone getHiveWriterTimezone(Table hiveTable) {
-        Map<String, String> parameters = hiveTable.getParameters();
-
-        // Check for explicit timezone properties
-        String timezoneStr = parameters.get(HIVE_WRITER_TIMEZONE_PROP);
-        if (timezoneStr == null) {
-            timezoneStr = parameters.get(PARQUET_WRITER_TIMEZONE_PROP);
-        }
-
-        if (timezoneStr != null) {
-            return TimeZone.getTimeZone(timezoneStr);
-        }
-
-        // Use system default timezone as fallback
-        return TimeZone.getDefault();
     }
 
     /** Check if the table has timestamp columns that need timezone conversion. */

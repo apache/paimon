@@ -51,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -116,10 +117,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
-        // Check if timezone conversion is enabled
         boolean timezoneConversionEnabled = TimezoneOptionUtils.isEnabled(conf);
-        String hiveWriterTimezone = conf.getString(TimezoneOptionUtils.HIVE_WRITER_TZ, null);
-        String systemTimezone = conf.getString(TimezoneOptionUtils.SYSTEM_TZ, null);
+        String sourceTz = timezoneConversionEnabled ? "UTC" : null;
+        String targetTz = timezoneConversionEnabled ? ZoneId.systemDefault().getId() : null;
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),
@@ -129,8 +129,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 writableVectors,
                 batchSize,
                 timezoneConversionEnabled,
-                hiveWriterTimezone,
-                systemTimezone);
+                sourceTz,
+                targetTz);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {

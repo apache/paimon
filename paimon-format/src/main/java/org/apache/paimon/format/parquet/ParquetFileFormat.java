@@ -89,18 +89,16 @@ public class ParquetFileFormat extends FileFormat {
                     "parquet.compression.codec.zstd.level", String.valueOf(context.zstdLevel()));
         }
 
-        // Propagate timestamp-timezone conversion keys (not prefixed by "parquet.")
-        TimezoneOptionUtils.KEYS.forEach(
-                k -> {
-                    if (context.options().containsKey(k)) {
-                        parquetOptions.set(k, context.options().get(k));
-                    }
-                });
-
         MemorySize blockSize = context.blockSize();
         if (blockSize != null) {
             parquetOptions.set(
                     ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
+        }
+
+        if (context.options().containsKey(TimezoneOptionUtils.CONVERSION_ENABLED)) {
+            parquetOptions.set(
+                    TimezoneOptionUtils.CONVERSION_ENABLED,
+                    context.options().get(TimezoneOptionUtils.CONVERSION_ENABLED));
         }
 
         return parquetOptions;
