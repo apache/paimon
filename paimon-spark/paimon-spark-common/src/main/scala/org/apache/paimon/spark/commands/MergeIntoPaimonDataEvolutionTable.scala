@@ -260,9 +260,10 @@ case class MergeIntoPaimonDataEvolutionTable(
             insertAction.condition.getOrElse(TrueLiteral),
             insertAction.assignments.map(
               a =>
-                if (!a.value.isInstanceOf[AttributeReference]) a.value
-                else if (joinPlan.output.exists(attr => attr.toString().equals(a.value.toString())))
-                  a.value
+                if (
+                  !a.value.isInstanceOf[AttributeReference] || joinPlan.output.exists(
+                    attr => attr.toString().equals(a.value.toString()))
+                ) a.value
                 else Literal(null))
           )
       }.toSeq,
