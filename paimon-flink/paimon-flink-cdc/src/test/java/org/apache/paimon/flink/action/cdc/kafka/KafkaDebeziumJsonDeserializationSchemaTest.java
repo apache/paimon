@@ -28,6 +28,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 
+/**
+ * Unit tests for {@link KafkaDebeziumJsonDeserializationSchema}. Ensures that deserialization
+ * succeeds when Kafka keys are not valid JSON and verifies that the value payload is still parsed
+ * correctly.
+ */
 public class KafkaDebeziumJsonDeserializationSchemaTest {
 
     @Test
