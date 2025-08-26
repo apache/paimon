@@ -47,6 +47,7 @@ def launch_gateway_server_process(env):
     log_settings = []
     jvm_args = env.get(constants.PYPAIMON_JVM_ARGS, '').split()
     classpath = _get_classpath(env)
+    print(f"py4j classpath: {classpath}")
     main_args = env.get(constants.PYPAIMON_MAIN_ARGS, '').split()
     command = [
         java_executable,

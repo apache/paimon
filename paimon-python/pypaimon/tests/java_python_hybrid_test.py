@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
+import glob
 import os
 import shutil
 import tempfile
@@ -35,9 +35,10 @@ class AlternativeWriteTest(unittest.TestCase):
         # for py4j env
         this_dir = os.path.abspath(os.path.dirname(__file__))
         project_dir = os.path.dirname(this_dir)
-        print(project_dir)
         deps_dir = os.path.join(project_dir, "tests/py4j_impl/test_deps/*")
-        print(deps_dir)
+        print(f"py4j deps_dir: {deps_dir}")
+        for file in glob.glob(deps_dir):
+            print(f"py4j deps_dir file: {file}")
         os.environ[constants.PYPAIMON_HADOOP_CLASSPATH] = deps_dir
         os.environ[constants.PYPAIMON4J_TEST_MODE] = 'true'
 
