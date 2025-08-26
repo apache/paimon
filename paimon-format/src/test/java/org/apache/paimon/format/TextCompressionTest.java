@@ -71,7 +71,6 @@ public abstract class TextCompressionTest {
         return format.createReaderFactory(rowType);
     }
 
-  
     /**
      * Test case for when a file has a compression extension but the corresponding compression codec
      * is not available or cannot be found.
