@@ -392,7 +392,7 @@ public abstract class FormatReadWriteTest {
         }
 
         // Read data
-        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = jsonFormat.createReaderFactory(rowType, rowType, null);
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
                         new FormatReaderFactory.Context() {

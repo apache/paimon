@@ -134,7 +134,7 @@ public abstract class TextCompressionTest {
         }
 
         // Read data back
-        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
         List<InternalRow> readData = new ArrayList<>();
 
         try (RecordReader<InternalRow> reader =
@@ -178,7 +178,7 @@ public abstract class TextCompressionTest {
         readOptions.set(CoreOptions.FILE_COMPRESSION, "none"); // Default to none
 
         FileFormat readFormat = createFileFormat(readOptions);
-        FormatReaderFactory readerFactory = readFormat.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = readFormat.createReaderFactory(rowType, rowType, null);
 
         List<InternalRow> readData = new ArrayList<>();
         try (RecordReader<InternalRow> reader =

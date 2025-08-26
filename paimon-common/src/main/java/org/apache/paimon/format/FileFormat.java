@@ -56,11 +56,12 @@ public abstract class FileFormat {
     /**
      * Create a {@link FormatReaderFactory} from the type, with projection pushed down.
      *
+     * @param dataSchemaRowType The full table schema type.
      * @param projectedRowType Type with projection.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters);
+            RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> filters);
 
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
@@ -69,7 +70,7 @@ public abstract class FileFormat {
     public abstract void validateDataFields(RowType rowType);
 
     public FormatReaderFactory createReaderFactory(RowType rowType) {
-        return createReaderFactory(rowType, new ArrayList<>());
+        return createReaderFactory(rowType, rowType, new ArrayList<>());
     }
 
     public Optional<SimpleStatsExtractor> createStatsExtractor(
