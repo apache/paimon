@@ -55,6 +55,7 @@ def launch_gateway_server_process(env):
         # default jvm args
         "-XX:+IgnoreUnrecognizedVMOptions",
         "--add-opens=jdk.proxy2/jdk.proxy2=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
         *log_settings,
         "-cp",
         classpath,
