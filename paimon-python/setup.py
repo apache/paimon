@@ -30,7 +30,7 @@ install_requires = [
     'pandas==1.1.5',
     'polars==0.9.12',
     'fastavro==1.4.7',
-    'zstandard==0.24.0',
+    'zstandard==0.19.0',
     'dataclasses;python_version<"3.7"'
 ]
 
