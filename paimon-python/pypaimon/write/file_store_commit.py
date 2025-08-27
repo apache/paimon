@@ -132,7 +132,7 @@ class FileStoreCommit:
         with self.snapshot_commit:
             success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
             if not success:
-                raise RuntimeError(f"Failed to commit snapshot {new_snapshot_id}")
+                raise RuntimeError("Failed to commit snapshot {}".format(new_snapshot_id))
 
     def overwrite(self, partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -146,7 +146,7 @@ class FileStoreCommit:
                     if file_path_obj.exists():
                         file_path_obj.unlink()
                 except Exception as e:
-                    print(f"Warning: Failed to clean up file {file.file_path}: {e}")
+                    print("Warning: Failed to clean up file {}: {}".format(file.file_path, e))
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
@@ -192,7 +192,7 @@ class FileStoreCommit:
                     else:
                         # Fallback: use indices as keys
                         for i, value in enumerate(partition_value):
-                            partition_spec[f"partition_{i}"] = str(value)
+                            partition_spec["partition_{}".format(i)] = str(value)
                 else:
                     # If partition is already a dict or other format
                     partition_spec = dict(partition_value) if partition_value else {}
