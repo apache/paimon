@@ -76,7 +76,7 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build Spark 3 with scala 2.13
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark3_2.13
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark3 -Pscala_2.13
       - name: Test Spark 3 with scala 2.13
         timeout-minutes: 60
         run: |
@@ -90,6 +90,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark3_2.13
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark3 -Pscala_2.13
         env:
           MAVEN_OPTS: -Xmx4096m
