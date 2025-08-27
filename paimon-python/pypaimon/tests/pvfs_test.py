@@ -22,8 +22,8 @@ import uuid
 from pathlib import Path
 
 import pandas
-import pypaimon
 
+from pypaimon import PaimonVirtualFileSystem
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -61,7 +61,7 @@ class PVFSTestCase(unittest.TestCase):
             'token': self.token,
             'cache-enabled': True
         }
-        self.pvfs = pypaimon.PaimonVirtualFileSystem(options)
+        self.pvfs = PaimonVirtualFileSystem(options)
         self.database = 'test_database'
         self.table = 'test_table'
         self.test_databases = {
