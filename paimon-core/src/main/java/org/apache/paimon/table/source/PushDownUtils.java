@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.stats;
+package org.apache.paimon.table.source;
 
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
@@ -28,8 +29,13 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 
-/** Utils for Stats. */
-public class StatsUtils {
+import java.util.HashSet;
+import java.util.Set;
+
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
+
+/** Utils for pushing downs. */
+public class PushDownUtils {
 
     public static boolean minmaxAvailable(DataType type) {
         // not push down complex type
@@ -47,5 +53,24 @@ public class StatsUtils {
                 || type instanceof FloatType
                 || type instanceof DoubleType
                 || type instanceof DateType;
+    }
+
+    public static boolean minmaxAvailable(DataSplit split, Set<String> columns) {
+        if (isNullOrEmpty(columns)) {
+            return false;
+        }
+
+        if (!split.rawConvertible()) {
+            return false;
+        }
+
+        return split.dataFiles().stream()
+                .map(DataFileMeta::valueStatsCols)
+                .allMatch(
+                        valueStatsCols ->
+                                // It means there are all column statistics when valueStatsCols ==
+                                // null
+                                valueStatsCols == null
+                                        || new HashSet<>(valueStatsCols).containsAll(columns));
     }
 }

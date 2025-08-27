@@ -20,9 +20,8 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
-import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
-import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
+import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
@@ -168,25 +167,14 @@ class PaimonScanBuilder(table: InnerTable)
       val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
-    val dataSplits = if (AggregatePushDownUtils.hasMinMaxAggregation(aggregation)) {
-      readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    } else {
-      readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    }
-    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits.toSeq)) {
-      val aggregator = new LocalAggregator(table.asInstanceOf[FileStoreTable])
-      aggregator.initialize(aggregation)
-      dataSplits.foreach(aggregator.update)
-      localScan = Some(
-        PaimonLocalScan(
-          aggregator.result(),
-          aggregator.resultSchema(),
-          table,
-          pushedPaimonPredicates)
-      )
-      true
-    } else {
-      false
+
+    tryPushdownAggregation(table.asInstanceOf[FileStoreTable], aggregation, readBuilder) match {
+      case Some(agg) =>
+        localScan = Some(
+          PaimonLocalScan(agg.result(), agg.resultSchema(), table, pushedPaimonPredicates)
+        )
+        true
+      case None => false
     }
   }
 
