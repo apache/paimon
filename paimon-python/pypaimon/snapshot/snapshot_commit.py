@@ -16,12 +16,12 @@
 # limitations under the License.
 ################################################################################
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List
-import time
 
-from pypaimon.common.rest_json import json_field
+from pypaimon.common.json_util import json_field
 from pypaimon.snapshot.snapshot import Snapshot
 
 

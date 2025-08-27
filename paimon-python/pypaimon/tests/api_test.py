@@ -19,20 +19,19 @@ import logging
 import unittest
 import uuid
 
-import pypaimon.api as api
+from pypaimon.api.api_response import ConfigResponse
+from pypaimon.api.auth import BearTokenAuthProvider
+from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.token_loader import DLFToken, DLFTokenLoaderFactory
+from pypaimon.catalog.rest.table_metadata import TableMetadata
+from pypaimon.common.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.rest_json import JSON
+from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
                                         RowType)
 from pypaimon.schema.table_schema import TableSchema
-
-from ..api import RESTApi
-from ..api.api_response import ConfigResponse
-from ..api.auth import BearTokenAuthProvider
-from ..api.token_loader import DLFToken, DLFTokenLoaderFactory
-from ..catalog.table_metadata import TableMetadata
-from .rest_server import RESTCatalogServer
+from pypaimon.tests.rest_server import RESTCatalogServer
 
 
 class ApiTestCase(unittest.TestCase):
@@ -170,10 +169,10 @@ class ApiTestCase(unittest.TestCase):
                 "token.provider": "bear",
                 'token': token
             }
-            api = RESTApi(options)
-            self.assertSetEqual(set(api.list_databases()), {*test_databases})
-            self.assertEqual(api.get_database('default'), test_databases.get('default'))
-            table = api.get_table(Identifier.from_string('default.user'))
+            rest_api = RESTApi(options)
+            self.assertSetEqual(set(rest_api.list_databases()), {*test_databases})
+            self.assertEqual(rest_api.get_database('default'), test_databases.get('default'))
+            table = rest_api.get_table(Identifier.from_string('default.user'))
             self.assertEqual(table.id, str(test_tables['default.user'].uuid))
 
         finally:
@@ -204,8 +203,8 @@ class ApiTestCase(unittest.TestCase):
             server.start()
             ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
             options = {
-                api.CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                api.CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
+                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
             }
             loader = DLFTokenLoaderFactory.create_token_loader(options)
             load_token = loader.load_token()
@@ -214,9 +213,9 @@ class ApiTestCase(unittest.TestCase):
             self.assertEqual(load_token.security_token, token.security_token)
             self.assertEqual(load_token.expiration, token.expiration)
             options_with_role = {
-                api.CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                api.CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
-                api.CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
+                CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
             }
             loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
             token = loader.load_token()

@@ -22,15 +22,15 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from pypaimon.api import NoSuchResourceException
 from pypaimon.api.api_response import CommitTableResponse
 from pypaimon.api.options import Options
+from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 
 class TestRESTCatalogCommitSnapshot(unittest.TestCase):
@@ -120,7 +120,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             # Configure mock to raise NoSuchResourceException
             mock_api_instance = Mock()
             mock_api_instance.options = self.test_options
-            mock_api_instance.commit_snapshot.side_effect = NoSuchResourceException("Table not found")
+            mock_api_instance.commit_snapshot.side_effect = NoSuchResourceException("Table", None, "not found")
             mock_rest_api.return_value = mock_api_instance
 
             # Create RESTCatalog
@@ -188,9 +188,9 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
     def test_rest_api_commit_snapshot(self):
         """Test RESTApi commit_snapshot method."""
-        from pypaimon.api import RESTApi
+        from pypaimon.api.rest_api import RESTApi
 
-        with patch('pypaimon.api.HttpClient') as mock_client_class:
+        with patch('pypaimon.api.client.HttpClient') as mock_client_class:
             # Configure mock
             mock_client = Mock()
             mock_response = CommitTableResponse(success=True)
