@@ -21,6 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -37,16 +39,20 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private boolean hasNext;
 
     private Integer pushDownLimit;
+    private TopN topN;
+
+    private final SchemaManager schemaManager;
 
     public DataTableBatchScan(
             TableSchema schema,
+            SchemaManager schemaManager,
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         super(schema, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-
+        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             if (options.toConfiguration()
                     .get(CoreOptions.BATCH_SCAN_MODE)
@@ -72,6 +78,12 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
+    public InnerTableScan withTopN(TopN topN) {
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
     public TableScan.Plan plan() {
         authQuery();
 
@@ -82,8 +94,9 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         if (hasNext) {
             hasNext = false;
             StartingScanner.Result result = startingScanner.scan(snapshotReader);
-            StartingScanner.Result limitedResult = applyPushDownLimit(result);
-            return DataFilePlan.fromResult(limitedResult);
+            result = applyPushDownLimit(result);
+            result = applyPushDownTopN(result);
+            return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();
         }
@@ -121,6 +134,27 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             }
         }
         return result;
+    }
+
+    private StartingScanner.Result applyPushDownTopN(StartingScanner.Result result) {
+        if (topN == null
+                || pushDownLimit != null
+                || !(result instanceof ScannedResult)
+                || !schema.primaryKeys().isEmpty()
+                || options().deletionVectorsEnabled()) {
+            return result;
+        }
+
+        SnapshotReader.Plan plan = ((ScannedResult) result).plan();
+        List<DataSplit> splits = plan.dataSplits();
+        if (splits.isEmpty()) {
+            return result;
+        }
+
+        TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
+        List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(topN, splits));
+        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        return new ScannedResult(newPlan);
     }
 
     @Override

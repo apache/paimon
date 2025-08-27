@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.aggregate
 
+import org.apache.paimon.stats.StatsUtils.minmaxAvailable
 import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types._
@@ -58,21 +59,12 @@ object AggregatePushDownUtils {
 
       val dataField = getDataFieldForCol(columnName)
 
-      dataField.`type`() match {
-        // not push down complex type
-        // not push down Timestamp because INT96 sort order is undefined,
-        // Parquet doesn't return statistics for INT96
-        // not push down Parquet Binary because min/max could be truncated
-        // (https://issues.apache.org/jira/browse/PARQUET-1685), Parquet Binary
-        // could be Spark StringType, BinaryType or DecimalType.
-        // not push down for ORC with same reason.
-        case _: BooleanType | _: TinyIntType | _: SmallIntType | _: IntType | _: BigIntType |
-            _: FloatType | _: DoubleType | _: DateType =>
-          minmaxColumns.add(columnName)
-          hasMinMax = true
-          true
-        case _ =>
-          false
+      if (minmaxAvailable(dataField.`type`())) {
+        minmaxColumns.add(columnName)
+        hasMinMax = true
+        true
+      } else {
+        false
       }
     }
 
@@ -95,15 +87,7 @@ object AggregatePushDownUtils {
     }
 
     if (hasMinMax) {
-      dataSplits.forall {
-        dataSplit =>
-          dataSplit.dataFiles().asScala.forall {
-            dataFile =>
-              // It means there are all column statistics when valueStatsCols == null
-              dataFile.valueStatsCols() == null ||
-              minmaxColumns.forall(dataFile.valueStatsCols().contains)
-          }
-      }
+      dataSplits.forall(_.statsAvailable(minmaxColumns.toSet.asJava))
     } else if (hasCount) {
       dataSplits.forall(_.mergedRowCountAvailable())
     } else {
