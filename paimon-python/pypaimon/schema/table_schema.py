@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.rest_json import json_field
+from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 

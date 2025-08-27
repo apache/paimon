@@ -21,8 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from pypaimon.catalog.snapshot_commit import PartitionStatistics
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 

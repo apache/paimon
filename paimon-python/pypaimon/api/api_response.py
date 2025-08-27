@@ -20,10 +20,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Generic, List, Optional
 
-from pypaimon.common.rest_json import json_field
+from pypaimon.common.json_util import T, json_field
 from pypaimon.schema.schema import Schema
-
-from .typedef import T
 
 
 @dataclass
@@ -33,7 +31,7 @@ class PagedList(Generic[T]):
 
 
 class RESTResponse(ABC):
-    pass
+    """RESTResponse"""
 
 
 @dataclass
@@ -99,11 +97,11 @@ class PagedResponse(RESTResponse, Generic[T]):
 
     @abstractmethod
     def data(self) -> List[T]:
-        pass
+        """data"""
 
     @abstractmethod
     def get_next_page_token(self) -> str:
-        pass
+        """get_next_page_token"""
 
 
 @dataclass

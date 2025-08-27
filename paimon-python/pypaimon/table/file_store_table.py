@@ -19,6 +19,7 @@
 from pathlib import Path
 from typing import Optional
 
+from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -26,7 +27,6 @@ from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.table.catalog_environment import CatalogEnvironment
 from pypaimon.table.table import Table
 from pypaimon.write.batch_write_builder import BatchWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
