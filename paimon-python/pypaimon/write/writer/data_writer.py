@@ -117,7 +117,9 @@ class DataWriter(ABC):
             raise ValueError("Unsupported file format: {}".format(self.file_format))
 
         # min key & max key
-        key_columns_batch = data.select(self.trimmed_primary_key)
+        table = pa.Table.from_batches([data])
+        selected_table = table.select(self.trimmed_primary_key)
+        key_columns_batch = selected_table.to_batches()[0]
         min_key_row_batch = key_columns_batch.slice(0, 1)
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
         min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]

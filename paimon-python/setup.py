@@ -26,7 +26,7 @@ install_requires = [
     'fsspec==2022.1.0',
     'cachetools==4.2.4',
     'ossfs==2021.8.0',
-    'pyarrow==5.0.0',
+    'pyarrow==6.0.1',
     'pandas==1.1.5',
     'polars==0.9.12',
     'fastavro==1.4.7',
