@@ -50,8 +50,14 @@ class RecordBatchReader(RecordReader):
         if hasattr(arrow_batch, 'num_rows'):
             # This is a RecordBatch, convert to Table first
             table = pa.Table.from_batches([arrow_batch])
+            # Check if table is empty to avoid Polars "empty table" error
+            if table.num_rows == 0:
+                return None
             return polars.from_arrow(table)
         else:
+            # Check if arrow_batch is empty to avoid Polars "empty table" error
+            if hasattr(arrow_batch, 'num_rows') and arrow_batch.num_rows == 0:
+                return None
             return polars.from_arrow(arrow_batch)
 
     def tuple_iterator(self) -> Optional[Iterator[tuple]]:

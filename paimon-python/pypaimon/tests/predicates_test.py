@@ -129,7 +129,7 @@ class PredicateTest(unittest.TestCase):
             ('_int', pa.int32()),
             ('_bigint', pa.int64()),
             # float
-            ('_float16', pa.float32()),  # NOTE: cannot write pa.float16() data into Paimon
+            ('_float16', pa.float32()),  # Use float32 instead of float16 for PyArrow 6.0.1 compatibility
             ('_float32', pa.float32()),
             ('_double', pa.float64()),
             # string
@@ -150,15 +150,14 @@ class PredicateTest(unittest.TestCase):
             '_smallint': pd.Series([10, 20], dtype='int16'),
             '_int': pd.Series([100, 200], dtype='int32'),
             '_bigint': pd.Series([1000, 2000], dtype='int64'),
-            '_float16': pd.Series([1.0, 2.0], dtype='float16'),
+            '_float16': pd.Series([1.0, 2.0], dtype='float32'),
             '_float32': pd.Series([1.00, 2.00], dtype='float32'),
             '_double': pd.Series([1.000, 2.000], dtype='double'),
             '_string': pd.Series(['A', 'B'], dtype='object'),
             '_boolean': [True, False]
         })
         record_batch = pa.RecordBatch.from_pandas(df, schema=pa_schema)
-        # prepare for assertion
-        df['_float16'] = df['_float16'].astype('float32')
+        # No need to convert _float16 since it's already float32
 
         write.write_arrow_batch(record_batch)
         commit.commit(write.prepare_commit())

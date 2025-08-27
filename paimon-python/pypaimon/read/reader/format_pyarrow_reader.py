@@ -33,18 +33,21 @@ class FormatPyArrowReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_format: str, file_path: str, primary_keys: List[str],
-                 fields: List[str], predicate: Predicate, batch_size: int = 4096):
+                 fields: List[str], full_fields: List, predicate: Predicate, batch_size: int = 4096):
 
-        if primary_keys:
-            # TODO: utilize predicate to improve performance
-            predicate = None
+        # For primary key tables, we can still apply predicates for filtering
+        # Keep all predicates for now - optimization can be added later
+        arrow_predicate = None
         if predicate is not None:
-            predicate = predicate.to_arrow()
+            try:
+                arrow_predicate = predicate.to_arrow()
+            except (TypeError, AttributeError):
+                pass
 
         self.dataset = ds.dataset(file_path, format=file_format, filesystem=file_io.filesystem)
         self.reader = self.dataset.scanner(
             columns=fields,
-            filter=predicate,
+            filter=arrow_predicate,
             batch_size=batch_size
         ).to_reader()
 

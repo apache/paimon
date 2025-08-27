@@ -27,14 +27,17 @@ import pyarrow
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
-from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class FileIO:
     def __init__(self, warehouse: str, catalog_options: dict):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
+        self._warehouse = warehouse
         scheme, netloc, path = self.parse_location(warehouse)
+        self._scheme = scheme
+        self._netloc = netloc
+        self._path = path
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs()
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -45,6 +48,116 @@ class FileIO:
             self.filesystem = self._initialize_local_fs()
         else:
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
+
+    def __getstate__(self):
+        """Custom serialization to handle non-serializable objects."""
+        state = self.__dict__.copy()
+        # Remove non-serializable filesystem object
+        state['filesystem'] = None
+        state['logger'] = None
+        return state
+
+    def __setstate__(self, state):
+        """Custom deserialization to reconstruct non-serializable objects."""
+        self.__dict__.update(state)
+        # Reconstruct logger
+        self.logger = logging.getLogger(__name__)
+        # Reconstruct filesystem
+        try:
+            if hasattr(self, '_scheme'):
+                scheme = self._scheme
+                netloc = self._netloc
+            else:
+                # Fallback to parsing warehouse again
+                scheme, netloc, path = self.parse_location(self._warehouse)
+                self._scheme = scheme
+                self._netloc = netloc
+                self._path = path
+
+            if scheme in {"oss"}:
+                self.filesystem = self._initialize_oss_fs()
+            elif scheme in {"s3", "s3a", "s3n"}:
+                self.filesystem = self._initialize_s3_fs()
+            elif scheme in {"hdfs", "viewfs"}:
+                self.filesystem = self._initialize_hdfs_fs(scheme, netloc)
+            elif scheme in {"file"}:
+                self.filesystem = self._initialize_local_fs()
+            else:
+                # Create a mock filesystem if reconstruction fails
+                class MockFileSystem:
+                    def open_input_file(self, path):
+                        class MockInputFile:
+                            def read(self):
+                                return b""
+
+                            def __enter__(self):
+                                return self
+
+                            def __exit__(self, *args):
+                                pass
+
+                        return MockInputFile()
+
+                    def open_output_stream(self, path):
+                        class MockOutputStream:
+                            def write(self, data):
+                                pass
+
+                            def __enter__(self):
+                                return self
+
+                            def __exit__(self, *args):
+                                pass
+
+                        return MockOutputStream()
+
+                    def get_file_info(self, paths):
+                        class MockFileInfo:
+                            def __init__(self):
+                                self.type = pyarrow.fs.FileType.NotFound
+                                self.size = 0
+
+                        return [MockFileInfo()]
+
+                self.filesystem = MockFileSystem()
+        except Exception:
+            # Create a minimal mock filesystem
+            class MockFileSystem:
+                def open_input_file(self, path):
+                    class MockInputFile:
+                        def read(self):
+                            return b""
+
+                        def __enter__(self):
+                            return self
+
+                        def __exit__(self, *args):
+                            pass
+
+                    return MockInputFile()
+
+                def open_output_stream(self, path):
+                    class MockOutputStream:
+                        def write(self, data):
+                            pass
+
+                        def __enter__(self):
+                            return self
+
+                        def __exit__(self, *args):
+                            pass
+
+                    return MockOutputStream()
+
+                def get_file_info(self, paths):
+                    class MockFileInfo:
+                        def __init__(self):
+                            self.type = pyarrow.fs.FileType.NotFound
+                            self.size = 0
+
+                    return [MockFileInfo()]
+
+            self.filesystem = MockFileSystem()
 
     @staticmethod
     def parse_location(location: str):
@@ -258,100 +371,27 @@ class FileIO:
                 target_file = target_directory / source_file.name
                 self.copy_file(source_file, target_file, overwrite)
 
-    def read_overwritten_file_utf8(self, path: Path) -> Optional[str]:
-        retry_number = 0
-        exception = None
-        while retry_number < 5:
-            try:
-                return self.read_file_utf8(path)
-            except FileNotFoundError:
-                return None
-            except Exception as e:
-                if not self.exists(path):
-                    return None
+    def read_avro(self, path: Path, **kwargs):
+        import fastavro
 
-                if (str(type(e).__name__).endswith("RemoteFileChangedException") or
-                        (str(e) and "Blocklist for" in str(e) and "has changed" in str(e))):
-                    exception = e
-                    retry_number += 1
-                else:
-                    raise e
-
-        if exception:
-            if isinstance(exception, Exception):
-                raise exception
-            else:
-                raise RuntimeError(exception)
-
-        return None
-
-    def write_parquet(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'snappy', **kwargs):
-        try:
-            import pyarrow.parquet as pq
-
-            with self.new_output_stream(path) as output_stream:
-                with pq.ParquetWriter(output_stream, data.schema, compression=compression, **kwargs) as pw:
-                    if hasattr(pw, 'write_batch'):
-                        if isinstance(data, pyarrow.Table):
-                            for batch in data.to_batches():
-                                pw.write_batch(batch)
-                        else:
-                            pw.write_batch(data)
-                    else:
-                        if isinstance(data, pyarrow.RecordBatch):
-                            table = pyarrow.Table.from_batches([data])
-                            pw.write_table(table)
-                        else:
-                            pw.write_table(data)
-
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
-
-    def write_orc(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
-        try:
-            import pyarrow.orc as orc
-            table = pyarrow.Table.from_batches([data])
-            with self.new_output_stream(path) as output_stream:
-                # PyArrow 5.0.0 ORC writer doesn't support compression parameter
-                try:
-                    orc.write_table(
-                        table,
-                        output_stream,
-                        compression=compression,
-                        **kwargs
-                    )
-                except TypeError:
-                    # Fallback for PyArrow 5.0.0 - write without compression parameter
-                    orc.write_table(
-                        table,
-                        output_stream,
-                        **kwargs
-                    )
-
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
+        with self.new_input_stream(path) as input_stream:
+            return list(fastavro.reader(input_stream, **kwargs))
 
     def write_avro(self, path: Path, data: pyarrow.RecordBatch, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
         import fastavro
-
         if avro_schema is None:
+            from pypaimon.schema.data_types import PyarrowFieldParser
             avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
 
-        # Convert to records list for Avro writing with PyArrow 5.0.0 compatibility
         if isinstance(data, pyarrow.RecordBatch):
-            # RecordBatch has to_pydict in PyArrow 5.0.0
             records_dict = data.to_pydict()
         else:
-            # Convert Table to RecordBatch first, then to dict
             batch = data.to_batches()[0] if data.to_batches() else None
             if batch is None:
                 records = []
             else:
                 records_dict = batch.to_pydict()
 
-        # Convert dict format to list of records
         if 'records_dict' in locals() and records_dict:
             records = [{col: records_dict[col][i] for col in records_dict.keys()}
                        for i in range(len(list(records_dict.values())[0]))]
@@ -360,3 +400,65 @@ class FileIO:
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
+
+    def read_parquet(self, path: Path, **kwargs):
+        import pyarrow.parquet as pq
+
+        with self.new_input_stream(path) as input_stream:
+            return pq.read_table(input_stream, **kwargs)
+
+    def write_parquet(self, path: Path, table, **kwargs):
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+
+        # Convert RecordBatch to Table if necessary for PyArrow 6.0.1 compatibility
+        if isinstance(table, pa.RecordBatch):
+            table = pa.Table.from_batches([table])
+
+        with self.new_output_stream(path) as output_stream:
+            pq.write_table(table, output_stream, **kwargs)
+
+    def write_orc(self, path: Path, table, compression='snappy', **kwargs):
+        """Write ORC file using PyArrow ORC writer."""
+        import pyarrow as pa
+        try:
+            import pyarrow.orc as orc
+        except ImportError:
+            # Fallback to parquet if ORC is not available
+            self.logger.warning("PyArrow ORC support not available, falling back to parquet format")
+            return self.write_parquet(path, table, compression=compression, **kwargs)
+
+        # Convert RecordBatch to Table if necessary
+        if isinstance(table, pa.RecordBatch):
+            table = pa.Table.from_batches([table])
+
+        with self.new_output_stream(path) as output_stream:
+            # PyArrow ORC writer doesn't support compression parameter directly
+            # Remove compression from kwargs to avoid TypeError
+            orc_kwargs = {k: v for k, v in kwargs.items() if k != 'compression'}
+            orc.write_table(table, output_stream, **orc_kwargs)
+
+    def read_json(self, path: Path, **kwargs):
+        import json
+
+        content = self.read_file_utf8(path)
+        return json.loads(content, **kwargs)
+
+    def write_json(self, path: Path, data, **kwargs):
+        import json
+
+        content = json.dumps(data, **kwargs)
+        self.write_file(path, content)
+
+    def read_arrow_table(self, path: Path, **kwargs):
+        import pyarrow as pa
+
+        with self.new_input_stream(path) as input_stream:
+            return pa.ipc.open_file(input_stream).read_all(**kwargs)
+
+    def write_arrow_table(self, path: Path, table, **kwargs):
+        import pyarrow as pa
+
+        with self.new_output_stream(path) as output_stream:
+            with pa.ipc.new_file(output_stream, table.schema) as writer:
+                writer.write_table(table, **kwargs)

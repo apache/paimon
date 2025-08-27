@@ -125,8 +125,10 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 f"Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
             )
 
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> int:
-        raise ValueError("Can't extract bucket from row in dynamic bucket mode")
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+        # For dynamic bucket mode, return a list of -1 for all rows
+        # This indicates dynamic bucket assignment will be handled elsewhere
+        return [-1] * data.num_rows
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
