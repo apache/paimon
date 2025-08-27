@@ -16,3 +16,7 @@
 #  under the License.
 
 from pypaimon.filesystem import pvfs
+
+__all__ = [
+    "pvfs",
+]
