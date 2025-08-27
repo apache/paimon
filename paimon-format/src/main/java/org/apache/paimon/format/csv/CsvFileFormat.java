@@ -54,7 +54,7 @@ public class CsvFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(projectedRowType, options);
+        return new CsvReaderFactory(dataSchemaRowType, projectedRowType, options);
     }
 
     @Override
@@ -101,17 +101,25 @@ public class CsvFileFormat extends FileFormat {
     /** CSV {@link FormatReaderFactory} implementation. */
     private static class CsvReaderFactory implements FormatReaderFactory {
 
-        private final RowType rowType;
+        private final RowType dataSchemaRowType;
+        private final RowType projectedRowType;
         private final CsvOptions options;
 
-        public CsvReaderFactory(RowType rowType, CsvOptions options) {
-            this.rowType = rowType;
+        public CsvReaderFactory(
+                RowType dataSchemaRowType, RowType projectedRowType, CsvOptions options) {
+            this.dataSchemaRowType = dataSchemaRowType;
+            this.projectedRowType = projectedRowType;
             this.options = options;
         }
 
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
+            return new CsvFileReader(
+                    context.fileIO(),
+                    context.filePath(),
+                    dataSchemaRowType,
+                    projectedRowType,
+                    options);
         }
     }
 

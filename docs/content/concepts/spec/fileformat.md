@@ -141,6 +141,7 @@ The following table lists the type mapping from Paimon type to Parquet type.
 
 Limitations:
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps).
+2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
 
 ## AVRO
 
