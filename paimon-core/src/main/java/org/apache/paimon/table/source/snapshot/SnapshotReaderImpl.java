@@ -312,6 +312,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader keepStats() {
+        scan.keepStats();
+        return this;
+    }
+
+    @Override
     public SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         if (splitGenerator.alwaysRawConvertible()) {
             withDataFileNameFilter(

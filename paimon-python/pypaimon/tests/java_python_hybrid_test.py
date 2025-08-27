@@ -26,9 +26,16 @@ import pyarrow as pa
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 from pypaimon.tests.py4j_impl import constants
-from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
+try:
+    from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
+    PY4J_AVAILABLE = True
+except ImportError:
+    # py4j is not available, skip these tests
+    PY4J_AVAILABLE = False
+    CatalogPy4j = None
 
 
+@unittest.skipUnless(PY4J_AVAILABLE, "py4j not available")
 class AlternativeWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

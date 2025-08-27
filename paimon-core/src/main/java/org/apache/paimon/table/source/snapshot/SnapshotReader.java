@@ -101,6 +101,8 @@ public interface SnapshotReader {
 
     SnapshotReader dropStats();
 
+    SnapshotReader keepStats();
+
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);

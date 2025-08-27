@@ -78,7 +78,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
-    private final TableSchema schema;
+    protected final TableSchema schema;
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
     private final TableQueryAuth queryAuth;

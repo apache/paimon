@@ -224,6 +224,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
+    @Override
+    public FileStoreScan keepStats() {
+        this.dropStats = false;
+        return this;
+    }
+
     @Nullable
     @Override
     public Integer parallelism() {

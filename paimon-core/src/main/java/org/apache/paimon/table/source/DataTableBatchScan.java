@@ -21,14 +21,21 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.types.DataType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+
+import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
@@ -37,16 +44,20 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private boolean hasNext;
 
     private Integer pushDownLimit;
+    private TopN topN;
+
+    private final SchemaManager schemaManager;
 
     public DataTableBatchScan(
             TableSchema schema,
+            SchemaManager schemaManager,
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
         super(schema, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-
+        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             if (options.toConfiguration()
                     .get(CoreOptions.BATCH_SCAN_MODE)
@@ -72,6 +83,12 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
+    public InnerTableScan withTopN(TopN topN) {
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
     public TableScan.Plan plan() {
         authQuery();
 
@@ -81,9 +98,15 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         if (hasNext) {
             hasNext = false;
-            StartingScanner.Result result = startingScanner.scan(snapshotReader);
-            StartingScanner.Result limitedResult = applyPushDownLimit(result);
-            return DataFilePlan.fromResult(limitedResult);
+            Optional<StartingScanner.Result> pushed = applyPushDownLimit();
+            if (pushed.isPresent()) {
+                return DataFilePlan.fromResult(pushed.get());
+            }
+            pushed = applyPushDownTopN();
+            if (pushed.isPresent()) {
+                return DataFilePlan.fromResult(pushed.get());
+            }
+            return DataFilePlan.fromResult(startingScanner.scan(snapshotReader));
         } else {
             throw new EndOfScanException();
         }
@@ -97,30 +120,77 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         return startingScanner.scanPartitions(snapshotReader);
     }
 
-    private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
-        if (pushDownLimit != null && result instanceof ScannedResult) {
-            long scannedRowCount = 0;
-            SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-            List<DataSplit> splits = plan.dataSplits();
-            if (splits.isEmpty()) {
-                return result;
-            }
+    private Optional<StartingScanner.Result> applyPushDownLimit() {
+        if (pushDownLimit == null) {
+            return Optional.empty();
+        }
 
-            List<Split> limitedSplits = new ArrayList<>();
-            for (DataSplit dataSplit : splits) {
-                if (dataSplit.rawConvertible()) {
-                    long partialMergedRowCount = dataSplit.partialMergedRowCount();
-                    limitedSplits.add(dataSplit);
-                    scannedRowCount += partialMergedRowCount;
-                    if (scannedRowCount >= pushDownLimit) {
-                        SnapshotReader.Plan newPlan =
-                                new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
-                        return new ScannedResult(newPlan);
-                    }
+        StartingScanner.Result result = startingScanner.scan(snapshotReader);
+        if (!(result instanceof ScannedResult)) {
+            return Optional.of(result);
+        }
+
+        long scannedRowCount = 0;
+        SnapshotReader.Plan plan = ((ScannedResult) result).plan();
+        List<DataSplit> splits = plan.dataSplits();
+        if (splits.isEmpty()) {
+            return Optional.of(result);
+        }
+
+        List<Split> limitedSplits = new ArrayList<>();
+        for (DataSplit dataSplit : splits) {
+            if (dataSplit.rawConvertible()) {
+                long partialMergedRowCount = dataSplit.partialMergedRowCount();
+                limitedSplits.add(dataSplit);
+                scannedRowCount += partialMergedRowCount;
+                if (scannedRowCount >= pushDownLimit) {
+                    SnapshotReader.Plan newPlan =
+                            new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    return Optional.of(new ScannedResult(newPlan));
                 }
             }
         }
-        return result;
+        return Optional.of(result);
+    }
+
+    private Optional<StartingScanner.Result> applyPushDownTopN() {
+        if (topN == null
+                || pushDownLimit != null
+                || !schema.primaryKeys().isEmpty()
+                || options().deletionVectorsEnabled()) {
+            return Optional.empty();
+        }
+
+        List<SortValue> orders = topN.orders();
+        if (orders.size() != 1) {
+            return Optional.empty();
+        }
+
+        if (topN.limit() > 100) {
+            return Optional.empty();
+        }
+
+        SortValue order = orders.get(0);
+        DataType type = order.field().type();
+        if (!minmaxAvailable(type)) {
+            return Optional.empty();
+        }
+
+        StartingScanner.Result result = startingScanner.scan(snapshotReader.keepStats());
+        if (!(result instanceof ScannedResult)) {
+            return Optional.of(result);
+        }
+
+        SnapshotReader.Plan plan = ((ScannedResult) result).plan();
+        List<DataSplit> splits = plan.dataSplits();
+        if (splits.isEmpty()) {
+            return Optional.of(result);
+        }
+
+        TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
+        List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(order, topN.limit(), splits));
+        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        return Optional.of(new ScannedResult(newPlan));
     }
 
     @Override

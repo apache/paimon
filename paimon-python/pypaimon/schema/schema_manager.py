@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.rest_json import JSON
+from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 

@@ -22,10 +22,16 @@ from typing import Any, Iterator, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.tests.py4j_impl import java_utils
-from pypaimon.tests.py4j_impl.gateway_factory import get_gateway
-from pypaimon.tests.py4j_impl.java_utils import (deserialize_java_object,
-                                                 serialize_java_object)
+try:
+    from pypaimon.tests.py4j_impl import java_utils
+    from pypaimon.tests.py4j_impl.gateway_factory import get_gateway
+    from pypaimon.tests.py4j_impl.java_utils import (deserialize_java_object,
+                                                     serialize_java_object)
+    PY4J_IMPL_AVAILABLE = True
+except ImportError:
+    # py4j implementation not available
+    PY4J_IMPL_AVAILABLE = False
+    java_utils = get_gateway = deserialize_java_object = serialize_java_object = None
 
 
 class SchemaPy4j:

@@ -14,3 +14,30 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
+
+from typing import Dict
+from urllib.parse import unquote
+
+
+class RESTUtil:
+    @staticmethod
+    def encode_string(value: str) -> str:
+        import urllib.parse
+
+        return urllib.parse.quote(value)
+
+    @staticmethod
+    def decode_string(encoded: str) -> str:
+        """Decode URL-encoded string"""
+        return unquote(encoded)
+
+    @staticmethod
+    def extract_prefix_map(
+            options: Dict[str, str], prefix: str) -> Dict[str, str]:
+        result = {}
+        config = options
+        for key, value in config.items():
+            if key.startswith(prefix):
+                new_key = key[len(prefix):]
+                result[new_key] = str(value)
+        return result

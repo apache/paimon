@@ -27,21 +27,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-import pypaimon.api as api
-from pypaimon.common.rest_json import JSON
+from pypaimon.api.api_request import (CreateDatabaseRequest,
+                                      CreateTableRequest, RenameTableRequest)
+from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
+                                       GetTableResponse, ListDatabasesResponse,
+                                       ListTablesResponse, PagedList,
+                                       RESTResponse)
+from pypaimon.api.resource_paths import ResourcePaths
+from pypaimon.api.rest_util import RESTUtil
+from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
+                                                DatabaseNotExistException,
+                                                TableNoPermissionException,
+                                                TableNotExistException)
+from pypaimon.catalog.rest.table_metadata import TableMetadata
+from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import JSON
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
-
-from ..api import (CreateDatabaseRequest, CreateTableRequest, Identifier,
-                   RenameTableRequest)
-from ..api.api_response import (ConfigResponse, GetDatabaseResponse,
-                                GetTableResponse, ListDatabasesResponse,
-                                ListTablesResponse, PagedList, RESTResponse)
-from ..catalog.catalog_exception import (DatabaseNoPermissionException,
-                                         DatabaseNotExistException,
-                                         TableNoPermissionException,
-                                         TableNotExistException)
-from ..catalog.table_metadata import TableMetadata
-from ..schema.schema import Schema
 
 
 @dataclass
@@ -99,7 +101,7 @@ class RESTCatalogServer:
 
         # Initialize resource paths
         prefix = config.defaults.get("prefix")
-        self.resource_paths = api.ResourcePaths(prefix=prefix)
+        self.resource_paths = ResourcePaths(prefix=prefix)
         self.database_uri = self.resource_paths.databases()
 
         # Initialize storage
@@ -199,7 +201,7 @@ class RESTCatalogServer:
                 for pair in query.split('&'):
                     if '=' in pair:
                         key, value = pair.split('=', 1)
-                        params[key.strip()] = api.RESTUtil.decode_string(value.strip())
+                        params[key.strip()] = RESTUtil.decode_string(value.strip())
                 return params
 
             def _authenticate(self, token: str, path: str, params: Dict[str, str],
@@ -265,7 +267,7 @@ class RESTCatalogServer:
                 """Handle database-specific resource requests"""
                 # Extract database name and resource path
                 path_parts = resource_path[len(self.database_uri) + 1:].split('/')
-                database_name = api.RESTUtil.decode_string(path_parts[0])
+                database_name = RESTUtil.decode_string(path_parts[0])
 
                 # Check database permissions
                 if database_name in self.no_permission_databases:
@@ -283,16 +285,16 @@ class RESTCatalogServer:
                     # Collection operations (tables, views, functions)
                     resource_type = path_parts[1]
 
-                    if resource_type.startswith(api.ResourcePaths.TABLES):
+                    if resource_type.startswith(ResourcePaths.TABLES):
                         return self._tables_handle(method, data, database_name, parameters)
 
                 elif len(path_parts) >= 3:
                     # Individual resource operations
                     resource_type = path_parts[1]
-                    resource_name = api.RESTUtil.decode_string(path_parts[2])
+                    resource_name = RESTUtil.decode_string(path_parts[2])
                     identifier = Identifier.create(database_name, resource_name)
 
-                    if resource_type == api.ResourcePaths.TABLES:
+                    if resource_type == ResourcePaths.TABLES:
                         return self._handle_table_resource(method, path_parts, identifier, data, parameters)
 
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)

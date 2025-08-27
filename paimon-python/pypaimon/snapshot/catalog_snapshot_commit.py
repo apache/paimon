@@ -19,9 +19,10 @@
 from typing import List
 
 from pypaimon.catalog.catalog import Catalog
-from pypaimon.catalog.snapshot_commit import PartitionStatistics, SnapshotCommit
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
+                                               SnapshotCommit)
 
 
 class CatalogSnapshotCommit(SnapshotCommit):

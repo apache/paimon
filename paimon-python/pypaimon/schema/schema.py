@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.rest_json import json_field
+from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 

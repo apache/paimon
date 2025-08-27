@@ -24,8 +24,15 @@ import time
 from logging import WARN
 from threading import RLock
 
-from py4j.java_gateway import (CallbackServerParameters, GatewayParameters,
-                               JavaGateway, JavaPackage, java_import, logger)
+try:
+    from py4j.java_gateway import (CallbackServerParameters, GatewayParameters,
+                                   JavaGateway, JavaPackage, java_import, logger)
+    PY4J_AVAILABLE = True
+except ImportError:
+    # py4j is not available, create dummy classes to avoid import errors
+    PY4J_AVAILABLE = False
+    CallbackServerParameters = GatewayParameters = JavaGateway = JavaPackage = None
+    java_import = logger = None
 
 from pypaimon.tests.py4j_impl import constants
 from pypaimon.tests.py4j_impl.gateway_server import \
@@ -37,6 +44,9 @@ _lock = RLock()
 
 def get_gateway():
     # type: () -> JavaGateway
+    if not PY4J_AVAILABLE:
+        raise ImportError("py4j is not available. Please install py4j to use Java integration features.")
+
     global _gateway
     with _lock:
         if _gateway is None:
