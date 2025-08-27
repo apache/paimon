@@ -21,9 +21,11 @@ from typing import List, Optional
 import pyarrow as pa
 from pyarrow import RecordBatch
 
+from pypaimon.common.predicate import Predicate
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.table.row.offset_row import OffsetRow
 
 
 class DataFileBatchReader(RecordBatchReader):
@@ -32,11 +34,14 @@ class DataFileBatchReader(RecordBatchReader):
     """
 
     def __init__(self, format_reader: RecordBatchReader, index_mapping: List[int], partition_info: PartitionInfo,
-                 system_primary_key: Optional[List[str]], fields: List[DataField]):
+                 system_primary_key: Optional[List[str]], fields: List[DataField],
+                 predicate: Optional[Predicate] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
+        self.predicate = predicate
+        self.fields = fields
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
@@ -97,7 +102,32 @@ class DataFileBatchReader(RecordBatchReader):
             final_fields.append(target_field)
         final_schema = pa.schema(final_fields)
 
-        return pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
+        final_batch = pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
+
+        if self.predicate is not None:
+            final_batch = self._filter_batch_python(final_batch, inter_names)
+
+        return final_batch
+
+    def _filter_batch_python(self, batch: RecordBatch, field_names: List[str]) -> RecordBatch:
+        if batch.num_rows == 0:
+            return batch
+
+        pydict = batch.to_pydict()
+        filtered_rows = []
+
+        for i in range(batch.num_rows):
+            row_data = tuple(pydict[field_name][i] for field_name in field_names)
+            row = OffsetRow(row_data, 0, len(field_names))
+
+            if self.predicate.test(row):
+                filtered_rows.append(i)
+
+        if not filtered_rows:
+            return batch.slice(0, 0)
+
+        filtered_batch = batch.take(pa.array(filtered_rows))
+        return filtered_batch
 
     def close(self) -> None:
         self.format_reader.close()

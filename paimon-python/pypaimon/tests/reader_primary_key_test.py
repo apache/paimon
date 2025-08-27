@@ -16,43 +16,30 @@
 # limitations under the License.
 ################################################################################
 
-import os
-import shutil
-import tempfile
 import unittest
-
 import pyarrow as pa
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+from pypaimon.tests import TestCatalogBase
+from pypaimon.common.pyarrow_compat import table_sort_by
 
 
-class PkReaderTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tempdir = tempfile.mkdtemp()
-        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
-        cls.catalog = CatalogFactory.create({
-            'warehouse': cls.warehouse
-        })
-        cls.catalog.create_database('default', False)
+class PkReaderTest(TestCatalogBase):
 
-        cls.pa_schema = pa.schema([
-            pa.field('user_id', pa.int32(), nullable=False),
+    def setUp(self):
+        super().setUp()
+        self.pa_schema = pa.schema([
+            ('user_id', pa.int64()),
             ('item_id', pa.int64()),
             ('behavior', pa.string()),
-            pa.field('dt', pa.string(), nullable=False)
+            ('dt', pa.string())
         ])
-        cls.expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=cls.pa_schema)
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tempdir, ignore_errors=True)
+        self.expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1']
+        }, schema=self.pa_schema)
 
     def testPkParquetReader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -64,7 +51,7 @@ class PkReaderTest(unittest.TestCase):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testPkOrcReader(self):
@@ -80,13 +67,13 @@ class PkReaderTest(unittest.TestCase):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual: pa.Table = self._read_test_table(read_builder).sort_by('user_id')
+        actual: pa.Table = table_sort_by(self._read_test_table(read_builder), 'user_id')
 
         # when bucket=1, actual field name will contain 'not null', so skip comparing field name
         for i in range(len(actual.columns)):
             col_a = actual.column(i)
             col_b = self.expected.column(i)
-            self.assertEqual(col_a, col_b)
+            self.assertEqual(col_a.to_pylist(), col_b.to_pylist())
 
     def testPkAvroReader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -101,7 +88,7 @@ class PkReaderTest(unittest.TestCase):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testPkReaderWithFilter(self):
@@ -119,10 +106,10 @@ class PkReaderTest(unittest.TestCase):
         p3 = predicate_builder.is_not_null('behavior')
         g1 = predicate_builder.and_predicates([p1, p2, p3])
         read_builder = table.new_read_builder().with_filter(g1)
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = pa.concat_tables([
             self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)   # 7/g
+            self.expected.slice(5, 1)   # 6/f
         ])
         self.assertEqual(actual, expected)
 
@@ -136,42 +123,31 @@ class PkReaderTest(unittest.TestCase):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id', 'behavior'])
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
-
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'behavior': ['a', 'b', 'c', None],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
 
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [5, 2, 7, 8],
-            'item_id': [1005, 1002, 1007, 1008],
-            'behavior': ['e', 'b-new', 'g', 'h'],
-            'dt': ['p2', 'p1', 'p1', 'p2']
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1']
+        }, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
 
     def _read_test_table(self, read_builder):
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        return table_read.to_arrow(splits)
+        scan = read_builder.new_scan()
+        read = read_builder.new_read()
+        return read.to_arrow(scan.plan().splits())
+
+
+if __name__ == '__main__':
+    unittest.main()

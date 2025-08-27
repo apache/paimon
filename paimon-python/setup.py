@@ -23,9 +23,10 @@ PACKAGES = find_packages(include=["pypaimon*"])
 
 install_requires = [
     'readerwriterlock==1.0.9',
-    'fsspec==2022.1.0',
+    'fsspec==2021.10.1',
     'cachetools==4.2.4',
     'ossfs==2021.8.0',
+    'ray==1.13.0',
     'pyarrow==6.0.1',
     'pandas==1.1.5',
     'polars==0.9.12',

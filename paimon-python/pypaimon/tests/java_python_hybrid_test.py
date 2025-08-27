@@ -56,7 +56,10 @@ class AlternativeWriteTest(unittest.TestCase):
             'warehouse': cls.warehouse
         }
         cls.py_catalog = CatalogFactory.create(cls.option)
-        cls.j_catalog = CatalogPy4j.create(cls.option)
+        if PY4J_AVAILABLE and CatalogPy4j is not None:
+            cls.j_catalog = CatalogPy4j.create(cls.option)
+        else:
+            cls.j_catalog = None
 
         cls.pa_schema = pa.schema([
             pa.field('user_id', pa.int32(), nullable=False),
@@ -77,6 +80,9 @@ class AlternativeWriteTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def testAlternativeWrite(self):
+        if not PY4J_AVAILABLE or self.j_catalog is None:
+            self.skipTest("py4j not available or j_catalog is None")
+
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],

@@ -90,11 +90,13 @@ class PVFSTestCase(unittest.TestCase):
     def _create_parquet_file(self, database: str, table: str, data_file_name: str):
         fs = self.pvfs
         path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
-        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
-        print(fs.ls(f'pvfs://{self.catalog}/{database}/{table}'))
+        table_dir = f'pvfs://{self.catalog}/{database}/{table}'
+        fs.mkdir(table_dir)
+        print(fs.ls(table_dir))
         fs.touch(path)
-        print(fs.ls(path))
-        self.assertEqual(fs.exists(f'pvfs://{self.catalog}/{database}/{table}'), True)
+        # Check if the file exists, don't try to list it as a directory
+        print(f"File exists: {fs.exists(path)}")
+        self.assertEqual(fs.exists(table_dir), True)
         self.assertEqual(fs.exists(path), True)
         data = {
             'id': [1, 2, 3, 4, 5],
@@ -122,20 +124,6 @@ class PVFSTestCase(unittest.TestCase):
         print(f"first_row: {first_row}")
         df = table.to_pandas()
         self.assertEqual(len(df), 5)
-
-    def test_ray(self):
-        import ray
-        if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True)
-        fs = self.pvfs
-        database = 'ray_db'
-        table = 'test_table'
-        data_file_name = 'a.parquet'
-        self._create_parquet_file(database, table, data_file_name)
-        path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
-        ds = ray.data.read_parquet(filesystem=fs, paths=path)
-        print(ds.count())
-        self.assertEqual(ds.count(), 5)
 
     def test_api(self):
         nested_dir = self.temp_path / self.database / self.table

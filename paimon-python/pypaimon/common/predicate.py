@@ -39,7 +39,10 @@ class Predicate:
         if self.method == 'equal':
             return record.get_field(self.index) == self.literals[0]
         elif self.method == 'notEqual':
-            return record.get_field(self.index) != self.literals[0]
+            field_value = record.get_field(self.index)
+            if field_value is None:
+                return False
+            return field_value != self.literals[0]
         elif self.method == 'lessThan':
             return record.get_field(self.index) < self.literals[0]
         elif self.method == 'lessOrEqual':
@@ -110,9 +113,9 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.starts_with(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a simple field equality as approximation
-                # This is not perfect but allows tests to run
-                return pyarrow_dataset.field(self.field) == pyarrow_dataset.field(self.field)
+                # Fallback for PyArrow 5.0.0 - return a condition that always fails
+                # This will be handled by Python filtering
+                return ~pyarrow_dataset.field(self.field).is_valid()
         elif self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow 5.0.0 compatibility
@@ -120,8 +123,9 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.ends_with(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0
-                return pyarrow_dataset.field(self.field) == pyarrow_dataset.field(self.field)
+                # Fallback for PyArrow 5.0.0 - return a condition that always fails
+                # This will be handled by Python filtering
+                return ~pyarrow_dataset.field(self.field).is_valid()
         elif self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow 5.0.0 compatibility
@@ -129,8 +133,9 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.match_substring(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0
-                return pyarrow_dataset.field(self.field) == pyarrow_dataset.field(self.field)
+                # Fallback for PyArrow 5.0.0 - return a condition that always fails
+                # This will be handled by Python filtering
+                return ~pyarrow_dataset.field(self.field).is_valid()
         elif self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])

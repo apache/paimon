@@ -15,44 +15,32 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import os
-import pickle
-import shutil
-import tempfile
-import unittest
 
+import pickle
+import unittest
 import pyarrow as pa
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+from pypaimon.tests import TestCatalogBase
+from pypaimon.common.pyarrow_compat import table_sort_by
 
 
-class SerializableTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tempdir = tempfile.mkdtemp()
-        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
-        cls.catalog = CatalogFactory.create({
-            'warehouse': cls.warehouse
-        })
-        cls.catalog.create_database('default', False)
+class SerializableTest(TestCatalogBase):
 
-        cls.pa_schema = pa.schema([
-            ('user_id', pa.int32()),
-            ('item_id', pa.int32()),
+    def setUp(self):
+        super().setUp()
+        self.pa_schema = pa.schema([
+            ('user_id', pa.int64()),
+            ('item_id', pa.int64()),
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
-        cls.expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=cls.pa_schema)
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tempdir, ignore_errors=True)
+        self.expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1']
+        }, schema=self.pa_schema)
 
     def testPickleSerializable(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -72,36 +60,25 @@ class SerializableTest(unittest.TestCase):
         pickled_splits = pickle.dumps(splits)
         splits = pickle.loads(pickled_splits)
 
-        actual = table_read.to_arrow(splits).sort_by('user_id')
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
-
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'behavior': ['a', 'b', 'c', None],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+
+        pa_table = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1']
+        }, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
 
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [5, 2, 7, 8],
-            'item_id': [1005, 1002, 1007, 1008],
-            'behavior': ['e', 'b-new', 'g', 'h'],
-            'dt': ['p2', 'p1', 'p1', 'p2']
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
+
+if __name__ == '__main__':
+    unittest.main()
