@@ -32,6 +32,10 @@ import java.util.List;
 @PublicEvolving
 public class VariantType extends LogicalType {
 
+    public VariantType() {
+        this(true);
+    }
+
     public VariantType(boolean isNullable) {
         super(isNullable, LogicalTypeRoot.UNRESOLVED);
     }
