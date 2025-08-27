@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.schema.schema import Schema
@@ -74,7 +74,7 @@ class SchemaManager:
 
         return TableSchema.from_path(self.file_io, schema_path)
 
-    def _list_versioned_files(self) -> list[int]:
+    def _list_versioned_files(self) -> List[int]:
         if not self.file_io.exists(self.schema_path):
             return []
 

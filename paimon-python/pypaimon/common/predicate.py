@@ -15,11 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from __future__ import annotations
+
 
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -32,7 +32,7 @@ from pypaimon.table.row.internal_row import InternalRow
 class Predicate:
     method: str
     index: Optional[int]
-    field: str | None
+    field: Optional[str]
     literals: Optional[List[Any]] = None
 
     def test(self, record: InternalRow) -> bool:
@@ -80,9 +80,9 @@ class Predicate:
             t = any(p.test(record) for p in self.literals)
             return t
         else:
-            raise ValueError(f"Unsupported predicate method: {self.method}")
+            raise ValueError("Unsupported predicate method: {}".format(self.method))
 
-    def to_arrow(self) -> pyarrow_compute.Expression | bool:
+    def to_arrow(self) -> Any:
         if self.method == 'equal':
             return pyarrow_dataset.field(self.field) == self.literals[0]
         elif self.method == 'notEqual':
@@ -122,4 +122,4 @@ class Predicate:
             return reduce(lambda x, y: x | y,
                           [p.to_arrow() for p in self.literals])
         else:
-            raise ValueError(f"Unsupported predicate method: {self.method}")
+            raise ValueError("Unsupported predicate method: {}".format(self.method))

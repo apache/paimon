@@ -153,7 +153,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
             return self._get_token(token_url)
 
         except Exception as e:
-            raise RuntimeError(f"Token loading failed: {e}") from e
+            raise RuntimeError("Token loading failed: {}".format(e)) from e
 
     def description(self) -> str:
         return self.ecs_metadata_url
@@ -162,7 +162,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
         try:
             return self._get_response_body(url)
         except Exception as e:
-            raise RuntimeError(f"Get role failed, error: {e}") from e
+            raise RuntimeError("Get role failed, error: {}".format(e)) from e
 
     def _get_token(self, url: str) -> DLFToken:
         try:
@@ -170,9 +170,9 @@ class DLFECSTokenLoader(DLFTokenLoader):
             return JSON.from_json(token_json, DLFToken)
         except OSError as e:
             # Python equivalent of UncheckedIOException
-            raise OSError(f"IO error while getting token: {e}") from e
+            raise OSError("IO error while getting token: {}".format(e)) from e
         except Exception as e:
-            raise RuntimeError(f"Get token failed, error: {e}") from e
+            raise RuntimeError("Get token failed, error: {}".format(e)) from e
 
     def _get_response_body(self, url: str) -> str:
         try:
@@ -183,7 +183,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
                 raise RuntimeError("Get response failed, response is None")
 
             if not response.ok:
-                raise RuntimeError(f"Get response failed, response: {response.status_code} {response.reason}")
+                raise RuntimeError("Get response failed, response: {} {}".format(response.status_code, response.reason))
 
             response_body = response.text
             if response_body is None:
@@ -194,9 +194,9 @@ class DLFECSTokenLoader(DLFTokenLoader):
             # Re-raise RuntimeError as-is
             raise
         except RequestException as e:
-            raise RuntimeError(f"Request failed: {e}") from e
+            raise RuntimeError("Request failed: {}".format(e)) from e
         except Exception as e:
-            raise RuntimeError(f"Get response failed, error: {e}") from e
+            raise RuntimeError("Get response failed, error: {}".format(e)) from e
 
 
 # Factory and utility functions

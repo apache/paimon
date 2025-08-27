@@ -90,7 +90,7 @@ class ResourcePaths:
 
     @classmethod
     def for_catalog_properties(
-            cls, options: dict[str, str]) -> "ResourcePaths":
+            cls, options: Dict[str, str]) -> "ResourcePaths":
         prefix = options.get(CatalogOptions.PREFIX, "")
         return cls(prefix)
 
@@ -207,7 +207,7 @@ class RESTApi:
 
         return results
 
-    def get_options(self) -> dict[str, str]:
+    def get_options(self) -> Dict[str, str]:
         return self.options
 
     def list_databases(self) -> List[str]:

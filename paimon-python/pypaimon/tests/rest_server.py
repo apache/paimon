@@ -715,7 +715,7 @@ class RESTCatalogServer:
         """Add no permission table"""
         self.no_permission_tables.append(identifier.get_full_name())
 
-    def mock_database(self, name: str, options: dict[str, str]) -> GetDatabaseResponse:
+    def mock_database(self, name: str, options: Dict[str, str]) -> GetDatabaseResponse:
         return GetDatabaseResponse(
             id=str(uuid.uuid4()),
             name=name,

@@ -85,7 +85,7 @@ class AuditRESTResponse(RESTResponse):
     def get_updated_by(self) -> Optional[str]:
         return self.updated_by
 
-    def put_audit_options_to(self, options: dict[str, str]) -> None:
+    def put_audit_options_to(self, options: Dict[str, str]) -> None:
         """Puts audit-related options into the provided dictionary."""
         options[self.FIELD_OWNER] = self.get_owner()
         options[self.FIELD_CREATED_BY] = str(self.get_created_by())

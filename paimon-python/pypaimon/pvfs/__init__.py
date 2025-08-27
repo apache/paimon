@@ -47,7 +47,7 @@ class PVFSIdentifier(ABC):
     endpoint: str
 
     def get_cache_key(self) -> str:
-        return f"{self.catalog}.{self.__remove_endpoint_schema(self.endpoint)}"
+        return "{}.{}".format(self.catalog, self.__remove_endpoint_schema(self.endpoint))
 
     @staticmethod
     def __remove_endpoint_schema(url):
@@ -89,18 +89,18 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
     def get_actual_path(self, storage_location: str):
         if self.sub_path:
-            return f'{storage_location.rstrip("/")}/{self.sub_path.lstrip("/")}'
+            return '{}/{}'.format(storage_location.rstrip("/"), self.sub_path.lstrip("/"))
         return storage_location
 
     def get_virtual_location(self):
-        return (f'{PROTOCOL_NAME}://{self.catalog}'
-                f'/{self.database}/{self.table}')
+        return ('{}://{}'.format(PROTOCOL_NAME, self.catalog) +
+                '/{}/{}'.format(self.database, self.table))
 
     def get_identifier(self):
         return Identifier.create(self.database, self.table)
 
     def name(self):
-        return f'{self.catalog}.{self.database}.{self.table}'
+        return '{}.{}.{}'.format(self.catalog, self.database, self.table)
 
 
 @dataclass
@@ -216,7 +216,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def info(self, path, **kwargs):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
-            return self._create_dir_detail(f'{PROTOCOL_NAME}://{pvfs_identifier.catalog}')
+            return self._create_dir_detail('{}://{}'.format(PROTOCOL_NAME, pvfs_identifier.catalog))
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self._create_dir_detail(
                 self._convert_database_virtual_path(pvfs_identifier.catalog, pvfs_identifier.database)
@@ -278,7 +278,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             )
             return None
         raise Exception(
-            f"cp is not supported for path: {path1} to path: {path2}"
+            "cp is not supported for path: {} to path: {}".format(path1, path2)
         )
 
     def mv(self, path1, path2, recursive=False, maxdepth=None, **kwargs):
@@ -314,7 +314,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     )
                 return None
         raise Exception(
-            f"Mv is not supported for path: {path1} to path: {path2}"
+            "Mv is not supported for path: {} to path: {}".format(path1, path2)
         )
 
     def rm(self, path, recursive=False, maxdepth=None):
@@ -349,7 +349,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 maxdepth,
             )
         raise Exception(
-            f"Rm is not supported for path: {path}."
+            "Rm is not supported for path: {}.".format(path)
         )
 
     def rm_file(self, path):
@@ -365,8 +365,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return fs.rm_file(
                     self._strip_storage_protocol(storage_type, actual_path),
                 )
-        raise Exception(
-            f"Rm file is not supported for path: {path}."
+                raise Exception(
+                "Rm file is not supported for path: {}.".format(path)
         )
 
     def rmdir(self, path):
@@ -393,11 +393,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
             raise Exception(
-                f"Rm dir is not supported for path: {path}."
+                "Rm dir is not supported for path: {path}."
             )
         else:
             raise Exception(
-                f"Rm dir is not supported for path: {path} as it is not empty."
+                "Rm dir is not supported for path: {path} as it is not empty."
             )
 
     def open(
@@ -412,18 +412,18 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"open is not supported for path: {path}"
+                "open is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             raise Exception(
-                f"open is not supported for path: {path}"
+                "open is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier)
             table_path = self._get_table_store(rest_api, pvfs_identifier).path
             if pvfs_identifier.sub_path is None:
                 raise Exception(
-                    f"open is not supported for path: {path}"
+                    "open is not supported for path: {path}"
                 )
             else:
                 storage_type = self._get_storage_type(table_path)
@@ -444,7 +444,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         rest_api = self.__rest_api(pvfs_identifier)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"mkdir is not supported for path: {path}"
+                "mkdir is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             rest_api.create_database(pvfs_identifier.database, {})
@@ -487,7 +487,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         rest_api = self.__rest_api(pvfs_identifier)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"makedirs is not supported for path: {path}"
+                "makedirs is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             try:
@@ -527,7 +527,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         rest_api = self.__rest_api(pvfs_identifier)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"created is not supported for path: {path}"
+                "created is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self.__converse_ts_to_datatime(rest_api.get_database(pvfs_identifier.database).created_at)
@@ -549,7 +549,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         rest_api = self.__rest_api(pvfs_identifier)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"modified is not supported for path: {path}"
+                "modified is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             return self.__converse_ts_to_datatime(rest_api.get_database(pvfs_identifier.database).updated_at)
@@ -571,16 +571,16 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         pvfs_identifier = self._extract_pvfs_identifier(path)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"cat file is not supported for path: {path}"
+                "cat file is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             raise Exception(
-                f"cat file is not supported for path: {path}"
+                "cat file is not supported for path: {path}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             if pvfs_identifier.sub_path is None:
                 raise Exception(
-                    f"cat file is not supported for path: {path}"
+                    "cat file is not supported for path: {path}"
                 )
             else:
                 rest_api = self.__rest_api(pvfs_identifier)
@@ -600,17 +600,17 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         pvfs_identifier = self._extract_pvfs_identifier(rpath)
         if isinstance(pvfs_identifier, PVFSCatalogIdentifier):
             raise Exception(
-                f"get file is not supported for path: {rpath}"
+                "get file is not supported for path: {rpath}"
             )
         elif isinstance(pvfs_identifier, PVFSDatabaseIdentifier):
             raise Exception(
-                f"get file is not supported for path: {rpath}"
+                "get file is not supported for path: {rpath}"
             )
         elif isinstance(pvfs_identifier, PVFSTableIdentifier):
             rest_api = self.__rest_api(pvfs_identifier)
             if pvfs_identifier.sub_path is None:
                 raise Exception(
-                    f"get file is not supported for path: {rpath}"
+                    "get file is not supported for path: {rpath}"
                 )
             else:
                 table = self._get_table_store(rest_api, pvfs_identifier)
@@ -642,17 +642,17 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     @staticmethod
     def _strip_storage_protocol(storage_type: StorageType, path: str):
         if storage_type == StorageType.LOCAL:
-            return path[len(f"{StorageType.LOCAL.value}:"):]
+            return path[len("{}:".format(StorageType.LOCAL.value)):]
 
         # OSS has different behavior than S3 and GCS, if we do not remove the
         # protocol, it will always return an empty array.
         if storage_type == StorageType.OSS:
-            if path.startswith(f"{StorageType.OSS.value}://"):
-                return path[len(f"{StorageType.OSS.value}://"):]
+            if path.startswith("{}://".format(StorageType.OSS.value)):
+                return path[len("{}://".format(StorageType.OSS.value)):]
             return path
 
         raise Exception(
-            f"Storage type:{storage_type} doesn't support now."
+            "Storage type:{} doesn't support now.".format(storage_type)
         )
 
     @staticmethod
@@ -693,7 +693,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             catalog_name: str,
             database_name: str
     ):
-        return f'{PROTOCOL_NAME}://{catalog_name}/{database_name}'
+        return '{}://{}/{}'.format(PROTOCOL_NAME, catalog_name, database_name)
 
     @staticmethod
     def _convert_table_virtual_path(
@@ -701,7 +701,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             database_name: str,
             table_name: str
     ):
-        return f'{PROTOCOL_NAME}://{catalog_name}/{database_name}/{table_name}'
+        return '{}://{}/{}/{}'.format(PROTOCOL_NAME, catalog_name, database_name, table_name)
 
     @staticmethod
     def _convert_actual_path(
@@ -717,21 +717,21 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         if len(sub_location) == 0:
             return normalized_pvfs
         else:
-            return f'{normalized_pvfs}/{sub_location}'
+            return '{}/{}'.format(normalized_pvfs, sub_location)
 
     @staticmethod
     def _get_path_without_schema(storage_type: StorageType, path: str) -> str:
         if storage_type == StorageType.LOCAL and path.startswith(StorageType.LOCAL.value):
-            return path[len(f"{StorageType.LOCAL.value}://"):]
+            return path[len("{}://".format(StorageType.LOCAL.value)):]
         elif storage_type == StorageType.OSS and path.startswith(StorageType.OSS.value):
-            return path[len(f"{StorageType.OSS.value}://"):]
+            return path[len("{}://".format(StorageType.OSS.value)):]
         return path
 
     def _extract_pvfs_identifier(self, path: str) -> Optional['PVFSIdentifier']:
         if not isinstance(path, str):
             raise Exception("path is not a string")
         path_without_protocol = path
-        if path.startswith(f'{PROTOCOL_NAME}://'):
+        if path.startswith('{}://'.format(PROTOCOL_NAME)):
             path_without_protocol = path[7:]
 
         if not path_without_protocol:
@@ -854,7 +854,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
             else:
                 raise Exception(
-                    f"Storage type: `{storage_type}` doesn't support now."
+                    "Storage type: `{}` doesn't support now.".format(storage_type)
                 )
             return fs
         finally:
@@ -862,12 +862,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     @staticmethod
     def _get_storage_type(path: str):
-        if path.startswith(f"{StorageType.LOCAL.value}:/"):
+        if path.startswith("{}:/".format(StorageType.LOCAL.value)):
             return StorageType.LOCAL
-        elif path.startswith(f"{StorageType.OSS.value}://"):
+        elif path.startswith("{}://".format(StorageType.OSS.value)):
             return StorageType.OSS
         raise Exception(
-            f"Storage type doesn't support now. Path:{path}"
+            "Storage type doesn't support now. Path:{}".format(path)
         )
 
     @staticmethod
