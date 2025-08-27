@@ -83,9 +83,11 @@ class SplitRead(ABC):
         index_mapping = self.create_index_mapping()
         partition_info = self.create_partition_info()
         if for_merge_read:
-            return DataFileBatchReader(format_reader, index_mapping, partition_info, self.trimmed_primary_key)
+            return DataFileBatchReader(format_reader, index_mapping, partition_info, self.trimmed_primary_key,
+                                       self.table.table_schema.fields)
         else:
-            return DataFileBatchReader(format_reader, index_mapping, partition_info, None)
+            return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
+                                       self.table.table_schema.fields)
 
     @abstractmethod
     def _get_all_data_fields(self):

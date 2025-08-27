@@ -193,7 +193,7 @@ class BinaryRowDeserializer:
             return bytes_data[base_offset + sub_offset:base_offset + sub_offset + length]
         else:
             length = (offset_and_len & cls.HIGHEST_SECOND_TO_EIGHTH_BIT) >> 56
-            return bytes_data[field_offset + 1:field_offset + 1 + length]
+            return bytes_data[field_offset:field_offset + length]
 
     @classmethod
     def _parse_decimal(cls, bytes_data: bytes, base_offset: int, field_offset: int, data_type: DataType) -> Decimal:
@@ -238,8 +238,6 @@ class BinaryRowDeserializer:
 class BinaryRowSerializer:
     HEADER_SIZE_IN_BITS = 8
     MAX_FIX_PART_DATA_SIZE = 7
-    HIGHEST_FIRST_BIT = 0x80 << 56
-    HIGHEST_SECOND_TO_EIGHTH_BIT = 0x7F << 56
 
     @classmethod
     def to_bytes(cls, binary_row: BinaryRow) -> bytes:
@@ -252,79 +250,49 @@ class BinaryRowSerializer:
         fixed_part = bytearray(fixed_part_size)
         fixed_part[0] = binary_row.row_kind.value
 
-        for i, value in enumerate(binary_row.values):
-            if value is None:
-                cls._set_null_bit(fixed_part, 0, i)
-
-        variable_data = []
-        variable_offsets = []
-        current_offset = fixed_part_size
+        variable_part_data = []
+        current_variable_offset = 0
 
         for i, (value, field) in enumerate(zip(binary_row.values, binary_row.fields)):
+            field_fixed_offset = null_bits_size_in_bytes + i * 8
+
             if value is None:
-                struct.pack_into('<q', fixed_part, null_bits_size_in_bytes + i * 8, 0)
-                variable_data.append(b'')
-                variable_offsets.append(0)
+                cls._set_null_bit(fixed_part, 0, i)
+                struct.pack_into('<q', fixed_part, field_fixed_offset, 0)
                 continue
 
-            field_offset = null_bits_size_in_bytes + i * 8
             if not isinstance(field.type, AtomicType):
                 raise ValueError(f"BinaryRow only support AtomicType yet, meet {field.type.__class__}")
-            if field.type.type.upper() in ['VARCHAR', 'STRING', 'CHAR', 'BINARY', 'VARBINARY', 'BYTES']:
-                if field.type.type.upper() in ['VARCHAR', 'STRING', 'CHAR']:
-                    if isinstance(value, str):
-                        value_bytes = value.encode('utf-8')
-                    else:
-                        value_bytes = bytes(value)
+
+            type_name = field.type.type.upper()
+            if type_name in ['VARCHAR', 'STRING', 'CHAR', 'BINARY', 'VARBINARY', 'BYTES']:
+                if type_name in ['VARCHAR', 'STRING', 'CHAR']:
+                    value_bytes = str(value).encode('utf-8')
                 else:
-                    if isinstance(value, bytes):
-                        value_bytes = value
-                    else:
-                        value_bytes = bytes(value)
+                    value_bytes = bytes(value)
 
                 length = len(value_bytes)
                 if length <= cls.MAX_FIX_PART_DATA_SIZE:
-                    fixed_part[field_offset:field_offset + length] = value_bytes
-                    for j in range(length, 8):
-                        fixed_part[field_offset + j] = 0
-                    packed_long = struct.unpack_from('<q', fixed_part, field_offset)[0]
-
-                    offset_and_len = packed_long | (length << 56) | cls.HIGHEST_FIRST_BIT
-                    if offset_and_len > 0x7FFFFFFFFFFFFFFF:
-                        offset_and_len = offset_and_len - 0x10000000000000000
-                    struct.pack_into('<q', fixed_part, field_offset, offset_and_len)
-                    variable_data.append(b'')
-                    variable_offsets.append(0)
+                    fixed_part[field_fixed_offset: field_fixed_offset + length] = value_bytes
+                    for j in range(length, 7):
+                        fixed_part[field_fixed_offset + j] = 0
+                    header_byte = 0x80 | length
+                    fixed_part[field_fixed_offset + 7] = header_byte
                 else:
-                    variable_data.append(value_bytes)
-                    variable_offsets.append(current_offset)
-                    current_offset += len(value_bytes)
-                    offset_and_len = (variable_offsets[i] << 32) | len(variable_data[i])
-                    struct.pack_into('<q', fixed_part, null_bits_size_in_bytes + i * 8, offset_and_len)
+                    offset_in_variable_part = current_variable_offset
+                    variable_part_data.append(value_bytes)
+                    current_variable_offset += length
+
+                    absolute_offset = fixed_part_size + offset_in_variable_part
+                    offset_and_len = (absolute_offset << 32) | length
+                    struct.pack_into('<q', fixed_part, field_fixed_offset, offset_and_len)
             else:
-                if field.type.type.upper() in ['BOOLEAN', 'BOOL']:
-                    struct.pack_into('<b', fixed_part, field_offset, 1 if value else 0)
-                elif field.type.type.upper() in ['TINYINT', 'BYTE']:
-                    struct.pack_into('<b', fixed_part, field_offset, value)
-                elif field.type.type.upper() in ['SMALLINT', 'SHORT']:
-                    struct.pack_into('<h', fixed_part, field_offset, value)
-                elif field.type.type.upper() in ['INT', 'INTEGER']:
-                    struct.pack_into('<i', fixed_part, field_offset, value)
-                elif field.type.type.upper() in ['BIGINT', 'LONG']:
-                    struct.pack_into('<q', fixed_part, field_offset, value)
-                elif field.type.type.upper() in ['FLOAT', 'REAL']:
-                    struct.pack_into('<f', fixed_part, field_offset, value)
-                elif field.type.type.upper() in ['DOUBLE']:
-                    struct.pack_into('<d', fixed_part, field_offset, value)
-                else:
-                    field_bytes = cls._serialize_field_value(value, field.type)
-                    fixed_part[field_offset:field_offset + len(field_bytes)] = field_bytes
+                field_bytes = cls._serialize_field_value(value, field.type)
+                fixed_part[field_fixed_offset: field_fixed_offset + len(field_bytes)] = field_bytes
 
-                variable_data.append(b'')
-                variable_offsets.append(0)
-
-        result = bytes(fixed_part) + b''.join(variable_data)
-        return result
+        row_data = bytes(fixed_part) + b''.join(variable_part_data)
+        arity_prefix = struct.pack('>i', arity)
+        return arity_prefix + row_data
 
     @classmethod
     def _calculate_bit_set_width_in_bytes(cls, arity: int) -> int:
@@ -342,33 +310,29 @@ class BinaryRowSerializer:
         type_name = data_type.type.upper()
 
         if type_name in ['BOOLEAN', 'BOOL']:
-            return cls._serialize_boolean(value)
+            return cls._serialize_boolean(value) + b'\x00' * 7
         elif type_name in ['TINYINT', 'BYTE']:
-            return cls._serialize_byte(value)
+            return cls._serialize_byte(value) + b'\x00' * 7
         elif type_name in ['SMALLINT', 'SHORT']:
-            return cls._serialize_short(value)
+            return cls._serialize_short(value) + b'\x00' * 6
         elif type_name in ['INT', 'INTEGER']:
-            return cls._serialize_int(value)
+            return cls._serialize_int(value) + b'\x00' * 4
         elif type_name in ['BIGINT', 'LONG']:
             return cls._serialize_long(value)
         elif type_name in ['FLOAT', 'REAL']:
-            return cls._serialize_float(value)
+            return cls._serialize_float(value) + b'\x00' * 4
         elif type_name in ['DOUBLE']:
             return cls._serialize_double(value)
-        elif type_name in ['VARCHAR', 'STRING', 'CHAR']:
-            return cls._serialize_string(value)
-        elif type_name in ['BINARY', 'VARBINARY', 'BYTES']:
-            return cls._serialize_binary(value)
         elif type_name in ['DECIMAL', 'NUMERIC']:
             return cls._serialize_decimal(value, data_type)
         elif type_name in ['TIMESTAMP', 'TIMESTAMP_WITHOUT_TIME_ZONE']:
             return cls._serialize_timestamp(value)
         elif type_name in ['DATE']:
-            return cls._serialize_date(value)
+            return cls._serialize_date(value) + b'\x00' * 4
         elif type_name in ['TIME', 'TIME_WITHOUT_TIME_ZONE']:
-            return cls._serialize_time(value)
+            return cls._serialize_time(value) + b'\x00' * 4
         else:
-            return cls._serialize_string(str(value))
+            raise TypeError(f"Unsupported type for serialization: {type_name}")
 
     @classmethod
     def _serialize_boolean(cls, value: bool) -> bytes:
@@ -399,32 +363,6 @@ class BinaryRowSerializer:
         return struct.pack('<d', value)
 
     @classmethod
-    def _serialize_string(cls, value) -> bytes:
-        if isinstance(value, str):
-            value_bytes = value.encode('utf-8')
-        else:
-            value_bytes = bytes(value)
-
-        length = len(value_bytes)
-
-        offset_and_len = (0x80 << 56) | (length << 56)
-        if offset_and_len > 0x7FFFFFFFFFFFFFFF:
-            offset_and_len = offset_and_len - 0x10000000000000000
-        return struct.pack('<q', offset_and_len)
-
-    @classmethod
-    def _serialize_binary(cls, value: bytes) -> bytes:
-        if isinstance(value, bytes):
-            data_bytes = value
-        else:
-            data_bytes = bytes(value)
-        length = len(data_bytes)
-        offset_and_len = (0x80 << 56) | (length << 56)
-        if offset_and_len > 0x7FFFFFFFFFFFFFFF:
-            offset_and_len = offset_and_len - 0x10000000000000000
-        return struct.pack('<q', offset_and_len)
-
-    @classmethod
     def _serialize_decimal(cls, value: Decimal, data_type: DataType) -> bytes:
         type_str = str(data_type)
         if '(' in type_str and ')' in type_str:
@@ -452,11 +390,10 @@ class BinaryRowSerializer:
     @classmethod
     def _serialize_date(cls, value: datetime) -> bytes:
         if isinstance(value, datetime):
-            epoch = datetime(1970, 1, 1)
-            days = (value - epoch).days
+            epoch = datetime(1970, 1, 1).date()
+            days = (value.date() - epoch).days
         else:
-            epoch = datetime(1970, 1, 1)
-            days = (value - epoch).days
+            raise RuntimeError("date should be datatime")
         return struct.pack('<i', days)
 
     @classmethod

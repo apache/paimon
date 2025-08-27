@@ -168,7 +168,7 @@ class RESTTableTest(RESTCatalogBaseTest):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/LATEST"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/snapshot-1"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/manifest"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/manifest/*.avro")), 2)
+        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/manifest/*")), 3)
         self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/user_id=2/bucket-postpone/*.avro")), 1)
 
     def test_postpone_read_write(self):
