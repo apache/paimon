@@ -36,6 +36,10 @@ public class VariantType extends LogicalType {
         super(isNullable, LogicalTypeRoot.UNRESOLVED);
     }
 
+    public VariantType() {
+        this(true);
+    }
+
     @Override
     public LogicalType copy(boolean b) {
         return null;
