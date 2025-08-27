@@ -21,6 +21,7 @@ import pyarrow as pa
 
 from pypaimon.schema.schema import Schema
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
+from pypaimon.common.pyarrow_compat import table_sort_by
 
 
 class RESTTableReadWriteTest(RESTCatalogBaseTest):
@@ -32,7 +33,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testOrcAppendOnlyReader(self):
@@ -42,7 +43,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testAvroAppendOnlyReader(self):
@@ -52,7 +53,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testAppendOnlyReaderWithFilter(self):
@@ -74,7 +75,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expected = pa.concat_tables([
             self.expected.slice(5, 1)  # 6/f
         ])
-        self.assertEqual(actual.sort_by('user_id'), expected)
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
 
         p7 = predicate_builder.startswith('behavior', 'a')
         p10 = predicate_builder.equal('item_id', 1002)
@@ -84,7 +85,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         g2 = predicate_builder.or_predicates([p7, p8, p9, p10, p11])
         read_builder = table.new_read_builder().with_filter(g2)
         actual = self._read_test_table(read_builder)
-        self.assertEqual(actual.sort_by('user_id'), self.expected)
+        self.assertEqual(table_sort_by(actual, 'user_id'), self.expected)
 
         g3 = predicate_builder.and_predicates([g1, g2])
         read_builder = table.new_read_builder().with_filter(g3)
@@ -92,7 +93,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expected = pa.concat_tables([
             self.expected.slice(5, 1)  # 6/f
         ])
-        self.assertEqual(actual.sort_by('user_id'), expected)
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
 
         # Same as java, 'not_equal' will also filter records of 'None' value
         p12 = predicate_builder.not_equal('behavior', 'f')
@@ -107,7 +108,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
             self.expected.slice(6, 1),  # 7/g
             self.expected.slice(7, 1),  # 8/h
         ])
-        self.assertEqual(actual.sort_by('user_id'), expected)
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
 
     def testAppendOnlyReaderWithProjection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -116,7 +117,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
@@ -127,7 +128,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
@@ -153,7 +154,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testPkOrcReader(self):
@@ -169,7 +170,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual: pa.Table = self._read_test_table(read_builder).sort_by('user_id')
+        actual: pa.Table = table_sort_by(self._read_test_table(read_builder), 'user_id')
 
         # when bucket=1, actual field name will contain 'not null', so skip comparing field name
         for i in range(len(actual.columns)):
@@ -190,7 +191,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, self.expected)
 
     def testPkReaderWithFilter(self):
@@ -208,7 +209,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         p3 = predicate_builder.is_not_null('behavior')
         g1 = predicate_builder.and_predicates([p1, p2, p3])
         read_builder = table.new_read_builder().with_filter(g1)
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = pa.concat_tables([
             self.expected.slice(1, 1),  # 2/b
             self.expected.slice(5, 1)  # 7/g
@@ -225,7 +226,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         self._write_test_table(table)
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id', 'behavior'])
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 

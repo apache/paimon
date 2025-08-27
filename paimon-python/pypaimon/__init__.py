@@ -14,3 +14,9 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
+
+# Import compatibility patches for Python 3.6 and PyArrow 5.0.0
+try:
+    from pypaimon.common import pyarrow_compat
+except ImportError:
+    pass  # Ignore if compatibility module is not available
