@@ -15,8 +15,14 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.common.config import CatalogOptions
+from pypaimon.schema.schema import Schema
 from pypaimon.filesystem import pvfs
 
 __all__ = [
+    "CatalogFactory",
+    "CatalogOptions",
+    "Schema",
     "pvfs",
 ]

@@ -24,8 +24,8 @@ import unittest
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.schema import Schema
+from pypaimon import CatalogFactory
+from pypaimon import Schema
 
 
 class ReaderBasicTest(unittest.TestCase):
