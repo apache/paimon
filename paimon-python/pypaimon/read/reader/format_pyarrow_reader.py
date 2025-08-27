@@ -56,7 +56,6 @@ class FormatPyArrowReader(RecordBatchReader):
 
     def close(self):
         if self.reader is not None:
-            self.reader.close()
             self.reader = None
 
 
