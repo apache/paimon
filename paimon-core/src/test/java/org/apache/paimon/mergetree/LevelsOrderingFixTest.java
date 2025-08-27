@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.stats.SimpleStats;
 
 import org.junit.jupiter.api.Test;
@@ -98,7 +99,7 @@ public class LevelsOrderingFixTest {
 
     private DataFileMeta createTestFile(
             String fileName, long minSeq, long maxSeq, long creationTimeMillis) {
-        return new DataFileMeta(
+        return new PojoDataFileMeta(
                 fileName,
                 1024L,
                 100L,
