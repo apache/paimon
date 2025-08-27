@@ -40,9 +40,11 @@ For Spark SQL, table with default `metadata.stats-mode` can be accelerated:
 
 ```sql
 SELECT MIN(a), MAX(b) FROM TABLE WHERE DT = '20230101';
+
+SELECT * FROM TABLE ORDER BY a LIMIT 1;
 ```
 
-Min max query can be also accelerated during compilation and returns very quickly.
+Min max topN query can be also accelerated during compilation and returns very quickly.
 
 ## Data Skipping By Order
 
