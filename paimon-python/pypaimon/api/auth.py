@@ -25,10 +25,10 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from pypaimon.api.token_loader import (DLFToken, DLFTokenLoader,
+                                       DLFTokenLoaderFactory)
+from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.config import CatalogOptions
-
-from .token_loader import DLFToken, DLFTokenLoader, DLFTokenLoaderFactory
-from .typedef import RESTAuthParameter
 
 
 class AuthProvider(ABC):

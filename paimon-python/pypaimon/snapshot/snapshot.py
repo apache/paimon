@@ -19,7 +19,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from pypaimon.common.rest_json import json_field
+from pypaimon.common.json_util import json_field
 
 
 @dataclass

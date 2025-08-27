@@ -29,10 +29,12 @@ from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 from readerwriterlock import rwlock
 
-from pypaimon.api import (GetTableResponse, GetTableTokenResponse, Identifier,
-                          RESTApi, Schema)
+from pypaimon.api.api_response import GetTableTokenResponse, GetTableResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
+from pypaimon.api.rest_api import RESTApi
 from pypaimon.common.config import CatalogOptions, OssOptions, PVFSOptions
+from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema import Schema
 
 PROTOCOL_NAME = "pvfs"
 

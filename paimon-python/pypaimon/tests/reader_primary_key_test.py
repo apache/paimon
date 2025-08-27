@@ -23,8 +23,8 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon.api import Schema
 from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.schema.schema import Schema
 
 
 class PkReaderTest(unittest.TestCase):

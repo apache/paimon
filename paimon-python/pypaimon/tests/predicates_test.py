@@ -23,8 +23,8 @@ import unittest
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon.api import Schema
 from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.schema.schema import Schema
 
 
 def _check_filtered_result(read_builder, expected_df):
