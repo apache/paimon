@@ -119,6 +119,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             boolean checkAppendFiles,
             boolean partitionMarkDoneRecoverFromState) {
         int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
+        // update bytes/records metrics for filter-and-commit path as well
+        calcNumBytesAndRecordsOut(globalCommittables);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
 
         return committed;
