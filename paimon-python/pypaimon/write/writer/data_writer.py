@@ -87,7 +87,7 @@ class DataWriter(ABC):
         if self.pending_data is None:
             return
 
-        current_size = self.pending_data.get_total_buffer_size()
+        current_size = self.pending_data.nbytes
         if current_size > self.target_file_size:
             split_row = _find_optimal_split_point(self.pending_data, self.target_file_size)
             if split_row > 0:
@@ -158,7 +158,7 @@ def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:
     while left <= right:
         mid = (left + right) // 2
         slice_data = data.slice(0, mid)
-        slice_size = slice_data.get_total_buffer_size()
+        slice_size = slice_data.nbytes
 
         if slice_size <= target_size:
             best_split = mid

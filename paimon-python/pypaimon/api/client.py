@@ -441,14 +441,14 @@ class HttpClient(RESTClient):
                          headers: Optional[Dict[str, str]] = None,
                          response_type: Optional[Type[T]] = None) -> T:
         try:
-            start_time = time.time_ns()
+            start_time = int(time.time() * 1_000_000_000)
             response = self.session.request(
                 method=method,
                 url=url,
                 data=data.encode('utf-8') if data else None,
                 headers=headers
             )
-            duration_ms = (time.time_ns() - start_time) // 1_000_000
+            duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
 
             self.logger.info(
