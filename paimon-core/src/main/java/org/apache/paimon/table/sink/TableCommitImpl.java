@@ -204,7 +204,9 @@ public class TableCommitImpl implements InnerTableCommit {
         return filterAndCommitMultiple(
                 commitIdentifiersAndMessages.entrySet().stream()
                         .map(e -> createManifestCommittable(e.getKey(), e.getValue()))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                true,
+                false);
     }
 
     private ManifestCommittable createManifestCommittable(
@@ -217,14 +219,15 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(singletonList(committable), false);
+        commitMultiple(singletonList(committable), false, false);
     }
 
-    public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
+    public void commitMultiple(
+            List<ManifestCommittable> committables, boolean checkAppendFiles, boolean endInput) {
         if (overwritePartition == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
-                newSnapshots += commit.commit(committable, checkAppendFiles);
+                newSnapshots += commit.commit(committable, checkAppendFiles, endInput);
             }
             if (!committables.isEmpty()) {
                 maintain(
@@ -247,7 +250,8 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    commit.overwrite(overwritePartition, committable, Collections.emptyMap());
+                    commit.overwrite(
+                            overwritePartition, committable, Collections.emptyMap(), endInput);
             maintain(
                     committable.identifier(),
                     maintainExecutor,
@@ -256,11 +260,11 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
-        return filterAndCommitMultiple(committables, true);
+        return filterAndCommitMultiple(committables, true, false);
     }
 
     public int filterAndCommitMultiple(
-            List<ManifestCommittable> committables, boolean checkAppendFiles) {
+            List<ManifestCommittable> committables, boolean checkAppendFiles, boolean endInput) {
         List<ManifestCommittable> sortedCommittables =
                 committables.stream()
                         // identifier must be in increasing order
@@ -270,7 +274,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables, checkAppendFiles);
+            commitMultiple(retryCommittables, checkAppendFiles, endInput);
         }
         return retryCommittables.size();
     }

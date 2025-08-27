@@ -68,7 +68,8 @@ case class CustomCommitCallback(testId: String) extends CommitCallback {
       baseFiles: List[SimpleFileEntry],
       deltaFiles: List[ManifestEntry],
       indexFiles: List[IndexManifestEntry],
-      snapshot: Snapshot): Unit = {
+      snapshot: Snapshot,
+      endInput: Boolean): Unit = {
     PaimonCommitTest.id = testId
   }
 

@@ -108,7 +108,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
-        commit.commitMultiple(committables, false);
+        commit.commitMultiple(committables, false, false);
         calcNumBytesAndRecordsOut(committables);
         commitListeners.notifyCommittable(committables);
     }
@@ -117,8 +117,10 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     public int filterAndCommit(
             List<ManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
-            boolean partitionMarkDoneRecoverFromState) {
-        int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
+            boolean partitionMarkDoneRecoverFromState,
+            boolean endInput) {
+        int committed =
+                commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles, endInput);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
 
         return committed;
