@@ -51,15 +51,10 @@ public class CsvFileReader extends BaseTextFileReader {
 
     private final CsvOptions formatOptions;
     private final CsvSchema schema;
-    private final RowType rowReadType;
+    private final RowType dataSchemaRowType;
     private final RowType projectedRowType;
     private final int[] projectionMapping;
     private boolean headerSkipped = false;
-
-    public CsvFileReader(FileIO fileIO, Path filePath, RowType rowType, CsvOptions options)
-            throws IOException {
-        this(fileIO, filePath, rowType, rowType, options);
-    }
 
     public CsvFileReader(
             FileIO fileIO,
@@ -69,7 +64,7 @@ public class CsvFileReader extends BaseTextFileReader {
             CsvOptions options)
             throws IOException {
         super(fileIO, filePath, projectedRowType);
-        this.rowReadType = rowReadType;
+        this.dataSchemaRowType = rowReadType;
         this.projectedRowType = projectedRowType;
         this.formatOptions = options;
         this.projectionMapping = createProjectionMapping(rowReadType, projectedRowType);
@@ -137,30 +132,24 @@ public class CsvFileReader extends BaseTextFileReader {
 
     private InternalRow parseCsvLine(String line, CsvSchema schema) throws IOException {
         String[] fields = parseCsvLineToArray(line, schema);
+        int fieldCount = fields.length;
 
-        // Parse all fields from the read schema first
-        int readFieldCount = Math.min(fields.length, rowReadType.getFieldCount());
-        Object[] readValues = new Object[readFieldCount];
-
-        for (int i = 0; i < readFieldCount; i++) {
-            String field = fields[i];
-
-            // Fast path for null values
-            if (field == null || field.equals(formatOptions.nullLiteral()) || field.isEmpty()) {
-                readValues[i] = null;
-                continue;
-            }
-
-            // Optimized field parsing with cached cast executors
-            readValues[i] = parseFieldOptimized(field.trim(), rowReadType.getTypeAt(i));
-        }
-
-        // Project the values based on the projection mapping
+        // Directly parse only projected fields to avoid unnecessary parsing
         Object[] projectedValues = new Object[projectedRowType.getFieldCount()];
         for (int i = 0; i < projectedRowType.getFieldCount(); i++) {
             int readIndex = projectionMapping[i];
-            if (readIndex < readValues.length) {
-                projectedValues[i] = readValues[readIndex];
+            // Check if the field exists in the CSV line
+            if (readIndex < fieldCount) {
+                String field = fields[readIndex];
+                // Fast path for null values - check if field is null or empty first
+                if (field == null || field.isEmpty() || field.equals(formatOptions.nullLiteral())) {
+                    projectedValues[i] = null;
+                    continue;
+                }
+
+                // Optimized field parsing with cached cast executors
+                projectedValues[i] =
+                        parseFieldOptimized(field.trim(), dataSchemaRowType.getTypeAt(readIndex));
             } else {
                 projectedValues[i] = null; // Field not present in the CSV line
             }

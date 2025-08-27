@@ -52,7 +52,6 @@ under the License.
     </scm>
 
     <modules>
-        <module>paimon-api</module>
         <module>paimon-benchmark</module>
         <module>paimon-codegen</module>
         <module>paimon-codegen-loader</module>
@@ -73,6 +72,7 @@ under the License.
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-hudi</module>
+        <module>paimon-api</module>
     </modules>
 
     <properties>
