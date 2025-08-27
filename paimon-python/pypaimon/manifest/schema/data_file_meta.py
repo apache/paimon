@@ -19,7 +19,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
                                                    SimpleStats)
@@ -41,12 +41,12 @@ class DataFileMeta:
     level: int
     extra_files: List[str]
 
-    creation_time: Optional[datetime] = None
-    delete_row_count: Optional[int] = None
-    embedded_index: Optional[bytes] = None
-    file_source: Optional[str] = None
-    value_stats_cols: Optional[List[str]] = None
-    external_path: Optional[str] = None
+    creation_time: datetime | None = None
+    delete_row_count: int | None = None
+    embedded_index: bytes | None = None
+    file_source: str | None = None
+    value_stats_cols: List[str] | None = None
+    external_path: str | None = None
 
     # not a schema field, just for internal usage
     file_path: str = None
