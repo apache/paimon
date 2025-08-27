@@ -20,11 +20,9 @@ package org.apache.paimon.format.csv;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.TextCompressionTest;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,12 +39,6 @@ class CsvCompressionTest extends TextCompressionTest {
     @Override
     protected String getFormatExtension() {
         return "csv";
-    }
-
-    @Override
-    public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
-        return ((org.apache.paimon.format.csv.CsvFileFormat) format)
-                .createReaderFactory(rowType, rowType, null);
     }
 
     @Test

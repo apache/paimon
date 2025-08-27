@@ -149,7 +149,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
                     fileIO,
                     new ManifestFileMetaSerializer(),
                     metaType,
-                    fileFormat.createReaderFactory(metaType),
+                    fileFormat.createReaderFactory(metaType, metaType, new ArrayList<>()),
                     fileFormat.createWriterFactory(metaType),
                     compression,
                     pathFactory.manifestListFactory(),

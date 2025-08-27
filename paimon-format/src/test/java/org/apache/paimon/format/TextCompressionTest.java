@@ -67,10 +67,6 @@ public abstract class TextCompressionTest {
     /** Returns the file extension for the format. */
     protected abstract String getFormatExtension();
 
-    public FormatReaderFactory createReaderFactory(FileFormat format, RowType rowType) {
-        return format.createReaderFactory(rowType);
-    }
-
     /**
      * Test case for when a file has a compression extension but the corresponding compression codec
      * is not available or cannot be found.
@@ -138,7 +134,7 @@ public abstract class TextCompressionTest {
         }
 
         // Read data back
-        FormatReaderFactory readerFactory = this.createReaderFactory(format, rowType);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
         List<InternalRow> readData = new ArrayList<>();
 
         try (RecordReader<InternalRow> reader =
@@ -182,7 +178,7 @@ public abstract class TextCompressionTest {
         readOptions.set(CoreOptions.FILE_COMPRESSION, "none"); // Default to none
 
         FileFormat readFormat = createFileFormat(readOptions);
-        FormatReaderFactory readerFactory = readFormat.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = readFormat.createReaderFactory(rowType, rowType, null);
 
         List<InternalRow> readData = new ArrayList<>();
         try (RecordReader<InternalRow> reader =

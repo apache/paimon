@@ -119,7 +119,7 @@ public class ManifestListTest {
                 LocalFileIO.create(),
                 new LegacyManifestFileMetaSerializerPaimon10(),
                 legacyMetaType,
-                avro.createReaderFactory(legacyMetaType),
+                avro.createReaderFactory(legacyMetaType, legacyMetaType, new ArrayList<>()),
                 avro.createWriterFactory(legacyMetaType),
                 "zstd",
                 pathFactory.manifestListFactory(),

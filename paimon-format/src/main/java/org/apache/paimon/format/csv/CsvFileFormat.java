@@ -51,24 +51,10 @@ public class CsvFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
-        throw new UnsupportedOperationException(
-                "CSV format support projection push down must with all row type");
-    }
-
-    /**
-     * Create a {@link FormatReaderFactory} with support for different read and projected types.
-     * This enables better projection pushdown for CSV format by reading the full file schema and
-     * projecting to the requested columns.
-     *
-     * @param rowReadType The full schema type of the data in the CSV file
-     * @param projectedRowType The projected schema type for columns to return
-     * @param filters A list of filters in conjunctive form for filtering on a best-effort basis
-     * @return A reader factory configured for projection pushdown
-     */
-    public FormatReaderFactory createReaderFactory(
-            RowType rowReadType, RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new CsvReaderFactory(rowReadType, projectedRowType, options);
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
+        return new CsvReaderFactory(projectedRowType, options);
     }
 
     @Override
@@ -115,34 +101,17 @@ public class CsvFileFormat extends FileFormat {
     /** CSV {@link FormatReaderFactory} implementation. */
     private static class CsvReaderFactory implements FormatReaderFactory {
 
-        private final RowType rowReadType;
-        private final RowType projectedRowType;
+        private final RowType rowType;
         private final CsvOptions options;
 
-        public CsvReaderFactory(RowType rowReadType, RowType projectedRowType, CsvOptions options) {
-            this.rowReadType = rowReadType;
-            this.projectedRowType = projectedRowType;
+        public CsvReaderFactory(RowType rowType, CsvOptions options) {
+            this.rowType = rowType;
             this.options = options;
-            validateProjection(rowReadType, projectedRowType);
         }
 
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            return new CsvFileReader(
-                    context.fileIO(), context.filePath(), rowReadType, projectedRowType, options);
-        }
-
-        /** Validates that all projected fields exist in the read schema. */
-        private static void validateProjection(RowType rowReadType, RowType projectedRowType) {
-            List<String> readFieldNames = rowReadType.getFieldNames();
-            List<String> projectedFieldNames = projectedRowType.getFieldNames();
-
-            for (String projectedField : projectedFieldNames) {
-                if (!readFieldNames.contains(projectedField)) {
-                    throw new IllegalArgumentException(
-                            "Projected field '" + projectedField + "' not found in read schema");
-                }
-            }
+            return new CsvFileReader(context.fileIO(), context.filePath(), rowType, options);
         }
     }
 

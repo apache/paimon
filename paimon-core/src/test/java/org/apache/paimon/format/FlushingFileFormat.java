@@ -42,8 +42,10 @@ public class FlushingFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return format.createReaderFactory(projectedRowType, filters);
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
+        return format.createReaderFactory(dataSchemaRowType, projectedRowType, filters);
     }
 
     @Override

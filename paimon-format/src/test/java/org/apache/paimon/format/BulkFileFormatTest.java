@@ -81,7 +81,7 @@ public class BulkFileFormatTest {
         // read
         RecordReader<InternalRow> reader =
                 fileFormat
-                        .createReaderFactory(rowType)
+                        .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         new LocalFileIO(),

@@ -73,7 +73,7 @@ public class LanceReaderWriterTest {
 
         InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
         // Read data and check
-        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, null);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(

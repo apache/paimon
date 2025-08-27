@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.casting.CastFieldGetter;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
@@ -224,27 +223,17 @@ public class FormatReaderMapping {
             List<Predicate> readFilters =
                     enabledFilterPushDown ? readFilters(filters, tableSchema, dataSchema) : null;
 
-            // For CSV format, support projection push down by passing both all fields and read
-            // fields
-            FileFormat fileFormat = formatDiscover.discover(formatIdentifier);
-            FormatReaderFactory readerFactory;
-
-            if (fileFormat instanceof org.apache.paimon.format.csv.CsvFileFormat) {
-                RowType fullFileRowType = new RowType(allDataFieldsInFile);
-                readerFactory =
-                        ((org.apache.paimon.format.csv.CsvFileFormat) fileFormat)
-                                .createReaderFactory(
-                                        fullFileRowType, actualReadRowType, readFilters);
-            } else {
-                readerFactory = fileFormat.createReaderFactory(actualReadRowType, readFilters);
-            }
-
             return new FormatReaderMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
                     trimmedKeyPair.getLeft(),
                     partitionMapping,
-                    readerFactory,
+                    formatDiscover
+                            .discover(formatIdentifier)
+                            .createReaderFactory(
+                                    new RowType(allDataFieldsInFile),
+                                    actualReadRowType,
+                                    readFilters),
                     dataSchema,
                     readFilters,
                     systemFields,

@@ -29,7 +29,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
@@ -67,13 +66,6 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         Options options = new Options();
         options.set(CoreOptions.FILE_COMPRESSION, compression());
         return new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
-    }
-
-    @Override
-    public FormatReaderFactory createReaderFactory(
-            FileFormat format, RowType allFields, RowType rowType) {
-        return ((org.apache.paimon.format.csv.CsvFileFormat) format)
-                .createReaderFactory(allFields, rowType, null);
     }
 
     @Test
@@ -189,11 +181,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
             List<InternalRow> result =
                     writeThenRead(
-                            options,
-                            rowType,
-                            rowType,
-                            testData,
-                            "test_field_delim_" + delimiter.hashCode());
+                            options, rowType, testData, "test_field_delim_" + delimiter.hashCode());
 
             // Verify results
             assertThat(result).hasSize(3);
@@ -228,11 +216,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
             List<InternalRow> result =
                     writeThenRead(
-                            options,
-                            rowType,
-                            rowType,
-                            testData,
-                            "test_line_delim_" + delimiter.hashCode());
+                            options, rowType, testData, "test_line_delim_" + delimiter.hashCode());
 
             // Verify results
             assertThat(result).hasSize(3);
@@ -264,11 +248,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
             List<InternalRow> result =
                     writeThenRead(
-                            options,
-                            rowType,
-                            rowType,
-                            testData,
-                            "test_quote_char_" + quoteChar.hashCode());
+                            options, rowType, testData, "test_quote_char_" + quoteChar.hashCode());
 
             // Verify results
             assertThat(result).hasSize(3);
@@ -302,7 +282,6 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                     writeThenRead(
                             options,
                             rowType,
-                            rowType,
                             testData,
                             "test_escape_char_" + escapeChar.hashCode());
 
@@ -335,11 +314,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
             List<InternalRow> result =
                     writeThenRead(
-                            options,
-                            rowType,
-                            rowType,
-                            testData,
-                            "test_include_header_" + includeHeader);
+                            options, rowType, testData, "test_include_header_" + includeHeader);
 
             // Verify results
             assertThat(result).hasSize(3);
@@ -376,7 +351,6 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             List<InternalRow> result =
                     writeThenRead(
                             options,
-                            rowType,
                             rowType,
                             testData,
                             "test_null_literal_" + nullLiteral.hashCode());
@@ -422,7 +396,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         GenericRow.of(4, BinaryString.fromString("Normal"), 400.0, null));
 
         List<InternalRow> result =
-                writeThenRead(options, rowType, rowType, testData, "test_csv_combination");
+                writeThenRead(options, rowType, testData, "test_csv_combination");
 
         // Verify results
         assertThat(result).hasSize(4);
@@ -530,101 +504,31 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         return CsvFileReader.parseCsvLineToArray(csvLine, schema);
     }
 
-    @Test
-    public void testProjectionPushdown() throws IOException {
-        RowType fullRowType =
-                RowType.builder()
-                        .field("id", DataTypes.INT().notNull())
-                        .field("name", DataTypes.STRING())
-                        .field("score", DataTypes.DOUBLE())
-                        .field("active", DataTypes.BOOLEAN())
-                        .build();
-
-        RowType projectedRowType =
-                RowType.builder()
-                        .field("score", DataTypes.DOUBLE())
-                        .field("name", DataTypes.STRING())
-                        .build();
-
-        List<InternalRow> testData =
-                Arrays.asList(
-                        GenericRow.of(1, BinaryString.fromString("Alice"), null, true),
-                        GenericRow.of(2, null, 87.2, false),
-                        GenericRow.of(3, BinaryString.fromString("Charlie"), 92.8, null));
-
-        List<InternalRow> result =
-                writeThenRead(
-                        new Options(), fullRowType, projectedRowType, testData, "test_projection");
-
-        assertThat(result).hasSize(3);
-        assertThat(result.get(0).isNullAt(0)).isTrue(); // score is null
-        assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
-
-        assertThat(result.get(1).getDouble(0)).isEqualTo(87.2);
-        assertThat(result.get(1).isNullAt(1)).isTrue(); // name is null
-
-        assertThat(result.get(2).getDouble(0)).isEqualTo(92.8);
-        assertThat(result.get(2).getString(1).toString()).isEqualTo("Charlie");
-    }
-
-    @Test
-    public void testProjectionPushdownWithMissingField() {
-        RowType fullRowType =
-                RowType.builder()
-                        .field("id", DataTypes.INT().notNull())
-                        .field("name", DataTypes.STRING())
-                        .build();
-
-        RowType projectedRowType =
-                RowType.builder()
-                        .field("id", DataTypes.INT().notNull())
-                        .field("name", DataTypes.STRING())
-                        .field(
-                                "missing_field",
-                                DataTypes.DOUBLE().notNull()) // field not in read schema
-                        .build();
-
-        Options options = new Options();
-        CsvFileFormat format = new CsvFileFormat(new FormatContext(options, 1024, 1024));
-
-        // Should throw exception when projected field is not in read schema
-        org.junit.jupiter.api.Assertions.assertThrows(
-                IllegalArgumentException.class,
-                () -> format.createReaderFactory(fullRowType, projectedRowType, null),
-                "Projected field 'missing_field' not found in read schema");
-    }
-
     /**
-     * Performs a complete write-read test with projection pushdown. Writes data using fullRowType,
-     * then reads using projection.
+     * Performs a complete write-read test with the given options and test data. Returns the data
+     * that was read back for further verification.
      */
     private List<InternalRow> writeThenRead(
-            Options options,
-            RowType fullRowType,
-            RowType projectedRowType,
-            List<InternalRow> testData,
-            String testPrefix)
+            Options options, RowType rowType, List<InternalRow> testData, String testPrefix)
             throws IOException {
-        CsvFileFormat format = new CsvFileFormat(new FormatContext(options, 1024, 1024));
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         Path testFile = new Path(parent, testPrefix + "_" + UUID.randomUUID() + ".csv");
 
-        // Write data using full schema
-        FormatWriterFactory writerFactory = format.createWriterFactory(fullRowType);
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         try (PositionOutputStream out = fileIO.newOutputStream(testFile, false);
                 FormatWriter writer = writerFactory.create(out, "none")) {
             for (InternalRow row : testData) {
                 writer.addElement(row);
             }
         }
-
-        // Read data using projection pushdown
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(fullRowType, projectedRowType, null)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
 
-            InternalRowSerializer serializer = new InternalRowSerializer(projectedRowType);
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
             return result;

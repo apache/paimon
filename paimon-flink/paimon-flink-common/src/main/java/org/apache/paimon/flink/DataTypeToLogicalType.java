@@ -143,7 +143,7 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
 
     @Override
     public LogicalType visit(VariantType variantType) {
-        throw new UnsupportedOperationException("VariantType is not supported.");
+        return new org.apache.flink.table.types.logical.VariantType(variantType.isNullable());
     }
 
     @Override
