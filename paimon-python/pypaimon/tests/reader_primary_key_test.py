@@ -38,10 +38,10 @@ class PkReaderTest(unittest.TestCase):
         cls.catalog.create_database('default', False)
 
         cls.pa_schema = pa.schema([
-            ('user_id', pa.int32()),
+            pa.field('user_id', pa.int32(), nullable=False),
             ('item_id', pa.int64()),
             ('behavior', pa.string()),
-            ('dt', pa.string())
+            pa.field('dt', pa.string(), nullable=False)
         ])
         cls.expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 4, 5, 7, 8],

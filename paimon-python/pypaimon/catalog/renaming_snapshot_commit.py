@@ -63,7 +63,7 @@ class RenamingSnapshotCommit(SnapshotCommit):
         if not self.file_io.exists(new_snapshot_path):
             """Internal function to perform the actual commit."""
             # Try to write atomically using the file IO
-            committed = self.file_io.try_to_write_atomic(new_snapshot_path, JSON.to_json(snapshot))
+            committed = self.file_io.try_to_write_atomic(new_snapshot_path, JSON.to_json(snapshot, indent=2))
             if committed:
                 # Update the latest hint
                 self._commit_latest_hint(snapshot.id)

@@ -30,16 +30,13 @@ class ManifestFileMeta:
     num_deleted_files: int
     partition_stats: SimpleStats
     schema_id: int
-    min_bucket: int
-    max_bucket: int
-    min_level: int
-    max_level: int
 
 
 MANIFEST_FILE_META_SCHEMA = {
     "type": "record",
     "name": "ManifestFileMeta",
     "fields": [
+        {"name": "_VERSION", "type": "int"},
         {"name": "_FILE_NAME", "type": "string"},
         {"name": "_FILE_SIZE", "type": "long"},
         {"name": "_NUM_ADDED_FILES", "type": "long"},

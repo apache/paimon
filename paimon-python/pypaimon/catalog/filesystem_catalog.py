@@ -17,7 +17,7 @@
 #################################################################################
 
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 from urllib.parse import urlparse
 
 from pypaimon.catalog.catalog import Catalog
@@ -67,7 +67,7 @@ class FileSystemCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         if CoreOptions.SCAN_FALLBACK_BRANCH in self.catalog_options:
-            raise ValueError(CoreOptions.SCAN_FALLBACK_BRANCH)
+            raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
 

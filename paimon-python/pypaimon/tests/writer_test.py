@@ -71,7 +71,7 @@ class WriterTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/snapshot/snapshot-1"))
         self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/manifest"))
         self.assertTrue(os.path.exists(self.warehouse + "/test_db.db/test_table/bucket-0"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/manifest/*.avro")), 2)
+        self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/manifest/*")), 3)
         self.assertEqual(len(glob.glob(self.warehouse + "/test_db.db/test_table/bucket-0/*.parquet")), 1)
 
         with open(self.warehouse + '/test_db.db/test_table/snapshot/snapshot-1', 'r', encoding='utf-8') as file:

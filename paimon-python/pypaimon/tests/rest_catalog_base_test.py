@@ -186,7 +186,7 @@ class RESTCatalogBaseTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/snapshot/snapshot-1"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/manifest"))
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/dt=p1"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*.avro")), 2)
+        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*")), 3)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()

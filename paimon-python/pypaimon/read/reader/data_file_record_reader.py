@@ -23,6 +23,7 @@ from pyarrow import RecordBatch
 
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
 class DataFileBatchReader(RecordBatchReader):
@@ -31,11 +32,12 @@ class DataFileBatchReader(RecordBatchReader):
     """
 
     def __init__(self, format_reader: RecordBatchReader, index_mapping: List[int], partition_info: PartitionInfo,
-                 system_primary_key: Optional[List[str]]):
+                 system_primary_key: Optional[List[str]], fields: List[DataField]):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
+        self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         record_batch = self.format_reader.read_arrow_batch()
@@ -85,7 +87,17 @@ class DataFileBatchReader(RecordBatchReader):
             inter_arrays = mapped_arrays
             inter_names = mapped_names
 
-        return pa.RecordBatch.from_arrays(inter_arrays, names=inter_names)
+        # to contains 'not null' property
+        final_fields = []
+        for i, name in enumerate(inter_names):
+            array = inter_arrays[i]
+            target_field = self.schema_map.get(name)
+            if not target_field:
+                target_field = pa.field(name, array.type)
+            final_fields.append(target_field)
+        final_schema = pa.schema(final_fields)
+
+        return pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
 
     def close(self) -> None:
         self.format_reader.close()
