@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
@@ -34,6 +35,7 @@ import org.apache.paimon.predicate.CompareUtils;
 import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.SerializationUtils;
@@ -44,13 +46,16 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -153,6 +158,21 @@ public class DataSplit implements Split {
         return partialMergedRowCount();
     }
 
+    public boolean statsAvailable(Set<String> columns) {
+        if (isNullOrEmpty(columns)) {
+            return false;
+        }
+
+        return dataFiles.stream()
+                .map(DataFileMeta::valueStatsCols)
+                .allMatch(
+                        valueStatsCols ->
+                                // It means there are all column statistics when valueStatsCols ==
+                                // null
+                                valueStatsCols == null
+                                        || new HashSet<>(valueStatsCols).containsAll(columns));
+    }
+
     public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
         Object minValue = null;
         for (DataFileMeta dataFile : dataFiles) {
@@ -189,6 +209,26 @@ public class DataSplit implements Split {
             }
         }
         return maxValue;
+    }
+
+    public Long nullCount(int fieldIndex, SimpleStatsEvolutions evolutions) {
+        Long sum = null;
+        for (DataFileMeta dataFile : dataFiles) {
+            SimpleStatsEvolution evolution = evolutions.getOrCreate(dataFile.schemaId());
+            InternalArray nullCounts =
+                    evolution.evolution(
+                            dataFile.valueStats().nullCounts(),
+                            dataFile.rowCount(),
+                            dataFile.valueStatsCols());
+            Long nullCount =
+                    (Long) InternalRowUtils.get(nullCounts, fieldIndex, DataTypes.BIGINT());
+            if (sum == null) {
+                sum = nullCount;
+            } else if (nullCount != null) {
+                sum += nullCount;
+            }
+        }
+        return sum;
     }
 
     /**

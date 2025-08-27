@@ -268,6 +268,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
                 tableSchema,
+                schemaManager(),
                 coreOptions(),
                 newSnapshotReader(),
                 catalogEnvironment.tableQueryAuth(coreOptions()));

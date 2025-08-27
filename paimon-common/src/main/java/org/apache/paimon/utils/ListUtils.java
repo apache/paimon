@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -32,7 +33,7 @@ public class ListUtils {
         return list.get(index);
     }
 
-    public static <T> boolean isNullOrEmpty(List<T> list) {
+    public static <T> boolean isNullOrEmpty(Collection<T> list) {
         return list == null || list.isEmpty();
     }
 }

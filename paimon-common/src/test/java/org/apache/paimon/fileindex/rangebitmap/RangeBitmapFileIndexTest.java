@@ -25,7 +25,6 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
@@ -36,7 +35,6 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -283,11 +281,7 @@ public class RangeBitmapFileIndexTest {
             RoaringBitmap32 expected = new RoaringBitmap32();
 
             // test NULL_LAST without found set
-            TopN topN =
-                    new TopN(
-                            Collections.singletonList(
-                                    new SortValue(fieldRef, ASCENDING, NULLS_LAST)),
-                            k);
+            TopN topN = new TopN(fieldRef, ASCENDING, NULLS_LAST, k);
             pairs.stream()
                     .sorted(nullLastCompactor)
                     .limit(k)
@@ -298,11 +292,7 @@ public class RangeBitmapFileIndexTest {
 
             // test NULL_LAST with found set
             expected.clear();
-            topN =
-                    new TopN(
-                            Collections.singletonList(
-                                    new SortValue(fieldRef, ASCENDING, NULLS_LAST)),
-                            k);
+            topN = new TopN(fieldRef, ASCENDING, NULLS_LAST, k);
             pairs.stream()
                     .filter(pair -> foundSet.contains(pair.getKey()))
                     .sorted(nullLastCompactor)
@@ -317,11 +307,7 @@ public class RangeBitmapFileIndexTest {
 
             // test NULL_FIRST without found set
             expected.clear();
-            topN =
-                    new TopN(
-                            Collections.singletonList(
-                                    new SortValue(fieldRef, ASCENDING, NULLS_FIRST)),
-                            k);
+            topN = new TopN(fieldRef, ASCENDING, NULLS_FIRST, k);
             pairs.stream()
                     .sorted(nullFirstCompactor)
                     .limit(k)
@@ -332,11 +318,7 @@ public class RangeBitmapFileIndexTest {
 
             // test NULL_FIRST with found set
             expected.clear();
-            topN =
-                    new TopN(
-                            Collections.singletonList(
-                                    new SortValue(fieldRef, ASCENDING, NULLS_FIRST)),
-                            k);
+            topN = new TopN(fieldRef, ASCENDING, NULLS_FIRST, k);
             pairs.stream()
                     .filter(pair -> foundSet.contains(pair.getKey()))
                     .sorted(nullFirstCompactor)
@@ -406,38 +388,26 @@ public class RangeBitmapFileIndexTest {
         // test bottomK
         BitmapIndexResult result =
                 new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(0, 3, 4, 5));
-        TopN bottomNullFirst =
-                new TopN(
-                        Collections.singletonList(new SortValue(fieldRef, ASCENDING, NULLS_FIRST)),
-                        3);
+        TopN bottomNullFirst = new TopN(fieldRef, ASCENDING, NULLS_FIRST, 3);
         assertThat(((BitmapIndexResult) reader.visitTopN(bottomNullFirst, null)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 5, 6));
         assertThat(((BitmapIndexResult) reader.visitTopN(bottomNullFirst, result)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 5));
 
-        TopN bottomNullLast =
-                new TopN(
-                        Collections.singletonList(new SortValue(fieldRef, ASCENDING, NULLS_LAST)),
-                        3);
+        TopN bottomNullLast = new TopN(fieldRef, ASCENDING, NULLS_LAST, 3);
         assertThat(((BitmapIndexResult) reader.visitTopN(bottomNullLast, null)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2));
         assertThat(((BitmapIndexResult) reader.visitTopN(bottomNullLast, result)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 4));
 
         // test topK
-        TopN topNullFirst =
-                new TopN(
-                        Collections.singletonList(new SortValue(fieldRef, DESCENDING, NULLS_FIRST)),
-                        3);
+        TopN topNullFirst = new TopN(fieldRef, DESCENDING, NULLS_FIRST, 3);
         assertThat(((BitmapIndexResult) reader.visitTopN(topNullFirst, null)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(5, 6, 7));
         assertThat(((BitmapIndexResult) reader.visitTopN(topNullFirst, result)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 5));
 
-        TopN topNullLast =
-                new TopN(
-                        Collections.singletonList(new SortValue(fieldRef, DESCENDING, NULLS_LAST)),
-                        3);
+        TopN topNullLast = new TopN(fieldRef, DESCENDING, NULLS_LAST, 3);
         assertThat(((BitmapIndexResult) reader.visitTopN(topNullLast, null)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf(3, 4, 7));
         assertThat(((BitmapIndexResult) reader.visitTopN(topNullLast, result)).get())

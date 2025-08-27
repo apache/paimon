@@ -149,6 +149,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         CoreOptions options = wrapped.coreOptions();
         return new DataTableBatchScan(
                 wrapped.schema(),
+                schemaManager(),
                 options,
                 newSnapshotReader(wrapped),
                 wrapped.catalogEnvironment().tableQueryAuth(options));
