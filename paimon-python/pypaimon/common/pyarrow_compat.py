@@ -27,14 +27,14 @@ import pyarrow.compute as pc
 def sort_table_by_column(table: pa.Table, column_name: str, order: str = 'ascending') -> pa.Table:
     """
     Sort a PyArrow Table by a column name.
-    
+
     This function provides compatibility for PyArrow 5.0.0 which doesn't have Table.sort_by method.
-    
+
     Args:
         table: PyArrow Table to sort
         column_name: Name of the column to sort by
         order: Sort order, either 'ascending' or 'descending'
-    
+
     Returns:
         Sorted PyArrow Table
     """

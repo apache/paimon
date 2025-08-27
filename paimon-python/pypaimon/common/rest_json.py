@@ -26,7 +26,7 @@ except ImportError:
     # Fallback for Python < 3.8
     def get_origin(tp):
         return getattr(tp, '__origin__', None)
-    
+
     def get_args(tp):
         return getattr(tp, '__args__', ())
 

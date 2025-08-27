@@ -495,7 +495,6 @@ class PyarrowFieldParser:
             raise ValueError(f"Unknown type: {type_name}")
         return AtomicType(type_name, nullable)
 
-
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
         data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
@@ -508,7 +507,6 @@ class PyarrowFieldParser:
             description=description
         )
 
-
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
         fields = []
@@ -517,7 +515,6 @@ class PyarrowFieldParser:
             data_field = PyarrowFieldParser.to_paimon_field(i, pa_field)
             fields.append(data_field)
         return fields
-
 
     @staticmethod
     def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
@@ -564,7 +561,6 @@ class PyarrowFieldParser:
             return PyarrowFieldParser.to_avro_schema(field_type, name=f"{field_name}_record")
 
         raise ValueError(f"Unsupported pyarrow type for Avro conversion: {field_type}")
-
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
