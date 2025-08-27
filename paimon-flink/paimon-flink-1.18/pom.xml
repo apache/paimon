@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : 1.18</name>
 
     <properties>
-        <flink.version>${paimon.flink.version}</flink.version>
+        <flink.version>1.18.1</flink.version>
         <iceberg.flink.version>1.18</iceberg.flink.version>
     </properties>
 
