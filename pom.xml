@@ -120,7 +120,7 @@ under the License.
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
         <test.flink.main.version>1.20</test.flink.main.version>
-        <test.flink.version>1.20.1</test.flink.version>
+        <test.flink.version>${paimon-flink-common.flink.version}</test.flink.version>
         <test.flink.connector.kafka.version>3.4.0-1.20</test.flink.connector.kafka.version>
         <test.flink.connector.hive.version>1.20.0</test.flink.connector.hive.version>
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
@@ -166,6 +166,8 @@ under the License.
             -Djdk.reflect.useDirectMethodHandle=false
             -Dio.netty.tryReflectionSetAccessible=true
         </extraJavaTestArgs>
+        <paimon-flink-cdc.flink.version>1.18.1</paimon-flink-cdc.flink.version>
+        <paimon-flink1-common.flink.version>1.20.1</paimon-flink1-common.flink.version>
     </properties>
 
     <dependencies>
@@ -444,7 +446,7 @@ under the License.
                 <paimon-flinkx-common>paimon-flink1-common</paimon-flinkx-common>
                 <paimon-flink-common.flink.version>1.20.1</paimon-flink-common.flink.version>
                 <test.flink.main.version>1.20</test.flink.main.version>
-                <test.flink.version>1.20.1</test.flink.version>
+                <test.flink.version>${paimon-flink-common.flink.version}</test.flink.version>
             </properties>
             <modules>
                 <module>paimon-flink/paimon-flink-1.15</module>
