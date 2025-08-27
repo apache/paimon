@@ -39,6 +39,7 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
@@ -61,6 +62,7 @@ import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
@@ -146,6 +148,9 @@ public class CatalogUtils {
                     options.get(PRIMARY_KEY) == null,
                     "Cannot define %s for format table.",
                     PRIMARY_KEY.key());
+        }
+        for (DataField field : schema.fields()) {
+            validateDefaultValue(field.type(), field.defaultValue());
         }
     }
 
