@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>${paimon-flink-common.flink.version}</flink.version>
+        <flink.version>${paimon-flink-cdc.flink.version}</flink.version>
         <flink.cdc.version>3.1.1</flink.cdc.version>
         <flink.mongodb.cdc.version>3.1.1</flink.mongodb.cdc.version>
         <avro.version>1.11.4</avro.version>
