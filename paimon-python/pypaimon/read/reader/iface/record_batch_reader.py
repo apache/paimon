@@ -58,7 +58,7 @@ class RecordBatchReader(RecordReader):
         df = self._read_next_df()
         if df is None:
             return None
-        
+
         # Polars 0.9.12 compatibility - iter_rows doesn't exist, use alternative
         if hasattr(df, 'iter_rows'):
             return df.iter_rows()
@@ -71,7 +71,7 @@ class RecordBatchReader(RecordReader):
         df = self._read_next_df()
         if df is None:
             return None
-        
+
         # Polars 0.9.12 compatibility - iter_rows doesn't exist, use alternative
         if hasattr(df, 'iter_rows'):
             return InternalRowWrapperIterator(df.iter_rows(), df.width)

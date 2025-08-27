@@ -367,9 +367,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 return fs.rm_file(
                     self._strip_storage_protocol(storage_type, actual_path),
                 )
-                raise Exception(
-                "Rm file is not supported for path: {}.".format(path)
-        )
+            raise Exception("Rm file is not supported for path: {}.".format(path))
 
     def rmdir(self, path):
         files = self.ls(path)

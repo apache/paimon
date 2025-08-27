@@ -80,7 +80,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        
+
         # Handle cases where fields might be dicts instead of DataField objects
         processed_fields = []
         for field in fields:
@@ -88,7 +88,7 @@ class TableSchema:
                 processed_fields.append(DataField.from_dict(field))
             else:
                 processed_fields.append(field)
-        
+
         highest_field_id: int = max(field.id for field in processed_fields) if processed_fields else 0
 
         return TableSchema(

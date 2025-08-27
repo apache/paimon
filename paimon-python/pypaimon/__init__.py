@@ -19,7 +19,7 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 
 # Import compatibility patches for Python 3.6 and PyArrow 5.0.0
 try:
-    from pypaimon.common import pyarrow_compat
+    from pypaimon.common import pyarrow_compat  # noqa: F401
 except ImportError:
     pass
 

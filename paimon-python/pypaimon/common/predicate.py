@@ -19,7 +19,7 @@
 
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute

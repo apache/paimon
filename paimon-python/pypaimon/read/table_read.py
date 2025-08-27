@@ -29,6 +29,7 @@ from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
+
 class TableRead:
     """Implementation of TableRead for native Python reading."""
 
@@ -120,6 +121,7 @@ class TableRead:
                 read_type=self.read_type,
                 split=split
             )
+
 
 def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
     columns_data = zip(*row_tuples)
