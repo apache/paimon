@@ -313,12 +313,21 @@ class FileIO:
             import pyarrow.orc as orc
             table = pyarrow.Table.from_batches([data])
             with self.new_output_stream(path) as output_stream:
-                orc.write_table(
-                    table,
-                    output_stream,
-                    compression=compression,
-                    **kwargs
-                )
+                # PyArrow 5.0.0 ORC writer doesn't support compression parameter
+                try:
+                    orc.write_table(
+                        table,
+                        output_stream,
+                        compression=compression,
+                        **kwargs
+                    )
+                except TypeError:
+                    # Fallback for PyArrow 5.0.0 - write without compression parameter
+                    orc.write_table(
+                        table,
+                        output_stream,
+                        **kwargs
+                    )
 
         except Exception as e:
             self.delete_quietly(path)
@@ -329,6 +338,25 @@ class FileIO:
 
         if avro_schema is None:
             avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
-        records = data.to_pylist()
+        
+        # Convert to records list for Avro writing with PyArrow 5.0.0 compatibility
+        if isinstance(data, pyarrow.RecordBatch):
+            # RecordBatch has to_pydict in PyArrow 5.0.0
+            records_dict = data.to_pydict()
+        else:
+            # Convert Table to RecordBatch first, then to dict
+            batch = data.to_batches()[0] if data.to_batches() else None
+            if batch is None:
+                records = []
+            else:
+                records_dict = batch.to_pydict()
+        
+        # Convert dict format to list of records
+        if 'records_dict' in locals() and records_dict:
+            records = [{col: records_dict[col][i] for col in records_dict.keys()} 
+                      for i in range(len(list(records_dict.values())[0]))]
+        else:
+            records = []
+            
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)

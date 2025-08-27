@@ -36,10 +36,13 @@ class KeyValueDataWriter(DataWriter):
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
         """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
-        enhanced_table = data
+        # Convert RecordBatch to Table for add_column operation (PyArrow 5.0.0 compatibility)
+        enhanced_table = pa.Table.from_batches([data])
 
         for pk_key in reversed(self.trimmed_primary_key):
-            if pk_key in data.column_names:
+            # Use schema.names for PyArrow 5.0.0 compatibility
+            column_names = data.schema.names if hasattr(data, 'schema') else data.column_names
+            if pk_key in column_names:
                 key_column = data.column(pk_key)
                 enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
 
@@ -51,11 +54,14 @@ class KeyValueDataWriter(DataWriter):
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key) + 1, '_VALUE_KIND',
                                                    value_kind_column)
 
-        return enhanced_table
+        # Convert back to RecordBatch
+        return enhanced_table.to_batches()[0]
 
     def _sort_by_primary_key(self, data: pa.RecordBatch) -> pa.RecordBatch:
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_key]
-        if '_SEQUENCE_NUMBER' in data.column_names:
+        # Use schema.names for PyArrow 5.0.0 compatibility
+        column_names = data.schema.names if hasattr(data, 'schema') else data.column_names
+        if '_SEQUENCE_NUMBER' in column_names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
         sorted_indices = pc.sort_indices(data, sort_keys=sort_keys)
