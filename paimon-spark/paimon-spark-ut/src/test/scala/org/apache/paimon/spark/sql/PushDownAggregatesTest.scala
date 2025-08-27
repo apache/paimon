@@ -230,6 +230,8 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           spark.sql("INSERT INTO T VALUES(1, 'x_1')")
           if (deletionVectorsEnabled) {
             runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+            // should not push down min max for primary key table
+            runAndCheckAggregate("SELECT MIN(c1) FROM T", Row(1) :: Nil, 2)
           } else {
             runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
           }

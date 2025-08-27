@@ -18,91 +18,98 @@
 
 package org.apache.paimon.spark.aggregate
 
-import org.apache.paimon.stats.StatsUtils.minmaxAvailable
-import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder}
+import org.apache.paimon.table.source.PushDownUtils.minmaxAvailable
 import org.apache.paimon.types._
 
-import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, Aggregation, CountStar, Max, Min}
-import org.apache.spark.sql.execution.datasources.v2.V2ColumnUtils
+import org.apache.spark.sql.connector.expressions.Expression
+import org.apache.spark.sql.connector.expressions.aggregate.{Aggregation, CountStar, Max, Min}
+import org.apache.spark.sql.execution.datasources.v2.V2ColumnUtils.extractV2Column
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 object AggregatePushDownUtils {
 
-  def canPushdownAggregation(
-      table: Table,
+  def tryPushdownAggregation(
+      table: FileStoreTable,
       aggregation: Aggregation,
-      dataSplits: Seq[DataSplit]): Boolean = {
+      readBuilder: ReadBuilder): Option[LocalAggregator] = {
+    val options = table.coreOptions()
+    val rowType = table.rowType
+    val partitionKeys = table.partitionKeys()
 
-    var hasMinMax = false
-    val minmaxColumns = mutable.HashSet.empty[String]
-    var hasCount = false
-
-    def getDataFieldForCol(colName: String): DataField = {
-      table.rowType.getField(colName)
-    }
-
-    def isPartitionCol(colName: String) = {
-      table.partitionKeys.contains(colName)
-    }
-
-    def processMinOrMax(agg: AggregateFunc): Boolean = {
-      val columnName = agg match {
-        case max: Max if V2ColumnUtils.extractV2Column(max.column).isDefined =>
-          V2ColumnUtils.extractV2Column(max.column).get
-        case min: Min if V2ColumnUtils.extractV2Column(min.column).isDefined =>
-          V2ColumnUtils.extractV2Column(min.column).get
-        case _ => return false
-      }
-
-      val dataField = getDataFieldForCol(columnName)
-
-      if (minmaxAvailable(dataField.`type`())) {
-        minmaxColumns.add(columnName)
-        hasMinMax = true
-        true
-      } else {
-        false
-      }
-    }
-
-    aggregation.groupByExpressions.map(V2ColumnUtils.extractV2Column).foreach {
+    aggregation.groupByExpressions.map(extractV2Column).foreach {
       colName =>
         // don't push down if the group by columns are not the same as the partition columns (orders
         // doesn't matter because reorder can be done at data source layer)
-        if (colName.isEmpty || !isPartitionCol(colName.get)) return false
+        if (colName.isEmpty || !partitionKeys.contains(colName.get)) return None
     }
 
+    val splits = extractMinMaxColumns(rowType, aggregation) match {
+      case Some(columns) =>
+        if (columns.isEmpty) {
+          generateSplits(readBuilder.dropStats())
+        } else {
+          if (options.deletionVectorsEnabled() || !table.primaryKeys().isEmpty) {
+            return None
+          }
+          val splits = generateSplits(readBuilder)
+          if (!splits.forall(minmaxAvailable(_, columns.asJava))) {
+            return None
+          }
+          splits
+        }
+      case None => return None
+    }
+
+    if (!splits.forall(_.mergedRowCountAvailable())) {
+      return None
+    }
+
+    val aggregator = new LocalAggregator(table)
+    aggregator.initialize(aggregation)
+    splits.foreach(aggregator.update)
+    Option(aggregator)
+  }
+
+  private def generateSplits(readBuilder: ReadBuilder): mutable.Seq[DataSplit] = {
+    readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+  }
+
+  private def extractMinMaxColumns(
+      rowType: RowType,
+      aggregation: Aggregation): Option[Set[String]] = {
+    val columns = mutable.HashSet.empty[String]
     aggregation.aggregateExpressions.foreach {
-      case max: Max =>
-        if (!processMinOrMax(max)) return false
-      case min: Min =>
-        if (!processMinOrMax(min)) return false
+      case e if e.isInstanceOf[Min] || e.isInstanceOf[Max] =>
+        extractMinMaxColumn(rowType, e) match {
+          case Some(colName) => columns.add(colName)
+          case None => return None
+        }
       case _: CountStar =>
-        hasCount = true
-      case _ =>
-        return false
+      case _ => return None
+    }
+    Option(columns.toSet)
+  }
+
+  private def extractMinMaxColumn(rowType: RowType, minOrMax: Expression): Option[String] = {
+    val column = minOrMax match {
+      case min: Min => min.column()
+      case max: Max => max.column()
+    }
+    val extractColumn = extractV2Column(column)
+    if (extractColumn.isEmpty) {
+      return None
     }
 
-    if (hasMinMax) {
-      dataSplits.forall(_.statsAvailable(minmaxColumns.toSet.asJava))
-    } else if (hasCount) {
-      dataSplits.forall(_.mergedRowCountAvailable())
+    val columnName = extractColumn.get
+    val dataType = rowType.getField(columnName).`type`()
+    if (minmaxAvailable(dataType)) {
+      Option(columnName)
     } else {
-      true
+      None
     }
   }
-
-  def hasMinMaxAggregation(aggregation: Aggregation): Boolean = {
-    var hasMinMax = false;
-    aggregation.aggregateExpressions().foreach {
-      case _: Min | _: Max =>
-        hasMinMax = true
-      case _ =>
-    }
-    hasMinMax
-  }
-
 }

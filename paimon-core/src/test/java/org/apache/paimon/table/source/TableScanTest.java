@@ -186,7 +186,7 @@ public class TableScanTest extends ScannerTestBase {
         TableScan.Plan plan4 =
                 table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 5)).plan();
         List<Split> splits4 = plan4.splits();
-        assertThat(splits4.size()).isEqualTo(5);
+        assertThat(splits4.size()).isEqualTo(7);
         assertThat(((DataSplit) splits4.get(0)).minValue(field.id(), field, evolutions))
                 .isEqualTo(null);
         assertThat(((DataSplit) splits4.get(1)).minValue(field.id(), field, evolutions))
@@ -249,7 +249,7 @@ public class TableScanTest extends ScannerTestBase {
         TableScan.Plan plan8 =
                 table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_FIRST, 5)).plan();
         List<Split> splits8 = plan8.splits();
-        assertThat(splits8.size()).isEqualTo(5);
+        assertThat(splits8.size()).isEqualTo(7);
         assertThat(((DataSplit) splits8.get(0)).maxValue(field.id(), field, evolutions))
                 .isEqualTo(null);
         assertThat(((DataSplit) splits8.get(1)).maxValue(field.id(), field, evolutions))

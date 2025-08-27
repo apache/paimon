@@ -19,15 +19,12 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.CompareUtils;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.SortValue;
-import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,14 +32,11 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
-import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
-import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
-import static org.apache.paimon.stats.StatsUtils.minmaxAvailable;
+import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
 /** Evaluate DataSplit TopN result. */
 public class TopNDataSplitEvaluator {
@@ -57,47 +51,25 @@ public class TopNDataSplitEvaluator {
         this.schemaManager = schemaManager;
     }
 
-    public List<DataSplit> evaluate(TopN topN, List<DataSplit> splits) {
-        // todo: we can support all the sort columns.
-        List<SortValue> orders = topN.orders();
-        if (orders.size() != 1) {
+    public List<DataSplit> evaluate(SortValue order, int limit, List<DataSplit> splits) {
+        if (limit > splits.size()) {
             return splits;
         }
-
-        int limit = topN.limit();
-        if (limit >= splits.size()) {
-            return splits;
-        }
-
-        SortValue order = orders.get(0);
-        DataType type = order.field().type();
-        if (!minmaxAvailable(type)) {
-            return splits;
-        }
-
         return getTopNSplits(order, limit, splits);
     }
 
     private List<DataSplit> getTopNSplits(SortValue order, int limit, List<DataSplit> splits) {
-        FieldRef ref = order.field();
-        SortValue.SortDirection direction = order.direction();
-        SortValue.NullOrdering nullOrdering = order.nullOrdering();
-
-        int index = ref.index();
+        int index = order.field().index();
         DataField field = schema.fields().get(index);
         SimpleStatsEvolutions evolutions =
                 new SimpleStatsEvolutions((id) -> scanTableSchema(id).fields(), schema.id());
 
         // extract the stats
         List<DataSplit> results = new ArrayList<>();
-        List<Pair<Stats, DataSplit>> pairs = new ArrayList<>();
+        List<RichSplit> richSplits = new ArrayList<>();
         for (DataSplit split : splits) {
-            if (!split.rawConvertible()) {
-                return splits;
-            }
-
-            Set<String> cols = Collections.singleton(field.name());
-            if (!split.statsAvailable(cols)) {
+            if (!minmaxAvailable(split, Collections.singleton(field.name()))) {
+                // unknown split, read it
                 results.add(split);
                 continue;
             }
@@ -105,109 +77,66 @@ public class TopNDataSplitEvaluator {
             Object min = split.minValue(index, field, evolutions);
             Object max = split.maxValue(index, field, evolutions);
             Long nullCount = split.nullCount(index, evolutions);
-            Stats stats = new Stats(min, max, nullCount);
-            pairs.add(Pair.of(stats, split));
+            richSplits.add(new RichSplit(split, min, max, nullCount));
         }
 
         // pick the TopN splits
-        if (NULLS_FIRST.equals(nullOrdering)) {
-            results.addAll(pickNullFirstSplits(pairs, ref, direction, limit));
-        } else if (NULLS_LAST.equals(nullOrdering)) {
-            results.addAll(pickNullLastSplits(pairs, ref, direction, limit));
-        } else {
-            return splits;
-        }
-
+        boolean nullFirst = NULLS_FIRST.equals(order.nullOrdering());
+        boolean ascending = ASCENDING.equals(order.direction());
+        results.addAll(pickTopNSplits(richSplits, field.type(), ascending, nullFirst, limit));
         return results;
     }
 
-    private List<DataSplit> pickNullFirstSplits(
-            List<Pair<Stats, DataSplit>> pairs,
-            FieldRef field,
-            SortValue.SortDirection direction,
+    private List<DataSplit> pickTopNSplits(
+            List<RichSplit> splits,
+            DataType fieldType,
+            boolean ascending,
+            boolean nullFirst,
             int limit) {
-        Comparator<Pair<Stats, DataSplit>> comparator;
-        if (ASCENDING.equals(direction)) {
+        Comparator<RichSplit> comparator;
+        if (ascending) {
             comparator =
                     (x, y) -> {
-                        Stats left = x.getKey();
-                        Stats right = y.getKey();
-                        int result = nullsFirst(left.nullCount, right.nullCount);
-                        if (result == 0) {
-                            result = asc(field, left.min, right.min);
-                        }
-                        return result;
-                    };
-        } else if (DESCENDING.equals(direction)) {
-            comparator =
-                    (x, y) -> {
-                        Stats left = x.getKey();
-                        Stats right = y.getKey();
-                        int result = nullsFirst(left.nullCount, right.nullCount);
-                        if (result == 0) {
-                            result = desc(field, left.max, right.max);
+                        int result;
+                        if (nullFirst) {
+                            result = nullsFirstCompare(x.nullCount, y.nullCount);
+                            if (result == 0) {
+                                result = ascCompare(fieldType, x.min, y.min);
+                            }
+                        } else {
+                            result = ascCompare(fieldType, x.min, y.min);
+                            if (result == 0) {
+                                result = nullsLastCompare(x.nullCount, y.nullCount);
+                            }
                         }
                         return result;
                     };
         } else {
-            return pairs.stream().map(Pair::getValue).collect(Collectors.toList());
-        }
-        pairs.sort(comparator);
-
-        long scanned = 0;
-        List<DataSplit> splits = new ArrayList<>();
-        for (Pair<Stats, DataSplit> pair : pairs) {
-            Stats stats = pair.getKey();
-            DataSplit split = pair.getValue();
-            splits.add(split);
-            scanned += Math.max(stats.nullCount, 1);
-            if (scanned >= limit) {
-                break;
-            }
-        }
-        return splits;
-    }
-
-    private List<DataSplit> pickNullLastSplits(
-            List<Pair<Stats, DataSplit>> pairs,
-            FieldRef field,
-            SortValue.SortDirection direction,
-            int limit) {
-        Comparator<Pair<Stats, DataSplit>> comparator;
-        if (ASCENDING.equals(direction)) {
             comparator =
                     (x, y) -> {
-                        Stats left = x.getKey();
-                        Stats right = y.getKey();
-                        int result = asc(field, left.min, right.min);
-                        if (result == 0) {
-                            result = nullsLast(left.nullCount, right.nullCount);
+                        int result;
+                        if (nullFirst) {
+                            result = nullsFirstCompare(x.nullCount, y.nullCount);
+                            if (result == 0) {
+                                result = descCompare(fieldType, x.max, y.max);
+                            }
+                        } else {
+                            result = descCompare(fieldType, x.max, y.max);
+                            if (result == 0) {
+                                result = nullsLastCompare(x.nullCount, y.nullCount);
+                            }
                         }
                         return result;
                     };
-        } else if (DESCENDING.equals(direction)) {
-            comparator =
-                    (x, y) -> {
-                        Stats left = x.getKey();
-                        Stats right = y.getKey();
-                        int result = desc(field, left.max, right.max);
-                        if (result == 0) {
-                            result = nullsLast(left.nullCount, right.nullCount);
-                        }
-                        return result;
-                    };
-        } else {
-            return pairs.stream().map(Pair::getValue).collect(Collectors.toList());
         }
-
-        return pairs.stream()
+        return splits.stream()
                 .sorted(comparator)
-                .map(Pair::getValue)
+                .map(RichSplit::split)
                 .limit(limit)
                 .collect(Collectors.toList());
     }
 
-    private int nullsFirst(Long left, Long right) {
+    private int nullsFirstCompare(Long left, Long right) {
         if (left == null) {
             return -1;
         } else if (right == null) {
@@ -217,7 +146,7 @@ public class TopNDataSplitEvaluator {
         }
     }
 
-    private int nullsLast(Long left, Long right) {
+    private int nullsLastCompare(Long left, Long right) {
         if (left == null) {
             return -1;
         } else if (right == null) {
@@ -227,23 +156,23 @@ public class TopNDataSplitEvaluator {
         }
     }
 
-    private int asc(FieldRef field, Object left, Object right) {
+    private int ascCompare(DataType type, Object left, Object right) {
         if (left == null) {
             return -1;
         } else if (right == null) {
             return 1;
         } else {
-            return CompareUtils.compareLiteral(field.type(), left, right);
+            return CompareUtils.compareLiteral(type, left, right);
         }
     }
 
-    private int desc(FieldRef field, Object left, Object right) {
+    private int descCompare(DataType type, Object left, Object right) {
         if (left == null) {
             return -1;
         } else if (right == null) {
             return 1;
         } else {
-            return -CompareUtils.compareLiteral(field.type(), left, right);
+            return -CompareUtils.compareLiteral(type, left, right);
         }
     }
 
@@ -252,16 +181,23 @@ public class TopNDataSplitEvaluator {
                 id, key -> key == schema.id() ? schema : schemaManager.schema(id));
     }
 
-    /** The DataSplit's stats. */
-    private static class Stats {
-        Object min;
-        Object max;
-        Long nullCount;
+    /** DataSplit with stats. */
+    private static class RichSplit {
 
-        public Stats(Object min, Object max, Long nullCount) {
+        private final DataSplit split;
+        private final Object min;
+        private final Object max;
+        private final Long nullCount;
+
+        private RichSplit(DataSplit split, Object min, Object max, Long nullCount) {
+            this.split = split;
             this.min = min;
             this.max = max;
             this.nullCount = nullCount;
+        }
+
+        private DataSplit split() {
+            return split;
         }
     }
 }
