@@ -66,6 +66,17 @@ public class Levels {
                                 // possible that multiple files have the same maxSequenceNumber. In
                                 // this case we have to compare their file names so that files with
                                 // same maxSequenceNumber won't be "de-duplicated" by the tree set.
+                                int minSeqCompare =
+                                        Long.compare(a.minSequenceNumber(), b.minSequenceNumber());
+                                if (minSeqCompare != 0) {
+                                    return minSeqCompare;
+                                }
+                                // If minSequenceNumber is also the same, use creation time
+                                int timeCompare = a.creationTime().compareTo(b.creationTime());
+                                if (timeCompare != 0) {
+                                    return timeCompare;
+                                }
+                                // Final fallback: filename (to ensure uniqueness in TreeSet)
                                 return a.fileName().compareTo(b.fileName());
                             }
                         });
