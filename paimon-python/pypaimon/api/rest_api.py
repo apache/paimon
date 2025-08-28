@@ -118,7 +118,7 @@ class RESTApi:
 
         return results
 
-    def get_options(self) -> dict[str, str]:
+    def get_options(self):
         return self.options
 
     def list_databases(self) -> List[str]:

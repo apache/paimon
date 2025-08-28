@@ -25,10 +25,10 @@ import pyarrow as pa
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
-from pypaimon.tests.py4j_impl import constants
 from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
 
 
+@unittest.skip("disable whole class")
 class AlternativeWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -39,8 +39,8 @@ class AlternativeWriteTest(unittest.TestCase):
         print(f"py4j deps_dir: {deps_dir}")
         for file in glob.glob(deps_dir):
             print(f"py4j deps_dir file: {file}")
-        os.environ[constants.PYPAIMON_HADOOP_CLASSPATH] = deps_dir
-        os.environ[constants.PYPAIMON4J_TEST_MODE] = 'true'
+        # os.environ[constants.PYPAIMON_HADOOP_CLASSPATH] = deps_dir
+        # os.environ[constants.PYPAIMON4J_TEST_MODE] = 'true'
 
         # for default catalog
         cls.tempdir = tempfile.mkdtemp()

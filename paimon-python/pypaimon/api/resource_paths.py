@@ -31,8 +31,7 @@ class ResourcePaths:
         self.base_path = f"/{self.V1}/{prefix}".rstrip("/")
 
     @classmethod
-    def for_catalog_properties(
-            cls, options: dict[str, str]) -> "ResourcePaths":
+    def for_catalog_properties(cls, options) -> "ResourcePaths":
         prefix = options.get(CatalogOptions.PREFIX, "")
         return cls(prefix)
 

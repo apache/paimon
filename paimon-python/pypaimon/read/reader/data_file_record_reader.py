@@ -148,8 +148,7 @@ class DataFileBatchReader(RecordBatchReader):
         filtered_batch = batch.take(pa.array(filtered_rows))
         return filtered_batch
 
-    def _adjust_predicate_for_field_mapping(self, predicate: Predicate,
-                                            field_name_mapping: dict, actual_field_names: list):
+    def _adjust_predicate_for_field_mapping(self, predicate: Predicate, field_name_mapping, actual_field_names):
         """Adjust predicate field indices to match actual field names in the batch."""
         if predicate is None:
             return None
