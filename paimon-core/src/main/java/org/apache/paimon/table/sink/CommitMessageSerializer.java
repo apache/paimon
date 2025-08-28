@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
 import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMeta12LegacySerializer;
+import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -50,11 +51,12 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 8;
+    private static final int CURRENT_VERSION = 9;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
+    private DataFileMetaFirstRowIdLegacySerializer dataFileMetaFirstRowIdLegacySerializer;
     private DataFileMeta12LegacySerializer dataFileMeta12LegacySerializer;
     private DataFileMeta10LegacySerializer dataFileMeta10LegacySerializer;
     private DataFileMeta09Serializer dataFile09Serializer;
@@ -146,8 +148,15 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 8) {
+
+        if (version == 9) {
             return () -> dataFileSerializer.deserializeList(view);
+        } else if (version == 8) {
+            if (dataFileMetaFirstRowIdLegacySerializer == null) {
+                dataFileMetaFirstRowIdLegacySerializer =
+                        new DataFileMetaFirstRowIdLegacySerializer();
+            }
+            return () -> dataFileMetaFirstRowIdLegacySerializer.deserializeList(view);
         } else if (version == 6 || version == 7) {
             if (dataFileMeta12LegacySerializer == null) {
                 dataFileMeta12LegacySerializer = new DataFileMeta12LegacySerializer();

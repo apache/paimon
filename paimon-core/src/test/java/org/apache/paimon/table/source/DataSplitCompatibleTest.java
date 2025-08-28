@@ -59,7 +59,7 @@ import static org.apache.paimon.data.BinaryRow.singleColumn;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DataSplit}. */
-public class SplitTest {
+public class DataSplitCompatibleTest {
 
     @Test
     public void testSplitMergedRowCount() {
@@ -273,7 +273,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v1"),
                         true);
@@ -338,7 +338,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v2"),
                         true);
@@ -407,7 +407,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v3"),
                         true);
@@ -476,7 +476,7 @@ public class SplitTest {
 
         byte[] v4Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v4"),
                         true);
@@ -545,7 +545,7 @@ public class SplitTest {
 
         byte[] v5Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v5"),
                         true);
@@ -615,7 +615,7 @@ public class SplitTest {
 
         byte[] v6Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v6"),
                         true);
@@ -627,6 +627,76 @@ public class SplitTest {
 
     @Test
     public void testSerializerCompatibleV7() throws Exception {
+        SimpleStats keyStats =
+                new SimpleStats(
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        fromLongArray(new Long[] {0L}));
+        SimpleStats valueStats =
+                new SimpleStats(
+                        singleColumn("min_value"),
+                        singleColumn("max_value"),
+                        fromLongArray(new Long[] {0L}));
+
+        DataFileMeta dataFile =
+                DataFileMeta.create(
+                        "my_file",
+                        1024 * 1024,
+                        1024,
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        keyStats,
+                        valueStats,
+                        15,
+                        200,
+                        5,
+                        3,
+                        Arrays.asList("extra1", "extra2"),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        11L,
+                        new byte[] {1, 2, 4},
+                        FileSource.COMPACT,
+                        Arrays.asList("field1", "field2", "field3"),
+                        "hdfs:///path/to/warehouse",
+                        12L,
+                        null);
+        List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
+
+        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
+        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
+        binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
+        binaryRowWriter.complete();
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(18)
+                        .withPartition(partition)
+                        .withBucket(20)
+                        .withTotalBuckets(32)
+                        .withDataFiles(dataFiles)
+                        .withDataDeletionFiles(deletionFiles)
+                        .withBucketPath("my path")
+                        .build();
+
+        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+
+        byte[] v6Bytes =
+                IOUtils.readFully(
+                        DataSplitCompatibleTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/datasplit-v7"),
+                        true);
+
+        DataSplit actual =
+                InstantiationUtil.deserializeObject(v6Bytes, DataSplit.class.getClassLoader());
+        assertThat(actual).isEqualTo(split);
+    }
+
+    @Test
+    public void testSerializerCompatibleV8() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -681,13 +751,13 @@ public class SplitTest {
                         .withBucketPath("my path")
                         .build();
 
-        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+        assertThat(InstantiationUtil.clone(InstantiationUtil.clone(split))).isEqualTo(split);
 
         byte[] v6Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
-                                .getResourceAsStream("compatibility/datasplit-v7"),
+                                .getResourceAsStream("compatibility/datasplit-v8"),
                         true);
 
         DataSplit actual =
