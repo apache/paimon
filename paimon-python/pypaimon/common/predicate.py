@@ -113,9 +113,10 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.starts_with(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always fails
-                # This will be handled by Python filtering
-                return ~pyarrow_dataset.field(self.field).is_valid()
+                # Fallback for PyArrow 5.0.0 - return a condition that always passes
+                # This allows all records through at Arrow level, Python filtering will handle the actual filtering
+                field_ref = pyarrow_dataset.field(self.field)
+                return field_ref.is_valid() | field_ref.is_null()
         elif self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow 5.0.0 compatibility
@@ -123,9 +124,9 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.ends_with(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always fails
-                # This will be handled by Python filtering
-                return ~pyarrow_dataset.field(self.field).is_valid()
+                # Fallback for PyArrow 5.0.0 - return a condition that always passes
+                field_ref = pyarrow_dataset.field(self.field)
+                return field_ref.is_valid() | field_ref.is_null()
         elif self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow 5.0.0 compatibility
@@ -133,9 +134,9 @@ class Predicate:
                 field_ref = pyarrow_dataset.field(self.field)
                 return pyarrow_compute.match_substring(field_ref.cast(pyarrow.string()), pattern)
             except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always fails
-                # This will be handled by Python filtering
-                return ~pyarrow_dataset.field(self.field).is_valid()
+                # Fallback for PyArrow 5.0.0 - return a condition that always passes
+                field_ref = pyarrow_dataset.field(self.field)
+                return field_ref.is_valid() | field_ref.is_null()
         elif self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])

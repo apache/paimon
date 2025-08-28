@@ -116,9 +116,11 @@ class DataFileBatchReader(RecordBatchReader):
         pydict = batch.to_pydict()
         filtered_rows = []
 
+        actual_field_names = batch.schema.names
+
         for i in range(batch.num_rows):
-            row_data = tuple(pydict[field_name][i] for field_name in field_names)
-            row = OffsetRow(row_data, 0, len(field_names))
+            row_data = tuple(pydict[field_name][i] for field_name in actual_field_names)
+            row = OffsetRow(row_data, 0, len(actual_field_names))
 
             if self.predicate.test(row):
                 filtered_rows.append(i)
