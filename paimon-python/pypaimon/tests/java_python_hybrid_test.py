@@ -33,9 +33,7 @@ class AlternativeWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # for py4j env
-        this_dir = os.path.abspath(os.path.dirname(__file__))
-        project_dir = os.path.dirname(this_dir)
-        deps_dir = os.path.join(project_dir, "tests/py4j_impl/test_deps/*")
+        deps_dir = "/tmp/paimon-python-old/dev/test_deps/*"
         print(f"py4j deps_dir: {deps_dir}")
         for file in glob.glob(deps_dir):
             print(f"py4j deps_dir file: {file}")
