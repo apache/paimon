@@ -15,8 +15,9 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from pypaimon.common.dataclasses import dataclass
 from typing import Dict, TypeVar
+
+from pypaimon.common.dataclasses import dataclass
 
 T = TypeVar("T")
 

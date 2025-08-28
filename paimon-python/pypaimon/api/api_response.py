@@ -17,9 +17,9 @@ limitations under the License.
 """
 
 from abc import ABC, abstractmethod
-from pypaimon.common.dataclasses import dataclass
 from typing import Dict, Generic, List, Optional
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.common.json_util import T, json_field
 from pypaimon.schema.schema import Schema
 

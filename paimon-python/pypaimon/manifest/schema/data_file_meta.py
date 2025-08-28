@@ -16,11 +16,11 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.common.dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
                                                    SimpleStats)
 from pypaimon.table.row.binary_row import BinaryRow

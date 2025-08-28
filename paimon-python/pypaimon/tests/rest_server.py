@@ -21,7 +21,6 @@ import re
 import threading
 import time
 import uuid
-from pypaimon.common.dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -40,6 +39,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableNoPermissionException,
                                                 TableNotExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.schema import Schema

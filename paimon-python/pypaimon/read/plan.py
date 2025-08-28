@@ -16,9 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.common.dataclasses import dataclass
 from typing import List
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.read.split import Split
 
 

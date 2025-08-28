@@ -19,7 +19,6 @@ import datetime
 import importlib
 import time
 from abc import ABC
-from pypaimon.common.dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
@@ -32,6 +31,7 @@ from readerwriterlock import rwlock
 from pypaimon.api.api_response import GetTableTokenResponse, GetTableResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.common.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema

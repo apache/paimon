@@ -16,9 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.common.dataclasses import dataclass
 from typing import List, Tuple
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
 

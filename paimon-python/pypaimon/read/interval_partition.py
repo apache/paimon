@@ -17,10 +17,10 @@
 ################################################################################
 
 import heapq
-from pypaimon.common.dataclasses import dataclass
 from functools import cmp_to_key
 from typing import Callable, List
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.binary_row import BinaryRow
 

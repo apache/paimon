@@ -17,7 +17,6 @@
 ################################################################################
 
 
-from pypaimon.common.dataclasses import dataclass
 from functools import reduce
 from typing import Any, List, Optional
 
@@ -25,6 +24,7 @@ import pyarrow
 from pyarrow import compute as pyarrow_compute
 from pyarrow import dataset as pyarrow_dataset
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.table.row.internal_row import InternalRow
 
 

@@ -18,11 +18,12 @@
 import re
 import threading
 from abc import ABC, abstractmethod
-from pypaimon.common.dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 import pyarrow
+
+from pypaimon.common.dataclasses import dataclass
 
 
 class AtomicInteger:

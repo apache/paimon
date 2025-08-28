@@ -16,9 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from pypaimon.common.dataclasses import dataclass
 from typing import Dict, Optional
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.common.json_util import json_field
 
 
