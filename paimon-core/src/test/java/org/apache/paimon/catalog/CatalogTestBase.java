@@ -594,7 +594,9 @@ public abstract class CatalogTestBase {
         schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
-        String[] formats = {"csv", "parquet"};
+        String[] formats = {
+            "csv", "parquet",
+        };
         for (String format : formats) {
             if (partitioned) {
                 schemaBuilder.partitionKeys("dt");
