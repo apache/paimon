@@ -50,6 +50,9 @@ class DataFileBatchReader(RecordBatchReader):
             return None
 
         if self.partition_info is None and self.index_mapping is None:
+            # Still need to apply Python-level filtering even when no partition/mapping is needed
+            if self.predicate is not None:
+                return self._filter_batch_python(record_batch, record_batch.schema.names)
             return record_batch
 
         inter_arrays = []
@@ -118,11 +121,25 @@ class DataFileBatchReader(RecordBatchReader):
 
         actual_field_names = batch.schema.names
 
+        # Create a mapping from original field names to actual field names (handles _KEY_ prefix)
+        field_name_mapping = {}
+        for actual_name in actual_field_names:
+            if actual_name.startswith("_KEY_"):
+                original_name = actual_name[5:]  # Remove "_KEY_" prefix
+                field_name_mapping[original_name] = actual_name
+            else:
+                field_name_mapping[actual_name] = actual_name
+
+        # Create a modified predicate with corrected field indices if needed
+        modified_predicate = self._adjust_predicate_for_field_mapping(
+            self.predicate, field_name_mapping, actual_field_names
+        )
+
         for i in range(batch.num_rows):
             row_data = tuple(pydict[field_name][i] for field_name in actual_field_names)
             row = OffsetRow(row_data, 0, len(actual_field_names))
 
-            if self.predicate and self.predicate.test(row):
+            if modified_predicate and modified_predicate.test(row):
                 filtered_rows.append(i)
 
         if not filtered_rows:
@@ -130,6 +147,57 @@ class DataFileBatchReader(RecordBatchReader):
 
         filtered_batch = batch.take(pa.array(filtered_rows))
         return filtered_batch
+
+    def _adjust_predicate_for_field_mapping(self, predicate: Predicate,
+                                            field_name_mapping: dict, actual_field_names: list):
+        """Adjust predicate field indices to match actual field names in the batch."""
+        if predicate is None:
+            return None
+
+        if predicate.method in ['and', 'or']:
+            # Recursively adjust compound predicates
+            adjusted_literals = []
+            for literal_predicate in predicate.literals:
+                adjusted = self._adjust_predicate_for_field_mapping(
+                    literal_predicate, field_name_mapping, actual_field_names
+                )
+                if adjusted is not None:
+                    adjusted_literals.append(adjusted)
+
+            if not adjusted_literals:
+                return None
+
+            return Predicate(
+                method=predicate.method,
+                index=predicate.index,
+                field=predicate.field,
+                literals=adjusted_literals
+            )
+        else:
+            # Handle simple predicates
+            if predicate.field is None:
+                return predicate
+
+            # Find the actual field name
+            actual_field_name = field_name_mapping.get(predicate.field)
+            if actual_field_name is None:
+                # Field not found, skip this predicate
+                return None
+
+            # Find the new index in actual_field_names
+            try:
+                new_index = actual_field_names.index(actual_field_name)
+            except ValueError:
+                # Field not found in actual names, skip this predicate
+                return None
+
+            # Create a new predicate with the adjusted index
+            return Predicate(
+                method=predicate.method,
+                index=new_index,
+                field=predicate.field,  # Keep original field name for reference
+                literals=predicate.literals
+            )
 
     def close(self) -> None:
         self.format_reader.close()
