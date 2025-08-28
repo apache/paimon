@@ -26,16 +26,9 @@ import pyarrow as pa
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 from pypaimon.tests.py4j_impl import constants
-try:
-    from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
-    PY4J_AVAILABLE = True
-except ImportError:
-    # py4j is not available, skip these tests
-    PY4J_AVAILABLE = False
-    CatalogPy4j = None
+from pypaimon.tests.py4j_impl.java_implementation import CatalogPy4j
 
 
-@unittest.skipUnless(PY4J_AVAILABLE, "py4j not available")
 class AlternativeWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -56,10 +49,7 @@ class AlternativeWriteTest(unittest.TestCase):
             'warehouse': cls.warehouse
         }
         cls.py_catalog = CatalogFactory.create(cls.option)
-        if PY4J_AVAILABLE and CatalogPy4j is not None:
-            cls.j_catalog = CatalogPy4j.create(cls.option)
-        else:
-            cls.j_catalog = None
+        cls.j_catalog = CatalogPy4j.create(cls.option)
 
         cls.pa_schema = pa.schema([
             pa.field('user_id', pa.int32(), nullable=False),
@@ -80,9 +70,6 @@ class AlternativeWriteTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def testAlternativeWrite(self):
-        if not PY4J_AVAILABLE or self.j_catalog is None:
-            self.skipTest("py4j not available or j_catalog is None")
-
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
