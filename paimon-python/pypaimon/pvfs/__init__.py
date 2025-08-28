@@ -430,12 +430,25 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
                 fs = self._get_filesystem(pvfs_identifier, storage_type)
+                # Build kwargs compatible with older fsspec (Py3.6) backends.
+                import inspect
+                open_kwargs = {}
+                if block_size is not None:
+                    open_kwargs["block_size"] = block_size
+                # Only pass args the backend actually supports
+                try:
+                    params = inspect.signature(fs.open).parameters
+                except (TypeError, ValueError):  # very old implementations
+                    params = {}
+                if "cache_options" in params and cache_options is not None:
+                    open_kwargs["cache_options"] = cache_options
+                if "compression" in params and compression is not None:
+                    open_kwargs["compression"] = compression
+
                 return fs.open(
                     self._strip_storage_protocol(storage_type, actual_path),
-                    mode,
-                    block_size,
-                    cache_options,
-                    compression,
+                    mode=mode,
+                    **open_kwargs,
                     **kwargs
                 )
 
