@@ -28,6 +28,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.csv.CsvFileFormatFactory;
 import org.apache.paimon.format.parquet.ParquetFileFormatFactory;
@@ -35,6 +36,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -589,11 +591,13 @@ public abstract class CatalogTestBase {
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
         int partitionValue = 10;
+        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
+        schemaBuilder.option("file.compression", compressionType.value());
         String[] formats = {
             "csv", "parquet",
         };
@@ -620,19 +624,46 @@ public abstract class CatalogTestBase {
             Map<String, String> partitionSpec = null;
             if (partitioned) {
                 Path partitionPath =
-                        new Path(
-                                String.format(
-                                        "%s/%s/%s",
-                                        table.location(), "dt=" + partitionValue, "data"));
+                        new Path(String.format("%s/%s", table.location(), "dt=" + partitionValue));
+                DataFilePathFactory dataFilePathFactory =
+                        new DataFilePathFactory(
+                                partitionPath,
+                                format,
+                                "data",
+                                "change",
+                                true,
+                                compressionType.value(),
+                                null);
                 Path diffPartitionPath =
-                        new Path(String.format("%s/%s/%s", table.location(), "dt=" + 11, "data"));
-                write(factory, partitionPath, datas);
-                write(factory, diffPartitionPath, dataWithDiffPartition);
+                        new Path(String.format("%s/%s", table.location(), "dt=" + 11));
+                DataFilePathFactory diffPartitionPathFactory =
+                        new DataFilePathFactory(
+                                diffPartitionPath,
+                                format,
+                                "data",
+                                "change",
+                                true,
+                                compressionType.value(),
+                                null);
+                write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+                write(
+                        factory,
+                        diffPartitionPathFactory.newPath(),
+                        compressionType.value(),
+                        dataWithDiffPartition);
                 partitionSpec = new HashMap<>();
                 partitionSpec.put("dt", "" + partitionValue);
             } else {
-                Path filePath = new Path(table.location(), "data");
-                write(factory, filePath, datas);
+                DataFilePathFactory dataFilePathFactory =
+                        new DataFilePathFactory(
+                                new Path(table.location()),
+                                format,
+                                "data",
+                                "change",
+                                true,
+                                compressionType.value(),
+                                null);
+                write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
             List<InternalRow> readData = read(table, null, partitionSpec);
 
@@ -652,15 +683,16 @@ public abstract class CatalogTestBase {
         }
     }
 
-    protected void write(FormatWriterFactory factory, Path file, InternalRow... rows)
+    protected void write(
+            FormatWriterFactory factory, Path file, String compression, InternalRow... rows)
             throws IOException {
         FormatWriter writer;
         PositionOutputStream out = null;
         if (factory instanceof SupportsDirectWrite) {
-            writer = ((SupportsDirectWrite) factory).create(fileIO, file, "gzip");
+            writer = ((SupportsDirectWrite) factory).create(fileIO, file, compression);
         } else {
             out = fileIO.newOutputStream(file, true);
-            writer = factory.create(out, "gzip");
+            writer = factory.create(out, compression);
         }
         for (InternalRow row : rows) {
             writer.addElement(row);

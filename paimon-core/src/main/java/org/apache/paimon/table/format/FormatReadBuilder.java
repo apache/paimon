@@ -169,7 +169,9 @@ public class FormatReadBuilder implements ReadBuilder {
 
         // Create FormatReaderFactory directly
         FormatReaderFactory readerFactory =
-                formatDiscover.discover(formatIdentifier).createReaderFactory(readType(), filters);
+                formatDiscover
+                        .discover(formatIdentifier)
+                        .createReaderFactory(table.rowType(), readType(), filters);
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), table.rowType().getFields(), table.partitionType());
