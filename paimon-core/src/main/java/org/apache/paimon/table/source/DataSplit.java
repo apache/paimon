@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
 import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMeta12LegacySerializer;
+import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
@@ -452,7 +453,11 @@ public class DataSplit implements Split {
         } else if (version == 5 || version == 6) {
             DataFileMeta12LegacySerializer serializer = new DataFileMeta12LegacySerializer();
             return serializer::deserialize;
-        } else if (version >= 7) {
+        } else if (version == 7) {
+            DataFileMetaFirstRowIdLegacySerializer serializer =
+                    new DataFileMetaFirstRowIdLegacySerializer();
+            return serializer::deserialize;
+        } else if (version == 8) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
