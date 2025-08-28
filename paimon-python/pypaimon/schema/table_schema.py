@@ -18,7 +18,7 @@ limitations under the License.
 
 import json
 import time
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 

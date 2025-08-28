@@ -16,7 +16,7 @@
 #  under the License.
 
 import json
-from dataclasses import field, fields, is_dataclass
+from pypaimon.common.dataclasses import field, fields, is_dataclass
 from typing import Any, Dict, Type, TypeVar, Union
 
 # Python 3.6 compatibility for get_args and get_origin

@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional

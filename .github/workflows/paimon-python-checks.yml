@@ -99,8 +99,7 @@ jobs:
             "polars==0.9.12" \
             "duckdb==0.8.1" \
             "py4j==0.10.9.9" \
-            "requests<3" \
-            "dataclasses==0.8"
+            "requests<3"
 
       - name: Run lint-python.sh
         run: |

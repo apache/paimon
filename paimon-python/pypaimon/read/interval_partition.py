@@ -17,7 +17,7 @@
 ################################################################################
 
 import heapq
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from functools import cmp_to_key
 from typing import Callable, List
 

@@ -17,7 +17,7 @@
 ################################################################################
 
 
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from functools import reduce
 from typing import Any, List, Optional
 

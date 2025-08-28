@@ -160,12 +160,31 @@ function flake8_check() {
     fi
 }
 
+# Function to check if required dependencies are available
+function check_pytest_dependencies() {
+    python -c "import pyarrow" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+    return 0
+}
+
 # Pytest check
 function pytest_check() {
 
     print_function "STAGE" "pytest checks"
     if [ ! -f "$PYTEST_PATH" ]; then
         echo "For some unknown reasons, the pytest package is not complete."
+        exit 1
+    fi
+
+    # Check if required dependencies are available
+    if ! check_pytest_dependencies; then
+        echo "WARNING: Required dependencies (pyarrow, etc.) are not installed."
+        echo "Skipping pytest checks. To install dependencies, run: pip install -e ."
+        echo "Or run only flake8 checks with: ./dev/lint-python.sh -i flake8"
+        print_function "STAGE" "pytest checks... [SKIPPED]"
+        return 0
     fi
 
     # the return value of a pipeline is the status of the last command to exit

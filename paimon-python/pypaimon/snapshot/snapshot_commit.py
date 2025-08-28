@@ -18,7 +18,7 @@
 
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from typing import Dict, List
 
 from pypaimon.common.json_util import json_field

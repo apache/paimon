@@ -16,7 +16,7 @@
 #  under the License.
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from urllib.parse import urljoin

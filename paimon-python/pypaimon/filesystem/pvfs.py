@@ -19,7 +19,7 @@ import datetime
 import importlib
 import time
 from abc import ABC
-from dataclasses import dataclass
+from pypaimon.common.dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
