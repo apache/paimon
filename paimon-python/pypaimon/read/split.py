@@ -16,9 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from  pypaimon.common.dataclasses import dataclass
 from typing import List
 
+from pypaimon.common.dataclasses import dataclass
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.binary_row import BinaryRow
 
