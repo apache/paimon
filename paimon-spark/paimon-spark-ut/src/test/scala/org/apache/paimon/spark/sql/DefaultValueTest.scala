@@ -20,35 +20,32 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Row
-
 class DefaultValueTest extends PaimonSparkTestBase {
 
-  test("Default Value: current_timestamp and current_date") {
+  test("Default Value: unsupported default value") {
     withTimeZone("Asia/Shanghai") {
       withTable("t") {
-        sql("""
-              |CREATE TABLE T (
-              |  a INT,
-              |  b TIMESTAMP DEFAULT current_timestamp(),
-              |  c TIMESTAMP_NTZ DEFAULT current_timestamp,
-              |  d DATE DEFAULT current_date()
-              |)
-              |""".stripMargin)
-        sql("INSERT INTO T (a) VALUES (1), (2)")
+        assert(
+          intercept[Throwable] {
+            sql("""
+                  |CREATE TABLE t (
+                  |  a INT,
+                  |  b TIMESTAMP DEFAULT current_timestamp(),
+                  |  c TIMESTAMP_NTZ DEFAULT current_timestamp,
+                  |  d DATE DEFAULT current_date()
+                  |)
+                  |""".stripMargin)
+          }.getMessage
+            .contains("Unsupported default value `current_timestamp()`"))
 
-        checkAnswer(
-          sql("SELECT a FROM T WHERE b >= (current_timestamp() - INTERVAL '1' MINUTE)"),
-          Seq(Row(1), Row(2))
-        )
-        checkAnswer(
-          sql("SELECT a FROM T WHERE c >= (current_timestamp() - INTERVAL '1' MINUTE)"),
-          Seq(Row(1), Row(2))
-        )
-        checkAnswer(
-          sql("SELECT a FROM T WHERE d >= (current_date() - INTERVAL '1' DAY)"),
-          Seq(Row(1), Row(2))
-        )
+        sql("CREATE TABLE t (a TIMESTAMP DEFAULT '2025-01-01 00:00:00')")
+        assert(
+          intercept[Throwable] {
+            sql("""
+                  |ALTER TABLE t ALTER COLUMN a SET DEFAULT current_timestamp()
+                  |""".stripMargin)
+          }.getMessage
+            .contains("Unsupported default value `current_timestamp()`"))
       }
     }
   }

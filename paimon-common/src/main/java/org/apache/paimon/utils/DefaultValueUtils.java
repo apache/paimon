@@ -21,34 +21,15 @@ package org.apache.paimon.utils;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DateType;
-import org.apache.paimon.types.LocalZonedTimestampType;
-import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import javax.annotation.Nullable;
-
-import java.time.LocalDate;
 
 /** Utils for default value. */
 public class DefaultValueUtils {
 
     public static Object convertDefaultValue(DataType dataType, String defaultValueStr) {
-        String lowerCaseDefaultValueStr = defaultValueStr.toLowerCase();
-        if ((dataType instanceof TimestampType || dataType instanceof LocalZonedTimestampType)
-                && (lowerCaseDefaultValueStr.equals("current_timestamp()")
-                        || lowerCaseDefaultValueStr.equals("current_timestamp"))) {
-            return Timestamp.now();
-        }
-
-        if ((dataType instanceof DateType)
-                && (lowerCaseDefaultValueStr.equals("current_date()")
-                        || lowerCaseDefaultValueStr.equals("current_date"))) {
-            return (int) (LocalDate.now().toEpochDay());
-        }
-
         @SuppressWarnings("unchecked")
         CastExecutor<Object, Object> resolve =
                 (CastExecutor<Object, Object>)
