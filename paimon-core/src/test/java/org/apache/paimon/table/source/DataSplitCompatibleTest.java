@@ -59,7 +59,7 @@ import static org.apache.paimon.data.BinaryRow.singleColumn;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DataSplit}. */
-public class SplitTest {
+public class DataSplitCompatibleTest {
 
     @Test
     public void testSplitMergedRowCount() {
@@ -273,7 +273,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v1"),
                         true);
@@ -338,7 +338,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v2"),
                         true);
@@ -407,7 +407,7 @@ public class SplitTest {
 
         byte[] v2Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v3"),
                         true);
@@ -476,7 +476,7 @@ public class SplitTest {
 
         byte[] v4Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v4"),
                         true);
@@ -545,7 +545,7 @@ public class SplitTest {
 
         byte[] v5Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v5"),
                         true);
@@ -615,7 +615,7 @@ public class SplitTest {
 
         byte[] v6Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v6"),
                         true);
@@ -685,7 +685,7 @@ public class SplitTest {
 
         byte[] v6Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v7"),
                         true);
@@ -709,7 +709,7 @@ public class SplitTest {
                         fromLongArray(new Long[] {0L}));
 
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -751,11 +751,11 @@ public class SplitTest {
                         .withBucketPath("my path")
                         .build();
 
-        assertThat(InstantiationUtil.clone(split)).isEqualTo(split);
+        assertThat(InstantiationUtil.clone(InstantiationUtil.clone(split))).isEqualTo(split);
 
         byte[] v6Bytes =
                 IOUtils.readFully(
-                        SplitTest.class
+                        DataSplitCompatibleTest.class
                                 .getClassLoader()
                                 .getResourceAsStream("compatibility/datasplit-v8"),
                         true);

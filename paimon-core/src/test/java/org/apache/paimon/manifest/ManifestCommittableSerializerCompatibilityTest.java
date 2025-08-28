@@ -141,7 +141,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         singleColumn("max_value"),
                         fromLongArray(new Long[] {0L}));
         DataFileMeta dataFile =
-                new DataFileMeta(
+                DataFileMeta.create(
                         "my_file",
                         1024 * 1024,
                         1024,
@@ -168,7 +168,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
         dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
         dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas);
+                new IndexFileMeta(
+                        "my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas, null);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
 
         CommitMessageImpl commitMessage =

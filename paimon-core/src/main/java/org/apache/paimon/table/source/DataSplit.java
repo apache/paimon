@@ -62,7 +62,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 7;
+    private static final int VERSION = 8;
 
     private long snapshotId = 0;
     private BinaryRow partition;
