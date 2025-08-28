@@ -97,18 +97,10 @@ jobs:
             "flake8==4.0.1" \
             "pytest==6.2.5" \
             "polars==0.9.12" \
+            "duckdb==0.8.1" \
             "py4j==0.10.9.9" \
             "requests<3" \
             "dataclasses==0.8"
-
-          # Polars is not really supported on Py3.6 — make it optional
-          if ! python -m pip install "polars==0.7.2" --only-binary=:all: ; then
-            echo "Polars is not available for Python 3.6; skipping."
-          fi
-
-          # These projects dropped Py3.6 support; attempt install, skip if fails
-          python -m pip install "duckdb==0.5.1" --only-binary=:all: || echo "DuckDB installation failed (expected on py3.6)."
-          python -m pip install "ray==1.13.0" || echo "Ray installation failed (expected on py3.6)."
 
       - name: Run lint-python.sh
         run: |
