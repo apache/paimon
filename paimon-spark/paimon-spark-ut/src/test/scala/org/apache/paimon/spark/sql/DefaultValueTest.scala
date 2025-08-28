@@ -38,7 +38,7 @@ class DefaultValueTest extends PaimonSparkTestBase {
           }.getMessage
             .contains("Unsupported default value `current_timestamp()`"))
 
-        sql("CREATE TABLE t (a TIMESTAMP DEFAULT '2025-01-01 00:00:00')")
+        sql("CREATE TABLE t (a INT DEFAULT 1)")
         assert(
           intercept[Throwable] {
             sql("""
