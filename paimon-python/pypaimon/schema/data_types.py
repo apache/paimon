@@ -439,6 +439,8 @@ class PyarrowFieldParser:
     def from_paimon_schema(data_fields: List[DataField]):
         pa_fields = []
         for field in data_fields:
+            if isinstance(field, dict):
+                field = DataField.from_dict(field)
             pa_fields.append(PyarrowFieldParser.from_paimon_field(field))
         return pyarrow.schema(pa_fields)
 
@@ -466,7 +468,13 @@ class PyarrowFieldParser:
         elif type_name.startswith('date'):
             type_name = 'DATE'
         elif type_name.startswith('timestamp'):
-            type_name = 'TIMESTAMP'
+            unit = pa_type.unit
+            if unit == 'us':
+                type_name = 'TIMESTAMP'
+            elif unit == 'ms':
+                type_name = 'TIMESTAMP'
+            else:
+                type_name = 'TIMESTAMP'
         elif type_name.startswith('decimal'):
             match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
             if match:
@@ -487,6 +495,7 @@ class PyarrowFieldParser:
             raise ValueError(f"Unknown type: {type_name}")
         return AtomicType(type_name, nullable)
 
+
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
         data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
@@ -499,6 +508,7 @@ class PyarrowFieldParser:
             description=description
         )
 
+
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
         fields = []
@@ -508,11 +518,12 @@ class PyarrowFieldParser:
             fields.append(data_field)
         return fields
 
+
     @staticmethod
     def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
-               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                    (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
                 return "int"
             else:
                 return "long"
@@ -553,6 +564,7 @@ class PyarrowFieldParser:
             return PyarrowFieldParser.to_avro_schema(field_type, name=f"{field_name}_record")
 
         raise ValueError(f"Unsupported pyarrow type for Avro conversion: {field_type}")
+
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],

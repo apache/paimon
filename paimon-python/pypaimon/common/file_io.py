@@ -291,7 +291,18 @@ class FileIO:
 
             with self.new_output_stream(path) as output_stream:
                 with pq.ParquetWriter(output_stream, data.schema, compression=compression, **kwargs) as pw:
-                    pw.write_batch(data)
+                    if hasattr(pw, 'write_batch'):
+                        if isinstance(data, pyarrow.Table):
+                            for batch in data.to_batches():
+                                pw.write_batch(batch)
+                        else:
+                            pw.write_batch(data)
+                    else:
+                        if isinstance(data, pyarrow.RecordBatch):
+                            table = pyarrow.Table.from_batches([data])
+                            pw.write_table(table)
+                        else:
+                            pw.write_table(data)
 
         except Exception as e:
             self.delete_quietly(path)

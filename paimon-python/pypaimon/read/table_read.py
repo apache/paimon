@@ -19,6 +19,7 @@ from typing import Iterator, List, Optional
 
 import pandas
 import pyarrow
+import pyarrow.ipc
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -27,7 +28,6 @@ from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
-
 
 class TableRead:
     """Implementation of TableRead for native Python reading."""
@@ -51,10 +51,10 @@ class TableRead:
 
         return _record_generator()
 
-    def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.RecordBatchReader:
+    def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.ipc.RecordBatchReader:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         batch_iterator = self._arrow_batch_generator(splits, schema)
-        return pyarrow.RecordBatchReader.from_batches(schema, batch_iterator)
+        return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
 
     def to_arrow(self, splits: List[Split]) -> Optional[pyarrow.Table]:
         batch_reader = self.to_arrow_batch_reader(splits)
@@ -120,7 +120,6 @@ class TableRead:
                 read_type=self.read_type,
                 split=split
             )
-
 
 def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
     columns_data = zip(*row_tuples)
