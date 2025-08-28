@@ -41,7 +41,8 @@ class FormatPyArrowReader(RecordBatchReader):
         if predicate is not None:
             try:
                 arrow_predicate = predicate.to_arrow()
-            except (TypeError, AttributeError):
+            except Exception:
+                # Log the exception for debugging
                 pass
 
         self.dataset = ds.dataset(file_path, format=file_format, filesystem=file_io.filesystem)

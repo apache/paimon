@@ -118,11 +118,34 @@ class DataFileBatchReader(RecordBatchReader):
 
         actual_field_names = batch.schema.names
 
-        for i in range(batch.num_rows):
-            row_data = tuple(pydict[field_name][i] for field_name in actual_field_names)
-            row = OffsetRow(row_data, 0, len(actual_field_names))
+        # Create field name to index mapping
+        field_name_to_index = {name: i for i, name in enumerate(actual_field_names)}
 
-            if self.predicate.test(row):
+        for i in range(batch.num_rows):
+            # Create row data with correct field mapping
+            row_data = []
+            for field_name in actual_field_names:
+                row_data.append(pydict[field_name][i])
+
+            row = OffsetRow(tuple(row_data), 0, len(actual_field_names))
+
+            # Update predicate field indices if needed
+            if self.predicate and self.predicate.field:
+                field_index = field_name_to_index.get(self.predicate.field)
+                if field_index is not None and self.predicate.index != field_index:
+                    # Create a copy of the predicate with correct index
+                    updated_predicate = Predicate(
+                        method=self.predicate.method,
+                        index=field_index,
+                        field=self.predicate.field,
+                        literals=self.predicate.literals
+                    )
+                    if updated_predicate.test(row):
+                        filtered_rows.append(i)
+                else:
+                    if self.predicate.test(row):
+                        filtered_rows.append(i)
+            elif self.predicate and self.predicate.test(row):
                 filtered_rows.append(i)
 
         if not filtered_rows:

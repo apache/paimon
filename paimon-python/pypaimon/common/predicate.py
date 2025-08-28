@@ -108,35 +108,41 @@ class Predicate:
             return ~pyarrow_dataset.field(self.field).isin(self.literals)
         elif self.method == 'startsWith':
             pattern = self.literals[0]
-            # For PyArrow 5.0.0 compatibility - try-catch approach
+            # For PyArrow compatibility - improved approach
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                return pyarrow_compute.starts_with(field_ref.cast(pyarrow.string()), pattern)
-            except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always passes
-                # This allows all records through at Arrow level, Python filtering will handle the actual filtering
-                field_ref = pyarrow_dataset.field(self.field)
-                return field_ref.is_valid() | field_ref.is_null()
+                # Ensure the field is cast to string type
+                string_field = field_ref.cast(pyarrow.string())
+                result = pyarrow_compute.starts_with(string_field, pattern)
+                return result
+            except Exception:
+                # Fallback to Python filtering - create a condition that allows all rows
+                # to be processed by Python filter later
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'endsWith':
             pattern = self.literals[0]
-            # For PyArrow 5.0.0 compatibility
+            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                return pyarrow_compute.ends_with(field_ref.cast(pyarrow.string()), pattern)
-            except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always passes
-                field_ref = pyarrow_dataset.field(self.field)
-                return field_ref.is_valid() | field_ref.is_null()
+                # Ensure the field is cast to string type
+                string_field = field_ref.cast(pyarrow.string())
+                result = pyarrow_compute.ends_with(string_field, pattern)
+                return result
+            except Exception:
+                # Fallback to Python filtering
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'contains':
             pattern = self.literals[0]
-            # For PyArrow 5.0.0 compatibility
+            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                return pyarrow_compute.match_substring(field_ref.cast(pyarrow.string()), pattern)
-            except (TypeError, AttributeError):
-                # Fallback for PyArrow 5.0.0 - return a condition that always passes
-                field_ref = pyarrow_dataset.field(self.field)
-                return field_ref.is_valid() | field_ref.is_null()
+                # Ensure the field is cast to string type
+                string_field = field_ref.cast(pyarrow.string())
+                result = pyarrow_compute.match_substring(string_field, pattern)
+                return result
+            except Exception:
+                # Fallback to Python filtering
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])
