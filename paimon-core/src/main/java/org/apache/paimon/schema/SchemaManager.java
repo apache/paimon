@@ -91,6 +91,7 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -559,13 +560,15 @@ public class SchemaManager implements Serializable {
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
-                        (field, depth) ->
-                                new DataField(
-                                        field.id(),
-                                        field.name(),
-                                        field.type(),
-                                        field.description(),
-                                        update.newDefaultValue()),
+                        (field, depth) -> {
+                            validateDefaultValue(field.type(), update.newDefaultValue());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    field.type(),
+                                    field.description(),
+                                    update.newDefaultValue());
+                        },
                         lazyIdentifier);
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());

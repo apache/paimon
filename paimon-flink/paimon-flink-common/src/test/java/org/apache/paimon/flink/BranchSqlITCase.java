@@ -53,6 +53,14 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testUnsupportedDefaultValue() {
+        sql("CREATE TABLE T (a INT, b INT)");
+        assertThatThrownBy(
+                        () -> sql("CALL sys.alter_column_default_value('default.T', 'b', 'ddd')"))
+                .hasMessageContaining("Unsupported default value `ddd` for type INT");
+    }
+
+    @Test
     public void testArrayDefaultValue() throws Exception {
         sql("CREATE TABLE T_ARRAY (id INT, tags ARRAY<STRING>, numbers ARRAY<INT>)");
         sql("CALL sys.alter_column_default_value('default.T_ARRAY', 'tags', '[tag1, tag2]')");
