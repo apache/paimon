@@ -24,9 +24,9 @@ from pypaimon.table.row.binary_row import BinaryRow
 
 @dataclass
 class SimpleStats:
-    min_value: BinaryRow
-    max_value: BinaryRow
-    null_count: Optional[List[int]]
+    min_values: BinaryRow
+    max_values: BinaryRow
+    null_counts: Optional[List[int]]
 
 
 SIMPLE_STATS_SCHEMA = {

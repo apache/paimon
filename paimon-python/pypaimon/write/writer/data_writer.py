@@ -19,7 +19,7 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -128,13 +128,13 @@ class DataWriter(ABC):
             for field in self.table.table_schema.fields
         }
         all_fields = self.table.table_schema.fields
-        min_value_stats = [column_stats[field.name]['min_value'] for field in all_fields]
-        max_value_stats = [column_stats[field.name]['max_value'] for field in all_fields]
-        value_null_counts = [column_stats[field.name]['null_count'] for field in all_fields]
+        min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
+        max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
+        value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
         key_fields = self.trimmed_primary_key_fields
-        min_key_stats = [column_stats[field.name]['min_value'] for field in key_fields]
-        max_key_stats = [column_stats[field.name]['max_value'] for field in key_fields]
-        key_null_counts = [column_stats[field.name]['null_count'] for field in key_fields]
+        min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
+        max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
+        key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
         if not all(count == 0 for count in key_null_counts):
             raise RuntimeError("Primary key should not be null")
 
@@ -203,21 +203,21 @@ class DataWriter(ABC):
         return best_split
 
     @staticmethod
-    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> dict:
+    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
         column_array = record_batch.column(column_name)
         if column_array.null_count == len(column_array):
             return {
-                "min_value": None,
-                "max_value": None,
-                "null_count": column_array.null_count,
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
             }
-        min_value = pc.min(column_array).as_py()
-        max_value = pc.max(column_array).as_py()
-        null_count = column_array.null_count
+        min_values = pc.min(column_array).as_py()
+        max_values = pc.max(column_array).as_py()
+        null_counts = column_array.null_count
         return {
-            "min_value": min_value,
-            "max_value": max_value,
-            "null_count": null_count,
+            "min_values": min_values,
+            "max_values": max_values,
+            "null_counts": null_counts,
         }
 
 

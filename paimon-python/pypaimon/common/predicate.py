@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -79,6 +79,107 @@ class Predicate:
         elif self.method == 'or':
             t = any(p.test(record) for p in self.literals)
             return t
+        else:
+            raise ValueError("Unsupported predicate method: {}".format(self.method))
+
+    def test_by_value(self, value: Any) -> bool:
+        if self.method == 'and':
+            return all(p.test_by_value(value) for p in self.literals)
+        if self.method == 'or':
+            t = any(p.test_by_value(value) for p in self.literals)
+            return t
+
+        if self.method == 'equal':
+            return value == self.literals[0]
+        if self.method == 'notEqual':
+            return value != self.literals[0]
+        if self.method == 'lessThan':
+            return value < self.literals[0]
+        if self.method == 'lessOrEqual':
+            return value <= self.literals[0]
+        if self.method == 'greaterThan':
+            return value > self.literals[0]
+        if self.method == 'greaterOrEqual':
+            return value >= self.literals[0]
+        if self.method == 'isNull':
+            return value is None
+        if self.method == 'isNotNull':
+            return value is not None
+        if self.method == 'startsWith':
+            if not isinstance(value, str):
+                return False
+            return value.startswith(self.literals[0])
+        if self.method == 'endsWith':
+            if not isinstance(value, str):
+                return False
+            return value.endswith(self.literals[0])
+        if self.method == 'contains':
+            if not isinstance(value, str):
+                return False
+            return self.literals[0] in value
+        if self.method == 'in':
+            return value in self.literals
+        if self.method == 'notIn':
+            return value not in self.literals
+        if self.method == 'between':
+            return self.literals[0] <= value <= self.literals[1]
+
+        raise ValueError("Unsupported predicate method: {}".format(self.method))
+
+    def test_by_stats(self, stat: Dict) -> bool:
+        if self.method == 'and':
+            return all(p.test_by_stats(stat) for p in self.literals)
+        if self.method == 'or':
+            t = any(p.test_by_stats(stat) for p in self.literals)
+            return t
+
+        null_count = stat["null_counts"][self.field]
+        row_count = stat["row_count"]
+
+        if self.method == 'isNull':
+            return null_count is not None and null_count > 0
+        if self.method == 'isNotNull':
+            return null_count is None or row_count is None or null_count < row_count
+
+        min_value = stat["min_values"][self.field]
+        max_value = stat["max_values"][self.field]
+
+        if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
+            return False
+
+        if self.method == 'equal':
+            return min_value <= self.literals[0] <= max_value
+        if self.method == 'notEqual':
+            return not (min_value == self.literals[0] == max_value)
+        if self.method == 'lessThan':
+            return self.literals[0] > min_value
+        if self.method == 'lessOrEqual':
+            return self.literals[0] >= min_value
+        if self.method == 'greaterThan':
+            return self.literals[0] < max_value
+        if self.method == 'greaterOrEqual':
+            return self.literals[0] <= max_value
+        if self.method == 'startsWith':
+            if not isinstance(min_value, str) or not isinstance(max_value, str):
+                raise RuntimeError("startsWith predicate on non-str field")
+            return ((min_value.startswith(self.literals[0]) or min_value < self.literals[0])
+                    and (max_value.startswith(self.literals[0]) or max_value > self.literals[0]))
+        if self.method == 'endsWith':
+            return True
+        if self.method == 'contains':
+            return True
+        if self.method == 'in':
+            for literal in self.literals:
+                if min_value <= literal <= max_value:
+                    return True
+            return False
+        if self.method == 'notIn':
+            for literal in self.literals:
+                if min_value == literal == max_value:
+                    return False
+            return True
+        if self.method == 'between':
+            return self.literals[0] <= max_value and self.literals[1] >= min_value
         else:
             raise ValueError("Unsupported predicate method: {}".format(self.method))
 

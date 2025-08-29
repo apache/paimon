@@ -58,15 +58,15 @@ class ManifestListManager:
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
             partition_stats = SimpleStats(
-                min_value=BinaryRowDeserializer.from_bytes(
+                min_values=BinaryRowDeserializer.from_bytes(
                     stats_dict['_MIN_VALUES'],
                     self.table.table_schema.get_partition_key_fields()
                 ),
-                max_value=BinaryRowDeserializer.from_bytes(
+                max_values=BinaryRowDeserializer.from_bytes(
                     stats_dict['_MAX_VALUES'],
                     self.table.table_schema.get_partition_key_fields()
                 ),
-                null_count=stats_dict['_NULL_COUNTS'],
+                null_counts=stats_dict['_NULL_COUNTS'],
             )
             manifest_file_meta = ManifestFileMeta(
                 file_name=record['_FILE_NAME'],
@@ -90,9 +90,9 @@ class ManifestListManager:
                 "_NUM_ADDED_FILES": meta.num_added_files,
                 "_NUM_DELETED_FILES": meta.num_deleted_files,
                 "_PARTITION_STATS": {
-                    "_MIN_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.min_value),
-                    "_MAX_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.max_value),
-                    "_NULL_COUNTS": meta.partition_stats.null_count,
+                    "_MIN_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.min_values),
+                    "_MAX_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.max_values),
+                    "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,
             }
