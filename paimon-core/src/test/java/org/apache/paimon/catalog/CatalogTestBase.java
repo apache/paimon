@@ -31,6 +31,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.csv.CsvFileFormatFactory;
+import org.apache.paimon.format.json.JsonFileFormatFactory;
 import org.apache.paimon.format.parquet.ParquetFileFormatFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -59,7 +60,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
@@ -594,13 +594,12 @@ public abstract class CatalogTestBase {
         HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
         schemaBuilder.option("file.compression", compressionType.value());
-        String[] formats = {
-            "csv", "parquet",
-        };
+        String[] formats = {"csv", "parquet", "json"};
         for (String format : formats) {
             if (partitioned) {
                 schemaBuilder.partitionKeys("dt");
@@ -611,10 +610,15 @@ public abstract class CatalogTestBase {
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int size = 5;
             InternalRow[] datas = new InternalRow[size];
+            InternalRow[] checkDatas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
-                datas[j] = GenericRow.of(random.nextInt(), partitionValue);
+                int f1 = random.nextInt();
+                int f2 = random.nextInt();
+                datas[j] = GenericRow.of(f1, f2, partitionValue);
+                checkDatas[j] = GenericRow.of(f2, partitionValue);
             }
-            InternalRow dataWithDiffPartition = GenericRow.of(random.nextInt(), 11);
+            InternalRow dataWithDiffPartition =
+                    GenericRow.of(random.nextInt(), random.nextInt(), 11);
             FormatWriterFactory factory =
                     (buildFileFormatFactory(format)
                                     .create(
@@ -665,9 +669,9 @@ public abstract class CatalogTestBase {
                                 null);
                 write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
-            List<InternalRow> readData = read(table, null, partitionSpec);
+            List<InternalRow> readData = read(table, new int[] {1, 2}, partitionSpec);
 
-            assertThat(readData).containsExactlyInAnyOrder(datas);
+            assertThat(readData).containsExactlyInAnyOrder(checkDatas);
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }
@@ -678,6 +682,8 @@ public abstract class CatalogTestBase {
                 return new CsvFileFormatFactory();
             case "parquet":
                 return new ParquetFileFormatFactory();
+            case "json":
+                return new JsonFileFormatFactory();
             default:
                 throw new IllegalArgumentException("Unsupported format: " + format);
         }
@@ -722,11 +728,7 @@ public abstract class CatalogTestBase {
         readBuilder.withPartitionFilter(partitionSpec);
         TableScan scan = readBuilder.newScan();
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(scan.plan())) {
-            InternalRowSerializer serializer =
-                    new InternalRowSerializer(
-                            projection == null
-                                    ? table.rowType()
-                                    : Projection.of(projection).project(table.rowType()));
+            InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
             reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
             return rows;

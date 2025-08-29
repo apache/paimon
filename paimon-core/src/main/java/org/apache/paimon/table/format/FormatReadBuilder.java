@@ -96,7 +96,7 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            RowType partitionType = readType().project(table.partitionKeys());
+            RowType partitionType = table.rowType().project(table.partitionKeys());
             PartitionPredicate partitionPredicate =
                     fromPredicate(
                             partitionType,
@@ -167,26 +167,27 @@ public class FormatReadBuilder implements ReadBuilder {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
 
-        // Create FormatReaderFactory directly
         FormatReaderFactory readerFactory =
                 formatDiscover
                         .discover(formatIdentifier)
                         .createReaderFactory(table.rowType(), readType(), filters);
+
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
-                        table.partitionKeys(), table.rowType().getFields(), table.partitionType());
+                        table.partitionKeys(), readType().getFields(), table.partitionType());
+
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readType(),
                         readerFactory,
                         formatReaderContext,
-                        null, // indexMapping
-                        null, // castMapping
+                        null,
+                        null,
                         PartitionUtils.create(partitionMapping, dataSplit.partition()),
                         false,
                         null,
                         0,
-                        Collections.emptyMap()); // systemFields
+                        Collections.emptyMap());
         return fileRecordReader;
     }
 
