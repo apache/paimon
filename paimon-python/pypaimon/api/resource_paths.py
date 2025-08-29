@@ -15,7 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.common.config import CatalogOptions

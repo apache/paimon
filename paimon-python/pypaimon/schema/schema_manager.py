@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON

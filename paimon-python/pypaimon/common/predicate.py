@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -124,9 +124,9 @@ class Predicate:
         if self.method == 'between':
             return self.literals[0] <= value <= self.literals[1]
 
-        raise ValueError(f"Unsupported predicate method: {self.method}")
+        raise ValueError("Unsupported predicate method: {}".format(self.method))
 
-    def test_by_stats(self, stat: dict) -> bool:
+    def test_by_stats(self, stat: Dict) -> bool:
         if self.method == 'and':
             return all(p.test_by_stats(stat) for p in self.literals)
         if self.method == 'or':
@@ -181,7 +181,7 @@ class Predicate:
         if self.method == 'between':
             return self.literals[0] <= max_value and self.literals[1] >= min_value
         else:
-            raise ValueError(f"Unsupported predicate method: {self.method}")
+            raise ValueError("Unsupported predicate method: {}".format(self.method))
 
     def to_arrow(self) -> pyarrow_compute.Expression | bool:
         if self.method == 'equal':

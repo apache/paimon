@@ -19,7 +19,7 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -203,7 +203,7 @@ class DataWriter(ABC):
         return best_split
 
     @staticmethod
-    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> dict:
+    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
         column_array = record_batch.column(column_name)
         if column_array.null_count == len(column_array):
             return {

@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Set
+from typing import Dict, List, Set
 
 from pypaimon.common.predicate import Predicate
 
@@ -50,7 +50,7 @@ def _get_all_fields(predicate: 'Predicate') -> Set[str]:
     return involved_fields
 
 
-def extract_predicate_to_dict(result: dict, input_predicate: 'Predicate', keys: List[str]):
+def extract_predicate_to_dict(result: Dict, input_predicate: 'Predicate', keys: List[str]):
     if not input_predicate or not keys:
         return
 
