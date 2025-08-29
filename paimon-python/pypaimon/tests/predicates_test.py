@@ -150,7 +150,7 @@ class PredicateTest(unittest.TestCase):
             '_smallint': pd.Series([10, 20], dtype='int16'),
             '_int': pd.Series([100, 200], dtype='int32'),
             '_bigint': pd.Series([1000, 2000], dtype='int64'),
-            '_float16': pd.Series([1.0, 2.0], dtype='float16'),
+            '_float16': pd.Series([1.0, 2.0], dtype='float32'),
             '_float32': pd.Series([1.00, 2.00], dtype='float32'),
             '_double': pd.Series([1.000, 2.000], dtype='double'),
             '_string': pd.Series(['A', 'B'], dtype='object'),
