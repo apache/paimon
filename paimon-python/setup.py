@@ -27,11 +27,17 @@ install_requires = [
     'cachetools==4.2.4',
     'ossfs==2021.8.0',
     'ray==1.13.0',
-    'pyarrow==6.0.1',
-    'pandas==1.1.5',
+    'pyarrow==6.0.1; python_version < "3.8"',
+    'pyarrow>=16;   python_version >= "3.8"',
+    'numpy==1.19.5; python_version < "3.7"',
+    'numpy<2;       python_version >= "3.7" and python_version < "3.8"',
+    'numpy>2; python_version > "3.8"',
+    'pandas==2.3.2; python_version >= "3.9"',
+    'pandas==1.1.5; python_version < "3.7"',
     'polars==0.9.12',
     'fastavro==1.4.7',
-    'zstandard==0.19.0'
+    'zstandard==0.15.2; python_version < "3.7"',
+    'zstandard==0.19.0; python_version >= "3.7"',
 ]
 
 long_description = "See Apache Paimon Python API \
