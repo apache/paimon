@@ -16,7 +16,7 @@
 # limitations under the License.
 #################################################################################
 
-from typing import Dict, Optional
+from typing import Optional, Dict
 
 
 class Database:
