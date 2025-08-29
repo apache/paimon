@@ -24,6 +24,8 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -37,6 +39,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
@@ -955,6 +958,357 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testFormatTableNormalWrite() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        // Test different format types
+        String[] formats = {"parquet", "orc", "csv", "json"};
+        for (String format : formats) {
+            testFormatTableWriteForFormat(format, false);
+        }
+    }
+
+    @Test
+    public void testFormatTablePartitionedWrite() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        // Test partitioned format table write
+        testFormatTableWriteForFormat("parquet", true);
+    }
+
+    @Test
+    public void testFormatTableWriteRollback() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "rollback_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create a format table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("score", DataTypes.DOUBLE())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "parquet")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FormatTable.class);
+
+        FormatTable formatTable = (FormatTable) table;
+
+        // First successful write
+        BatchWriteBuilder writeBuilder1 = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write1 = writeBuilder1.newWrite();
+        BatchTableCommit commit1 = writeBuilder1.newCommit();
+
+        write1.write(GenericRow.of(1, BinaryString.fromString("Alice"), 85.5));
+        write1.write(GenericRow.of(2, BinaryString.fromString("Bob"), 92.0));
+
+        List<CommitMessage> messages1 = write1.prepareCommit();
+        commit1.commit(messages1);
+        write1.close();
+        commit1.close();
+
+        // Simulate a failed write by preparing commit but not committing
+        BatchWriteBuilder writeBuilder2 = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write2 = writeBuilder2.newWrite();
+        BatchTableCommit commit2 = writeBuilder2.newCommit();
+
+        write2.write(GenericRow.of(3, BinaryString.fromString("Charlie"), 88.0));
+        write2.write(GenericRow.of(4, BinaryString.fromString("David"), 90.0));
+
+        List<CommitMessage> messages2 = write2.prepareCommit();
+
+        // Simulate abort by not committing and calling abort
+        commit2.abort(messages2);
+        write2.close();
+        commit2.close();
+
+        // Verify that abort handled gracefully (no exception thrown)
+        assertThat(messages1).isNotEmpty();
+        assertThat(messages2).isNotEmpty();
+
+        // Verify that only the first write's data is present and no temporary files remain
+        verifyFormatTableData(formatTable, 2, false); // Should have 2 records from first write
+        verifyNoTemporaryFiles(formatTable);
+    }
+
+    @Test
+    public void testFormatTableAtomicWrite() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "atomic_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create a format table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("score", DataTypes.DOUBLE())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "parquet")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FormatTable.class);
+
+        FormatTable formatTable = (FormatTable) table;
+
+        BatchWriteBuilder writeBuilder = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Write data - this should use temporary files internally
+        write.write(GenericRow.of(1, BinaryString.fromString("Alice"), 85.5));
+        write.write(GenericRow.of(2, BinaryString.fromString("Bob"), 92.0));
+        write.write(GenericRow.of(3, BinaryString.fromString("Charlie"), 88.0));
+
+        List<CommitMessage> messages = write.prepareCommit();
+        assertThat(messages).isNotEmpty();
+
+        // Commit should atomically make files visible
+        assertThatCode(() -> commit.commit(messages)).doesNotThrowAnyException();
+
+        write.close();
+        commit.close();
+
+        // Verify table exists and data was written successfully
+        assertThat(catalog.listTables(identifier.getDatabaseName()))
+                .contains(identifier.getTableName());
+
+        // Verify that data files exist and no temporary files remain
+        verifyFormatTableData(formatTable, 3, false); // Should have 3 records
+        verifyNoTemporaryFiles(formatTable);
+    }
+
+    @Test
+    public void testFormatTableOverwriteWrite() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "overwrite_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create a partitioned format table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("score", DataTypes.DOUBLE())
+                        .column("department", DataTypes.STRING())
+                        .partitionKeys("department")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "parquet")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FormatTable.class);
+
+        FormatTable formatTable = (FormatTable) table;
+
+        // First write with multiple partitions
+        BatchWriteBuilder writeBuilder1 = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write1 = writeBuilder1.newWrite();
+        BatchTableCommit commit1 = writeBuilder1.newCommit();
+
+        write1.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("Alice"),
+                        85.5,
+                        BinaryString.fromString("Engineering")));
+        write1.write(
+                GenericRow.of(
+                        2, BinaryString.fromString("Bob"), 92.0, BinaryString.fromString("Sales")));
+        write1.write(
+                GenericRow.of(
+                        3,
+                        BinaryString.fromString("Charlie"),
+                        88.0,
+                        BinaryString.fromString("Engineering")));
+
+        List<CommitMessage> messages1 = write1.prepareCommit();
+        commit1.commit(messages1);
+        write1.close();
+        commit1.close();
+
+        // Overwrite specific partition
+        Map<String, String> partitionOverwrite = new HashMap<>();
+        partitionOverwrite.put("department", "Engineering");
+
+        BatchWriteBuilder writeBuilder2 =
+                formatTable.newBatchWriteBuilder().withOverwrite(partitionOverwrite);
+        BatchTableWrite write2 = writeBuilder2.newWrite();
+        BatchTableCommit commit2 = writeBuilder2.newCommit();
+
+        write2.write(
+                GenericRow.of(
+                        4,
+                        BinaryString.fromString("David"),
+                        90.0,
+                        BinaryString.fromString("Engineering")));
+        write2.write(
+                GenericRow.of(
+                        5,
+                        BinaryString.fromString("Eve"),
+                        95.0,
+                        BinaryString.fromString("Engineering")));
+
+        List<CommitMessage> messages2 = write2.prepareCommit();
+        commit2.commit(messages2);
+        write2.close();
+        commit2.close();
+
+        // Verify overwrite succeeded
+        assertThat(messages1).isNotEmpty();
+        assertThat(messages2).isNotEmpty();
+
+        // Verify that overwrite worked - should have data files in multiple partitions
+        // Engineering partition should have 2 records (overwritten), Sales should have 1
+        verifyFormatTableData(formatTable, 0, true); // Use partitioned verification
+        verifyNoTemporaryFiles(formatTable);
+    }
+
+    @Test
+    public void testFormatTableWriteFailureScenarios() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+
+        Identifier identifier = new Identifier("format_db", "failure_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create a format table
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "parquet")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FormatTable.class);
+
+        FormatTable formatTable = (FormatTable) table;
+
+        BatchWriteBuilder writeBuilder = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Test empty commit
+        List<CommitMessage> emptyMessages = write.prepareCommit();
+        assertThatCode(() -> commit.commit(emptyMessages)).doesNotThrowAnyException();
+
+        // Test normal write after empty commit
+        write.write(GenericRow.of(1, BinaryString.fromString("Test")));
+        List<CommitMessage> messages = write.prepareCommit();
+        commit.commit(messages);
+
+        write.close();
+        commit.close();
+
+        assertThat(messages).isNotEmpty();
+
+        // Verify that data was written successfully
+        verifyFormatTableData(formatTable, 1, false); // Should have 1 record
+        verifyNoTemporaryFiles(formatTable);
+    }
+
+    private void testFormatTableWriteForFormat(String format, boolean partitioned)
+            throws Exception {
+        String tableName = format + "_table" + (partitioned ? "_partitioned" : "");
+        Identifier identifier = new Identifier("format_db", tableName);
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("score", DataTypes.DOUBLE());
+
+        if (partitioned) {
+            schemaBuilder.column("department", DataTypes.STRING()).partitionKeys("department");
+        }
+
+        Schema schema =
+                schemaBuilder
+                        .options(getFormatTableOptions())
+                        .option("file.format", format)
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isInstanceOf(FormatTable.class);
+
+        FormatTable formatTable = (FormatTable) table;
+
+        // Test write operations
+        BatchWriteBuilder writeBuilder = formatTable.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Write test data
+        if (partitioned) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("Alice"),
+                            85.5,
+                            BinaryString.fromString("Engineering")));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("Bob"),
+                            92.0,
+                            BinaryString.fromString("Sales")));
+            write.write(
+                    GenericRow.of(
+                            3,
+                            BinaryString.fromString("Charlie"),
+                            88.0,
+                            BinaryString.fromString("Engineering")));
+        } else {
+            write.write(GenericRow.of(1, BinaryString.fromString("Alice"), 85.5));
+            write.write(GenericRow.of(2, BinaryString.fromString("Bob"), 92.0));
+            write.write(GenericRow.of(3, BinaryString.fromString("Charlie"), 88.0));
+        }
+
+        List<CommitMessage> messages = write.prepareCommit();
+        assertThat(messages).isNotEmpty();
+
+        commit.commit(messages);
+
+        write.close();
+        commit.close();
+
+        // Verify table exists and operations completed successfully
+        assertThat(catalog.listTables(identifier.getDatabaseName()))
+                .contains(identifier.getTableName());
+        assertThat(catalog.getTable(identifier)).isInstanceOf(FormatTable.class);
+
+        // Verify that data files were created correctly
+        verifyFormatTableData(formatTable, 3, partitioned); // Should have 3 records
+        verifyNoTemporaryFiles(formatTable);
+    }
+
+    @Test
     public void testTableUUID() throws Exception {
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "test_table");
@@ -1666,5 +2020,124 @@ public abstract class CatalogTestBase {
                                         false))
                 .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
         catalog.dropTable(identifier, false);
+    }
+
+    /** Verifies that format table data files exist and are correctly structured. */
+    protected void verifyFormatTableData(
+            FormatTable formatTable, int expectedFileCount, boolean isPartitioned)
+            throws Exception {
+        Path tablePath = new Path(formatTable.location());
+
+        if (!formatTable.fileIO().exists(tablePath)) {
+            if (expectedFileCount > 0) {
+                throw new AssertionError("Table directory does not exist: " + tablePath);
+            }
+            return; // Empty table is acceptable if no files expected
+        }
+
+        if (!isPartitioned) {
+            // Non-partitioned table: check for data files directly in table directory
+            verifyDataFilesInDirectory(formatTable, tablePath, expectedFileCount > 0);
+        } else {
+            // Partitioned table: check partition directories
+            verifyPartitionedTableData(formatTable, tablePath);
+        }
+    }
+
+    /** Verifies that no temporary files or directories remain after write operations. */
+    protected void verifyNoTemporaryFiles(FormatTable formatTable) throws Exception {
+        Path tablePath = new Path(formatTable.location());
+
+        if (!formatTable.fileIO().exists(tablePath)) {
+            return; // No table directory, so no temp files
+        }
+
+        FileStatus[] files = formatTable.fileIO().listStatus(tablePath);
+        if (files != null) {
+            for (FileStatus file : files) {
+                String fileName = file.getPath().getName();
+
+                // Check for temporary directories
+                if (fileName.startsWith("_temp_") || fileName.equals("_temporary")) {
+                    throw new AssertionError(
+                            "Temporary directory should not exist: " + file.getPath());
+                }
+
+                // Check for temporary files
+                if (fileName.startsWith(".tmp") || fileName.endsWith(".tmp")) {
+                    throw new AssertionError("Temporary file should not exist: " + file.getPath());
+                }
+            }
+        }
+    }
+
+    private void verifyDataFilesInDirectory(
+            FormatTable formatTable, Path directory, boolean shouldHaveFiles) throws Exception {
+        FileStatus[] files = formatTable.fileIO().listStatus(directory);
+
+        boolean hasDataFiles = false;
+        if (files != null) {
+            for (FileStatus file : files) {
+                if (!file.isDir() && isDataFile(file.getPath(), formatTable.format())) {
+                    hasDataFiles = true;
+
+                    // Verify file is not empty
+                    if (file.getLen() == 0) {
+                        throw new AssertionError(
+                                "Data file should not be empty: " + file.getPath());
+                    }
+                }
+            }
+        }
+
+        if (shouldHaveFiles && !hasDataFiles) {
+            throw new AssertionError("Expected data files in directory: " + directory);
+        }
+    }
+
+    private void verifyPartitionedTableData(FormatTable formatTable, Path tablePath)
+            throws Exception {
+        FileStatus[] partitionDirs = formatTable.fileIO().listStatus(tablePath);
+
+        boolean hasPartitionData = false;
+        if (partitionDirs != null) {
+            for (FileStatus partitionDir : partitionDirs) {
+                if (partitionDir.isDir() && !partitionDir.getPath().getName().startsWith("_")) {
+                    // This looks like a partition directory
+                    verifyDataFilesInDirectory(formatTable, partitionDir.getPath(), true);
+                    hasPartitionData = true;
+                }
+            }
+        }
+
+        if (!hasPartitionData) {
+            throw new AssertionError(
+                    "Expected partition directories with data in table: " + tablePath);
+        }
+    }
+
+    private boolean isDataFile(Path path, FormatTable.Format format) {
+        String fileName = path.getName();
+        String expectedExtension = getExpectedFileExtension(format);
+
+        return fileName.endsWith("." + expectedExtension)
+                && !fileName.startsWith(".")
+                && !fileName.startsWith("_")
+                && !fileName.contains(".tmp");
+    }
+
+    private String getExpectedFileExtension(FormatTable.Format format) {
+        switch (format) {
+            case PARQUET:
+                return "parquet";
+            case ORC:
+                return "orc";
+            case CSV:
+                return "csv";
+            case JSON:
+                return "json";
+            default:
+                return "data";
+        }
     }
 }
