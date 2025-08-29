@@ -96,7 +96,7 @@ class DefaultErrorHandler(ErrorHandler):
             message = error.message
         else:
             # If we have a requestId, append it to the message
-            message = f"{error.message} requestId:{request_id}"
+            message = "{} requestId:{}".format(error.message, request_id)
 
         # Handle different error codes
         if code == 400:
@@ -217,7 +217,7 @@ def _normalize_uri(uri: str) -> str:
         server_uri = server_uri[:-1]
 
     if not server_uri.startswith("http://") and not server_uri.startswith("https://"):
-        server_uri = f"http://{server_uri}"
+        server_uri = "http://{}".format(server_uri)
 
     return server_uri
 
@@ -344,7 +344,7 @@ class HttpClient(RESTClient):
 
         if query_params:
             query_string = urllib.parse.urlencode(query_params)
-            full_path = f"{full_path}?{query_string}"
+            full_path = "{}?{}".format(full_path, query_string)
 
         return full_path
 
@@ -356,14 +356,14 @@ class HttpClient(RESTClient):
                          headers: Optional[Dict[str, str]] = None,
                          response_type: Optional[Type[T]] = None) -> T:
         try:
-            start_time = time.time_ns()
+            start_time = int(time.time() * 1_000_000_000)
             response = self.session.request(
                 method=method,
                 url=url,
                 data=data.encode('utf-8') if data else None,
                 headers=headers
             )
-            duration_ms = (time.time_ns() - start_time) // 1_000_000
+            duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
 
             self.logger.info(

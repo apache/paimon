@@ -16,13 +16,13 @@
 # limitations under the License.
 #################################################################################
 
-from typing import Optional
+from typing import Optional, Dict
 
 
 class Database:
     """Structure of a Database."""
 
-    def __init__(self, name: str, options: dict, comment: Optional[str] = None):
+    def __init__(self, name: str, options: Dict, comment: Optional[str] = None):
         self.name = name
         self.options = options
         self.comment = comment

@@ -32,7 +32,7 @@ from pypaimon.table.row.internal_row import InternalRow
 class Predicate:
     method: str
     index: Optional[int]
-    field: str | None
+    field: Optional[str]
     literals: Optional[List[Any]] = None
 
     def test(self, record: InternalRow) -> bool:
@@ -80,7 +80,7 @@ class Predicate:
             t = any(p.test(record) for p in self.literals)
             return t
         else:
-            raise ValueError(f"Unsupported predicate method: {self.method}")
+            raise ValueError("Unsupported predicate method: {}".format(self.method))
 
     def to_arrow(self) -> pyarrow_compute.Expression | bool:
         if self.method == 'equal':
@@ -122,4 +122,4 @@ class Predicate:
             return reduce(lambda x, y: x | y,
                           [p.to_arrow() for p in self.literals])
         else:
-            raise ValueError(f"Unsupported predicate method: {self.method}")
+            raise ValueError("Unsupported predicate method: {}".format(self.method))
