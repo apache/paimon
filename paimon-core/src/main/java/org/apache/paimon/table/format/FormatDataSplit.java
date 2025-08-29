@@ -20,11 +20,11 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
+
+import java.util.Objects;
 
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit implements Split {
@@ -34,25 +34,12 @@ public class FormatDataSplit implements Split {
     private final Path filePath;
     private final long offset;
     private final long length;
-    private final RowType rowType;
-    private final Predicate predicate;
-    private final int[] projection;
-    private final BinaryRow partition;
+    @Nullable private final BinaryRow partition;
 
-    public FormatDataSplit(
-            Path filePath,
-            long offset,
-            long length,
-            RowType rowType,
-            @Nullable Predicate predicate,
-            @Nullable int[] projection,
-            @Nullable BinaryRow partition) {
+    public FormatDataSplit(Path filePath, long offset, long length, @Nullable BinaryRow partition) {
         this.filePath = filePath;
         this.offset = offset;
         this.length = length;
-        this.rowType = rowType;
-        this.predicate = predicate;
-        this.projection = projection;
         this.partition = partition;
     }
 
@@ -72,26 +59,32 @@ public class FormatDataSplit implements Split {
         return length;
     }
 
-    public RowType rowType() {
-        return rowType;
-    }
-
     public BinaryRow partition() {
         return partition;
-    }
-
-    @Nullable
-    public Predicate predicate() {
-        return predicate;
-    }
-
-    @Nullable
-    public int[] projection() {
-        return projection;
     }
 
     @Override
     public long rowCount() {
         return -1;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        FormatDataSplit that = (FormatDataSplit) o;
+        return offset == that.offset
+                && length == that.length
+                && Objects.equals(filePath, that.filePath)
+                && Objects.equals(partition, that.partition);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(filePath, offset, length, partition);
     }
 }

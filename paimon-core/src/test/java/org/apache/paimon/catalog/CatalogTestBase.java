@@ -42,6 +42,8 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -67,7 +69,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.junit.Ignore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -582,7 +583,6 @@ public abstract class CatalogTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    @Ignore
     void testFormatTableRead(boolean partitioned) throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -608,14 +608,20 @@ public abstract class CatalogTestBase {
             schemaBuilder.option("file.format", format);
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
+            int[] projection = new int[] {1, 2};
+            PredicateBuilder builder = new PredicateBuilder(table.rowType().project(projection));
+            Predicate predicate = builder.greaterOrEqual(0, 10);
             int size = 5;
+            int checkSize = 3;
             InternalRow[] datas = new InternalRow[size];
-            InternalRow[] checkDatas = new InternalRow[size];
+            InternalRow[] checkDatas = new InternalRow[checkSize];
             for (int j = 0; j < size; j++) {
                 int f1 = random.nextInt();
-                int f2 = random.nextInt();
+                int f2 = j < checkSize ? random.nextInt(10) + 10 : random.nextInt(10);
                 datas[j] = GenericRow.of(f1, f2, partitionValue);
-                checkDatas[j] = GenericRow.of(f2, partitionValue);
+                if (j < checkSize) {
+                    checkDatas[j] = GenericRow.of(f2, partitionValue);
+                }
             }
             InternalRow dataWithDiffPartition =
                     GenericRow.of(random.nextInt(), random.nextInt(), 11);
@@ -669,7 +675,7 @@ public abstract class CatalogTestBase {
                                 null);
                 write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
-            List<InternalRow> readData = read(table, new int[] {1, 2}, partitionSpec);
+            List<InternalRow> readData = read(table, predicate, projection, partitionSpec);
 
             assertThat(readData).containsExactlyInAnyOrder(checkDatas);
             catalog.dropTable(Identifier.create(dbName, format), true);
@@ -712,6 +718,7 @@ public abstract class CatalogTestBase {
     @SafeVarargs
     protected final List<InternalRow> read(
             Table table,
+            Predicate predicate,
             @Nullable int[] projection,
             @Nullable Map<String, String> partitionSpec,
             Pair<ConfigOption<?>, String>... dynamicOptions)
@@ -727,7 +734,9 @@ public abstract class CatalogTestBase {
         }
         readBuilder.withPartitionFilter(partitionSpec);
         TableScan scan = readBuilder.newScan();
-        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(scan.plan())) {
+        readBuilder.withFilter(predicate);
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
             reader.forEachRemaining(row -> rows.add(serializer.copy(row)));

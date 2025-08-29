@@ -25,13 +25,12 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -45,9 +44,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -64,11 +61,8 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private final FileFormatDiscover formatDiscover;
 
-    @Nullable private List<Predicate> filters;
-
-    private @Nullable PartitionPredicate partitionFilter;
-    private @Nullable Predicate predicate;
-    private @Nullable int[] projection;
+    @Nullable private Predicate filter;
+    @Nullable private PartitionPredicate partitionFilter;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -89,7 +83,11 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate predicate) {
-        this.predicate = predicate;
+        if (this.filter == null) {
+            this.filter = predicate;
+        } else {
+            this.filter = PredicateBuilder.and(this.filter, predicate);
+        }
         return this;
     }
 
@@ -124,53 +122,29 @@ public class FormatReadBuilder implements ReadBuilder {
         if (projection == null) {
             return this;
         }
-        this.projection = projection;
         return withReadType(readType().project(projection));
     }
 
     @Override
-    public ReadBuilder withLimit(int limit) {
-        return this;
-    }
-
-    @Override
-    public ReadBuilder withTopN(TopN topN) {
-        throw new UnsupportedOperationException("TopN is not supported for FormatTable.");
-    }
-
-    @Override
     public TableScan newScan() {
-        FormatTableScan scan = new FormatTableScan(table, predicate, projection);
-        scan.withPartitionFilter(partitionFilter);
-        return scan;
+        return new FormatTableScan(table, partitionFilter);
     }
 
     @Override
     public TableRead newRead() {
-        FormatReadBuilder read = this;
-        return new FormatTableRead(readType(), read, predicate);
+        return new FormatTableRead(readType(), this, filter);
     }
 
-    RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
-        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
-
-        String formatIdentifier = options.formatType();
-        suppliers.add(() -> createFileReader(dataSplit, formatIdentifier));
-
-        return ConcatRecordReader.create(suppliers);
-    }
-
-    private FileRecordReader<InternalRow> createFileReader(
-            FormatDataSplit dataSplit, String formatIdentifier) throws IOException {
-
+    protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
 
         FormatReaderFactory readerFactory =
                 formatDiscover
-                        .discover(formatIdentifier)
-                        .createReaderFactory(table.rowType(), readType(), filters);
+                        .discover(options.formatType())
+                        .createReaderFactory(
+                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
@@ -192,10 +166,19 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     // ===================== Unsupported ===============================
+    @Override
+    public ReadBuilder withLimit(int limit) {
+        throw new UnsupportedOperationException("limit is not supported for FormatTable.");
+    }
+
+    @Override
+    public ReadBuilder withTopN(TopN topN) {
+        throw new UnsupportedOperationException("TopN is not supported for FormatTable.");
+    }
 
     @Override
     public ReadBuilder dropStats() {
-        return this;
+        throw new UnsupportedOperationException("Format Table does not support dropStats.");
     }
 
     @Override

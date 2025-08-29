@@ -27,11 +27,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Optional;
 
 /** A {@link TableRead} implementation for {@link FormatTable}. */
@@ -73,16 +71,6 @@ public class FormatTableRead implements TableRead {
         }
 
         return reader;
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
-        return TableRead.super.createReader(splits);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(TableScan.Plan plan) throws IOException {
-        return TableRead.super.createReader(plan);
     }
 
     private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {

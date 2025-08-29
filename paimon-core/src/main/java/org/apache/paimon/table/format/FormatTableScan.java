@@ -48,20 +48,11 @@ import java.util.List;
 public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
-    private Predicate predicate;
-    private int[] projection;
     private @Nullable PartitionPredicate partitionFilter;
 
-    public FormatTableScan(FormatTable table, Predicate predicate, int[] projection) {
+    public FormatTableScan(FormatTable table, @Nullable PartitionPredicate partitionFilter) {
         this.table = table;
-        this.predicate = predicate;
-        this.projection = projection;
-    }
-
-    @Override
-    public InnerTableScan withFilter(Predicate predicate) {
-        this.predicate = predicate;
-        return this;
+        this.partitionFilter = partitionFilter;
     }
 
     @Override
@@ -86,6 +77,11 @@ public class FormatTableScan implements InnerTableScan {
             partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
         }
         return partitionEntries;
+    }
+
+    @Override
+    public InnerTableScan withFilter(Predicate predicate) {
+        throw new UnsupportedOperationException("Filter is not supported for FormatTable.");
     }
 
     public static boolean isDataFileName(String fileName) {
@@ -163,14 +159,7 @@ public class FormatTableScan implements InnerTableScan {
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
                 FormatDataSplit split =
-                        new FormatDataSplit(
-                                file.getPath(),
-                                0,
-                                file.getLen(),
-                                table.rowType(),
-                                predicate,
-                                projection,
-                                partition);
+                        new FormatDataSplit(file.getPath(), 0, file.getLen(), partition);
                 splits.add(split);
             }
         }

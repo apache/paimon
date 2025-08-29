@@ -61,15 +61,18 @@ public class PartitionUtils {
 
         List<DataField> fieldsWithoutPartition = new ArrayList<>();
         int[] map = new int[dataFields.size() + 1];
-        int pCount = 0;
+        int partitionFieldCount = 0;
+
         for (int i = 0; i < dataFields.size(); i++) {
             DataField field = dataFields.get(i);
             if (partitionKeys.contains(field.name())) {
+                // if the map[i] is minus, represent the related column is stored in partition row
                 map[i] = -(partitionKeys.indexOf(field.name()) + 1);
-                pCount++;
+                partitionFieldCount++;
             } else {
-                map[i] = (i - pCount) + 1;
-                fieldsWithoutPartition.add(dataFields.get(i));
+                // else if the map[i] is positive, the related column is stored in the file-read row
+                map[i] = (i - partitionFieldCount) + 1;
+                fieldsWithoutPartition.add(field);
             }
         }
 
