@@ -1,0 +1,27 @@
+name: Check File Size
+
+on:
+  pull_request:
+
+jobs:
+  check-file-size:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check file size
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          files=$(git diff --name-only ${{ github.base_ref }}...${{ github.head_ref }})
+          for file in $files; do
+            if [ -f "$file" ]; then
+              size=$(ls -l "$file" | awk '{print $5}')
+              if [ "$size" -gt 1048576 ]; then
+                echo "Error: File $file is larger than 1MB ($size bytes)."
+                exit 1
+              fi
+            fi
+          done
