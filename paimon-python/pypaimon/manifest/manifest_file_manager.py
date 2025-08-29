@@ -55,19 +55,19 @@ class ManifestFileManager:
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(
-                min_value=BinaryRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
-                                                           self.trimmed_primary_key_fields),
-                max_value=BinaryRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
-                                                           self.trimmed_primary_key_fields),
-                null_count=key_dict['_NULL_COUNTS'],
+                min_values=BinaryRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
+                                                            self.trimmed_primary_key_fields),
+                max_values=BinaryRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
+                                                            self.trimmed_primary_key_fields),
+                null_counts=key_dict['_NULL_COUNTS'],
             )
             value_dict = dict(file_dict['_VALUE_STATS'])
             value_stats = SimpleStats(
-                min_value=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'],
-                                                           self.table.table_schema.fields),
-                max_value=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'],
-                                                           self.table.table_schema.fields),
-                null_count=value_dict['_NULL_COUNTS'],
+                min_values=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'],
+                                                            self.table.table_schema.fields),
+                max_values=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'],
+                                                            self.table.table_schema.fields),
+                null_counts=value_dict['_NULL_COUNTS'],
             )
             file_meta = DataFileMeta(
                 file_name=file_dict['_FILE_NAME'],
@@ -118,14 +118,14 @@ class ManifestFileManager:
                         "_MIN_KEY": BinaryRowSerializer.to_bytes(file.min_key),
                         "_MAX_KEY": BinaryRowSerializer.to_bytes(file.max_key),
                         "_KEY_STATS": {
-                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.min_value),
-                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.max_value),
-                            "_NULL_COUNTS": file.key_stats.null_count,
+                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.min_values),
+                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.max_values),
+                            "_NULL_COUNTS": file.key_stats.null_counts,
                         },
                         "_VALUE_STATS": {
-                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.min_value),
-                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.max_value),
-                            "_NULL_COUNTS": file.value_stats.null_count,
+                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.min_values),
+                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.max_values),
+                            "_NULL_COUNTS": file.value_stats.null_counts,
                         },
                         "_MIN_SEQUENCE_NUMBER": file.min_sequence_number,
                         "_MAX_SEQUENCE_NUMBER": file.max_sequence_number,

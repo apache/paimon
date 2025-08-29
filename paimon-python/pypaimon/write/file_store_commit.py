@@ -81,15 +81,15 @@ class FileStoreCommit:
             num_added_files=sum(len(msg.new_files) for msg in commit_messages),
             num_deleted_files=0,
             partition_stats=SimpleStats(
-                min_value=BinaryRow(
+                min_values=BinaryRow(
                     values=partition_min_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
-                max_value=BinaryRow(
+                max_values=BinaryRow(
                     values=partition_max_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
-                null_count=partition_null_counts,
+                null_counts=partition_null_counts,
             ),
             schema_id=self.table.table_schema.id,
         )

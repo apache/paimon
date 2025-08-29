@@ -20,12 +20,15 @@ from collections import defaultdict
 from typing import Callable, List, Optional
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.plan import Plan
+from pypaimon.read.push_down_utils import (extract_predicate_to_dict,
+                                           extract_predicate_to_list)
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -49,15 +52,23 @@ class TableScan:
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 
-        self.partition_conditions = self._extract_partition_conditions()
+        pk_conditions = []
+        trimmed_pk = [field.name for field in self.table.table_schema.get_trimmed_primary_key_fields()]
+        extract_predicate_to_list(pk_conditions, self.predicate, trimmed_pk)
+        self.primary_key_predicate = PredicateBuilder(self.table.fields).and_predicates(pk_conditions)
+
+        partition_conditions = defaultdict(list)
+        extract_predicate_to_dict(partition_conditions, self.predicate, self.table.partition_keys)
+        self.partition_key_predicate = partition_conditions
+
         self.target_split_size = 128 * 1024 * 1024
         self.open_file_cost = 4 * 1024 * 1024
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
 
-        self.only_read_real_buckets = True if self.table.options.get('bucket',
-                                                                     -1) == BucketMode.POSTPONE_BUCKET.value else False
+        self.only_read_real_buckets = True \
+            if (self.table.options.get('bucket', -1) == BucketMode.POSTPONE_BUCKET.value) else False
 
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
@@ -129,7 +140,7 @@ class TableScan:
 
         filtered_files = []
         for file_entry in file_entries:
-            if self.partition_conditions and not self._filter_by_partition(file_entry):
+            if self.partition_key_predicate and not self._filter_by_partition(file_entry):
                 continue
             if not self._filter_by_stats(file_entry):
                 continue
@@ -138,98 +149,31 @@ class TableScan:
         return filtered_files
 
     def _filter_by_partition(self, file_entry: ManifestEntry) -> bool:
-        # TODO: refactor with a better solution
         partition_dict = file_entry.partition.to_dict()
-        for field_name, condition in self.partition_conditions.items():
+        for field_name, conditions in self.partition_key_predicate.items():
             partition_value = partition_dict[field_name]
-            if condition['op'] == '=':
-                if str(partition_value) != str(condition['value']):
-                    return False
-            elif condition['op'] == 'in':
-                if str(partition_value) not in [str(v) for v in condition['values']]:
-                    return False
-            elif condition['op'] == 'notIn':
-                if str(partition_value) in [str(v) for v in condition['values']]:
-                    return False
-            elif condition['op'] == '>':
-                if partition_value <= condition['values']:
-                    return False
-            elif condition['op'] == '>=':
-                if partition_value < condition['values']:
-                    return False
-            elif condition['op'] == '<':
-                if partition_value >= condition['values']:
-                    return False
-            elif condition['op'] == '<=':
-                if partition_value > condition['values']:
+            for predicate in conditions:
+                if not predicate.test_by_value(partition_value):
                     return False
         return True
 
     def _filter_by_stats(self, file_entry: ManifestEntry) -> bool:
-        # TODO: real support for filtering by stat
-        return True
-
-    def _extract_partition_conditions(self) -> dict:
-        if not self.predicate or not self.table.partition_keys:
-            return {}
-
-        conditions = {}
-        self._extract_conditions_from_predicate(self.predicate, conditions, self.table.partition_keys)
-        return conditions
-
-    def _extract_conditions_from_predicate(self, predicate: 'Predicate', conditions: dict,
-                                           partition_keys: List[str]):
-        if predicate.method == 'and':
-            for sub_predicate in predicate.literals:
-                self._extract_conditions_from_predicate(sub_predicate, conditions, partition_keys)
-            return
-        elif predicate.method == 'or':
-            all_partition_conditions = True
-            for sub_predicate in predicate.literals:
-                if sub_predicate.field not in partition_keys:
-                    all_partition_conditions = False
-                    break
-            if all_partition_conditions:
-                for sub_predicate in predicate.literals:
-                    self._extract_conditions_from_predicate(sub_predicate, conditions, partition_keys)
-            return
-
-        if predicate.field in partition_keys:
-            if predicate.method == 'equal':
-                conditions[predicate.field] = {
-                    'op': '=',
-                    'value': predicate.literals[0] if predicate.literals else None
-                }
-            elif predicate.method == 'in':
-                conditions[predicate.field] = {
-                    'op': 'in',
-                    'values': predicate.literals if predicate.literals else []
-                }
-            elif predicate.method == 'notIn':
-                conditions[predicate.field] = {
-                    'op': 'notIn',
-                    'values': predicate.literals if predicate.literals else []
-                }
-            elif predicate.method == 'greaterThan':
-                conditions[predicate.field] = {
-                    'op': '>',
-                    'value': predicate.literals[0] if predicate.literals else None
-                }
-            elif predicate.method == 'greaterOrEqual':
-                conditions[predicate.field] = {
-                    'op': '>=',
-                    'value': predicate.literals[0] if predicate.literals else None
-                }
-            elif predicate.method == 'lessThan':
-                conditions[predicate.field] = {
-                    'op': '<',
-                    'value': predicate.literals[0] if predicate.literals else None
-                }
-            elif predicate.method == 'lessOrEqual':
-                conditions[predicate.field] = {
-                    'op': '<=',
-                    'value': predicate.literals[0] if predicate.literals else None
-                }
+        if file_entry.kind != 0:
+            return False
+        if self.table.is_primary_key_table:
+            predicate = self.primary_key_predicate
+            stats = file_entry.file.key_stats
+        else:
+            predicate = self.predicate
+            stats = file_entry.file.value_stats
+        return predicate.test_by_stats({
+            "min_values": stats.min_values.to_dict(),
+            "max_values": stats.max_values.to_dict(),
+            "null_counts": {
+                stats.min_values.fields[i].name: stats.null_counts[i] for i in range(len(stats.min_values.fields))
+            },
+            "row_count": file_entry.file.row_count,
+        })
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         if not file_entries:
@@ -240,7 +184,7 @@ class TableScan:
         def weight_func(f: DataFileMeta) -> int:
             return max(f.file_size, self.open_file_cost)
 
-        packed_files: List[List[DataFileMeta]] = _pack_for_ordered(data_files, weight_func, self.target_split_size)
+        packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func, self.target_split_size)
         return self._build_split_from_pack(packed_files, file_entries, False)
 
     def _create_primary_key_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
@@ -257,7 +201,8 @@ class TableScan:
         def weight_func(fl: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in fl), self.open_file_cost)
 
-        packed_files: List[List[List[DataFileMeta]]] = _pack_for_ordered(sections, weight_func, self.target_split_size)
+        packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(sections, weight_func,
+                                                                              self.target_split_size)
         flatten_packed_files: List[List[DataFileMeta]] = [
             [file for sub_pack in pack for file in sub_pack]
             for pack in packed_files
@@ -295,23 +240,23 @@ class TableScan:
                 splits.append(split)
         return splits
 
+    @staticmethod
+    def _pack_for_ordered(items: List, weight_func: Callable, target_weight: int) -> List[List]:
+        packed = []
+        bin_items = []
+        bin_weight = 0
 
-def _pack_for_ordered(items: List, weight_func: Callable, target_weight: int) -> List[List]:
-    packed = []
-    bin_items = []
-    bin_weight = 0
+        for item in items:
+            weight = weight_func(item)
+            if bin_weight + weight > target_weight and len(bin_items) > 0:
+                packed.append(bin_items)
+                bin_items.clear()
+                bin_weight = 0
 
-    for item in items:
-        weight = weight_func(item)
-        if bin_weight + weight > target_weight and len(bin_items) > 0:
+            bin_weight += weight
+            bin_items.append(item)
+
+        if len(bin_items) > 0:
             packed.append(bin_items)
-            bin_items.clear()
-            bin_weight = 0
 
-        bin_weight += weight
-        bin_items.append(item)
-
-    if len(bin_items) > 0:
-        packed.append(bin_items)
-
-    return packed
+        return packed

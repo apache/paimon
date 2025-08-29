@@ -19,8 +19,11 @@ from typing import Iterator, List, Optional
 
 import pandas
 import pyarrow
+import pyarrow.compute as pc
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.push_down_utils import extract_predicate_to_list
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
@@ -37,6 +40,7 @@ class TableRead:
 
         self.table: FileStoreTable = table
         self.predicate = predicate
+        self.push_down_predicate = self._push_down_predicate()
         self.read_type = read_type
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
@@ -78,12 +82,12 @@ class TableRead:
                             row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                batch = convert_rows_to_arrow_batch(row_tuple_chunk, schema)
+                                batch = self.convert_rows_to_arrow_batch(row_tuple_chunk, schema)
                                 yield batch
                                 row_tuple_chunk = []
 
                     if row_tuple_chunk:
-                        batch = convert_rows_to_arrow_batch(row_tuple_chunk, schema)
+                        batch = self.convert_rows_to_arrow_batch(row_tuple_chunk, schema)
                         yield batch
             finally:
                 reader.close()
@@ -105,11 +109,27 @@ class TableRead:
 
         return ray.data.from_arrow(self.to_arrow(splits))
 
+    def _push_down_predicate(self) -> pc.Expression | bool:
+        if self.predicate is None:
+            return None
+        elif self.table.is_primary_key_table:
+            result = []
+            extract_predicate_to_list(result, self.predicate, self.table.primary_keys)
+            if result:
+                # the field index is unused for arrow field
+                pk_predicates = (PredicateBuilder(self.table.fields).and_predicates(result)).to_arrow()
+                return pk_predicates
+            else:
+                return None
+        else:
+            return self.predicate.to_arrow()
+
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
+                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )
@@ -117,12 +137,13 @@ class TableRead:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
+                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )
 
-
-def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
-    columns_data = zip(*row_tuples)
-    pydict = {name: list(column) for name, column in zip(schema.names, columns_data)}
-    return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)
+    @staticmethod
+    def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
+        columns_data = zip(*row_tuples)
+        pydict = {name: list(column) for name, column in zip(schema.names, columns_data)}
+        return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)
