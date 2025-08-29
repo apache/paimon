@@ -90,11 +90,13 @@ class PVFSTestCase(unittest.TestCase):
     def _create_parquet_file(self, database: str, table: str, data_file_name: str):
         fs = self.pvfs
         path = f'pvfs://{self.catalog}/{database}/{table}/{data_file_name}'
-        fs.mkdir(f'pvfs://{self.catalog}/{database}/{table}')
-        print(fs.ls(f'pvfs://{self.catalog}/{database}/{table}'))
+        table_dir = f'pvfs://{self.catalog}/{database}/{table}'
+        fs.mkdir(table_dir)
+        print(fs.ls(table_dir))
         fs.touch(path)
-        print(fs.ls(path))
-        self.assertEqual(fs.exists(f'pvfs://{self.catalog}/{database}/{table}'), True)
+        # Check if the file exists, don't try to list it as a directory
+        print(f"File exists: {fs.exists(path)}")
+        self.assertEqual(fs.exists(table_dir), True)
         self.assertEqual(fs.exists(path), True)
         data = {
             'id': [1, 2, 3, 4, 5],

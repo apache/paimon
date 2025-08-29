@@ -23,13 +23,13 @@ PACKAGES = find_packages(include=["pypaimon*"])
 
 install_requires = [
     'readerwriterlock==1.0.9',
-    'fsspec==2024.3.1',
+    'fsspec==2021.10.1',
     'cachetools==5.3.3',
-    'ossfs==2023.12.0',
+    'ossfs==2021.8.0',
     'pyarrow==16.0.0',
-    'polars==1.32.0',
-    'fastavro==1.11.1',
-    'zstandard==0.24.0'
+    'polars==0.9.12',
+    'fastavro==1.4.7',
+    'zstandard==0.19.0'
 ]
 
 long_description = "See Apache Paimon Python API \
