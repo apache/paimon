@@ -28,7 +28,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,8 +51,9 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testCreateTagFromTimestampAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCreateTagFromTimestampAction(boolean startFlinkJob) throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
@@ -62,8 +64,8 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
         long ts = table.snapshotManager().latestSnapshot().timeMillis();
         String tag = "tag_test";
 
-        createAction(
-                        CreateTagFromTimestampAction.class,
+        List<String> args =
+                Arrays.asList(
                         "create_tag_from_timestamp",
                         "--warehouse",
                         warehouse,
@@ -74,8 +76,14 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
                         "--tag",
                         tag,
                         "--timestamp",
-                        Long.toString(ts))
-                .run();
+                        Long.toString(ts));
+
+        if (startFlinkJob) {
+            args = new ArrayList<>(args);
+            args.add("--force_start_flink_job");
+        }
+
+        createAction(CreateTagFromTimestampAction.class, args.toArray(new String[0])).run();
 
         Snapshot snapshot = table.tagManager().tags().firstKey();
 

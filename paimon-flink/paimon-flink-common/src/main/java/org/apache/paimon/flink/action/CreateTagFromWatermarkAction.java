@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.CreateTagFromWatermarkProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Create tag from watermark action for Flink. */
-public class CreateTagFromWatermarkAction extends ActionBase {
+public class CreateTagFromWatermarkAction extends ActionBase implements LocalAction {
 
     private final String database;
     private final String table;
@@ -49,15 +47,11 @@ public class CreateTagFromWatermarkAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         CreateTagFromWatermarkProcedure createTagFromWatermarkProcedure =
                 new CreateTagFromWatermarkProcedure();
         createTagFromWatermarkProcedure.withCatalog(catalog);
         createTagFromWatermarkProcedure.call(
-                new DefaultProcedureContext(env),
-                database + "." + table,
-                tag,
-                watermark,
-                timeRetained);
+                null, database + "." + table, tag, watermark, timeRetained);
     }
 }

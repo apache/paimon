@@ -24,7 +24,7 @@ import java.time.Duration;
 import java.util.Map;
 
 /** Replace tag action for Flink. */
-public class ReplaceTagAction extends TableActionBase {
+public class ReplaceTagAction extends TableActionBase implements LocalAction {
 
     private final String tagName;
     private final @Nullable Long snapshotId;
@@ -44,7 +44,7 @@ public class ReplaceTagAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         table.replaceTag(tagName, snapshotId, timeRetained);
     }
 }

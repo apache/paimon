@@ -25,7 +25,7 @@ import org.apache.flink.table.procedure.DefaultProcedureContext;
 import java.util.Map;
 
 /** Create tag from timestamp action for Flink. */
-public class CreateTagFromTimestampAction extends ActionBase {
+public class CreateTagFromTimestampAction extends ActionBase implements LocalAction {
 
     private final String database;
     private final String table;
@@ -49,7 +49,7 @@ public class CreateTagFromTimestampAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         CreateTagFromTimestampProcedure createTagFromTimestampProcedure =
                 new CreateTagFromTimestampProcedure();
         createTagFromTimestampProcedure.withCatalog(catalog);

@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Migrate from iceberg table to paimon table. */
-public class MigrateIcebergTableAction extends ActionBase {
+public class MigrateIcebergTableAction extends ActionBase implements LocalAction {
 
     private final String sourceTableFullName;
     private final String tableProperties;
@@ -47,15 +45,11 @@ public class MigrateIcebergTableAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         MigrateIcebergTableProcedure migrateIcebergTableProcedure =
                 new MigrateIcebergTableProcedure();
         migrateIcebergTableProcedure.withCatalog(catalog);
         migrateIcebergTableProcedure.call(
-                new DefaultProcedureContext(env),
-                sourceTableFullName,
-                icebergProperties,
-                tableProperties,
-                parallelism);
+                null, sourceTableFullName, icebergProperties, tableProperties, parallelism);
     }
 }

@@ -23,7 +23,7 @@ import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 import java.util.Map;
 
 /** Create branch action for Flink. */
-public class CreateBranchAction extends TableActionBase {
+public class CreateBranchAction extends TableActionBase implements LocalAction {
     private final String branchName;
     private final String tagName;
 
@@ -39,7 +39,7 @@ public class CreateBranchAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() {
         if (!StringUtils.isBlank(tagName)) {
             table.createBranch(branchName, tagName);
         } else {

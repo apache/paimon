@@ -50,7 +50,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToSnapshotTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -83,6 +83,21 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 "2")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                RollbackToAction.class,
+                                "rollback_to",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--version",
+                                "2",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -105,7 +120,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToTagTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -141,6 +156,21 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 "tag2")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                RollbackToAction.class,
+                                "rollback_to",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--version",
+                                "tag2",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -162,7 +192,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToTimestampTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -193,6 +223,21 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--timestamp",
                                 timestamp + "")
+                        .run();
+                break;
+            case "action_job":
+                createAction(
+                                RollbackToTimestampAction.class,
+                                "rollback_to_timestamp",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--timestamp",
+                                timestamp + "",
+                                "--force_start_flink_job")
                         .run();
                 break;
             case "procedure_indexed":

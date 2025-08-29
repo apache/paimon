@@ -31,6 +31,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -211,8 +213,9 @@ public class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
     }
 
-    @Test
-    void testFastForward() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForward(boolean startFlinkJob) throws Exception {
         init(warehouse);
         RowType rowType =
                 RowType.of(
@@ -251,8 +254,8 @@ public class BranchActionITCase extends ActionITCaseBase {
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isTrue();
         // Create branch_name_action branch
-        createAction(
-                        CreateBranchAction.class,
+        List<String> args1 =
+                Arrays.asList(
                         "create_branch",
                         "--warehouse",
                         warehouse,
@@ -263,8 +266,12 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--branch_name",
                         "branch_name_action",
                         "--tag_name",
-                        "tag3")
-                .run();
+                        "tag3");
+        if (startFlinkJob) {
+            args1 = new ArrayList<>(args1);
+            args1.add("--force_start_flink_job");
+        }
+        createAction(CreateBranchAction.class, args1.toArray(new String[0])).run();
         assertThat(branchManager.branchExists("branch_name_action")).isTrue();
 
         // Fast-forward branch branch_name
@@ -277,8 +284,8 @@ public class BranchActionITCase extends ActionITCaseBase {
         assertThat(snapshotManager.snapshotExists(3)).isFalse();
 
         // Fast-forward branch branch_name_action
-        createAction(
-                        FastForwardAction.class,
+        List<String> args2 =
+                Arrays.asList(
                         "fast_forward",
                         "--warehouse",
                         warehouse,
@@ -287,8 +294,12 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--table",
                         tableName,
                         "--branch_name",
-                        "branch_name_action")
-                .run();
+                        "branch_name_action");
+        if (startFlinkJob) {
+            args2 = new ArrayList<>(args2);
+            args2.add("--force_start_flink_job");
+        }
+        createAction(FastForwardAction.class, args2.toArray(new String[0])).run();
 
         // Check snapshot
         assertThat(snapshotManager.snapshotExists(3)).isTrue();
@@ -335,8 +346,8 @@ public class BranchActionITCase extends ActionITCaseBase {
         assertEquals(expected, sortedActual);
 
         // Fast-forward branch branch_name_action again
-        createAction(
-                        FastForwardAction.class,
+        List<String> args3 =
+                Arrays.asList(
                         "fast_forward",
                         "--warehouse",
                         warehouse,
@@ -345,8 +356,12 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--table",
                         tableName,
                         "--branch_name",
-                        "branch_name_action")
-                .run();
+                        "branch_name_action");
+        if (startFlinkJob) {
+            args3 = new ArrayList<>(args3);
+            args3.add("--force_start_flink_job");
+        }
+        createAction(FastForwardAction.class, args3.toArray(new String[0])).run();
 
         // Check main branch data
         result = readTableData(table);

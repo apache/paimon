@@ -22,7 +22,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -36,8 +41,9 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testCreateTagsFromSnapshotsWatermark() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCreateTagsFromSnapshotsWatermark(boolean startFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -65,8 +71,8 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
         Snapshot snapshot3 = table.snapshotManager().snapshot(3);
         long commitTime3 = snapshot3.timeMillis();
         long watermark3 = snapshot3.watermark();
-        createAction(
-                        CreateTagFromWatermarkAction.class,
+        List<String> args1 =
+                Arrays.asList(
                         "create_tag_from_watermark",
                         "--warehouse",
                         warehouse,
@@ -77,14 +83,18 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag2",
                         "--watermark",
-                        Long.toString(watermark2 - 1))
-                .run();
+                        Long.toString(watermark2 - 1));
+        if (startFlinkJob) {
+            args1 = new ArrayList<>(args1);
+            args1.add("--force_start_flink_job");
+        }
+        createAction(CreateTagFromWatermarkAction.class, args1.toArray(new String[0])).run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(watermark2);
         assertThat(table.tagManager().getOrThrow("tag2").timeMillis()).isEqualTo(commitTime2);
 
-        createAction(
-                        CreateTagFromWatermarkAction.class,
+        List<String> args2 =
+                Arrays.asList(
                         "create_tag_from_watermark",
                         "--warehouse",
                         warehouse,
@@ -95,15 +105,20 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag3",
                         "--watermark",
-                        Long.toString(watermark2 + 1))
-                .run();
+                        Long.toString(watermark2 + 1));
+        if (startFlinkJob) {
+            args2 = new ArrayList<>(args2);
+            args2.add("--force_start_flink_job");
+        }
+        createAction(CreateTagFromWatermarkAction.class, args2.toArray(new String[0])).run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark3);
         assertThat(table.tagManager().getOrThrow("tag3").timeMillis()).isEqualTo(commitTime3);
     }
 
-    @Test
-    public void testCreateTagsFromTagsWatermark() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCreateTagsFromTagsWatermark(boolean startFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -143,8 +158,8 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
         assertThat(tagsWatermark == 1000).isTrue();
         assertThat(watermark2 == 2000).isTrue();
 
-        createAction(
-                        CreateTagFromWatermarkAction.class,
+        List<String> args1 =
+                Arrays.asList(
                         "create_tag_from_watermark",
                         "--warehouse",
                         warehouse,
@@ -155,14 +170,18 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag2",
                         "--watermark",
-                        Long.toString(tagsWatermark - 1))
-                .run();
+                        Long.toString(tagsWatermark - 1));
+        if (startFlinkJob) {
+            args1 = new ArrayList<>(args1);
+            args1.add("--force_start_flink_job");
+        }
+        createAction(CreateTagFromWatermarkAction.class, args1.toArray(new String[0])).run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(tagsWatermark);
         assertThat(table.tagManager().getOrThrow("tag2").timeMillis()).isEqualTo(tagsCommitTime);
 
-        createAction(
-                        CreateTagFromWatermarkAction.class,
+        List<String> args2 =
+                Arrays.asList(
                         "create_tag_from_watermark",
                         "--warehouse",
                         warehouse,
@@ -173,8 +192,12 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag3",
                         "--watermark",
-                        Long.toString(watermark2 - 1))
-                .run();
+                        Long.toString(watermark2 - 1));
+        if (startFlinkJob) {
+            args2 = new ArrayList<>(args2);
+            args2.add("--force_start_flink_job");
+        }
+        createAction(CreateTagFromWatermarkAction.class, args2.toArray(new String[0])).run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark2);
         assertThat(table.tagManager().getOrThrow("tag3").timeMillis()).isEqualTo(commitTime2);

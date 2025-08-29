@@ -28,12 +28,14 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -50,7 +52,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -114,6 +116,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
+            case "action_job":
+                args = new ArrayList<>(args);
+                args.add("--force_start_flink_job");
+                createAction(ResetConsumerAction.class, args).run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -137,6 +144,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "action":
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+                break;
+            case "action_job":
+                List<String> subArgs = args.subList(0, 9);
+                subArgs.add("--force_start_flink_job");
+                createAction(ResetConsumerAction.class, subArgs).run();
                 break;
             case "procedure_indexed":
                 executeSQL(
@@ -175,6 +187,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         RuntimeException.class,
                         () -> createAction(ResetConsumerAction.class, args1).run());
                 break;
+            case "action_job":
+                List<String> args2 = new ArrayList<>(args1);
+                args2.add("--force_start_flink_job");
+                assertThrows(
+                        JobExecutionException.class,
+                        () -> createAction(ResetConsumerAction.class, args2).run());
+                break;
             case "procedure_indexed":
                 assertThrows(
                         TableException.class,
@@ -200,7 +219,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -270,6 +289,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
+            case "action_job":
+                args = new ArrayList<>(args);
+                args.add("--force_start_flink_job");
+                createAction(ResetConsumerAction.class, args).run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -294,6 +318,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
                 break;
+            case "action_job":
+                List<String> subArgs = args.subList(0, 9);
+                subArgs.add("--force_start_flink_job");
+                createAction(ResetConsumerAction.class, subArgs).run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -315,7 +344,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(120)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testClearConsumers(String invoker) throws Exception {
         init(warehouse);
 
@@ -415,6 +444,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
+            case "action_job":
+                args = new ArrayList<>(args);
+                args.add("--force_start_flink_job");
+                createAction(ClearConsumerAction.class, args).run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -455,6 +489,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             case "action":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
+            case "action_job":
+                args = new ArrayList<>(args);
+                args.add("--force_start_flink_job");
+                createAction(ClearConsumerAction.class, args).run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -482,6 +521,11 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "action":
                 createAction(ClearConsumerAction.class, args.subList(0, 7)).run();
+                break;
+            case "action_job":
+                List<String> subArgs = args.subList(0, 7);
+                subArgs.add("--force_start_flink_job");
+                createAction(ClearConsumerAction.class, subArgs).run();
                 break;
             case "procedure_indexed":
                 executeSQL(String.format("CALL sys.clear_consumers('%s.%s')", database, tableName));
