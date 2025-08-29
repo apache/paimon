@@ -163,14 +163,7 @@ public class FormatTableScan implements InnerTableScan {
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
                 FormatDataSplit split =
-                        new FormatDataSplit(
-                                file.getPath(),
-                                0,
-                                file.getLen(),
-                                table.rowType(),
-                                predicate,
-                                projection,
-                                partition);
+                        new FormatDataSplit(file.getPath(), 0, file.getLen(), partition);
                 splits.add(split);
             }
         }
