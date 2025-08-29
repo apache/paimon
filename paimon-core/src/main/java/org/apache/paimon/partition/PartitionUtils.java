@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -59,17 +60,28 @@ public class PartitionUtils {
             return Pair.of(null, dataFields);
         }
 
+        // Create index map for O(1) partition key lookup
+        Map<String, Integer> partitionKeyIndexMap = new HashMap<>(partitionKeys.size());
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            partitionKeyIndexMap.put(partitionKeys.get(i), i);
+        }
+
         List<DataField> fieldsWithoutPartition = new ArrayList<>();
         int[] map = new int[dataFields.size() + 1];
-        int pCount = 0;
+        int partitionFieldCount = 0;
+
         for (int i = 0; i < dataFields.size(); i++) {
             DataField field = dataFields.get(i);
+            Integer partitionIndex = partitionKeyIndexMap.get(field.name());
+
             if (partitionKeys.contains(field.name())) {
-                map[i] = -(partitionKeys.indexOf(field.name()) + 1);
-                pCount++;
+                // Negative value indicates partition field (stored in partition row)
+                map[i] = -(partitionIndex + 1);
+                partitionFieldCount++;
             } else {
-                map[i] = (i - pCount) + 1;
-                fieldsWithoutPartition.add(dataFields.get(i));
+                // Positive value indicates data field (stored in file-read row)
+                map[i] = (i - partitionFieldCount) + 1;
+                fieldsWithoutPartition.add(field);
             }
         }
 

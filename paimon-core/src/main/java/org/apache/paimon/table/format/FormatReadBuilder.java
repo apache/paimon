@@ -29,6 +29,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -64,11 +65,10 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private final FileFormatDiscover formatDiscover;
 
-    @Nullable private List<Predicate> filters;
+    @Nullable private Predicate filter;
+    private @Nullable int[] projection;
 
     private @Nullable PartitionPredicate partitionFilter;
-    private @Nullable Predicate predicate;
-    private @Nullable int[] projection;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -89,7 +89,11 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate predicate) {
-        this.predicate = predicate;
+        if (this.filter == null) {
+            this.filter = predicate;
+        } else {
+            this.filter = PredicateBuilder.and(this.filter, predicate);
+        }
         return this;
     }
 
@@ -140,15 +144,14 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
-        FormatTableScan scan = new FormatTableScan(table, predicate, projection);
-        scan.withPartitionFilter(partitionFilter);
+        FormatTableScan scan = new FormatTableScan(table, partitionFilter);
         return scan;
     }
 
     @Override
     public TableRead newRead() {
         FormatReadBuilder read = this;
-        return new FormatTableRead(readType(), read, predicate);
+        return new FormatTableRead(readType(), read, filter);
     }
 
     RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
@@ -170,7 +173,8 @@ public class FormatReadBuilder implements ReadBuilder {
         FormatReaderFactory readerFactory =
                 formatDiscover
                         .discover(formatIdentifier)
-                        .createReaderFactory(table.rowType(), readType(), filters);
+                        .createReaderFactory(
+                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
@@ -195,7 +199,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder dropStats() {
-        return this;
+        throw new UnsupportedOperationException("Format Table does not support dropStats.");
     }
 
     @Override
