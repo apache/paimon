@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -40,31 +41,54 @@ public class PartitionUtils {
         if (dataSchema.partitionKeys().isEmpty()) {
             return Pair.of(null, dataFields);
         }
+        return getPartitionMapping2fieldsWithoutPartition(
+                dataSchema.partitionKeys(),
+                dataFields,
+                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+    }
 
-        List<String> partitionNames = dataSchema.partitionKeys();
+    public static Pair<int[], RowType> getPartitionMapping(
+            List<String> partitionKeys, List<DataField> dataFields, RowType partitionType) {
+        return getPartitionMapping2fieldsWithoutPartition(partitionKeys, dataFields, partitionType)
+                .getLeft();
+    }
+
+    public static Pair<Pair<int[], RowType>, List<DataField>>
+            getPartitionMapping2fieldsWithoutPartition(
+                    List<String> partitionKeys, List<DataField> dataFields, RowType partitionType) {
+        if (partitionKeys.isEmpty()) {
+            return Pair.of(null, dataFields);
+        }
+
+        // Create index map for O(1) partition key lookup
+        Map<String, Integer> partitionKeyIndexMap = new HashMap<>(partitionKeys.size());
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            partitionKeyIndexMap.put(partitionKeys.get(i), i);
+        }
+
         List<DataField> fieldsWithoutPartition = new ArrayList<>();
-
         int[] map = new int[dataFields.size() + 1];
-        int pCount = 0;
+        int partitionFieldCount = 0;
+
         for (int i = 0; i < dataFields.size(); i++) {
             DataField field = dataFields.get(i);
-            if (partitionNames.contains(field.name())) {
-                // if the map[i] is minus, represent the related column is stored in partition row
-                map[i] = -(partitionNames.indexOf(field.name()) + 1);
-                pCount++;
+            Integer partitionIndex = partitionKeyIndexMap.get(field.name());
+
+            if (partitionKeys.contains(field.name())) {
+                // Negative value indicates partition field (stored in partition row)
+                map[i] = -(partitionIndex + 1);
+                partitionFieldCount++;
             } else {
-                // else if the map[i] is positive, the related column is stored in the file-read row
-                map[i] = (i - pCount) + 1;
-                fieldsWithoutPartition.add(dataFields.get(i));
+                // Positive value indicates data field (stored in file-read row)
+                map[i] = (i - partitionFieldCount) + 1;
+                fieldsWithoutPartition.add(field);
             }
         }
 
         Pair<int[], RowType> partitionMapping =
                 fieldsWithoutPartition.size() == dataFields.size()
                         ? null
-                        : Pair.of(
-                                map,
-                                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+                        : Pair.of(map, partitionType);
         return Pair.of(partitionMapping, fieldsWithoutPartition);
     }
 
