@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
@@ -182,7 +182,7 @@ class SplitRead(ABC):
         return [field.name for field in fields_without_partition]
 
     def _get_trimmed_fields(self, read_data_fields: List[DataField],
-                            all_data_fields: List[DataField]) -> tuple[List[int], List[DataField]]:
+                            all_data_fields: List[DataField]) -> Tuple[List[int], List[DataField]]:
         trimmed_mapping = [0] * len(read_data_fields)
         trimmed_fields = []
 

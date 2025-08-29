@@ -43,12 +43,12 @@ class Identifier:
         elif len(parts) == 3:
             return cls(parts[0], parts[1], parts[2])
         else:
-            raise ValueError(f"Invalid identifier format: {full_name}")
+            raise ValueError("Invalid identifier format: {}".format(full_name))
 
     def get_full_name(self) -> str:
         if self.branch_name:
-            return f"{self.database_name}.{self.object_name}.{self.branch_name}"
-        return f"{self.database_name}.{self.object_name}"
+            return "{}.{}.{}".format(self.database_name, self.object_name, self.branch_name)
+        return "{}.{}".format(self.database_name, self.object_name)
 
     def get_database_name(self) -> str:
         return self.database_name
