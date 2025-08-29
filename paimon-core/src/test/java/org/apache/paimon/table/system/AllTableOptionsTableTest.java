@@ -64,7 +64,13 @@ public class AllTableOptionsTableTest extends TableTestBase {
                 read(allTableOptionsTable).stream()
                         .map(Objects::toString)
                         .collect(Collectors.toList());
-        result = result.stream().filter(r -> !r.contains("path")).collect(Collectors.toList());
+        result =
+                result.stream()
+                        .filter(
+                                r ->
+                                        !r.contains("path")
+                                                && !r.contains("table.create.timestamp-ms"))
+                        .collect(Collectors.toList());
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I(default,T,fields.sales.aggregate-function,sum)",

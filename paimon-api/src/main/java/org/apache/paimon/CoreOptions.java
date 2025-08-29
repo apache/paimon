@@ -220,6 +220,14 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    @Immutable
+    public static final ConfigOption<Long> TABLE_CREATE_TIMESTAMP_MS =
+            key("table.create.timestamp-ms")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription("Table creation timestamp");
+
     @ExcludeFromDocumentation("Avoid using deprecated options")
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");

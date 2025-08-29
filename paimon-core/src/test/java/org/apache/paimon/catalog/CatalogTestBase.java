@@ -24,12 +24,15 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -1111,6 +1114,47 @@ public abstract class CatalogTestBase {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
+    }
+
+    @Test
+    public void testCreateTableHasCreatedTimestamp() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        "comment"),
+                false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.options())
+                .as("Should have table create timestamp")
+                .containsKey(CoreOptions.TABLE_CREATE_TIMESTAMP_MS.key());
+
+        SchemaManager schemaManager =
+                new SchemaManager(
+                        LocalFileIO.create(),
+                        new Path(table.options().get(CoreOptions.PATH.key())));
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.TABLE_CREATE_TIMESTAMP_MS.key(), "1")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'table.create.timestamp-ms' is not supported yet.");
+
+        schemaManager.commitChanges(SchemaChange.setOption("my_key", "my_value"));
+
+        assertThat(schemaManager.latest().get().options())
+                .containsKey("my_key")
+                .containsKey(CoreOptions.TABLE_CREATE_TIMESTAMP_MS.key());
     }
 
     protected boolean supportsAlterDatabase() {

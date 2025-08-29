@@ -92,6 +92,7 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
+import static org.apache.paimon.CoreOptions.TABLE_CREATE_TIMESTAMP_MS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
@@ -913,6 +914,7 @@ public class FlinkCatalogTest {
             Set<String> optionsToRemove) {
         Path tablePath;
         Path tableDataPath;
+        String tableCreateTime;
         try {
             Map<String, String> options =
                     ((FlinkCatalog) catalog)
@@ -920,11 +922,13 @@ public class FlinkCatalogTest {
                             .getTable(FlinkCatalog.toIdentifier(path))
                             .options();
             tablePath = new Path(options.get(PATH.key()));
+            tableCreateTime = options.get(TABLE_CREATE_TIMESTAMP_MS.key());
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
+        options.put("table.create.timestamp-ms", tableCreateTime);
         options.putAll(optionsToAdd);
         optionsToRemove.forEach(options::remove);
         if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {

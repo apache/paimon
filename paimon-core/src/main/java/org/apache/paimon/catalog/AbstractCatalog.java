@@ -633,6 +633,9 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
+        options.putIfAbsent(
+                CoreOptions.TABLE_CREATE_TIMESTAMP_MS.key(),
+                Long.toString(System.currentTimeMillis()));
     }
 
     private void validateCustomTablePath(Map<String, String> options) {
