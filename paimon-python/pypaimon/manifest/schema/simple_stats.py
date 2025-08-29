@@ -17,7 +17,7 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from pypaimon.table.row.binary_row import BinaryRow
 
@@ -26,7 +26,7 @@ from pypaimon.table.row.binary_row import BinaryRow
 class SimpleStats:
     min_value: BinaryRow
     max_value: BinaryRow
-    null_count: List[int] | None
+    null_count: Optional[List[int]]
 
 
 SIMPLE_STATS_SCHEMA = {
