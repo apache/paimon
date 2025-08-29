@@ -23,6 +23,8 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 
+import java.util.TimeZone;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -33,22 +35,60 @@ public class ParquetTimestampVector implements TimestampColumnVector {
 
     private final ColumnVector vector;
 
+    private final TimeZone sourceTimezone;
+    private final TimeZone targetTimezone;
+
     public ParquetTimestampVector(ColumnVector vector) {
+        this(vector, null, null);
+    }
+
+    public ParquetTimestampVector(
+            ColumnVector vector, TimeZone sourceTimezone, TimeZone targetTimezone) {
         this.vector = vector;
+        this.sourceTimezone = sourceTimezone;
+        this.targetTimezone = targetTimezone;
     }
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         if (precision <= 3 && vector instanceof LongColumnVector) {
-            return Timestamp.fromEpochMillis(((LongColumnVector) vector).getLong(i));
+            long millis = ((LongColumnVector) vector).getLong(i);
+            if (needsTimezoneConversion()) {
+                millis = convertTimezone(millis, true);
+            }
+            return Timestamp.fromEpochMillis(millis);
         } else if (precision <= 6 && vector instanceof LongColumnVector) {
-            return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
+            long micros = ((LongColumnVector) vector).getLong(i);
+            if (needsTimezoneConversion()) {
+                micros = convertTimezone(micros, false);
+            }
+            return Timestamp.fromMicros(micros);
         } else {
             checkArgument(
                     vector instanceof TimestampColumnVector,
                     "Reading timestamp type occur unsupported vector type: %s",
                     vector.getClass());
             return ((TimestampColumnVector) vector).getTimestamp(i, precision);
+        }
+    }
+
+    private boolean needsTimezoneConversion() {
+        return sourceTimezone != null && targetTimezone != null;
+    }
+
+    private long convertTimezone(long timestamp, boolean isMillis) {
+        long millis = isMillis ? timestamp : Math.floorDiv(timestamp, 1000L);
+
+        int sourceOffset = sourceTimezone.getOffset(millis);
+        int targetOffset = targetTimezone.getOffset(millis);
+
+        int offsetDiff = targetOffset - sourceOffset;
+
+        long convertedMillis = millis + offsetDiff;
+        if (isMillis) {
+            return convertedMillis;
+        } else {
+            return timestamp + offsetDiff * 1000L;
         }
     }
 

@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -96,6 +97,12 @@ public class ParquetFileFormat extends FileFormat {
         if (blockSize != null) {
             parquetOptions.set(
                     ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
+        }
+
+        if (context.options().containsKey(TimezoneOptionUtils.CONVERSION_ENABLED)) {
+            parquetOptions.set(
+                    TimezoneOptionUtils.CONVERSION_ENABLED,
+                    context.options().get(TimezoneOptionUtils.CONVERSION_ENABLED));
         }
 
         return parquetOptions;

@@ -24,6 +24,7 @@ import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -128,6 +129,12 @@ public class HiveCloneUtils {
 
     public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
             throws Exception {
+        return hiveTableToPaimonSchema(hiveCatalog, identifier, true);
+    }
+
+    public static Schema hiveTableToPaimonSchema(
+            HiveCatalog hiveCatalog, Identifier identifier, boolean enableTimezoneConversion)
+            throws Exception {
         String database = identifier.getDatabaseName();
         String table = identifier.getObjectName();
 
@@ -148,6 +155,16 @@ public class HiveCloneUtils {
         List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
+
+        if (enableTimezoneConversion
+                && hasTimestampColumns(hiveTable)
+                && "parquet".equals(parseFormat(hiveTable))
+                && !options.containsKey(TimezoneOptionUtils.CONVERSION_ENABLED)) {
+            options.put(TimezoneOptionUtils.CONVERSION_ENABLED, "true");
+            LOG.debug(
+                    "Enabled timestamp timezone conversion for {}.{} (Parquet).", database, table);
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .comment(options.get("comment"))
@@ -212,5 +229,14 @@ public class HiveCloneUtils {
             throw new UnsupportedOperationException("Unknown partition format: " + partition);
         }
         return format;
+    }
+
+    /** Check if the table has timestamp columns that need timezone conversion. */
+    public static boolean hasTimestampColumns(Table hiveTable) {
+        List<FieldSchema> allCols = new ArrayList<>(hiveTable.getSd().getCols());
+        allCols.addAll(hiveTable.getPartitionKeys());
+
+        return allCols.stream()
+                .anyMatch(field -> field.getType().toLowerCase().contains("timestamp"));
     }
 }

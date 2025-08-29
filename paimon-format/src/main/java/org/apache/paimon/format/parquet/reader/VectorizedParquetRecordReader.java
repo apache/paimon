@@ -54,6 +54,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
@@ -93,6 +94,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
+    // Timezone conversion parameters
+    private final boolean timezoneConversionEnabled;
+    private final TimeZone sourceTimezone;
+    private final TimeZone targetTimezone;
 
     public VectorizedParquetRecordReader(
             Path filePath,
@@ -102,6 +107,21 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             WritableColumnVector[] vectors,
             int batchSize)
             throws IOException {
+        this(filePath, reader, fileSchema, fields, vectors, batchSize, false, null, null);
+    }
+
+    public VectorizedParquetRecordReader(
+            Path filePath,
+            ParquetFileReader reader,
+            MessageType fileSchema,
+            List<ParquetField> fields,
+            WritableColumnVector[] vectors,
+            int batchSize,
+            boolean timezoneConversionEnabled,
+            String sourceTimezoneId,
+            String targetTimezoneId)
+            throws IOException {
+
         this.filePath = filePath;
         this.reader = reader;
         this.fileSchema = fileSchema;
@@ -109,6 +129,11 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
+
+        // Initialize timezone conversion parameters
+        this.timezoneConversionEnabled = timezoneConversionEnabled;
+        this.sourceTimezone = tzOrNull(sourceTimezoneId);
+        this.targetTimezone = tzOrNull(targetTimezoneId);
 
         // fetch writer version from file metadata
         try {
@@ -122,6 +147,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         checkMissingColumns();
         // Initialize the columnarBatch and columnVectors,
         initBatch(vectors);
+    }
+
+    private static TimeZone tzOrNull(String id) {
+        return id == null ? null : TimeZone.getTimeZone(id);
     }
 
     private void initBatch(WritableColumnVector[] vectors) {
@@ -154,6 +183,14 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
+                    if (timezoneConversionEnabled) {
+                        vectors[i] =
+                                new ParquetTimestampVector(
+                                        writableVectors[i], sourceTimezone, targetTimezone);
+                    } else {
+                        vectors[i] = new ParquetTimestampVector(writableVectors[i]);
+                    }
+                    break;
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                     vectors[i] = new ParquetTimestampVector(writableVectors[i]);
                     break;

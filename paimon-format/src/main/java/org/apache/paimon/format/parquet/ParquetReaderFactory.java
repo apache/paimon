@@ -33,6 +33,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.TimezoneOptionUtils;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -50,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -115,8 +117,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
+        boolean timezoneConversionEnabled = TimezoneOptionUtils.isEnabled(conf);
+        String sourceTz = timezoneConversionEnabled ? "UTC" : null;
+        String targetTz = timezoneConversionEnabled ? ZoneId.systemDefault().getId() : null;
+
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize,
+                timezoneConversionEnabled,
+                sourceTz,
+                targetTz);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
