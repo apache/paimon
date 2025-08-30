@@ -66,23 +66,39 @@ public class SimpleFileEntry implements FileEntry {
         this.externalPath = externalPath;
     }
 
-    public static SimpleFileEntry from(ManifestEntry entry) {
-        return new SimpleFileEntry(
-                entry.kind(),
-                entry.partition(),
-                entry.bucket(),
-                entry.totalBuckets(),
-                entry.level(),
-                entry.fileName(),
-                entry.file().extraFiles(),
-                entry.file().embeddedIndex(),
-                entry.minKey(),
-                entry.maxKey(),
-                entry.externalPath());
+    public static SimpleFileEntry from(ManifestEntry entry, boolean containsTime) {
+        return containsTime
+                ? new TimedFileEntry(
+                        entry.kind(),
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.level(),
+                        entry.fileName(),
+                        entry.file().extraFiles(),
+                        entry.file().embeddedIndex(),
+                        entry.minKey(),
+                        entry.maxKey(),
+                        entry.externalPath(),
+                        entry.file().creationTimeEpochMillis())
+                : new SimpleFileEntry(
+                        entry.kind(),
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.level(),
+                        entry.fileName(),
+                        entry.file().extraFiles(),
+                        entry.file().embeddedIndex(),
+                        entry.minKey(),
+                        entry.maxKey(),
+                        entry.externalPath());
     }
 
-    public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
-        return entries.stream().map(SimpleFileEntry::from).collect(Collectors.toList());
+    public static List<SimpleFileEntry> from(List<ManifestEntry> entries, boolean containsTime) {
+        return entries.stream()
+                .map(entry -> SimpleFileEntry.from(entry, containsTime))
+                .collect(Collectors.toList());
     }
 
     @Override
