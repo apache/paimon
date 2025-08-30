@@ -18,7 +18,8 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
+import org.apache.paimon.Snapshot
+import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
 
 import org.apache.spark.sql.Row
 
@@ -693,6 +694,33 @@ trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimar
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
+    }
+  }
+}
+
+trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTable {
+
+  test("Paimon MergeInto: non pk table commit kind") {
+    withTable("s", "t") {
+      createTable("s", "id INT, b INT, c INT", Seq("id"))
+      sql("INSERT INTO s VALUES (1, 1, 1)")
+
+      createTable("t", "id INT, b INT, c INT", Seq("id"))
+      sql("INSERT INTO t VALUES (2, 2, 2)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN
+            |INSERT (id, b, c) VALUES (s.id, s.b, s.c);
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 2)
+      // no old data is deleted, so the commit kind is APPEND
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.APPEND))
     }
   }
 }
