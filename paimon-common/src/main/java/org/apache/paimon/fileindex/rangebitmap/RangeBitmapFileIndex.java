@@ -155,8 +155,12 @@ public class RangeBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
+            System.out.println(
+                    "DEBUG: RangeBitmapFileIndex.visitTopN called with limit=" + topN.limit());
             List<SortValue> orders = topN.orders();
             if (orders.size() != 1) {
+                System.out.println(
+                        "DEBUG: RangeBitmapFileIndex.visitTopN - orders size != 1, returning REMAIN");
                 return FileIndexResult.REMAIN;
             }
 
@@ -166,9 +170,19 @@ public class RangeBitmapFileIndex implements FileIndexer {
             int limit = topN.limit();
             SortValue sort = topN.orders().get(0);
             SortValue.NullOrdering nullOrdering = sort.nullOrdering();
+            System.out.println(
+                    "DEBUG: This is a custom log RangeBitmapFileIndex.visitTopN - processing TopN with field="
+                            + sort.field().name()
+                            + ", direction="
+                            + sort.direction()
+                            + ", nullOrdering="
+                            + nullOrdering);
             if (ASCENDING.equals(sort.direction())) {
+                System.out.println(
+                        "DEBUG: RangeBitmapFileIndex.visitTopN - calling bitmap.bottomK");
                 return new BitmapIndexResult(() -> bitmap.bottomK(limit, nullOrdering, foundSet));
             } else {
+                System.out.println("DEBUG: RangeBitmapFileIndex.visitTopN - calling bitmap.topK");
                 return new BitmapIndexResult(() -> bitmap.topK(limit, nullOrdering, foundSet));
             }
         }

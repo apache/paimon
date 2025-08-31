@@ -20,11 +20,13 @@ package org.apache.paimon.fileindex.rangebitmap;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
@@ -34,13 +36,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
@@ -468,5 +464,41 @@ public class RangeBitmapFileIndexTest {
         // test GT
         assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
+    }
+
+    @Test
+    public void testTopNWithMultipleColumns() {
+        IntType intType = new IntType();
+        FieldRef fieldRef1 = new FieldRef(0, "col1", intType);
+        FieldRef fieldRef2 = new FieldRef(1, "col2", intType);
+
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        // Write test data
+        writer.writeRecord(10);
+        writer.writeRecord(20);
+        writer.writeRecord(30);
+        writer.writeRecord(5);
+        writer.writeRecord(15);
+
+        // build index
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        // Create TopN with multiple columns (2 columns)
+        List<SortValue> orders = Arrays.asList(
+            new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+            new SortValue(fieldRef2, DESCENDING, NULLS_LAST)
+        );
+        TopN topN = new TopN(orders, 3);
+
+        // Execute TopN request with multiple columns
+        RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
+        FileIndexResult result = reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet));
+
+        // Current implementation should return REMAIN for multiple columns
+        assertThat(result).isEqualTo(FileIndexResult.REMAIN);
     }
 }
