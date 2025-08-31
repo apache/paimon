@@ -155,22 +155,12 @@ public class RangeBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
-            System.out.println(
-                    "DEBUG: RangeBitmapFileIndex.visitTopN called with limit=" + topN.limit());
             List<SortValue> orders = topN.orders();
 
             // If multiple columns, use first column with allowDuplicates=true
             boolean useFirstColumn = orders.size() > 1;
             SortValue sort = orders.get(0); // Always use first column
             boolean allowDuplicates = useFirstColumn;
-
-            System.out.println(
-                    "DEBUG: RangeBitmapFileIndex.visitTopN - processing TopN with field="
-                            + sort.field().name()
-                            + ", direction="
-                            + sort.direction()
-                            + ", allowDuplicates="
-                            + allowDuplicates);
 
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;
@@ -179,11 +169,8 @@ public class RangeBitmapFileIndex implements FileIndexer {
             SortValue.NullOrdering nullOrdering = sort.nullOrdering();
 
             if (ASCENDING.equals(sort.direction())) {
-                System.out.println(
-                        "DEBUG: RangeBitmapFileIndex.visitTopN - calling bitmap.bottomK with allowDuplicates=" + allowDuplicates);
                 return new BitmapIndexResult(() -> bitmap.bottomK(limit, nullOrdering, foundSet, allowDuplicates));
             } else {
-                System.out.println("DEBUG: RangeBitmapFileIndex.visitTopN - calling bitmap.topK with allowDuplicates=" + allowDuplicates);
                 return new BitmapIndexResult(() -> bitmap.topK(limit, nullOrdering, foundSet, allowDuplicates));
             }
         }

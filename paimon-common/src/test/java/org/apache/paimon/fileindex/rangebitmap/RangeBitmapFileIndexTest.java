@@ -475,33 +475,27 @@ public class RangeBitmapFileIndexTest {
         RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
         FileIndexWriter writer = bitmapFileIndex.createWriter();
 
-        // Write test data
         writer.writeRecord(10);
         writer.writeRecord(20);
         writer.writeRecord(30);
         writer.writeRecord(5);
         writer.writeRecord(15);
 
-        // build index
         byte[] bytes = writer.serializedBytes();
         ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
 
-        // Create TopN with multiple columns (2 columns)
         List<SortValue> orders = Arrays.asList(
             new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
             new SortValue(fieldRef2, DESCENDING, NULLS_LAST)
         );
         TopN topN = new TopN(orders, 3);
 
-        // Execute TopN request with multiple columns
         RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
         FileIndexResult result = reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet));
 
-        // With multiple columns, should use first column with allowDuplicates=true
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         RoaringBitmap32 actual = ((BitmapIndexResult) result).get();
-        // Should return all rows with the top 3 values from first column
         assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(3, 0, 4)); // values: 5, 10, 15
     }
 
@@ -513,7 +507,6 @@ public class RangeBitmapFileIndexTest {
 
         RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
         FileIndexWriter writer = bitmapFileIndex.createWriter();
-        // values: 1,1,1,2,3
         writer.writeRecord(1);
         writer.writeRecord(1);
         writer.writeRecord(1);
