@@ -169,9 +169,11 @@ public class RangeBitmapFileIndex implements FileIndexer {
             SortValue.NullOrdering nullOrdering = sort.nullOrdering();
 
             if (ASCENDING.equals(sort.direction())) {
-                return new BitmapIndexResult(() -> bitmap.bottomK(limit, nullOrdering, foundSet, allowDuplicates));
+                return new BitmapIndexResult(
+                        () -> bitmap.bottomK(limit, nullOrdering, foundSet, allowDuplicates));
             } else {
-                return new BitmapIndexResult(() -> bitmap.topK(limit, nullOrdering, foundSet, allowDuplicates));
+                return new BitmapIndexResult(
+                        () -> bitmap.topK(limit, nullOrdering, foundSet, allowDuplicates));
             }
         }
     }

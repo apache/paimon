@@ -485,10 +485,10 @@ public class RangeBitmapFileIndexTest {
         ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
 
-        List<SortValue> orders = Arrays.asList(
-            new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
-            new SortValue(fieldRef2, DESCENDING, NULLS_LAST)
-        );
+        List<SortValue> orders =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+                        new SortValue(fieldRef2, DESCENDING, NULLS_LAST));
         TopN topN = new TopN(orders, 3);
 
         RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
@@ -517,13 +517,16 @@ public class RangeBitmapFileIndexTest {
         ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
 
-        List<SortValue> orders = Arrays.asList(
-                new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
-                new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
+        List<SortValue> orders =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+                        new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
         TopN topN = new TopN(orders, 2);
 
         RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
-        RoaringBitmap32 actual = ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet))).get();
+        RoaringBitmap32 actual =
+                ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet)))
+                        .get();
         assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2));
     }
 
@@ -545,13 +548,16 @@ public class RangeBitmapFileIndexTest {
         ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
         FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
 
-        List<SortValue> orders = Arrays.asList(
-                new SortValue(fieldRef1, DESCENDING, NULLS_LAST),
-                new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
+        List<SortValue> orders =
+                Arrays.asList(
+                        new SortValue(fieldRef1, DESCENDING, NULLS_LAST),
+                        new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
         TopN topN = new TopN(orders, 2);
 
         RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
-        RoaringBitmap32 actual = ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet))).get();
+        RoaringBitmap32 actual =
+                ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet)))
+                        .get();
         assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3));
     }
 }

@@ -156,7 +156,8 @@ public class BitSliceIndexBitmap {
         return topK(k, foundSet, false);
     }
 
-    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
+    public RoaringBitmap32 topK(
+            int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -208,7 +209,8 @@ public class BitSliceIndexBitmap {
         return bottomK(k, foundSet, false);
     }
 
-    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
+    public RoaringBitmap32 bottomK(
+            int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }

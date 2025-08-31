@@ -285,8 +285,15 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 topK(
-            int k, SortValue.NullOrdering nullOrdering, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
-        return fillNulls(k, nullOrdering, foundSet, (l, r) -> getBitSliceIndexBitmap().topK(l, r, allowDuplicates));
+            int k,
+            SortValue.NullOrdering nullOrdering,
+            @Nullable RoaringBitmap32 foundSet,
+            boolean allowDuplicates) {
+        return fillNulls(
+                k,
+                nullOrdering,
+                foundSet,
+                (l, r) -> getBitSliceIndexBitmap().topK(l, r, allowDuplicates));
     }
 
     public RoaringBitmap32 bottomK(
@@ -295,9 +302,15 @@ public class RangeBitmap {
     }
 
     public RoaringBitmap32 bottomK(
-            int k, SortValue.NullOrdering nullOrdering, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
+            int k,
+            SortValue.NullOrdering nullOrdering,
+            @Nullable RoaringBitmap32 foundSet,
+            boolean allowDuplicates) {
         return fillNulls(
-                k, nullOrdering, foundSet, (l, r) -> getBitSliceIndexBitmap().bottomK(l, r, allowDuplicates));
+                k,
+                nullOrdering,
+                foundSet,
+                (l, r) -> getBitSliceIndexBitmap().bottomK(l, r, allowDuplicates));
     }
 
     private RoaringBitmap32 fillNulls(
