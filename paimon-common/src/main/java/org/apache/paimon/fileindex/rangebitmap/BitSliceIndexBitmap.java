@@ -153,6 +153,10 @@ public class BitSliceIndexBitmap {
     }
 
     public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet) {
+        return topK(k, foundSet, false);
+    }
+
+    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -178,24 +182,37 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.and(e, getSlice(i));
-                break;
+                if (!allowDuplicates) {
+                    break;
+                }
+                // If allowDuplicates, continue to include all rows with the same value
+                System.out.println("DEBUG: BitSliceIndexBitmap.topK allowDuplicates - continuing to include duplicates for current key slice");
             }
         }
 
-        // only k results should be returned
+        // Return all results if allowDuplicates, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        long n = f.getCardinality() - k;
-        if (n > 0) {
-            Iterator<Integer> iterator = e.iterator();
-            while (iterator.hasNext() && n > 0) {
-                f.remove(iterator.next());
-                n--;
+        if (allowDuplicates) {
+            System.out.println("DEBUG: BitSliceIndexBitmap.topK allowDuplicates - final cardinality=" + f.getCardinality());
+        }
+        if (!allowDuplicates) {
+            long n = f.getCardinality() - k;
+            if (n > 0) {
+                Iterator<Integer> iterator = e.iterator();
+                while (iterator.hasNext() && n > 0) {
+                    f.remove(iterator.next());
+                    n--;
+                }
             }
         }
         return f;
     }
 
     public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet) {
+        return bottomK(k, foundSet, false);
+    }
+
+    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -222,18 +239,27 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.and(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
-                break;
+                if (!allowDuplicates) {
+                    break;
+                }
+                // If allowDuplicates, continue to include all rows with the same value
+                System.out.println("DEBUG: BitSliceIndexBitmap.bottomK allowDuplicates - continuing to include duplicates for current key slice");
             }
         }
 
-        // only k results should be returned
+        // Return all results if allowDuplicates, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        long n = f.getCardinality() - k;
-        if (n > 0) {
-            Iterator<Integer> iterator = e.iterator();
-            while (iterator.hasNext() && n > 0) {
-                f.remove(iterator.next());
-                n--;
+        if (allowDuplicates) {
+            System.out.println("DEBUG: BitSliceIndexBitmap.bottomK allowDuplicates - final cardinality=" + f.getCardinality());
+        }
+        if (!allowDuplicates) {
+            long n = f.getCardinality() - k;
+            if (n > 0) {
+                Iterator<Integer> iterator = e.iterator();
+                while (iterator.hasNext() && n > 0) {
+                    f.remove(iterator.next());
+                    n--;
+                }
             }
         }
         return f;

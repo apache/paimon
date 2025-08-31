@@ -498,7 +498,10 @@ public class RangeBitmapFileIndexTest {
         RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
         FileIndexResult result = reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet));
 
-        // Current implementation should return REMAIN for multiple columns
-        assertThat(result).isEqualTo(FileIndexResult.REMAIN);
+        // With multiple columns, should use first column with allowDuplicates=true
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        RoaringBitmap32 actual = ((BitmapIndexResult) result).get();
+        // Should return all rows with the top 3 values from first column
+        assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(3, 0, 4)); // values: 5, 10, 15
     }
 }
