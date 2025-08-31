@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.Options;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
@@ -31,4 +32,16 @@ public class ParquetOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Specify the variant shredding schema for writing parquet files.");
+
+    public static final String TIMESTAMP_INT96_ADJUST_ZONE = "parquet.timestamp-int96-adjust-zone";
+
+    private final Options options;
+
+    public ParquetOptions(Options options) {
+        this.options = options;
+    }
+
+    public boolean timestampInt96AdjustZone() {
+        return options.getBoolean(TIMESTAMP_INT96_ADJUST_ZONE, false);
+    }
 }

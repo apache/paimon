@@ -98,6 +98,12 @@ public class ParquetFileFormat extends FileFormat {
                     ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
         }
 
+        if (context.options().containsKey(ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE)) {
+            parquetOptions.set(
+                    ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE,
+                    context.options().get(ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE));
+        }
+
         return parquetOptions;
     }
 }

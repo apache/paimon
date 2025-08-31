@@ -44,6 +44,7 @@ import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
 import javax.annotation.Nullable;
@@ -60,6 +61,8 @@ import static java.lang.String.format;
 
 /** Record reader for parquet. */
 public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(VectorizedParquetRecordReader.class);
 
     private ParquetFileReader reader;
 
@@ -93,6 +96,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
+    private final boolean adjustInt96Timestamp;
 
     public VectorizedParquetRecordReader(
             Path filePath,
@@ -102,6 +106,19 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             WritableColumnVector[] vectors,
             int batchSize)
             throws IOException {
+        this(filePath, reader, fileSchema, fields, vectors, batchSize, false);
+    }
+
+    public VectorizedParquetRecordReader(
+            Path filePath,
+            ParquetFileReader reader,
+            MessageType fileSchema,
+            List<ParquetField> fields,
+            WritableColumnVector[] vectors,
+            int batchSize,
+            boolean adjustInt96Timestamp)
+            throws IOException {
+
         this.filePath = filePath;
         this.reader = reader;
         this.fileSchema = fileSchema;
@@ -109,6 +126,9 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
+
+        // Initialize INT96 timestamp adjustment parameter
+        this.adjustInt96Timestamp = adjustInt96Timestamp;
 
         // fetch writer version from file metadata
         try {
@@ -154,8 +174,14 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
+                    if (adjustInt96Timestamp && isInt96Timestamp(fields.get(i))) {
+                        vectors[i] = new ParquetTimestampVector(writableVectors[i], true);
+                    } else {
+                        vectors[i] = new ParquetTimestampVector(writableVectors[i], false);
+                    }
+                    break;
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    vectors[i] = new ParquetTimestampVector(writableVectors[i]);
+                    vectors[i] = new ParquetTimestampVector(writableVectors[i], false);
                     break;
                 case ARRAY:
                     vectors[i] =
@@ -210,6 +236,16 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         }
 
         return vectors;
+    }
+
+    private boolean isInt96Timestamp(ParquetField field) {
+        if (!field.isPrimitive()) {
+            return false;
+        }
+        ParquetPrimitiveField primitiveField = (ParquetPrimitiveField) field;
+        ColumnDescriptor descriptor = primitiveField.getDescriptor();
+        return descriptor.getPrimitiveType().getPrimitiveTypeName()
+                == PrimitiveType.PrimitiveTypeName.INT96;
     }
 
     private void checkMissingColumns() throws IOException {
