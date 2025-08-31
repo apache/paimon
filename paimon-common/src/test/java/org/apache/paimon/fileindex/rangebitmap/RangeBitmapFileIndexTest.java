@@ -504,4 +504,61 @@ public class RangeBitmapFileIndexTest {
         // Should return all rows with the top 3 values from first column
         assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(3, 0, 4)); // values: 5, 10, 15
     }
+
+    @Test
+    public void testAllowDuplicatesAscBoundary() {
+        IntType intType = new IntType();
+        FieldRef fieldRef1 = new FieldRef(0, "col1", intType);
+        FieldRef fieldRef2 = new FieldRef(1, "col2", intType);
+
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+        // values: 1,1,1,2,3
+        writer.writeRecord(1);
+        writer.writeRecord(1);
+        writer.writeRecord(1);
+        writer.writeRecord(2);
+        writer.writeRecord(3);
+
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        List<SortValue> orders = Arrays.asList(
+                new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+                new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
+        TopN topN = new TopN(orders, 2);
+
+        RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
+        RoaringBitmap32 actual = ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet))).get();
+        assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2));
+    }
+
+    @Test
+    public void testAllowDuplicatesDescBoundary() {
+        IntType intType = new IntType();
+        FieldRef fieldRef1 = new FieldRef(0, "col1", intType);
+        FieldRef fieldRef2 = new FieldRef(1, "col2", intType);
+
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+        writer.writeRecord(5);
+        writer.writeRecord(4);
+        writer.writeRecord(4);
+        writer.writeRecord(4);
+        writer.writeRecord(3);
+
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+
+        List<SortValue> orders = Arrays.asList(
+                new SortValue(fieldRef1, DESCENDING, NULLS_LAST),
+                new SortValue(fieldRef2, ASCENDING, NULLS_LAST));
+        TopN topN = new TopN(orders, 2);
+
+        RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
+        RoaringBitmap32 actual = ((BitmapIndexResult) reader.visitTopN(topN, new BitmapIndexResult(() -> foundSet))).get();
+        assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3));
+    }
 }

@@ -30,6 +30,8 @@ import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.paimon.utils.IOUtils.readFully;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Implementation of bit-slice index bitmap. */
 public class BitSliceIndexBitmap {
@@ -186,14 +188,16 @@ public class BitSliceIndexBitmap {
                     break;
                 }
                 // If allowDuplicates, continue to include all rows with the same value
-                System.out.println("DEBUG: BitSliceIndexBitmap.topK allowDuplicates - continuing to include duplicates for current key slice");
+                Logger logger = LoggerFactory.getLogger(BitSliceIndexBitmap.class);
+                logger.debug("BitSliceIndexBitmap.topK allowDuplicates - continuing to include duplicates for current key slice");
             }
         }
 
         // Return all results if allowDuplicates, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
         if (allowDuplicates) {
-            System.out.println("DEBUG: BitSliceIndexBitmap.topK allowDuplicates - final cardinality=" + f.getCardinality());
+            Logger logger = LoggerFactory.getLogger(BitSliceIndexBitmap.class);
+            logger.debug("BitSliceIndexBitmap.topK allowDuplicates - final cardinality=" + f.getCardinality());
         }
         if (!allowDuplicates) {
             long n = f.getCardinality() - k;
@@ -243,14 +247,16 @@ public class BitSliceIndexBitmap {
                     break;
                 }
                 // If allowDuplicates, continue to include all rows with the same value
-                System.out.println("DEBUG: BitSliceIndexBitmap.bottomK allowDuplicates - continuing to include duplicates for current key slice");
+                Logger logger = LoggerFactory.getLogger(BitSliceIndexBitmap.class);
+                logger.debug("BitSliceIndexBitmap.bottomK allowDuplicates - continuing to include duplicates for current key slice");
             }
         }
 
         // Return all results if allowDuplicates, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
         if (allowDuplicates) {
-            System.out.println("DEBUG: BitSliceIndexBitmap.bottomK allowDuplicates - final cardinality=" + f.getCardinality());
+            Logger logger = LoggerFactory.getLogger(BitSliceIndexBitmap.class);
+            logger.debug("BitSliceIndexBitmap.bottomK allowDuplicates - final cardinality=" + f.getCardinality());
         }
         if (!allowDuplicates) {
             long n = f.getCardinality() - k;
