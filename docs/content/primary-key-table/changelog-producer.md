@@ -131,7 +131,7 @@ efficient as the input changelog producer and the latency to produce changelog m
 Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
 changelog for the same record.
 
-The `full-compaction.delta-commits` property is only supported with lookup changlog
+The `full-compaction.delta-commits` property is only supported with full-compaction changlog
 producers. If you need both efficient lookup based changelog generation
 and periodic full compaction (e.g., Iceberg), `'full-compaction'` can be selected as the changelog producer.
 
