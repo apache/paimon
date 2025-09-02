@@ -157,10 +157,10 @@ public class RangeBitmapFileIndex implements FileIndexer {
         public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
             List<SortValue> orders = topN.orders();
 
-            // If multiple columns, use first column with allowDuplicates=true
-            boolean useFirstColumn = orders.size() > 1;
+            // If multiple columns, use first column with strict=false (allow duplicates)
+            boolean isMultiColumn = orders.size() > 1;
             SortValue sort = orders.get(0); // Always use first column
-            boolean allowDuplicates = useFirstColumn;
+            boolean strict = !isMultiColumn;
 
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;
@@ -170,10 +170,10 @@ public class RangeBitmapFileIndex implements FileIndexer {
 
             if (ASCENDING.equals(sort.direction())) {
                 return new BitmapIndexResult(
-                        () -> bitmap.bottomK(limit, nullOrdering, foundSet, allowDuplicates));
+                        () -> bitmap.bottomK(limit, nullOrdering, foundSet, strict));
             } else {
                 return new BitmapIndexResult(
-                        () -> bitmap.topK(limit, nullOrdering, foundSet, allowDuplicates));
+                        () -> bitmap.topK(limit, nullOrdering, foundSet, strict));
             }
         }
     }

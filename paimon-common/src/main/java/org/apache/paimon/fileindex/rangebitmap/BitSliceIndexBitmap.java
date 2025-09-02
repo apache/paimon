@@ -152,12 +152,7 @@ public class BitSliceIndexBitmap {
         return gt(code - 1);
     }
 
-    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet) {
-        return topK(k, foundSet, false);
-    }
-
-    public RoaringBitmap32 topK(
-            int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
+    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet, boolean strict) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -183,16 +178,16 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.and(e, getSlice(i));
-                if (!allowDuplicates) {
+                if (strict) {
                     break;
                 }
-                // If allowDuplicates, continue to include all rows with the same value
+                // If not strict, continue to include all rows with the same value
             }
         }
 
-        // Return all results if allowDuplicates, otherwise limit to k
+        // Return all results if not strict, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        if (!allowDuplicates) {
+        if (strict) {
             long n = f.getCardinality() - k;
             if (n > 0) {
                 Iterator<Integer> iterator = e.iterator();
@@ -205,12 +200,7 @@ public class BitSliceIndexBitmap {
         return f;
     }
 
-    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet) {
-        return bottomK(k, foundSet, false);
-    }
-
-    public RoaringBitmap32 bottomK(
-            int k, @Nullable RoaringBitmap32 foundSet, boolean allowDuplicates) {
+    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet, boolean strict) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -237,16 +227,16 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.and(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
-                if (!allowDuplicates) {
+                if (strict) {
                     break;
                 }
-                // If allowDuplicates, continue to include all rows with the same value
+                // If not strict, continue to include all rows with the same value
             }
         }
 
-        // Return all results if allowDuplicates, otherwise limit to k
+        // Return all results if not strict, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        if (!allowDuplicates) {
+        if (strict) {
             long n = f.getCardinality() - k;
             if (n > 0) {
                 Iterator<Integer> iterator = e.iterator();
