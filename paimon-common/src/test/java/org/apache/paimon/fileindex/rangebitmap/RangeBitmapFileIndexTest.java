@@ -36,9 +36,14 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
