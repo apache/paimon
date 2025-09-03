@@ -613,7 +613,7 @@ public interface Catalog extends AutoCloseable {
      * will throw an {@link UnsupportedOperationException}, affect the following methods:
      *
      * <ul>
-     *   <li>{@link #commitSnapshot(Identifier, Snapshot, List)}.
+     *   <li>{@link #commitSnapshot(Identifier, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
@@ -786,6 +786,8 @@ public interface Catalog extends AutoCloseable {
      */
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
+
+    // ======================= Function methods ===============================
 
     /**
      * Get the names of all functions in this catalog.
