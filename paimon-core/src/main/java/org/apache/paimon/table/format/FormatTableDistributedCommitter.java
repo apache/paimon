@@ -16,14 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.sink.FormatTableAtomicCommitter.TempFileInfo;
-import org.apache.paimon.table.sink.FormatTableWrite.FormatTableCommitMessage;
+import org.apache.paimon.table.format.FormatTableAtomicCommitter.TempFileInfo;
+import org.apache.paimon.table.format.FormatTableWrite.FormatTableCommitMessage;
+import org.apache.paimon.table.sink.CommitMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,9 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>This committer implements a two-phase commit protocol: 1. Prepare phase: Collect and serialize
  * commit messages from all tasks 2. Commit phase: Atomically apply all changes or rollback on
- * failure
- *
- * @since 0.9.0
+ * failure.
  */
 @Public
 public class FormatTableDistributedCommitter {

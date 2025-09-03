@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
@@ -80,11 +80,41 @@ public abstract class FormatTableAtomicCommitter {
      */
     public abstract void commitFiles(List<TempFileInfo> tempFiles) throws IOException;
 
-    /** Aborts the write operation and cleans up temporary files. */
-    public abstract void abortFiles(List<TempFileInfo> tempFiles) throws IOException;
+    public abstract void cleanupTempDirectory() throws IOException;
 
-    /** Gets the final location for a file after commit. */
-    public abstract Path getFinalLocation(TempFileInfo tempFile);
+    /** Aborts the write operation and cleans up temporary files. */
+    public void abortFiles(List<TempFileInfo> tempFiles) throws IOException {
+        LOG.info("Aborting {} files and cleaning up temporary directory", tempFiles.size());
+
+        // First, delete individual temporary files
+        for (TempFileInfo tempFile : tempFiles) {
+            Path tempPath = tempFile.getTempPath();
+            if (fileIO.exists(tempPath)) {
+                try {
+                    fileIO.delete(tempPath, false);
+                    LOG.debug("Deleted temporary file: {}", tempPath);
+                } catch (IOException e) {
+                    LOG.warn("Failed to delete temporary file: {}", tempPath, e);
+                    // Continue with other files even if one fails
+                }
+            }
+
+            // Also ensure final file doesn't exist (in case it was partially committed)
+            Path finalPath = tempFile.getFinalPath();
+            if (fileIO.exists(finalPath)) {
+                try {
+                    fileIO.delete(finalPath, false);
+                    LOG.debug("Deleted final file: {}", finalPath);
+                } catch (IOException e) {
+                    LOG.warn("Failed to delete final file: {}", finalPath, e);
+                    // Continue with other files even if one fails
+                }
+            }
+        }
+
+        // Then clean up temporary directory
+        this.cleanupTempDirectory();
+    }
 
     private static boolean isS3FileSystem(String location) {
         return location.startsWith("s3://")
@@ -236,45 +266,7 @@ public abstract class FormatTableAtomicCommitter {
         }
 
         @Override
-        public void abortFiles(List<TempFileInfo> tempFiles) throws IOException {
-            LOG.info("Aborting {} files and cleaning up temporary directory", tempFiles.size());
-
-            // First, delete individual temporary files
-            for (TempFileInfo tempFile : tempFiles) {
-                Path tempPath = tempFile.getTempPath();
-                if (fileIO.exists(tempPath)) {
-                    try {
-                        fileIO.delete(tempPath, false);
-                        LOG.debug("Deleted temporary file: {}", tempPath);
-                    } catch (IOException e) {
-                        LOG.warn("Failed to delete temporary file: {}", tempPath, e);
-                        // Continue with other files even if one fails
-                    }
-                }
-
-                // Also ensure final file doesn't exist (in case it was partially committed)
-                Path finalPath = tempFile.getFinalPath();
-                if (fileIO.exists(finalPath)) {
-                    try {
-                        fileIO.delete(finalPath, false);
-                        LOG.debug("Deleted final file: {}", finalPath);
-                    } catch (IOException e) {
-                        LOG.warn("Failed to delete final file: {}", finalPath, e);
-                        // Continue with other files even if one fails
-                    }
-                }
-            }
-
-            // Then clean up temporary directory
-            cleanupTempDirectory();
-        }
-
-        @Override
-        public Path getFinalLocation(TempFileInfo tempFile) {
-            return tempFile.getFinalPath();
-        }
-
-        private void cleanupTempDirectory() throws IOException {
+        public void cleanupTempDirectory() throws IOException {
             Path tablePath = new Path(formatTable.location());
             Path stagingPath = new Path(tablePath, STAGING_DIR_NAME);
             Path tempDir = new Path(stagingPath, TEMP_DIR_PREFIX + sessionId);
@@ -388,45 +380,7 @@ public abstract class FormatTableAtomicCommitter {
         }
 
         @Override
-        public void abortFiles(List<TempFileInfo> tempFiles) throws IOException {
-            LOG.info("Aborting {} files for S3A committer", tempFiles.size());
-
-            // First, delete individual temporary files
-            for (TempFileInfo tempFile : tempFiles) {
-                Path tempPath = tempFile.getTempPath();
-                if (fileIO.exists(tempPath)) {
-                    try {
-                        fileIO.delete(tempPath, false);
-                        LOG.debug("Deleted temporary file: {}", tempPath);
-                    } catch (IOException e) {
-                        LOG.warn("Failed to delete temporary file: {}", tempPath, e);
-                        // Continue with other files even if one fails
-                    }
-                }
-
-                // Also ensure final file doesn't exist (in case it was partially committed)
-                Path finalPath = tempFile.getFinalPath();
-                if (fileIO.exists(finalPath)) {
-                    try {
-                        fileIO.delete(finalPath, false);
-                        LOG.debug("Deleted final file: {}", finalPath);
-                    } catch (IOException e) {
-                        LOG.warn("Failed to delete final file: {}", finalPath, e);
-                        // Continue with other files even if one fails
-                    }
-                }
-            }
-
-            // Then clean up temporary directory
-            cleanupTempDirectory();
-        }
-
-        @Override
-        public Path getFinalLocation(TempFileInfo tempFile) {
-            return tempFile.getFinalPath();
-        }
-
-        private void cleanupTempDirectory() throws IOException {
+        public void cleanupTempDirectory() throws IOException {
             Path tablePath = new Path(formatTable.location());
             Path tempDir = new Path(tablePath, MAGIC_COMMITTER_DIR + "/" + sessionId);
 

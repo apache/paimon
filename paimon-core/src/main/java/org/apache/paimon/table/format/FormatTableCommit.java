@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
@@ -28,8 +28,10 @@ import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.sink.FormatTableAtomicCommitter.TempFileInfo;
-import org.apache.paimon.table.sink.FormatTableWrite.FormatTableCommitMessage;
+import org.apache.paimon.table.format.FormatTableAtomicCommitter.TempFileInfo;
+import org.apache.paimon.table.format.FormatTableWrite.FormatTableCommitMessage;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.CommitMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,9 +48,7 @@ import java.util.Set;
 
 /**
  * A {@link BatchTableCommit} implementation for {@link FormatTable} that handles committing writes
- * to format tables (ORC, Parquet, CSV, JSON).
- *
- * @since 0.9.0
+ * to format tables.
  */
 @Public
 public class FormatTableCommit implements BatchTableCommit {

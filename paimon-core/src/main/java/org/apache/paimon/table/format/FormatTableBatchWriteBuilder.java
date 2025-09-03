@@ -16,10 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -30,9 +34,7 @@ import java.util.UUID;
 
 /**
  * A {@link BatchWriteBuilder} implementation for {@link FormatTable} that handles writing to format
- * tables (ORC, Parquet, CSV, JSON).
- *
- * @since 0.9.0
+ * tables.
  */
 @Public
 public class FormatTableBatchWriteBuilder implements BatchWriteBuilder {

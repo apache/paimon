@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;

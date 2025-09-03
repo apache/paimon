@@ -1232,7 +1232,7 @@ public abstract class CatalogTestBase {
         assertThat(messages1).isNotEmpty();
         assertThat(messages2).isNotEmpty();
 
-        // Verify that only the first write's data is present and no temporary files remain
+        // Verify that only the first writes data is present and no temporary files remain
         verifyFormatTableData(formatTable, 2, false); // Should have 2 records from first write
         verifyNoTemporaryFiles(formatTable);
     }

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
@@ -34,7 +34,9 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.sink.FormatTableAtomicCommitter.TempFileInfo;
+import org.apache.paimon.table.format.FormatTableAtomicCommitter.TempFileInfo;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.table.format;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
@@ -36,8 +36,6 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>This component is designed to run periodically or on-demand to maintain system health by
  * cleaning up resources from failed operations.
- *
- * @since 0.9.0
  */
 @Public
 public class FormatTableFailureRecovery {
