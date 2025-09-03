@@ -44,6 +44,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,6 +128,9 @@ public class ManifestObjectsCache
         if (partition.isPresent()) {
             Map<Integer, List<RichSegments>> segMap =
                     manifestSegments.indexedSegments().get(partition.get());
+            if (segMap == null) {
+                return Collections.emptyList();
+            }
             OptionalInt specifiedBucket = extractSpecifiedBucket(bucketFilter);
             if (specifiedBucket.isPresent()) {
                 segments = segMap.get(specifiedBucket.getAsInt());
