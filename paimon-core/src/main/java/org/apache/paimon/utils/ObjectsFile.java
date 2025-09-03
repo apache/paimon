@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Segments;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -41,7 +42,8 @@ import java.util.List;
 import static org.apache.paimon.utils.FileUtils.checkExists;
 
 /** A file which contains several {@link T}s, provides read and write. */
-public class ObjectsFile<T> implements SimpleFileReader<T> {
+public abstract class ObjectsFile<T, F extends ObjectsCache.Filters<T>, S extends Segments>
+        implements SimpleFileReader<T> {
 
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
@@ -50,7 +52,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     protected final String compression;
     protected final PathFactory pathFactory;
 
-    @Nullable private final ObjectsCache<Path, T> cache;
+    @Nullable protected final ObjectsCache<Path, T, F, S> cache;
 
     public ObjectsFile(
             FileIO fileIO,
@@ -67,18 +69,15 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         this.writerFactory = writerFactory;
         this.compression = compression;
         this.pathFactory = pathFactory;
-        this.cache =
-                cache == null
-                        ? null
-                        : new ObjectsCache<>(
-                                cache,
-                                serializer,
-                                formatType,
-                                this::fileSize,
-                                this::createIterator);
+        this.cache = cache == null ? null : createCache(cache, formatType);
     }
 
-    public ObjectsFile<T> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+    protected abstract ObjectsCache<Path, T, F, S> createCache(
+            SegmentsCache<Path> cache, RowType formatType);
+
+    protected abstract F createFilters(Filter<InternalRow> readFilter, Filter<T> readTFilter);
+
+    public ObjectsFile<T, F, S> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
         if (cache != null) {
             cache.withCacheMetrics(cacheMetrics);
         }
@@ -143,7 +142,7 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, readFilter, readTFilter);
+            return cache.read(path, fileSize, createFilters(readFilter, readTFilter));
         }
 
         return readFromIterator(
@@ -187,13 +186,13 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
         }
     }
 
-    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
+    public CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
             throws IOException {
         return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
                 .toCloseableIterator();
     }
 
-    private long fileSize(Path file) throws IOException {
+    public long fileSize(Path file) throws IOException {
         try {
             return fileIO.getFileSize(file);
         } catch (IOException e) {

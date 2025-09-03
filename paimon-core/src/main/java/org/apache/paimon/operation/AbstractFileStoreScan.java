@@ -37,8 +37,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.IntIntFilter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -79,7 +79,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private boolean onlyReadRealBuckets = false;
     private Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter = null;
-    private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
+    private IntIntFilter totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Integer specifiedLevel = null;
     private Filter<Integer> levelFilter = null;
@@ -151,8 +151,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withTotalAwareBucketFilter(
-            BiFilter<Integer, Integer> totalAwareBucketFilter) {
+    public FileStoreScan withTotalAwareBucketFilter(IntIntFilter totalAwareBucketFilter) {
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -447,6 +446,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
+                                manifestsReader.partitionFilter(),
+                                createBucketFilter(),
                                 createEntryRowFilter().and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
@@ -467,6 +468,28 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return entry.copyWithoutStats();
     }
 
+    private IntIntFilter createBucketFilter() {
+        if (!onlyReadRealBuckets
+                && specifiedBucket == null
+                && bucketFilter == null
+                && totalAwareBucketFilter == null) {
+            return null;
+        }
+
+        return (bucket, numBucket) -> {
+            if (onlyReadRealBuckets && bucket < 0) {
+                return false;
+            }
+            if (specifiedBucket != null && bucket != specifiedBucket) {
+                return false;
+            }
+            if (bucketFilter != null && !bucketFilter.test(bucket)) {
+                return false;
+            }
+            return totalAwareBucketFilter == null || totalAwareBucketFilter.test(bucket, numBucket);
+        };
+    }
+
     /**
      * Read the corresponding entries based on the current required partition and bucket.
      *
@@ -481,27 +504,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<InternalRow, String> fileNameGetter = ManifestEntrySerializer.fileNameGetter();
         PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
         Function<InternalRow, Integer> levelGetter = ManifestEntrySerializer.levelGetter();
+        IntIntFilter bucketFilter = createBucketFilter();
         return row -> {
             if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
                 return false;
             }
 
-            int bucket = bucketGetter.apply(row);
-            if (onlyReadRealBuckets && bucket < 0) {
-                return false;
-            }
-
-            if (specifiedBucket != null && bucket != specifiedBucket) {
-                return false;
-            }
-
-            if (bucketFilter != null && !bucketFilter.test(bucket)) {
-                return false;
-            }
-
-            if (totalAwareBucketFilter != null
-                    && !totalAwareBucketFilter.test(bucket, totalBucketGetter.apply(row))) {
-                return false;
+            if (bucketFilter != null) {
+                int bucket = bucketGetter.apply(row);
+                int totalBucket = totalBucketGetter.apply(row);
+                if (!bucketFilter.test(bucket, totalBucket)) {
+                    return false;
+                }
             }
 
             int level = levelGetter.apply(row);
