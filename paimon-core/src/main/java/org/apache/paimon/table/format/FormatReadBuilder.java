@@ -20,7 +20,6 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -56,9 +55,8 @@ public class FormatReadBuilder implements ReadBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
-    private final FileFormat fileFormat;
-
     private RowType readType;
+    private final CoreOptions options;
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
@@ -66,8 +64,7 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.readType = this.table.rowType();
-        CoreOptions options = new CoreOptions(table.options());
-        this.fileFormat = FileFormatDiscover.of(options).discover(options.formatType());
+        this.options = new CoreOptions(table.options());
     }
 
     @Override
@@ -144,10 +141,11 @@ public class FormatReadBuilder implements ReadBuilder {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
-
         FormatReaderFactory readerFactory =
-                fileFormat.createReaderFactory(
-                        table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
+                FileFormatDiscover.of(options)
+                        .discover(options.formatType())
+                        .createReaderFactory(
+                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
