@@ -653,6 +653,24 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       )
     }
   }
+
+  test(s"Paimon MergeInto: merge into with varchar") {
+    withTable("source", "target") {
+      createTable("source", "a INT, b VARCHAR(32)", Seq("a"))
+      createTable("target", "a INT, b VARCHAR(32)", Seq("a"))
+      sql("INSERT INTO target values (1, 'Alice'), (2, 'Bob')")
+      sql("INSERT INTO source values (1, 'Eve'), (3, 'Cat')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON target.a = source.a
+             |WHEN MATCHED THEN
+             |UPDATE SET a = source.a, b = source.b
+             |""".stripMargin)
+      checkAnswer(sql("SELECT * FROM target ORDER BY a, b"), Seq(Row(1, "Eve"), Row(2, "Bob")))
+    }
+  }
 }
 
 trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
