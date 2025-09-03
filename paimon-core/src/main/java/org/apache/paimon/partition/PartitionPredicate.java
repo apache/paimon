@@ -191,6 +191,7 @@ public interface PartitionPredicate extends Serializable {
         private static final long serialVersionUID = 1L;
 
         private final Set<BinaryRow> partitions;
+        private final @Nullable BinaryRow singlePartition;
         private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
@@ -198,6 +199,7 @@ public interface PartitionPredicate extends Serializable {
         private MultiplePartitionPredicate(
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
+            this.singlePartition = partitions.size() == 1 ? partitions.iterator().next() : null;
             RowType partitionType = converter.rowType();
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
@@ -260,7 +262,7 @@ public interface PartitionPredicate extends Serializable {
 
         @Override
         public Optional<BinaryRow> extractSinglePartition() {
-            return partitions.stream().findFirst();
+            return Optional.ofNullable(singlePartition);
         }
     }
 
