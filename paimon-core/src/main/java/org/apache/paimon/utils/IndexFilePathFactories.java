@@ -21,13 +21,13 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexPathFactory;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Cache for index {@link PathFactory}s. */
 public class IndexFilePathFactories {
 
-    private final Map<Pair<BinaryRow, Integer>, IndexPathFactory> cache = new HashMap<>();
+    private final Map<Pair<BinaryRow, Integer>, IndexPathFactory> cache = new ConcurrentHashMap<>();
     private final FileStorePathFactory pathFactory;
 
     public IndexFilePathFactories(FileStorePathFactory pathFactory) {
