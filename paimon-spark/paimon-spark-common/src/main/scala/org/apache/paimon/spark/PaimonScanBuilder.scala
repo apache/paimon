@@ -31,8 +31,6 @@ import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPred
 import org.apache.spark.sql.connector.read._
 import org.apache.spark.sql.sources.Filter
 
-import java.util.Collections
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -104,37 +102,39 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    if (orders.length != 1) {
-      return false
-    }
+    val sorts: List[SortValue] = orders
+      .map(
+        order => {
+          val fieldName = order.expression() match {
+            case nr: NamedReference => nr.fieldNames.mkString(".")
+            case _ => return false
+          }
 
-    val fieldName = orders.head.expression() match {
-      case nr: NamedReference => nr.fieldNames.mkString(".")
-      case _ => return false
-    }
+          val rowType = table.rowType()
+          if (rowType.notContainsField(fieldName)) {
+            return false
+          }
 
-    val rowType = table.rowType()
-    if (rowType.notContainsField(fieldName)) {
-      return false
-    }
+          val field = rowType.getField(fieldName)
+          val ref = new FieldRef(field.id(), field.name(), field.`type`())
 
-    val field = rowType.getField(fieldName)
-    val ref = new FieldRef(field.id(), field.name(), field.`type`())
+          val nullOrdering = order.nullOrdering() match {
+            case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
+            case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
+            case _ => return false
+          }
 
-    val nullOrdering = orders.head.nullOrdering() match {
-      case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
-      case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
-      case _ => return false
-    }
+          val direction = order.direction() match {
+            case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
+            case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
+            case _ => return false
+          }
 
-    val direction = orders.head.direction() match {
-      case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
-      case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
-      case _ => return false
-    }
+          new SortValue(ref, direction, nullOrdering)
+        })
+      .toList
 
-    val sort = new SortValue(ref, direction, nullOrdering)
-    pushDownTopN = Some(new TopN(Collections.singletonList(sort), limit))
+    pushDownTopN = Some(new TopN(sorts.asJava, limit))
 
     // just make the best effort to push down TopN
     false

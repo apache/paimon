@@ -148,7 +148,8 @@ public class TestChangelogDataReadWrite {
                         FileFormatDiscover.of(options),
                         pathFactory,
                         options.fileIndexReadEnabled(),
-                        false);
+                        false,
+                        options.deletionVectorsEnabled());
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 

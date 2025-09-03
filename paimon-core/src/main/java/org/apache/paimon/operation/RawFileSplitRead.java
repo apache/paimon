@@ -79,6 +79,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
+    private final boolean deletionVectorsEnabled;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -93,7 +94,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            boolean rowTrackingEnabled,
+            boolean deletionVectorsEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -103,6 +105,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.rowTrackingEnabled = rowTrackingEnabled;
         this.readRowType = rowType;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     @Override
@@ -180,7 +183,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         },
                         filters,
                         topN,
-                        limit);
+                        limit,
+                        deletionVectorsEnabled);
 
         for (DataFileMeta file : files) {
             suppliers.add(
