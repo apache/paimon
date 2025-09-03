@@ -30,8 +30,8 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.IntIntFilter;
 
 import javax.annotation.Nullable;
 
@@ -61,7 +61,7 @@ public interface FileStoreScan {
 
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 
-    FileStoreScan withTotalAwareBucketFilter(IntIntFilter bucketFilter);
+    FileStoreScan withTotalAwareBucketFilter(BiFilter<Integer, Integer> bucketFilter);
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 

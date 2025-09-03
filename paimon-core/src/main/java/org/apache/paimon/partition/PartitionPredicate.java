@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
@@ -70,6 +71,9 @@ public interface PartitionPredicate extends Serializable {
      */
     boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
+
+    /** Try to extract a single partition from this predicate. */
+    Optional<BinaryRow> extractSinglePartition();
 
     /**
      * Compared to the multiple method, this approach can accept filtering of partially partitioned
@@ -116,6 +120,11 @@ public interface PartitionPredicate extends Serializable {
                     InternalArray nullCounts) {
                 return false;
             }
+
+            @Override
+            public Optional<BinaryRow> extractSinglePartition() {
+                return Optional.empty();
+            }
         };
     }
 
@@ -133,6 +142,11 @@ public interface PartitionPredicate extends Serializable {
                     InternalRow maxValues,
                     InternalArray nullCounts) {
                 return true;
+            }
+
+            @Override
+            public Optional<BinaryRow> extractSinglePartition() {
+                return Optional.empty();
             }
         };
     }
@@ -160,6 +174,11 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return predicate.test(rowCount, minValues, maxValues, nullCounts);
+        }
+
+        @Override
+        public Optional<BinaryRow> extractSinglePartition() {
+            return Optional.empty();
         }
     }
 
@@ -237,6 +256,11 @@ public interface PartitionPredicate extends Serializable {
                 }
             }
             return true;
+        }
+
+        @Override
+        public Optional<BinaryRow> extractSinglePartition() {
+            return partitions.stream().findFirst();
         }
     }
 

@@ -35,7 +35,6 @@ import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.IntIntFilter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -110,7 +109,7 @@ public class ManifestFile
             String fileName,
             @Nullable Long fileSize,
             @Nullable PartitionPredicate partitionFilter,
-            @Nullable IntIntFilter bucketFilter,
+            @Nullable BucketFilter bucketFilter,
             Filter<InternalRow> readFilter,
             Filter<ManifestEntry> readTFilter) {
         try {

@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.IntIntFilter;
 import org.apache.paimon.utils.ObjectsCache;
 
 import javax.annotation.Nullable;
@@ -30,11 +29,11 @@ import javax.annotation.Nullable;
 public class ManifestEntryFilters extends ObjectsCache.Filters<ManifestEntry> {
 
     public final @Nullable PartitionPredicate partitionFilter;
-    public final @Nullable IntIntFilter bucketFilter;
+    public final @Nullable BucketFilter bucketFilter;
 
     public ManifestEntryFilters(
             @Nullable PartitionPredicate partitionFilter,
-            @Nullable IntIntFilter bucketFilter,
+            @Nullable BucketFilter bucketFilter,
             Filter<InternalRow> readFilter,
             Filter<ManifestEntry> readVFilter) {
         super(readFilter, readVFilter);

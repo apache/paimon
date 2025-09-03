@@ -20,29 +20,78 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Segments;
-import org.apache.paimon.utils.Triple;
 
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** A {@link Segments} for manifest entries. */
 public class ManifestSegments implements Segments {
 
-    private final Map<Triple<BinaryRow, Integer, Integer>, Segments> segments;
+    private final List<RichSegments> segments;
     private final long totalMemorySize;
 
-    public ManifestSegments(Map<Triple<BinaryRow, Integer, Integer>, Segments> segments) {
-        this.segments = Collections.unmodifiableMap(segments);
+    private final Map<BinaryRow, Map<Integer, List<RichSegments>>> indexedSegments;
+
+    public ManifestSegments(List<RichSegments> segments) {
+        this.segments = segments;
         this.totalMemorySize =
-                segments.values().stream().mapToLong(Segments::totalMemorySize).sum();
+                segments.stream()
+                        .map(RichSegments::segments)
+                        .mapToLong(Segments::totalMemorySize)
+                        .sum();
+        this.indexedSegments = new HashMap<>();
+        for (RichSegments seg : segments) {
+            indexedSegments
+                    .computeIfAbsent(seg.partition(), k -> new HashMap<>())
+                    .computeIfAbsent(seg.bucket(), k -> new ArrayList<>())
+                    .add(seg);
+        }
     }
 
-    public Map<Triple<BinaryRow, Integer, Integer>, Segments> segments() {
+    public List<RichSegments> segments() {
         return segments;
+    }
+
+    public Map<BinaryRow, Map<Integer, List<RichSegments>>> indexedSegments() {
+        return indexedSegments;
     }
 
     @Override
     public long totalMemorySize() {
         return totalMemorySize;
+    }
+
+    /** Segments with partition and bucket information. */
+    public static class RichSegments {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final int totalBucket;
+        private final Segments segments;
+
+        public RichSegments(BinaryRow partition, int bucket, int totalBucket, Segments segments) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.totalBucket = totalBucket;
+            this.segments = segments;
+        }
+
+        public BinaryRow partition() {
+            return partition;
+        }
+
+        public int bucket() {
+            return bucket;
+        }
+
+        public int totalBucket() {
+            return totalBucket;
+        }
+
+        public Segments segments() {
+            return segments;
+        }
     }
 }

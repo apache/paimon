@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.BucketEntry;
+import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -37,8 +38,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.IntIntFilter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -79,7 +80,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private boolean onlyReadRealBuckets = false;
     private Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter = null;
-    private IntIntFilter totalAwareBucketFilter = null;
+    private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Integer specifiedLevel = null;
     private Filter<Integer> levelFilter = null;
@@ -151,7 +152,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withTotalAwareBucketFilter(IntIntFilter totalAwareBucketFilter) {
+    public FileStoreScan withTotalAwareBucketFilter(
+            BiFilter<Integer, Integer> totalAwareBucketFilter) {
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -468,26 +470,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return entry.copyWithoutStats();
     }
 
-    private IntIntFilter createBucketFilter() {
-        if (!onlyReadRealBuckets
-                && specifiedBucket == null
-                && bucketFilter == null
-                && totalAwareBucketFilter == null) {
-            return null;
-        }
-
-        return (bucket, numBucket) -> {
-            if (onlyReadRealBuckets && bucket < 0) {
-                return false;
-            }
-            if (specifiedBucket != null && bucket != specifiedBucket) {
-                return false;
-            }
-            if (bucketFilter != null && !bucketFilter.test(bucket)) {
-                return false;
-            }
-            return totalAwareBucketFilter == null || totalAwareBucketFilter.test(bucket, numBucket);
-        };
+    private BucketFilter createBucketFilter() {
+        return BucketFilter.create(
+                onlyReadRealBuckets, specifiedBucket, bucketFilter, totalAwareBucketFilter);
     }
 
     /**
@@ -504,7 +489,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<InternalRow, String> fileNameGetter = ManifestEntrySerializer.fileNameGetter();
         PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
         Function<InternalRow, Integer> levelGetter = ManifestEntrySerializer.levelGetter();
-        IntIntFilter bucketFilter = createBucketFilter();
+        BucketFilter bucketFilter = createBucketFilter();
         return row -> {
             if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
                 return false;

@@ -24,14 +24,15 @@ import org.apache.paimon.data.Segments;
 import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestSegments.RichSegments;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFunctionWithIOE;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
-import org.apache.paimon.utils.IntIntFilter;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectsCache;
 import org.apache.paimon.utils.SegmentsCache;
@@ -46,7 +47,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.manifest.ManifestEntrySerializer.bucketGetter;
 import static org.apache.paimon.manifest.ManifestEntrySerializer.partitionGetter;
@@ -93,13 +96,17 @@ public class ManifestObjectsCache
                                                 cache.pageSize()));
                 formatSerializer.serializeToPages(row, view);
             }
-            Map<Triple<BinaryRow, Integer, Integer>, Segments> result = new HashMap<>();
+            List<RichSegments> result = new ArrayList<>();
             segments.forEach(
                     (k, v) ->
-                            result.put(
-                                    k,
-                                    Segments.create(
-                                            v.fullSegments(), v.getCurrentPositionInSegment())));
+                            result.add(
+                                    new RichSegments(
+                                            k.f0,
+                                            k.f1,
+                                            k.f2,
+                                            Segments.create(
+                                                    v.fullSegments(),
+                                                    v.getCurrentPositionInSegment()))));
             return new ManifestSegments(result);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -108,21 +115,37 @@ public class ManifestObjectsCache
 
     @Override
     protected List<ManifestEntry> readFromSegments(
-            ManifestSegments segments, ManifestEntryFilters filters) throws IOException {
+            ManifestSegments manifestSegments, ManifestEntryFilters filters) throws IOException {
         List<Segments> segmentsList = new ArrayList<>();
         PartitionPredicate partitionFilter = filters.partitionFilter;
-        IntIntFilter bucketFilter = filters.bucketFilter;
-        segments.segments()
-                .forEach(
-                        (k, v) -> {
-                            if (partitionFilter != null && !partitionFilter.test(k.f0)) {
-                                return;
-                            }
-                            if (bucketFilter != null && !bucketFilter.test(k.f1, k.f2)) {
-                                return;
-                            }
-                            segmentsList.add(v);
-                        });
+        BucketFilter bucketFilter = filters.bucketFilter;
+        List<RichSegments> segments = manifestSegments.segments();
+        if (partitionFilter != null) {
+            // try to do fast filter first
+            Optional<BinaryRow> partition = partitionFilter.extractSinglePartition();
+            if (partition.isPresent()) {
+                Map<Integer, List<RichSegments>> segMap =
+                        manifestSegments.indexedSegments().get(partition.get());
+                if (bucketFilter != null && bucketFilter.specifiedBucket() != null) {
+                    segments = segMap.get(bucketFilter.specifiedBucket());
+                } else {
+                    segments =
+                            segMap.values().stream()
+                                    .flatMap(List::stream)
+                                    .collect(Collectors.toList());
+                }
+            }
+        }
+        segments.forEach(
+                (k, v) -> {
+                    if (partitionFilter != null && !partitionFilter.test(k.f0)) {
+                        return;
+                    }
+                    if (bucketFilter != null && !bucketFilter.test(k.f1, k.f2)) {
+                        return;
+                    }
+                    segmentsList.add(v);
+                });
         List<ManifestEntry> result = new ArrayList<>();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         for (Segments subSegments : segmentsList) {
@@ -132,4 +155,6 @@ public class ManifestObjectsCache
         }
         return result;
     }
+
+    private Filter<BinaryRow> createPartitionFilter(PartitionPredicate partitionFilter) {}
 }

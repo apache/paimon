@@ -29,7 +29,7 @@ import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IntIntFilter;
+import org.apache.paimon.utils.BiFilter;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
@@ -53,9 +53,9 @@ public interface BucketSelectConverter {
 
     int MAX_VALUES = 1000;
 
-    Optional<IntIntFilter> convert(Predicate predicate);
+    Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
 
-    static Optional<IntIntFilter> create(
+    static Optional<BiFilter<Integer, Integer>> create(
             Predicate bucketPredicate,
             RowType bucketKeyType,
             BucketFunctionType bucketFunctionType) {
@@ -142,7 +142,7 @@ public interface BucketSelectConverter {
 
     /** Selector to select bucket from {@link Predicate}. */
     @ThreadSafe
-    class Selector implements IntIntFilter {
+    class Selector implements BiFilter<Integer, Integer> {
 
         private final List<BinaryRow> bucketKeys;
 
@@ -156,7 +156,7 @@ public interface BucketSelectConverter {
         }
 
         @Override
-        public boolean test(int bucket, int numBucket) {
+        public boolean test(Integer bucket, Integer numBucket) {
             return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket))
                     .contains(bucket);
         }
