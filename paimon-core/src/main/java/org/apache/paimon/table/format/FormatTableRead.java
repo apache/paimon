@@ -31,6 +31,7 @@ import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
@@ -39,11 +40,14 @@ public class FormatTableRead implements TableRead {
     private boolean executeFilter = false;
     private Predicate predicate;
     private FormatReadBuilder read;
+    private Integer limit;
 
-    public FormatTableRead(RowType readType, FormatReadBuilder read, Predicate predicate) {
+    public FormatTableRead(
+            RowType readType, FormatReadBuilder read, Predicate predicate, Integer limit) {
         this.readType = readType;
         this.read = read;
         this.predicate = predicate;
+        this.limit = limit;
     }
 
     @Override
@@ -69,6 +73,9 @@ public class FormatTableRead implements TableRead {
         if (executeFilter) {
             reader = executeFilter(reader);
         }
+        if (limit != null && limit > 0) {
+            reader = applyLimit(reader, limit);
+        }
 
         return reader;
     }
@@ -91,5 +98,45 @@ public class FormatTableRead implements TableRead {
 
         Predicate finalFilter = predicate;
         return reader.filter(finalFilter::test);
+    }
+
+    private RecordReader<InternalRow> applyLimit(RecordReader<InternalRow> reader, int limit) {
+        return new RecordReader<InternalRow>() {
+            private final AtomicLong recordCount = new AtomicLong(0);
+
+            @Override
+            public RecordIterator<InternalRow> readBatch() throws IOException {
+                if (recordCount.get() >= limit) {
+                    return null;
+                }
+                RecordIterator<InternalRow> iterator = reader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return new RecordIterator<InternalRow>() {
+                    @Override
+                    public InternalRow next() throws IOException {
+                        if (recordCount.get() >= limit) {
+                            return null;
+                        }
+                        InternalRow next = iterator.next();
+                        if (next != null) {
+                            recordCount.incrementAndGet();
+                        }
+                        return next;
+                    }
+
+                    @Override
+                    public void releaseBatch() {
+                        iterator.releaseBatch();
+                    }
+                };
+            }
+
+            @Override
+            public void close() throws IOException {
+                reader.close();
+            }
+        };
     }
 }

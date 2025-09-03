@@ -63,6 +63,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
+    @Nullable private Integer limit;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -126,13 +127,19 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withLimit(int limit) {
+        this.limit = limit;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
-        return new FormatTableScan(table, partitionFilter);
+        return new FormatTableScan(table, partitionFilter, limit);
     }
 
     @Override
     public TableRead newRead() {
-        return new FormatTableRead(readType(), this, filter);
+        return new FormatTableRead(readType(), this, filter, limit);
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
@@ -166,11 +173,6 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     // ===================== Unsupported ===============================
-    @Override
-    public ReadBuilder withLimit(int limit) {
-        throw new UnsupportedOperationException("limit is not supported for FormatTable.");
-    }
-
     @Override
     public ReadBuilder withTopN(TopN topN) {
         throw new UnsupportedOperationException("TopN is not supported for FormatTable.");

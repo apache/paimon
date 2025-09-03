@@ -48,11 +48,16 @@ import java.util.List;
 public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
-    private @Nullable PartitionPredicate partitionFilter;
+    @Nullable private PartitionPredicate partitionFilter;
+    @Nullable private Integer limit;
 
-    public FormatTableScan(FormatTable table, @Nullable PartitionPredicate partitionFilter) {
+    public FormatTableScan(
+            FormatTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Integer limit) {
         this.table = table;
         this.partitionFilter = partitionFilter;
+        this.limit = limit;
     }
 
     @Override
@@ -144,6 +149,14 @@ public class FormatTableScan implements InnerTableScan {
                     }
                 } else {
                     splits.addAll(getSplits(fileIO, new Path(table.location()), null));
+                }
+                if (limit != null) {
+                    if (limit <= 0) {
+                        return new ArrayList<>();
+                    }
+                    if (splits.size() > limit) {
+                        return splits.subList(0, limit);
+                    }
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);

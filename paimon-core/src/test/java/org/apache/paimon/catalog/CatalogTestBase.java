@@ -675,8 +675,11 @@ public abstract class CatalogTestBase {
                                 null);
                 write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
-            List<InternalRow> readData = read(table, predicate, projection, partitionSpec);
-
+            List<InternalRow> readData = read(table, predicate, projection, partitionSpec, null);
+            Integer limit = checkSize - 1;
+            List<InternalRow> readLimitData =
+                    read(table, predicate, projection, partitionSpec, limit);
+            assertThat(readLimitData).hasSize(limit);
             assertThat(readData).containsExactlyInAnyOrder(checkDatas);
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
@@ -721,6 +724,7 @@ public abstract class CatalogTestBase {
             Predicate predicate,
             @Nullable int[] projection,
             @Nullable Map<String, String> partitionSpec,
+            @Nullable Integer limit,
             Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
         Map<String, String> options = new HashMap<>();
@@ -735,6 +739,9 @@ public abstract class CatalogTestBase {
         readBuilder.withPartitionFilter(partitionSpec);
         TableScan scan = readBuilder.newScan();
         readBuilder.withFilter(predicate);
+        if (limit != null) {
+            readBuilder.withLimit(limit);
+        }
         try (RecordReader<InternalRow> reader =
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
