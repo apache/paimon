@@ -134,6 +134,9 @@ public class ManifestObjectsCache
             OptionalInt specifiedBucket = extractSpecifiedBucket(bucketFilter);
             if (specifiedBucket.isPresent()) {
                 segments = segMap.get(specifiedBucket.getAsInt());
+                if (segments == null) {
+                    return Collections.emptyList();
+                }
             } else {
                 segments =
                         segMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
