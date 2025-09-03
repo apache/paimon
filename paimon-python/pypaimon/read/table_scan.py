@@ -249,7 +249,7 @@ class TableScan:
         for item in items:
             weight = weight_func(item)
             if bin_weight + weight > target_weight and len(bin_items) > 0:
-                packed.append(bin_items)
+                packed.append(list(bin_items))
                 bin_items.clear()
                 bin_weight = 0
 
