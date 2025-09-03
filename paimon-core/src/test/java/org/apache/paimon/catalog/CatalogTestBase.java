@@ -661,6 +661,7 @@ public abstract class CatalogTestBase {
                         diffPartitionPathFactory.newPath(),
                         compressionType.value(),
                         dataWithDiffPartition);
+                size = size + 1;
                 partitionSpec = new HashMap<>();
                 partitionSpec.put("dt", "" + partitionValue);
             } else {
@@ -675,12 +676,15 @@ public abstract class CatalogTestBase {
                                 null);
                 write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
-            List<InternalRow> readData = read(table, predicate, projection, partitionSpec, null);
-            Integer limit = checkSize - 1;
+            List<InternalRow> readFilterData =
+                    read(table, predicate, projection, partitionSpec, null);
+            assertThat(readFilterData).containsExactlyInAnyOrder(checkDatas);
+            List<InternalRow> readAllData = read(table, null, null, null, null);
+            assertThat(readAllData).hasSize(size);
+            int limit = checkSize - 1;
             List<InternalRow> readLimitData =
                     read(table, predicate, projection, partitionSpec, limit);
             assertThat(readLimitData).hasSize(limit);
-            assertThat(readData).containsExactlyInAnyOrder(checkDatas);
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }

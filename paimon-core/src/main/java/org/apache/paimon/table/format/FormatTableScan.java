@@ -142,7 +142,7 @@ public class FormatTableScan implements InnerTableScan {
                             partition2Paths) {
                         LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
                         BinaryRow partitionRow = createPartitionRow(partitionSpec);
-                        if (partitionFilter != null && partitionFilter.test(partitionRow)) {
+                        if (partitionFilter == null || partitionFilter.test(partitionRow)) {
                             splits.addAll(
                                     getSplits(fileIO, partition2Path.getValue(), partitionRow));
                         }
