@@ -235,7 +235,6 @@ public class HiveCloneUtils {
         return format;
     }
 
-    /** Check if the table has timestamp columns that need timezone conversion. */
     public static boolean hasTimestampColumns(Table hiveTable) {
         List<FieldSchema> allCols = new ArrayList<>(hiveTable.getSd().getCols());
         allCols.addAll(hiveTable.getPartitionKeys());

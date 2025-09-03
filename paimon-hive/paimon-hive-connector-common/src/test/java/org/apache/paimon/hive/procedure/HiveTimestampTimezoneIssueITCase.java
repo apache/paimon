@@ -43,7 +43,7 @@ import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT to reproduce timestamp skew after Hive -> Paimon clone (parquet). */
+/** Tests the local timezone conversion for Parquet files */
 public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore HMS = new TestHiveMetastore();
@@ -93,7 +93,6 @@ public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
         return LocalDateTime.parse(iso);
     }
 
-    // Holds random db/table identifiers for each test run
     private static class TableIds {
         final String db = "hivedb" + StringUtils.randomNumericString(10);
         final String tbl = "hivetable" + StringUtils.randomNumericString(10);

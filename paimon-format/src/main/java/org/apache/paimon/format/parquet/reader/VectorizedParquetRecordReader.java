@@ -129,7 +129,6 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.batchSize = batchSize;
         this.rowIndexGenerator = new RowIndexGenerator();
 
-        // Initialize INT96 timestamp adjustment parameter
         this.adjustInt96Timestamp = adjustInt96Timestamp;
 
         // fetch writer version from file metadata
@@ -177,6 +176,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                     if (adjustInt96Timestamp && isInt96Timestamp(fields.get(i))) {
+                        // Request tz conversion
                         vectors[i] = new ParquetTimestampVector(writableVectors[i], true);
                     } else {
                         vectors[i] = new ParquetTimestampVector(writableVectors[i], false);
