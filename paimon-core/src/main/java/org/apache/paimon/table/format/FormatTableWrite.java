@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
@@ -37,6 +37,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTableAtomicCommitter.TempFileInfo;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
@@ -50,15 +51,14 @@ import java.util.UUID;
 
 /**
  * A {@link BatchTableWrite} implementation for {@link FormatTable} that handles writing to format
- * tables (ORC, Parquet, CSV, JSON).
- *
- * @since 0.9.0
+ * tables.
  */
 @Public
 public class FormatTableWrite implements BatchTableWrite {
 
     private final FormatTable formatTable;
     private final String commitUser;
+    private final RowPartitionKeyExtractor partitionKeyExtractor;
     private final boolean overwrite;
     private final FileIO fileIO;
     private final RowType rowType;
@@ -76,9 +76,14 @@ public class FormatTableWrite implements BatchTableWrite {
     private MemorySegmentPool memoryPool;
     private MetricRegistry metricRegistry;
 
-    public FormatTableWrite(FormatTable formatTable, String commitUser, boolean overwrite) {
+    public FormatTableWrite(
+            FormatTable formatTable,
+            String commitUser,
+            RowPartitionKeyExtractor partitionKeyExtractor,
+            boolean overwrite) {
         this.formatTable = formatTable;
         this.commitUser = commitUser;
+        this.partitionKeyExtractor = partitionKeyExtractor;
         this.overwrite = overwrite;
         this.fileIO = formatTable.fileIO();
         this.rowType = formatTable.rowType();
@@ -124,37 +129,7 @@ public class FormatTableWrite implements BatchTableWrite {
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        if (partitionKeys.isEmpty()) {
-            return new BinaryRow(0);
-        }
-
-        BinaryRow partition = new BinaryRow(partitionKeys.size());
-        BinaryRowWriter writer = new BinaryRowWriter(partition);
-
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            String partitionKey = partitionKeys.get(i);
-            int fieldIndex = rowType.getFieldIndex(partitionKey);
-            if (fieldIndex >= 0) {
-                if (!row.isNullAt(fieldIndex)) {
-                    switch (rowType.getTypeAt(fieldIndex).getTypeRoot()) {
-                        case INTEGER:
-                            writer.writeInt(i, row.getInt(fieldIndex));
-                            break;
-                        case VARCHAR:
-                        case CHAR:
-                            writer.writeString(i, row.getString(fieldIndex));
-                            break;
-                            // Add more types as needed
-                        default:
-                            writer.writeString(i, row.getString(fieldIndex));
-                    }
-                } else {
-                    writer.setNullAt(i);
-                }
-            }
-        }
-        writer.complete();
-        return partition;
+        return partitionKeyExtractor.partition(row);
     }
 
     @Override
@@ -180,21 +155,12 @@ public class FormatTableWrite implements BatchTableWrite {
     @Override
     public void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle)
             throws Exception {
-        // Convert bundle to individual rows and write them
-        String partitionKey = partitionToString(partition);
-        FormatWriter writer = getOrCreateWriter(partitionKey, partition);
-
-        // Convert bundle to individual rows and write them
-        // Note: BundleRecords doesn't have a records() method in the current API
-        // This would need to be implemented based on the actual BundleRecords interface
-        throw new UnsupportedOperationException(
-                "Bundle writing not supported for format tables yet");
+        throw new UnsupportedOperationException("Bundle writing not supported for format tables.");
     }
 
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
-        // Format tables don't support compaction in the traditional sense
-        // This could be extended to merge files if needed
+        throw new UnsupportedOperationException("Compaction not supported for format tables.");
     }
 
     @Override
@@ -254,7 +220,10 @@ public class FormatTableWrite implements BatchTableWrite {
             }
 
             PositionOutputStream outputStream = fileIO.newOutputStream(tempFilePath, false);
-            writer = writerFactory.create(outputStream, getCompression());
+            writer =
+                    writerFactory.create(
+                            outputStream,
+                            formatTable.options().get(CoreOptions.FILE_COMPRESSION.key()));
 
             // Store temp file info for later commit
             TempFileInfo tempFileInfo = new TempFileInfo(tempFilePath, finalFilePath, partitionKey);
@@ -323,10 +292,6 @@ public class FormatTableWrite implements BatchTableWrite {
             default:
                 return "data";
         }
-    }
-
-    private String getCompression() {
-        return formatTable.options().getOrDefault("compression", "snappy");
     }
 
     /** Commit message for format table writes. */

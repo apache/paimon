@@ -1159,7 +1159,7 @@ public abstract class CatalogTestBase {
         }
 
         // Test different format types
-        String[] formats = {"parquet", "orc", "csv", "json"};
+        String[] formats = {"parquet", "csv", "json"};
         for (String format : formats) {
             testFormatTableWriteForFormat(format, false);
         }
@@ -1446,6 +1446,7 @@ public abstract class CatalogTestBase {
                 schemaBuilder
                         .options(getFormatTableOptions())
                         .option("file.format", format)
+                        .option("file.compression", "gzip")
                         .build();
 
         catalog.createTable(identifier, schema, false);

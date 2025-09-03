@@ -23,6 +23,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.types.RowType;
 
@@ -75,7 +76,11 @@ public class FormatTableBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableWrite newWrite() {
-        return new FormatTableWrite(formatTable, commitUser, staticPartition != null);
+        return new FormatTableWrite(
+                formatTable,
+                commitUser,
+                new RowPartitionKeyExtractor(formatTable.rowType(), formatTable.partitionKeys()),
+                staticPartition != null);
     }
 
     @Override
