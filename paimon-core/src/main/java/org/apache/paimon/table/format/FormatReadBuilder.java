@@ -20,6 +20,7 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -30,7 +31,6 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -55,12 +55,10 @@ public class FormatReadBuilder implements ReadBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private CoreOptions options;
-    private FormatTable table;
+    private final FormatTable table;
+    private final FileFormat fileFormat;
+
     private RowType readType;
-
-    private final FileFormatDiscover formatDiscover;
-
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
@@ -68,8 +66,8 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.readType = this.table.rowType();
-        this.options = new CoreOptions(table.options());
-        this.formatDiscover = FileFormatDiscover.of(this.options);
+        CoreOptions options = new CoreOptions(table.options());
+        this.fileFormat = FileFormatDiscover.of(options).discover(options.formatType());
     }
 
     @Override
@@ -148,39 +146,36 @@ public class FormatReadBuilder implements ReadBuilder {
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
 
         FormatReaderFactory readerFactory =
-                formatDiscover
-                        .discover(options.formatType())
-                        .createReaderFactory(
-                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
+                fileFormat.createReaderFactory(
+                        table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), readType().getFields(), table.partitionType());
 
-        FileRecordReader<InternalRow> fileRecordReader =
-                new DataFileRecordReader(
-                        readType(),
-                        readerFactory,
-                        formatReaderContext,
-                        null,
-                        null,
-                        PartitionUtils.create(partitionMapping, dataSplit.partition()),
-                        false,
-                        null,
-                        0,
-                        Collections.emptyMap());
-        return fileRecordReader;
+        return new DataFileRecordReader(
+                readType(),
+                readerFactory,
+                formatReaderContext,
+                null,
+                null,
+                PartitionUtils.create(partitionMapping, dataSplit.partition()),
+                false,
+                null,
+                0,
+                Collections.emptyMap());
     }
 
     // ===================== Unsupported ===============================
+
     @Override
     public ReadBuilder withTopN(TopN topN) {
-        throw new UnsupportedOperationException("TopN is not supported for FormatTable.");
+        return this;
     }
 
     @Override
     public ReadBuilder dropStats() {
-        throw new UnsupportedOperationException("Format Table does not support dropStats.");
+        return this;
     }
 
     @Override

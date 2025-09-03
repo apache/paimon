@@ -36,11 +36,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
 
-    private RowType readType;
+    private final RowType readType;
+    private final Predicate predicate;
+    private final FormatReadBuilder read;
+    private final Integer limit;
+
     private boolean executeFilter = false;
-    private Predicate predicate;
-    private FormatReadBuilder read;
-    private Integer limit;
 
     public FormatTableRead(
             RowType readType, FormatReadBuilder read, Predicate predicate, Integer limit) {
