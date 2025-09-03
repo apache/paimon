@@ -31,7 +31,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFunctionWithIOE;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectsCache;
@@ -136,16 +135,16 @@ public class ManifestObjectsCache
                 }
             }
         }
-        segments.forEach(
-                (k, v) -> {
-                    if (partitionFilter != null && !partitionFilter.test(k.f0)) {
-                        return;
-                    }
-                    if (bucketFilter != null && !bucketFilter.test(k.f1, k.f2)) {
-                        return;
-                    }
-                    segmentsList.add(v);
-                });
+        for (RichSegments richSegments : segments) {
+            if (partitionFilter != null && !partitionFilter.test(richSegments.partition())) {
+                continue;
+            }
+            if (bucketFilter != null
+                    && !bucketFilter.test(richSegments.bucket(), richSegments.totalBucket())) {
+                continue;
+            }
+            segmentsList.add(richSegments.segments());
+        }
         List<ManifestEntry> result = new ArrayList<>();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         for (Segments subSegments : segmentsList) {
@@ -155,6 +154,4 @@ public class ManifestObjectsCache
         }
         return result;
     }
-
-    private Filter<BinaryRow> createPartitionFilter(PartitionPredicate partitionFilter) {}
 }
