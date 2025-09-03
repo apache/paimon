@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.FormatTableBatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -42,6 +43,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
@@ -87,8 +90,8 @@ public interface FormatTable extends Table {
     }
 
     /** Create a new builder for {@link FormatTable}. */
-    static FormatTable.Builder builder() {
-        return new FormatTable.Builder();
+    static Builder builder() {
+        return new Builder();
     }
 
     /** Builder for {@link FormatTable}. */
@@ -99,58 +102,60 @@ public interface FormatTable extends Table {
         private RowType rowType;
         private List<String> partitionKeys;
         private String location;
-        private FormatTable.Format format;
+        private Format format;
         private Map<String, String> options;
         @Nullable private String comment;
 
-        public FormatTable.Builder fileIO(FileIO fileIO) {
+        public Builder fileIO(FileIO fileIO) {
             this.fileIO = fileIO;
             return this;
         }
 
-        public FormatTable.Builder identifier(Identifier identifier) {
+        public Builder identifier(Identifier identifier) {
             this.identifier = identifier;
             return this;
         }
 
-        public FormatTable.Builder rowType(RowType rowType) {
+        public Builder rowType(RowType rowType) {
             this.rowType = rowType;
             return this;
         }
 
-        public FormatTable.Builder partitionKeys(List<String> partitionKeys) {
+        public Builder partitionKeys(List<String> partitionKeys) {
             this.partitionKeys = partitionKeys;
             return this;
         }
 
-        public FormatTable.Builder location(String location) {
+        public Builder location(String location) {
             this.location = location;
             return this;
         }
 
-        public FormatTable.Builder format(FormatTable.Format format) {
+        public Builder format(Format format) {
             this.format = format;
             return this;
         }
 
-        public FormatTable.Builder options(Map<String, String> options) {
+        public Builder options(Map<String, String> options) {
             this.options = options;
             return this;
         }
 
-        public FormatTable.Builder comment(@Nullable String comment) {
+        public Builder comment(@Nullable String comment) {
             this.comment = comment;
             return this;
         }
 
         public FormatTable build() {
-            return new FormatTable.FormatTableImpl(
+            return new FormatTableImpl(
                     fileIO, identifier, rowType, partitionKeys, location, format, options, comment);
         }
     }
 
     /** An implementation for {@link FormatTable}. */
     class FormatTableImpl implements FormatTable {
+
+        private static final long serialVersionUID = 1L;
 
         private final FileIO fileIO;
         private final Identifier identifier;
@@ -244,6 +249,25 @@ public interface FormatTable extends Table {
                     newOptions,
                     comment);
         }
+    }
+
+    @Override
+    default ReadBuilder newReadBuilder() {
+        return new FormatReadBuilder(this);
+    }
+
+    @Override
+    default BatchWriteBuilder newBatchWriteBuilder() {
+        return new FormatTableBatchWriteBuilder(this);
+    }
+
+    default RowType partitionType() {
+        return rowType().project(partitionKeys());
+    }
+
+    default String defaultPartName() {
+        return options()
+                .getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
     }
 
     // ===================== Unsupported ===============================
@@ -351,16 +375,6 @@ public interface FormatTable extends Table {
     @Override
     default ExpireSnapshots newExpireChangelog() {
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default ReadBuilder newReadBuilder() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default BatchWriteBuilder newBatchWriteBuilder() {
-        return new FormatTableBatchWriteBuilder(this);
     }
 
     @Override

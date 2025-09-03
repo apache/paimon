@@ -18,10 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.LinkedHashMap;
@@ -234,5 +237,63 @@ public class PartitionPathUtils {
         }
 
         return fullPartSpec;
+    }
+
+    /**
+     * Search all partitions in this path.
+     *
+     * @param path search path.
+     * @param partitionNumber partition number, it will affect path structure.
+     * @return all partition specs to its path.
+     */
+    public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
+            FileIO fileIO, Path path, int partitionNumber) {
+        FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
+        List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
+        for (FileStatus part : generatedParts) {
+            // ignore hidden file
+            if (isHiddenFile(part)) {
+                continue;
+            }
+            ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+        }
+        return ret;
+    }
+
+    private static FileStatus[] getFileStatusRecurse(Path path, int expectLevel, FileIO fileIO) {
+        ArrayList<FileStatus> result = new ArrayList<>();
+
+        try {
+            FileStatus fileStatus = fileIO.getFileStatus(path);
+            listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
+        } catch (IOException ignore) {
+            return new FileStatus[0];
+        }
+
+        return result.toArray(new FileStatus[0]);
+    }
+
+    private static void listStatusRecursively(
+            FileIO fileIO,
+            FileStatus fileStatus,
+            int level,
+            int expectLevel,
+            List<FileStatus> results)
+            throws IOException {
+        if (expectLevel == level) {
+            results.add(fileStatus);
+            return;
+        }
+
+        if (fileStatus.isDir()) {
+            for (FileStatus stat : fileIO.listStatus(fileStatus.getPath())) {
+                listStatusRecursively(fileIO, stat, level + 1, expectLevel, results);
+            }
+        }
+    }
+
+    private static boolean isHiddenFile(FileStatus fileStatus) {
+        String name = fileStatus.getPath().getName();
+        return name.startsWith("_") || name.startsWith(".");
     }
 }
