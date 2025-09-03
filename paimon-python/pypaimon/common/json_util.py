@@ -17,7 +17,18 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Dict, Type, TypeVar, Union, get_args, get_origin
+from typing import Any, Dict, Type, TypeVar, Union
+
+# Python 3.6 compatibility for get_args and get_origin
+try:
+    from typing import get_args, get_origin
+except ImportError:
+    # Fallback for Python < 3.8
+    def get_origin(tp):
+        return getattr(tp, '__origin__', None)
+
+    def get_args(tp):
+        return getattr(tp, '__args__', ())
 
 T = TypeVar("T")
 
