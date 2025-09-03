@@ -96,6 +96,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.spark.SparkCatalogOptions.V1FUNCTION_ENABLED;
 import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_METADATA_KEY;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
@@ -137,9 +138,7 @@ public class SparkCatalog extends SparkBaseCatalog
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
         this.v1FunctionEnabled =
-                options.getBoolean(
-                                SparkCatalogOptions.V1FUNCTION_ENABLED.key(),
-                                SparkCatalogOptions.V1FUNCTION_ENABLED.defaultValue())
+                options.getBoolean(V1FUNCTION_ENABLED.key(), V1FUNCTION_ENABLED.defaultValue())
                         && DelegateCatalog.rootCatalog(catalog) instanceof RESTCatalog;
         if (v1FunctionEnabled) {
             this.v1FunctionRegistry = new PaimonV1FunctionRegistry(sparkSession);
@@ -147,7 +146,7 @@ public class SparkCatalog extends SparkBaseCatalog
         try {
             catalog.getDatabase(defaultDatabase);
         } catch (Catalog.DatabaseNotExistException e) {
-            LOG.warn(
+            LOG.info(
                     "Default database '{}' does not exist, caused by: {}, start to create it",
                     defaultDatabase,
                     ExceptionUtils.stringifyException(e));
@@ -162,6 +161,8 @@ public class SparkCatalog extends SparkBaseCatalog
     public Catalog paimonCatalog() {
         return catalog;
     }
+
+    // ======================= database methods ===============================
 
     @Override
     public String[] defaultNamespace() {
@@ -258,6 +259,22 @@ public class SparkCatalog extends SparkBaseCatalog
                     String.format("Namespace %s is not empty", Arrays.toString(namespace)));
         }
     }
+
+    @Override
+    public void alterNamespace(String[] namespace, NamespaceChange... changes)
+            throws NoSuchNamespaceException {
+        checkNamespace(namespace);
+        try {
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            List<PropertyChange> propertyChanges =
+                    Arrays.stream(changes).map(this::toPropertyChange).collect(Collectors.toList());
+            catalog.alterDatabase(databaseName, propertyChanges, false);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
+        }
+    }
+
+    // ======================= table methods ===============================
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
@@ -499,111 +516,7 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
-    // --------------------- tools ------------------------------------------
-
-    protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
-            Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
-        try {
-            org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
-            if (paimonTable instanceof FormatTable) {
-                return convertToFileTable(ident, (FormatTable) paimonTable);
-            } else {
-                return new SparkTable(
-                        copyWithSQLConf(
-                                paimonTable, catalogName, toIdentifier(ident), extraOptions));
-            }
-        } catch (Catalog.TableNotExistException e) {
-            throw new NoSuchTableException(ident);
-        }
-    }
-
-    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
-        SparkSession spark = PaimonSparkSession$.MODULE$.active();
-        StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
-        StructType partitionSchema =
-                SparkTypeUtils.fromPaimonRowType(
-                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
-        List<String> pathList = new ArrayList<>();
-        pathList.add(formatTable.location());
-        Options options = Options.fromMap(formatTable.options());
-        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
-        if (formatTable.format() == FormatTable.Format.CSV) {
-            options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
-            dsOptions = new CaseInsensitiveStringMap(options.toMap());
-            return new PartitionedCSVTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    CSVFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.ORC) {
-            return new PartitionedOrcTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    OrcFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-            return new PartitionedParquetTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    ParquetFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.JSON) {
-            return new PartitionedJsonTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    JsonFileFormat.class,
-                    partitionSchema);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported format table "
-                            + ident.name()
-                            + " format "
-                            + formatTable.format().name());
-        }
-    }
-
-    protected List<String> convertPartitionTransforms(Transform[] transforms) {
-        List<String> partitionColNames = new ArrayList<>(transforms.length);
-        for (Transform transform : transforms) {
-            if (!(transform instanceof IdentityTransform)) {
-                throw new UnsupportedOperationException(
-                        "Unsupported partition transform: " + transform);
-            }
-            NamedReference ref = ((IdentityTransform) transform).ref();
-            if (!(ref instanceof FieldReference || ref.fieldNames().length != 1)) {
-                throw new UnsupportedOperationException(
-                        "Unsupported partition transform: " + transform);
-            }
-            partitionColNames.add(ref.fieldNames()[0]);
-        }
-        return partitionColNames;
-    }
-
-    @Override
-    public void alterNamespace(String[] namespace, NamespaceChange... changes)
-            throws NoSuchNamespaceException {
-        checkNamespace(namespace);
-        try {
-            String databaseName = getDatabaseNameFromNamespace(namespace);
-            List<PropertyChange> propertyChanges =
-                    Arrays.stream(changes).map(this::toPropertyChange).collect(Collectors.toList());
-            catalog.alterDatabase(databaseName, propertyChanges, false);
-        } catch (Catalog.DatabaseNotExistException e) {
-            throw new NoSuchNamespaceException(namespace);
-        }
-    }
+    // ======================= Function methods ===============================
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
@@ -714,6 +627,98 @@ public class SparkCatalog extends SparkBaseCatalog
         v1FunctionRegistry().unregisterFunction(funcIdent);
         paimonCatalog()
                 .dropFunction(V1FunctionConverter.fromFunctionIdentifier(funcIdent), ifExists);
+    }
+
+    // ======================= Tools methods ===============================
+
+    protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
+            Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
+        try {
+            org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
+            if (paimonTable instanceof FormatTable) {
+                return convertToFileTable(ident, (FormatTable) paimonTable);
+            } else {
+                return new SparkTable(
+                        copyWithSQLConf(
+                                paimonTable, catalogName, toIdentifier(ident), extraOptions));
+            }
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        }
+    }
+
+    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+        SparkSession spark = PaimonSparkSession$.MODULE$.active();
+        StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
+        StructType partitionSchema =
+                SparkTypeUtils.fromPaimonRowType(
+                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
+        List<String> pathList = new ArrayList<>();
+        pathList.add(formatTable.location());
+        Options options = Options.fromMap(formatTable.options());
+        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
+        if (formatTable.format() == FormatTable.Format.CSV) {
+            options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
+            dsOptions = new CaseInsensitiveStringMap(options.toMap());
+            return new PartitionedCSVTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    CSVFileFormat.class,
+                    partitionSchema);
+        } else if (formatTable.format() == FormatTable.Format.ORC) {
+            return new PartitionedOrcTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    OrcFileFormat.class,
+                    partitionSchema);
+        } else if (formatTable.format() == FormatTable.Format.PARQUET) {
+            return new PartitionedParquetTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    ParquetFileFormat.class,
+                    partitionSchema);
+        } else if (formatTable.format() == FormatTable.Format.JSON) {
+            return new PartitionedJsonTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    JsonFileFormat.class,
+                    partitionSchema);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unsupported format table "
+                            + ident.name()
+                            + " format "
+                            + formatTable.format().name());
+        }
+    }
+
+    protected List<String> convertPartitionTransforms(Transform[] transforms) {
+        List<String> partitionColNames = new ArrayList<>(transforms.length);
+        for (Transform transform : transforms) {
+            if (!(transform instanceof IdentityTransform)) {
+                throw new UnsupportedOperationException(
+                        "Unsupported partition transform: " + transform);
+            }
+            NamedReference ref = ((IdentityTransform) transform).ref();
+            if (!(ref instanceof FieldReference || ref.fieldNames().length != 1)) {
+                throw new UnsupportedOperationException(
+                        "Unsupported partition transform: " + transform);
+            }
+            partitionColNames.add(ref.fieldNames()[0]);
+        }
+        return partitionColNames;
     }
 
     private PropertyChange toPropertyChange(NamespaceChange change) {
