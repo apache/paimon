@@ -238,6 +238,34 @@ public abstract class FormatTableAtomicCommitter {
         @Override
         public void abortFiles(List<TempFileInfo> tempFiles) throws IOException {
             LOG.info("Aborting {} files and cleaning up temporary directory", tempFiles.size());
+
+            // First, delete individual temporary files
+            for (TempFileInfo tempFile : tempFiles) {
+                Path tempPath = tempFile.getTempPath();
+                if (fileIO.exists(tempPath)) {
+                    try {
+                        fileIO.delete(tempPath, false);
+                        LOG.debug("Deleted temporary file: {}", tempPath);
+                    } catch (IOException e) {
+                        LOG.warn("Failed to delete temporary file: {}", tempPath, e);
+                        // Continue with other files even if one fails
+                    }
+                }
+
+                // Also ensure final file doesn't exist (in case it was partially committed)
+                Path finalPath = tempFile.getFinalPath();
+                if (fileIO.exists(finalPath)) {
+                    try {
+                        fileIO.delete(finalPath, false);
+                        LOG.debug("Deleted final file: {}", finalPath);
+                    } catch (IOException e) {
+                        LOG.warn("Failed to delete final file: {}", finalPath, e);
+                        // Continue with other files even if one fails
+                    }
+                }
+            }
+
+            // Then clean up temporary directory
             cleanupTempDirectory();
         }
 
@@ -257,18 +285,47 @@ public abstract class FormatTableAtomicCommitter {
                 LOG.debug("Cleaned up temporary directory: {}", tempDir);
             }
 
-            // Optionally clean up empty staging directory
+            // Clean up empty staging directory
             try {
                 if (fileIO.exists(stagingPath)) {
                     FileStatus[] stagingContents = fileIO.listStatus(stagingPath);
-                    if (stagingContents.length == 0) {
+                    if (stagingContents == null || stagingContents.length == 0) {
                         fileIO.delete(stagingPath, false);
                         LOG.debug("Cleaned up empty staging directory: {}", stagingPath);
+                    } else {
+                        LOG.debug(
+                                "Staging directory not empty, contains {} items",
+                                stagingContents.length);
+                        // Clean up any orphaned temp directories from previous sessions
+                        for (FileStatus content : stagingContents) {
+                            if (content.isDir()
+                                    && content.getPath().getName().startsWith(TEMP_DIR_PREFIX)) {
+                                try {
+                                    fileIO.delete(content.getPath(), true);
+                                    LOG.debug(
+                                            "Cleaned up orphaned temp directory: {}",
+                                            content.getPath());
+                                } catch (IOException e) {
+                                    LOG.warn(
+                                            "Failed to clean up orphaned temp directory: {}",
+                                            content.getPath(),
+                                            e);
+                                }
+                            }
+                        }
+
+                        // Try to delete staging directory again after cleanup
+                        FileStatus[] remainingContents = fileIO.listStatus(stagingPath);
+                        if (remainingContents == null || remainingContents.length == 0) {
+                            fileIO.delete(stagingPath, false);
+                            LOG.debug(
+                                    "Cleaned up staging directory after orphan cleanup: {}",
+                                    stagingPath);
+                        }
                     }
                 }
             } catch (Exception e) {
-                LOG.debug(
-                        "Could not clean up staging directory (may not be empty): {}", stagingPath);
+                LOG.debug("Could not clean up staging directory: {}", stagingPath, e);
             }
         }
     }
@@ -334,15 +391,33 @@ public abstract class FormatTableAtomicCommitter {
         public void abortFiles(List<TempFileInfo> tempFiles) throws IOException {
             LOG.info("Aborting {} files for S3A committer", tempFiles.size());
 
-            // Clean up any temporary files
+            // First, delete individual temporary files
             for (TempFileInfo tempFile : tempFiles) {
                 Path tempPath = tempFile.getTempPath();
                 if (fileIO.exists(tempPath)) {
-                    fileIO.delete(tempPath, false);
-                    LOG.debug("Deleted temporary file: {}", tempPath);
+                    try {
+                        fileIO.delete(tempPath, false);
+                        LOG.debug("Deleted temporary file: {}", tempPath);
+                    } catch (IOException e) {
+                        LOG.warn("Failed to delete temporary file: {}", tempPath, e);
+                        // Continue with other files even if one fails
+                    }
+                }
+
+                // Also ensure final file doesn't exist (in case it was partially committed)
+                Path finalPath = tempFile.getFinalPath();
+                if (fileIO.exists(finalPath)) {
+                    try {
+                        fileIO.delete(finalPath, false);
+                        LOG.debug("Deleted final file: {}", finalPath);
+                    } catch (IOException e) {
+                        LOG.warn("Failed to delete final file: {}", finalPath, e);
+                        // Continue with other files even if one fails
+                    }
                 }
             }
 
+            // Then clean up temporary directory
             cleanupTempDirectory();
         }
 
