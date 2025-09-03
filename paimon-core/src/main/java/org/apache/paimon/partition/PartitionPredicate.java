@@ -72,9 +72,6 @@ public interface PartitionPredicate extends Serializable {
     boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
-    /** Try to extract a single partition from this predicate. */
-    Optional<BinaryRow> extractSinglePartition();
-
     /**
      * Compared to the multiple method, this approach can accept filtering of partially partitioned
      * fields.
@@ -120,11 +117,6 @@ public interface PartitionPredicate extends Serializable {
                     InternalArray nullCounts) {
                 return false;
             }
-
-            @Override
-            public Optional<BinaryRow> extractSinglePartition() {
-                return Optional.empty();
-            }
         };
     }
 
@@ -142,11 +134,6 @@ public interface PartitionPredicate extends Serializable {
                     InternalRow maxValues,
                     InternalArray nullCounts) {
                 return true;
-            }
-
-            @Override
-            public Optional<BinaryRow> extractSinglePartition() {
-                return Optional.empty();
             }
         };
     }
@@ -174,11 +161,6 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return predicate.test(rowCount, minValues, maxValues, nullCounts);
-        }
-
-        @Override
-        public Optional<BinaryRow> extractSinglePartition() {
-            return Optional.empty();
         }
     }
 
@@ -260,7 +242,6 @@ public interface PartitionPredicate extends Serializable {
             return true;
         }
 
-        @Override
         public Optional<BinaryRow> extractSinglePartition() {
             return Optional.ofNullable(singlePartition);
         }

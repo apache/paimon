@@ -33,7 +33,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -117,11 +116,6 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return true;
-        }
-
-        @Override
-        public Optional<BinaryRow> extractSinglePartition() {
-            return Optional.empty();
         }
     }
 }

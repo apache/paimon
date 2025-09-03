@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestSegments.RichSegments;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFunctionWithIOE;
 import org.apache.paimon.utils.CloseableIterator;
@@ -47,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -119,22 +121,22 @@ public class ManifestObjectsCache
         PartitionPredicate partitionFilter = filters.partitionFilter;
         BucketFilter bucketFilter = filters.bucketFilter;
         List<RichSegments> segments = manifestSegments.segments();
-        if (partitionFilter != null) {
-            // try to do fast filter first
-            Optional<BinaryRow> partition = partitionFilter.extractSinglePartition();
-            if (partition.isPresent()) {
-                Map<Integer, List<RichSegments>> segMap =
-                        manifestSegments.indexedSegments().get(partition.get());
-                if (bucketFilter != null && bucketFilter.specifiedBucket() != null) {
-                    segments = segMap.get(bucketFilter.specifiedBucket());
-                } else {
-                    segments =
-                            segMap.values().stream()
-                                    .flatMap(List::stream)
-                                    .collect(Collectors.toList());
-                }
+
+        // try to do fast filter first
+        Optional<BinaryRow> partition = extractSinglePartition(partitionFilter);
+        if (partition.isPresent()) {
+            Map<Integer, List<RichSegments>> segMap =
+                    manifestSegments.indexedSegments().get(partition.get());
+            OptionalInt specifiedBucket = extractSpecifiedBucket(bucketFilter);
+            if (specifiedBucket.isPresent()) {
+                segments = segMap.get(specifiedBucket.getAsInt());
+            } else {
+                segments =
+                        segMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
             }
         }
+
+        // do force loop filter
         for (RichSegments richSegments : segments) {
             if (partitionFilter != null && !partitionFilter.test(richSegments.partition())) {
                 continue;
@@ -145,6 +147,8 @@ public class ManifestObjectsCache
             }
             segmentsList.add(richSegments.segments());
         }
+
+        // read manifest entries from segments with per record filter
         List<ManifestEntry> result = new ArrayList<>();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         for (Segments subSegments : segmentsList) {
@@ -153,5 +157,22 @@ public class ManifestObjectsCache
                             formatSerializer, projectedSerializer, subSegments, filters));
         }
         return result;
+    }
+
+    private Optional<BinaryRow> extractSinglePartition(@Nullable PartitionPredicate predicate) {
+        if (predicate instanceof MultiplePartitionPredicate) {
+            return ((MultiplePartitionPredicate) predicate).extractSinglePartition();
+        }
+        return Optional.empty();
+    }
+
+    private OptionalInt extractSpecifiedBucket(@Nullable BucketFilter filter) {
+        if (filter != null) {
+            Integer specifiedBucket = filter.specifiedBucket();
+            if (specifiedBucket != null) {
+                return OptionalInt.of(specifiedBucket);
+            }
+        }
+        return OptionalInt.empty();
     }
 }
