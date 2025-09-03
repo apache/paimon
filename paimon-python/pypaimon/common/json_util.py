@@ -17,7 +17,7 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Dict, Type, TypeVar, Union
+from typing import Any, Dict, Type, TypeVar, Union, List
 
 # Python 3.6 compatibility for get_args and get_origin
 try:
@@ -104,7 +104,7 @@ class JSON:
                 field_type = args[0]
             if is_dataclass(field_type):
                 type_mapping[json_name] = field_type
-            elif origin_type is list and is_dataclass(args[0]):
+            elif origin_type in (list, List) and is_dataclass(args[0]):
                 type_mapping[json_name] = field_info.type
 
         # Map JSON data to field names
@@ -114,7 +114,7 @@ class JSON:
                 field_name = field_mapping[json_name]
                 if json_name in type_mapping:
                     tp = get_origin(type_mapping[json_name])
-                    if tp is list:
+                    if tp in (list, List):
                         item_type = get_args(type_mapping[json_name])[0]
                         if is_dataclass(item_type):
                             kwargs[field_name] = [

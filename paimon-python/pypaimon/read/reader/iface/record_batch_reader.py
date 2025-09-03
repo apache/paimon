@@ -45,19 +45,45 @@ class RecordBatchReader(RecordReader):
         arrow_batch = self.read_arrow_batch()
         if arrow_batch is None:
             return None
-        return polars.from_arrow(arrow_batch)
+        # Convert RecordBatch to Table for Polars compatibility with PyArrow 5.0.0
+        import pyarrow as pa
+        if hasattr(arrow_batch, 'num_rows'):
+            # This is a RecordBatch, convert to Table first
+            table = pa.Table.from_batches([arrow_batch])
+            # Check if table is empty to avoid Polars "empty table" error
+            if table.num_rows == 0:
+                return None
+            return polars.from_arrow(table)
+        else:
+            # Check if arrow_batch is empty to avoid Polars "empty table" error
+            if hasattr(arrow_batch, 'num_rows') and arrow_batch.num_rows == 0:
+                return None
+            return polars.from_arrow(arrow_batch)
 
     def tuple_iterator(self) -> Optional[Iterator[tuple]]:
         df = self._read_next_df()
         if df is None:
             return None
-        return df.iter_rows()
+        # Polars 0.9.12 compatibility - iter_rows doesn't exist, use alternative
+        if hasattr(df, 'iter_rows'):
+            return df.iter_rows()
+        else:
+            # Fallback for Polars 0.9.12: convert to pandas and iterate
+            pandas_df = df.to_pandas()
+            return (tuple(row) for _, row in pandas_df.iterrows())
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
         df = self._read_next_df()
         if df is None:
             return None
-        return InternalRowWrapperIterator(df.iter_rows(), df.width)
+        # Polars 0.9.12 compatibility - iter_rows doesn't exist, use alternative
+        if hasattr(df, 'iter_rows'):
+            return InternalRowWrapperIterator(df.iter_rows(), df.width)
+        else:
+            # Fallback for Polars 0.9.12: convert to pandas and iterate
+            pandas_df = df.to_pandas()
+            row_iterator = (tuple(row) for _, row in pandas_df.iterrows())
+            return InternalRowWrapperIterator(row_iterator, df.width)
 
 
 class InternalRowWrapperIterator(RecordIterator[InternalRow]):

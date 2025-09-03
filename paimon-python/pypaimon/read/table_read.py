@@ -15,11 +15,10 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Any
 
 import pandas
 import pyarrow
-import pyarrow.compute as pc
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -213,7 +212,7 @@ class TableRead:
 
         return ray.data.from_arrow(self.to_arrow(splits))
 
-    def _push_down_predicate(self) -> pc.Expression | bool:
+    def _push_down_predicate(self) -> Any:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:
@@ -246,8 +245,8 @@ class TableRead:
                 split=split
             )
 
-
-def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
-    columns_data = zip(*row_tuples)
-    pydict = {name: list(column) for name, column in zip(schema.names, columns_data)}
-    return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)
+    @staticmethod
+    def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
+        columns_data = zip(*row_tuples)
+        pydict = {name: list(column) for name, column in zip(schema.names, columns_data)}
+        return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)
