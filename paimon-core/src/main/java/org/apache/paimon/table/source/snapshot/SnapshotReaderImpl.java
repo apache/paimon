@@ -72,7 +72,7 @@ import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAndForPartitionAndNonPartitionFilter;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
@@ -222,15 +222,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 PredicateBuilder.fieldIdxToPartitionIdx(
                         tableSchema.logicalRowType(), tableSchema.partitionKeys());
         Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
-                splitAndForPartitionAndNonPartitionFilter(predicate, fieldIdxToPartitionIdx);
+                splitAndByPartition(predicate, fieldIdxToPartitionIdx);
         List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
-        List<Predicate> unPartitionFilters = partitionAndNonPartitionFilter.getRight();
+        List<Predicate> nonPartitionFilters = partitionAndNonPartitionFilter.getRight();
         if (partitionFilters.size() > 0) {
             scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
         }
 
-        if (unPartitionFilters.size() > 0) {
-            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(unPartitionFilters));
+        if (nonPartitionFilters.size() > 0) {
+            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(nonPartitionFilters));
         }
         return this;
     }

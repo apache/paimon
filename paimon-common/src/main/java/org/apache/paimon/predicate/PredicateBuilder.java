@@ -208,7 +208,7 @@ public class PredicateBuilder {
         return result;
     }
 
-    public static Pair<List<Predicate>, List<Predicate>> splitAndForPartitionAndNonPartitionFilter(
+    public static Pair<List<Predicate>, List<Predicate>> splitAndByPartition(
             Predicate predicate, int[] fieldIdxToPartitionIdx) {
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
