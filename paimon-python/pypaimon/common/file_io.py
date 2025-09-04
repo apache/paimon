@@ -33,11 +33,7 @@ class FileIO:
     def __init__(self, warehouse: str, catalog_options: dict):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._warehouse = warehouse
         scheme, netloc, path = self.parse_location(warehouse)
-        self._scheme = scheme
-        self._netloc = netloc
-        self._path = path
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs()
         elif scheme in {"s3", "s3a", "s3n"}:
