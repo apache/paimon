@@ -22,7 +22,7 @@ from pypaimon.schema.schema import Schema
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
 
 
-class RESTTableReadWriteTest(RESTCatalogBaseTest):
+class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
 
     def testParquetAppendOnlyReader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
