@@ -213,9 +213,8 @@ class Predicate:
                 result = pyarrow_compute.starts_with(string_field, pattern)
                 return result
             except Exception:
-                # Fallback to Python filtering - create a condition that allows all rows
-                # to be processed by Python filter later
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                # Fallback to True
+                return True
         elif self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -226,8 +225,8 @@ class Predicate:
                 result = pyarrow_compute.ends_with(string_field, pattern)
                 return result
             except Exception:
-                # Fallback to Python filtering
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                # Fallback to True
+                return True
         elif self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -238,8 +237,8 @@ class Predicate:
                 result = pyarrow_compute.match_substring(string_field, pattern)
                 return result
             except Exception:
-                # Fallback to Python filtering
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                # Fallback to True
+                return True
         elif self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])
