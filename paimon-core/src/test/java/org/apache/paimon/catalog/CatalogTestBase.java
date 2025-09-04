@@ -661,7 +661,6 @@ public abstract class CatalogTestBase {
                         diffPartitionPathFactory.newPath(),
                         compressionType.value(),
                         dataWithDiffPartition);
-                size = size + 1;
                 partitionSpec = new HashMap<>();
                 partitionSpec.put("dt", "" + partitionValue);
             } else {
@@ -679,12 +678,20 @@ public abstract class CatalogTestBase {
             List<InternalRow> readFilterData =
                     read(table, predicate, projection, partitionSpec, null);
             assertThat(readFilterData).containsExactlyInAnyOrder(checkDatas);
-            List<InternalRow> readAllData = read(table, null, null, null, null);
-            assertThat(readAllData).hasSize(size);
             int limit = checkSize - 1;
             List<InternalRow> readLimitData =
                     read(table, predicate, projection, partitionSpec, limit);
             assertThat(readLimitData).hasSize(limit);
+            if (partitioned) {
+                List<InternalRow> readAllData = read(table, null, null, null, null);
+                assertThat(readAllData).hasSize(size + 1);
+                PredicateBuilder partitionFilterBuilder = new PredicateBuilder(table.rowType());
+                Predicate partitionFilterPredicate =
+                        partitionFilterBuilder.equal(2, partitionValue);
+                List<InternalRow> readPartitionAndNoPartitionFilterData =
+                        read(table, partitionFilterPredicate, projection, null, null);
+                assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
+            }
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }
@@ -741,11 +748,11 @@ public abstract class CatalogTestBase {
             readBuilder.withProjection(projection);
         }
         readBuilder.withPartitionFilter(partitionSpec);
-        TableScan scan = readBuilder.newScan();
         readBuilder.withFilter(predicate);
         if (limit != null) {
             readBuilder.withLimit(limit);
         }
+        TableScan scan = readBuilder.newScan();
         try (RecordReader<InternalRow> reader =
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
