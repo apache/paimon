@@ -64,7 +64,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -73,7 +72,7 @@ import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
-import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAndForPartitionAndNonPartitionFilter;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
@@ -222,24 +221,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
         int[] fieldIdxToPartitionIdx =
                 PredicateBuilder.fieldIdxToPartitionIdx(
                         tableSchema.logicalRowType(), tableSchema.partitionKeys());
-
-        List<Predicate> partitionFilters = new ArrayList<>();
-        List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
-                nonPartitionFilters.add(p);
-            }
-        }
-
+        Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
+                splitAndForPartitionAndNonPartitionFilter(predicate, fieldIdxToPartitionIdx);
+        List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+        List<Predicate> unPartitionFilters = partitionAndNonPartitionFilter.getRight();
         if (partitionFilters.size() > 0) {
             scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
         }
 
-        if (nonPartitionFilters.size() > 0) {
-            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(nonPartitionFilters));
+        if (unPartitionFilters.size() > 0) {
+            nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(unPartitionFilters));
         }
         return this;
     }

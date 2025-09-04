@@ -44,10 +44,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAndForPartitionAndNonPartitionFilter;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
@@ -79,10 +81,27 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate predicate) {
-        if (this.filter == null) {
-            this.filter = predicate;
-        } else {
-            this.filter = PredicateBuilder.and(this.filter, predicate);
+        int[] fieldIdxToPartitionIdx =
+                PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
+        Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
+                splitAndForPartitionAndNonPartitionFilter(predicate, fieldIdxToPartitionIdx);
+        List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+        List<Predicate> unPartitionFilters = partitionAndNonPartitionFilter.getRight();
+        if (partitionFilters.size() > 0 && this.partitionFilter == null) {
+            RowType partitionType = table.rowType().project(table.partitionKeys());
+            PartitionPredicate partitionPredicate =
+                    PartitionPredicate.fromPredicate(
+                            partitionType, PredicateBuilder.and(partitionFilters));
+            withPartitionFilter(partitionPredicate);
+        }
+
+        if (unPartitionFilters.size() > 0) {
+            if (this.filter == null) {
+                this.filter = PredicateBuilder.and(partitionAndNonPartitionFilter.getRight());
+            } else {
+                this.filter =
+                        PredicateBuilder.and(this.filter, PredicateBuilder.and(unPartitionFilters));
+            }
         }
         return this;
     }

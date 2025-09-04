@@ -685,6 +685,14 @@ public abstract class CatalogTestBase {
             List<InternalRow> readLimitData =
                     read(table, predicate, projection, partitionSpec, limit);
             assertThat(readLimitData).hasSize(limit);
+            if (partitioned) {
+                PredicateBuilder partitionFilterBuilder = new PredicateBuilder(table.rowType());
+                Predicate partitionFilterPredicate =
+                        partitionFilterBuilder.equal(2, partitionValue);
+                List<InternalRow> readPartitionAndNoPartitionFilterData =
+                        read(table, partitionFilterPredicate, projection, null, null);
+                assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
+            }
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }
