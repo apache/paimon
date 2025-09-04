@@ -787,7 +787,6 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
-    @Immutable
     public static final ConfigOption<SortOrder> SEQUENCE_FIELD_SORT_ORDER =
             key("sequence.field.sort-order")
                     .enumType(SortOrder.class)
