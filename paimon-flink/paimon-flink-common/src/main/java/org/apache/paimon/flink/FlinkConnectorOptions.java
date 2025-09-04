@@ -513,7 +513,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
             key("sink.writer-coordinator.cache-memory")
                     .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .defaultValue(MemorySize.ofMebiBytes(2048))
                     .withDescription(
                             "Controls the cache memory of writer coordinator to cache manifest files in Job Manager.");
 
