@@ -282,25 +282,7 @@ public class FormatTableWriteTest {
                 partitioned ? Arrays.asList("department") : Collections.emptyList();
 
         Map<String, String> options = new HashMap<>();
-        // Use different compression types based on format to avoid native code issues
-        switch (format) {
-            case ORC:
-                // ORC supports ZLIB, SNAPPY, LZO, LZ4, ZSTD, BROTLI
-                options.put("compression", "zlib");
-                break;
-            case PARQUET:
-                // Parquet supports various compression types
-                options.put("compression", "gzip");
-                break;
-            case JSON:
-            case CSV:
-                // Text formats can use gzip compression
-                options.put("compression", "gzip");
-                break;
-            default:
-                options.put("compression", "none");
-        }
-
+        options.put("file.compression", "gzip");
         return FormatTable.builder()
                 .fileIO(fileIO)
                 .identifier(Identifier.create("test_db", "test_table"))

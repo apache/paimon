@@ -284,7 +284,7 @@ public class FormatTableAtomicWriteTest {
     private FormatTable createFormatTable(String location, FormatTable.Format format) {
         Map<String, String> options = new HashMap<>();
         // Use gzip instead of snappy to avoid native code issues
-        options.put("compression", "gzip");
+        options.put("file.compression", "gzip");
 
         return FormatTable.builder()
                 .fileIO(fileIO)
