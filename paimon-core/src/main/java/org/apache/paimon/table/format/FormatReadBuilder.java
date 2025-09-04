@@ -81,36 +81,10 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate predicate) {
-        if (table.partitionKeys().isEmpty()) {
-            if (this.filter == null) {
-                this.filter = PredicateBuilder.and(predicate);
-            } else {
-                this.filter = PredicateBuilder.and(this.filter, PredicateBuilder.and(predicate));
-            }
+        if (this.filter == null) {
+            this.filter = predicate;
         } else {
-            int[] fieldIdxToPartitionIdx =
-                    PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
-            Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
-                    splitAndByPartition(predicate, fieldIdxToPartitionIdx);
-            List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
-            List<Predicate> nonPartitionFilters = partitionAndNonPartitionFilter.getRight();
-            if (this.partitionFilter == null && partitionFilters.size() > 0) {
-                RowType partitionType = table.rowType().project(table.partitionKeys());
-                PartitionPredicate partitionPredicate =
-                        PartitionPredicate.fromPredicate(
-                                partitionType, PredicateBuilder.and(partitionFilters));
-                withPartitionFilter(partitionPredicate);
-            }
-
-            if (nonPartitionFilters.size() > 0) {
-                if (this.filter == null) {
-                    this.filter = PredicateBuilder.and(partitionAndNonPartitionFilter.getRight());
-                } else {
-                    this.filter =
-                            PredicateBuilder.and(
-                                    this.filter, PredicateBuilder.and(nonPartitionFilters));
-                }
-            }
+            this.filter = PredicateBuilder.and(this.filter, predicate);
         }
         return this;
     }
@@ -157,6 +131,20 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
+        PartitionPredicate partitionFilter = this.partitionFilter;
+        if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
+            int[] fieldIdxToPartitionIdx =
+                    PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
+            Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
+                    splitAndByPartition(filter, fieldIdxToPartitionIdx);
+            List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+            if (!partitionFilters.isEmpty()) {
+                RowType partitionType = table.rowType().project(table.partitionKeys());
+                partitionFilter =
+                        PartitionPredicate.fromPredicate(
+                                partitionType, PredicateBuilder.and(partitionFilters));
+            }
+        }
         return new FormatTableScan(table, partitionFilter, limit);
     }
 
