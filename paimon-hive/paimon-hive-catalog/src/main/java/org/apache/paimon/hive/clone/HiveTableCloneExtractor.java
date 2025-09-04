@@ -32,7 +32,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
@@ -50,14 +49,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
 import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
-import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.SUPPORT_CLONE_SPLITS;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
-import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 /** A {@link HiveCloneExtractor} for hive tables. */
 public class HiveTableCloneExtractor implements HiveCloneExtractor {
@@ -244,10 +240,6 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
         if (FormatTable.Format.JSON.name().equalsIgnoreCase(format)) {
             result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
         } else if (FormatTable.Format.CSV.name().equalsIgnoreCase(format)) {
-            String delimiter = parseDelimiter(table);
-            if (delimiter != null) {
-                result.put(FIELD_DELIMITER.key(), delimiter);
-            }
             result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
         } else {
             result.put(FILE_FORMAT.key(), format);
@@ -255,17 +247,5 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
         // only for clone
         result.put(SUPPORT_CLONE_SPLITS, "true");
         return result;
-    }
-
-    public static String parseDelimiter(Table table) {
-        StorageDescriptor sd = table.getSd();
-        if (sd == null) {
-            return null;
-        }
-        SerDeInfo serdeInfo = sd.getSerdeInfo();
-        if (serdeInfo == null) {
-            return null;
-        }
-        return serdeInfo.getParameters().getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT);
     }
 }
