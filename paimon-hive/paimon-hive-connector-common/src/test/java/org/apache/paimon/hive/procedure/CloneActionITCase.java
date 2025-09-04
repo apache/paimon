@@ -893,14 +893,14 @@ public class CloneActionITCase extends ActionITCaseBase {
     private String randomFormat() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        String[] formats = new String[] {"orc", "parquet", "avro"};
+        String[] formats = new String[] {"orc", "parquet", "avro", "textfile"};
         return formats[i];
     }
 
     private String randomFormat(String excludedFormat) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        String[] formats = new String[] {"orc", "parquet", "avro"};
+        String[] formats = new String[] {"orc", "parquet", "avro", "textfile"};
         if (Objects.equals(excludedFormat, formats[i])) {
             return formats[(i + 1) % 3];
         }
