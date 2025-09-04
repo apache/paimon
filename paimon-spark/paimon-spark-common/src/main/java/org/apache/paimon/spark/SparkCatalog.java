@@ -455,9 +455,13 @@ public class SparkCatalog extends SparkBaseCatalog
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
-        if (!usePaimon(provider) && isFormatTable(provider)) {
-            normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
-            normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
+        if (!usePaimon(provider)) {
+            if (isFormatTable(provider)) {
+                normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
+                normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
+            } else {
+                throw new UnsupportedOperationException("Provider is not supported: " + provider);
+            }
         }
         normalizedProperties.remove(TableCatalog.PROP_PROVIDER);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
