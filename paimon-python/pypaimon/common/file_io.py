@@ -288,12 +288,10 @@ class FileIO:
         try:
             import pyarrow.parquet as pq
             import pyarrow as pa
-            # Convert RecordBatch to Table if necessary for PyArrow 6.0.1 compatibility
-            if isinstance(data, pa.RecordBatch):
-                table = pa.Table.from_batches([data])
+            table = pa.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
-                pq.write_table(table, output_stream, **kwargs)
+                pq.write_table(table, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
@@ -304,15 +302,10 @@ class FileIO:
             """Write ORC file using PyArrow ORC writer."""
             import pyarrow as pa
             import pyarrow.orc as orc
-            # Convert RecordBatch to Table if necessary
-            if isinstance(table, pa.RecordBatch):
-                table = pa.Table.from_batches([table])
+            table = pa.Table.from_batches([table])
 
             with self.new_output_stream(path) as output_stream:
-                # PyArrow ORC writer doesn't support compression parameter directly
-                # Remove compression from kwargs to avoid TypeError
-                orc_kwargs = {k: v for k, v in kwargs.items() if k != 'compression'}
-                orc.write_table(table, output_stream, **orc_kwargs)
+                orc.write_table(table, output_stream, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
