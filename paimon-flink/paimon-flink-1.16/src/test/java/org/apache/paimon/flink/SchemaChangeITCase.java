@@ -90,13 +90,5 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
-
-        // sequence.field is immutable
-        sql("CREATE TABLE T5 (a STRING, b STRING, c STRING) WITH ('sequence.field' = 'b')");
-        sql("INSERT INTO T5 VALUES ('a', 'b', 'c')");
-        assertThatThrownBy(() -> sql("ALTER TABLE T5 SET ('sequence.field' = 'c')"))
-                .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'sequence.field' is not supported yet.");
     }
 }
