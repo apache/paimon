@@ -287,8 +287,7 @@ class FileIO:
     def write_parquet(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'snappy', **kwargs):
         try:
             import pyarrow.parquet as pq
-            import pyarrow as pa
-            table = pa.Table.from_batches([data])
+            table = pyarrow.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
                 pq.write_table(table, output_stream, compression=compression, **kwargs)
@@ -297,13 +296,12 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: Path, table: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer."""
             import sys
-            import pyarrow as pa
             import pyarrow.orc as orc
-            table = pa.Table.from_batches([table])
+            table = pyarrow.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
                 # Check Python version - if 3.6, don't use compression parameter
