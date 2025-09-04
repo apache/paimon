@@ -71,6 +71,7 @@ import org.apache.parquet.internal.column.columnindex.ColumnIndex;
 import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexFilter;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore.MissingOffsetIndexException;
 import org.apache.parquet.internal.filter2.columnindex.RowRanges;
 import org.apache.parquet.internal.hadoop.metadata.IndexReference;
 import org.apache.parquet.io.InputFile;
@@ -813,11 +814,17 @@ public class ParquetFileReader implements Closeable {
         RowRanges rowRanges = RowRanges.createSingle(block.getRowCount());
         if (selection != null) {
             ColumnIndexStore store = getColumnIndexStore(blockIndex);
-            List<OffsetIndex> offsets =
-                    paths.keySet().stream()
-                            .map(store::getOffsetIndex)
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+            List<OffsetIndex> offsets = new ArrayList<>();
+            for (ColumnChunkMetaData mc : block.getColumns()) {
+                ColumnPath pathKey = mc.getPath();
+                ColumnDescriptor columnDescriptor = paths.get(pathKey);
+                if (columnDescriptor != null) {
+                    try {
+                        offsets.add(store.getOffsetIndex(pathKey));
+                    } catch (MissingOffsetIndexException ignored) {
+                    }
+                }
+            }
             long rowCount = block.getRowCount();
             long rowIndexOffset = block.getRowIndexOffset();
             for (OffsetIndex offset : offsets) {
