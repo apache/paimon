@@ -112,6 +112,11 @@ public class HudiHiveCloneExtractor extends HiveTableCloneExtractor {
         }
     }
 
+    @Override
+    public boolean supportCloneSplits(String format) {
+        return false;
+    }
+
     private static void checkTableType(Map<String, String> conf) {
         String type = conf.getOrDefault("table.type", HoodieTableType.COPY_ON_WRITE.name());
         checkArgument(

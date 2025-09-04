@@ -21,6 +21,8 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.flink.clone.schema.ClonePaimonSchemaFunction;
+import org.apache.paimon.flink.clone.schema.CloneSchemaInfo;
 import org.apache.paimon.flink.clone.spits.CloneSplitInfo;
 import org.apache.paimon.flink.clone.spits.CloneSplitsFunction;
 import org.apache.paimon.flink.clone.spits.CommitMessageInfo;
@@ -153,19 +155,29 @@ public class ClonePaimonTableUtils {
                 FlinkStreamPartitioner.partition(
                         source, new ShuffleIdentifierByTableComputer(), parallelism);
 
-        DataStream<CloneSplitInfo> splits =
+        // create target table
+        DataStream<CloneSchemaInfo> schemaInfos =
                 partitionedSource
+                        .process(
+                                new ClonePaimonSchemaFunction(
+                                        sourceCatalogConfig, targetCatalogConfig))
+                        .name("Clone Schema")
+                        .setParallelism(parallelism);
+
+        // list splits
+        DataStream<CloneSplitInfo> splits =
+                schemaInfos
                         .process(
                                 new ListCloneSplitsFunction(
                                         sourceCatalogConfig, targetCatalogConfig, whereSql))
-                        .name("List Files")
+                        .name("List Splits")
                         .setParallelism(parallelism);
 
         // copy splits and commit
         DataStream<CommitMessageInfo> commitMessage =
                 splits.rebalance()
                         .process(new CloneSplitsFunction(sourceCatalogConfig, targetCatalogConfig))
-                        .name("Copy Files")
+                        .name("Copy Splits")
                         .setParallelism(parallelism);
 
         DataStream<CommitMessageInfo> partitionedCommitMessage =
@@ -175,7 +187,7 @@ public class ClonePaimonTableUtils {
         DataStream<Long> committed =
                 partitionedCommitMessage
                         .transform(
-                                "Commit table",
+                                "Commit Table",
                                 BasicTypeInfo.LONG_TYPE_INFO,
                                 new CommitMessageTableOperator(targetCatalogConfig))
                         .setParallelism(parallelism);

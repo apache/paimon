@@ -194,6 +194,11 @@ public class IcebergHiveCloneExtractor extends HiveTableCloneExtractor {
         return paimonOptions;
     }
 
+    @Override
+    public boolean supportCloneSplits(String format) {
+        return false;
+    }
+
     private HivePartitionFiles toHivePartitionFiles(List<DataFile> dataFiles, BinaryRow partition) {
         List<org.apache.paimon.fs.Path> paths = new ArrayList<>(dataFiles.size());
         List<Long> fileSizes = new ArrayList<>(dataFiles.size());

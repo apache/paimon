@@ -20,9 +20,9 @@ package org.apache.paimon.flink.clone.spits;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.clone.schema.CloneSchemaInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -38,15 +38,11 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
-import static org.apache.paimon.CoreOptions.BUCKET_KEY;
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
 import static org.apache.paimon.flink.clone.files.ListCloneFilesFunction.getPartitionPredicate;
 
 /** List splits for table. */
-public class ListCloneSplitsFunction
-        extends ProcessFunction<Tuple2<Identifier, Identifier>, CloneSplitInfo> {
+public class ListCloneSplitsFunction extends ProcessFunction<CloneSchemaInfo, CloneSplitInfo> {
 
     private static final long serialVersionUID = 1L;
 
@@ -83,47 +79,13 @@ public class ListCloneSplitsFunction
 
     @Override
     public void processElement(
-            Tuple2<Identifier, Identifier> tuple,
-            ProcessFunction<Tuple2<Identifier, Identifier>, CloneSplitInfo>.Context context,
+            CloneSchemaInfo cloneSchemaInfo,
+            ProcessFunction<CloneSchemaInfo, CloneSplitInfo>.Context context,
             Collector<CloneSplitInfo> collector)
             throws Exception {
-
-        // create database if not exists
-        targetCatalog.createDatabase(tuple.f1.getDatabaseName(), true);
+        Tuple2<Identifier, Identifier> tuple = cloneSchemaInfo.identifierTuple();
 
         Table sourceTable = sourceCatalog.getTable(tuple.f0);
-        Schema.Builder builder = Schema.newBuilder();
-        sourceTable
-                .rowType()
-                .getFields()
-                .forEach(
-                        f -> builder.column(f.name(), f.type(), f.description(), f.defaultValue()));
-        builder.partitionKeys(sourceTable.partitionKeys());
-        builder.primaryKey(sourceTable.primaryKeys());
-        sourceTable
-                .options()
-                .forEach(
-                        (k, v) -> {
-                            if (k.equalsIgnoreCase(BUCKET.key())
-                                    || k.equalsIgnoreCase(PATH.key())) {
-                                return;
-                            }
-                            builder.option(k, v);
-                        });
-
-        if (sourceTable.primaryKeys().isEmpty()) {
-            // for append table with bucket
-            if (sourceTable.options().containsKey(BUCKET_KEY.key())) {
-                builder.option(BUCKET.key(), sourceTable.options().get(BUCKET.key()));
-                builder.option(BUCKET_KEY.key(), sourceTable.options().get(BUCKET_KEY.key()));
-            }
-        } else {
-            // for primary key table, only postpone bucket supports clone
-            builder.option(BUCKET.key(), "-2");
-        }
-
-        targetCatalog.createTable(tuple.f1, builder.build(), true);
-
         PartitionPredicate predicate =
                 getPartitionPredicate(
                         whereSql,

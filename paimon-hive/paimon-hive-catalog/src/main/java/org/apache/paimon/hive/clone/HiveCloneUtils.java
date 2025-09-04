@@ -31,6 +31,7 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
@@ -55,6 +56,8 @@ public class HiveCloneUtils {
 
     public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
+
+    public static final String SUPPORT_CLONE_SPLITS = "support.clone.splits";
 
     public static Map<String, String> getDatabaseOptions(
             HiveCatalog hiveCatalog, String databaseName) throws Exception {
@@ -186,14 +189,28 @@ public class HiveCloneUtils {
                         predicate);
     }
 
-    private static String parseFormat(StorageDescriptor storageDescriptor) {
-        String serder = storageDescriptor.getSerdeInfo().toString();
-        if (serder.contains("avro")) {
+    private static String parseFormat(StorageDescriptor sd) {
+        SerDeInfo serdeInfo = sd.getSerdeInfo();
+        if (serdeInfo == null) {
+            return null;
+        }
+        String serLib =
+                serdeInfo.getSerializationLib() == null
+                        ? ""
+                        : serdeInfo.getSerializationLib().toLowerCase();
+        String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
+        if (serLib.contains("avro")) {
             return "avro";
-        } else if (serder.contains("parquet")) {
+        } else if (serLib.contains("parquet")) {
             return "parquet";
-        } else if (serder.contains("orc")) {
+        } else if (serLib.contains("orc")) {
             return "orc";
+        } else if (inputFormat.contains("Text")) {
+            if (serLib.contains("json")) {
+                return "json";
+            } else {
+                return "csv";
+            }
         }
         return null;
     }
