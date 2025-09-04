@@ -553,4 +553,10 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       }.getMessage.contains("Only supports operations within the same catalog"))
     }
   }
+
+  test("Paimon DDL: create unsupported table") {
+    assert(intercept[Exception] {
+      sql("CREATE TABLE t (id INT) USING paimon1")
+    }.getMessage.contains("Provider is not supported: paimon1"))
+  }
 }
