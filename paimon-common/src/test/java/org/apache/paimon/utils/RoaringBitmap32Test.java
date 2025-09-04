@@ -31,5 +31,6 @@ public class RoaringBitmap32Test {
         assertThat(bitmap.limit(3, true)).isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 5));
         assertThat(bitmap.limit(3, false)).isEqualTo(RoaringBitmap32.bitmapOf(5, 7, 9));
         assertThat(bitmap.limit(10, false)).isEqualTo(bitmap);
+        assertThat(bitmap.limit(5, false)).isEqualTo(bitmap);
     }
 }

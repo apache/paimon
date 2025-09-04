@@ -220,70 +220,77 @@ public class FormatReaderMappingTest {
         FieldRef f2Ref = new FieldRef(2, "f2", DataTypes.INT());
 
         // test matches
+        TopN topN01 = new TopN(singletonList(new SortValue(idRef, ASCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
+        assertThat(test01).isPresent();
+        assertThat(test01.get()).isEqualTo(new RichLimit(1, true));
+
+        TopN topN02 = new TopN(singletonList(new SortValue(idRef, DESCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
+        assertThat(test02).isPresent();
+        assertThat(test02.get()).isEqualTo(new RichLimit(1, false));
+
         // ASCENDING
-        TopN topN01 =
+        TopN topN03 =
                 new TopN(
                         Arrays.asList(
                                 new SortValue(idRef, ASCENDING, NULLS_FIRST),
                                 new SortValue(f1Ref, ASCENDING, NULLS_FIRST)),
                         1);
-        Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
-        assertThat(test01).isPresent();
-        assertThat(test01.get()).isEqualTo(new RichLimit(1, true));
+        Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
+        assertThat(test03).isPresent();
+        assertThat(test03.get()).isEqualTo(new RichLimit(1, true));
 
         // DESCENDING
-        TopN topN02 =
+        TopN topN04 =
                 new TopN(
                         Arrays.asList(
                                 new SortValue(idRef, DESCENDING, NULLS_FIRST),
                                 new SortValue(f1Ref, DESCENDING, NULLS_FIRST)),
                         1);
-        Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
-        assertThat(test02).isPresent();
-        assertThat(test02.get()).isEqualTo(new RichLimit(1, false));
+        Optional<RichLimit> test04 = tryConvertTopNToLimit(topN04, null, schema, true);
+        assertThat(test04).isPresent();
+        assertThat(test04.get()).isEqualTo(new RichLimit(1, false));
 
         // with non-primary keys
-        TopN topN03 =
+        TopN topN05 =
                 new TopN(
                         Arrays.asList(
                                 new SortValue(idRef, DESCENDING, NULLS_FIRST),
                                 new SortValue(f1Ref, DESCENDING, NULLS_FIRST),
                                 new SortValue(f2Ref, ASCENDING, NULLS_FIRST)),
                         1);
-        Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
-        assertThat(test03).isPresent();
-        assertThat(test03.get()).isEqualTo(new RichLimit(1, false));
+        Optional<RichLimit> test05 = tryConvertTopNToLimit(topN05, null, schema, true);
+        assertThat(test05).isPresent();
+        assertThat(test05.get()).isEqualTo(new RichLimit(1, false));
 
         // test not matches
         // only contains a part the primary key
-        TopN topN04 = new TopN(singletonList(new SortValue(idRef, ASCENDING, NULLS_FIRST)), 1);
-        Optional<RichLimit> test04 = tryConvertTopNToLimit(topN04, null, schema, true);
-        assertThat(test04).isEmpty();
-        TopN topN05 =
+        TopN topN06 =
                 new TopN(
                         Arrays.asList(
                                 new SortValue(idRef, ASCENDING, NULLS_FIRST),
                                 new SortValue(f2Ref, ASCENDING, NULLS_FIRST)),
                         1);
-        Optional<RichLimit> test05 = tryConvertTopNToLimit(topN05, null, schema, true);
-        assertThat(test05).isEmpty();
-
-        // position not matches
-        TopN topN06 = new TopN(singletonList(new SortValue(f1Ref, ASCENDING, NULLS_FIRST)), 1);
         Optional<RichLimit> test06 = tryConvertTopNToLimit(topN06, null, schema, true);
         assertThat(test06).isEmpty();
-        TopN topN07 = new TopN(singletonList(new SortValue(f2Ref, ASCENDING, NULLS_FIRST)), 1);
+
+        // position not matches
+        TopN topN07 = new TopN(singletonList(new SortValue(f1Ref, ASCENDING, NULLS_FIRST)), 1);
         Optional<RichLimit> test07 = tryConvertTopNToLimit(topN07, null, schema, true);
         assertThat(test07).isEmpty();
+        TopN topN08 = new TopN(singletonList(new SortValue(f2Ref, ASCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test08 = tryConvertTopNToLimit(topN08, null, schema, true);
+        assertThat(test08).isEmpty();
 
         // the direction not same
-        TopN topN08 =
+        TopN topN09 =
                 new TopN(
                         Arrays.asList(
                                 new SortValue(idRef, ASCENDING, NULLS_FIRST),
                                 new SortValue(f1Ref, DESCENDING, NULLS_FIRST)),
                         1);
-        Optional<RichLimit> test08 = tryConvertTopNToLimit(topN08, null, schema, true);
-        assertThat(test08).isEmpty();
+        Optional<RichLimit> test09 = tryConvertTopNToLimit(topN09, null, schema, true);
+        assertThat(test09).isEmpty();
     }
 }

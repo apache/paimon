@@ -51,6 +51,7 @@ import java.util.function.Function;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 
 /** Class with index mapping and format reader. */
 public class FormatReaderMapping {
@@ -292,19 +293,21 @@ public class FormatReaderMapping {
             }
 
             // The follow rules can convert TopN to limit.
-            // 1. In the front of sort keys must be perfect matches with the primary keys,
+            // 1. The preceding sort keys must matches with the primary keys in order,
             //      and the sort direction must be the same.
-            // 2. If Rule One holds true, we can ignore others sort keys.
+            // 2. If non-primary key including, all the primary-key must matches in order first.
             List<DataField> fields = schema.primaryKeysFields();
             List<SortValue> orders = pushTopN.orders();
-
-            // All the primary keys must be included.
-            if (fields.size() > orders.size()) {
+            if (isNullOrEmpty(orders)) {
                 return Optional.empty();
             }
 
             SortDirection firstDirection = null;
             for (int i = 0; i < fields.size(); i++) {
+                if (i > orders.size() - 1) {
+                    break;
+                }
+
                 DataField field = fields.get(i);
                 SortValue sort = orders.get(i);
                 SortDirection direction = sort.direction();

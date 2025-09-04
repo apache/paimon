@@ -493,6 +493,12 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
       // test can convert
       checkAnswer(
+        spark.sql("SELECT id_0 FROM dv_test ORDER BY id_0 LIMIT 3"),
+        Row(1) :: Row(1) :: Row(2) :: Nil)
+      checkAnswer(
+        spark.sql("SELECT id_0 FROM dv_test ORDER BY id_0 DESC LIMIT 3"),
+        Row(2) :: Row(2) :: Row(1) :: Nil)
+      checkAnswer(
         spark.sql("SELECT * FROM dv_test ORDER BY id_0, id_1 LIMIT 3"),
         Row(1, 3, 3, "c") :: Row(1, 7, 7, "g") :: Row(2, 2, 2, "b") :: Nil)
       checkAnswer(
