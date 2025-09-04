@@ -41,7 +41,6 @@ class DataFileBatchReader(RecordBatchReader):
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
         self.python_predicate = python_predicate
-        self.fields = fields
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
