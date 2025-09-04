@@ -35,12 +35,12 @@ class DataFileBatchReader(RecordBatchReader):
 
     def __init__(self, format_reader: RecordBatchReader, index_mapping: List[int], partition_info: PartitionInfo,
                  system_primary_key: Optional[List[str]], fields: List[DataField],
-                 predicate: Optional[Predicate] = None):
+                 python_predicate: Optional[Predicate] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
-        self.predicate = predicate
+        self.python_predicate = python_predicate
         self.fields = fields
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
 
@@ -51,8 +51,8 @@ class DataFileBatchReader(RecordBatchReader):
 
         if self.partition_info is None and self.index_mapping is None:
             # Still need to apply Python-level filtering even when no partition/mapping is needed
-            if self.predicate is not None:
-                return self._filter_batch_python(record_batch, record_batch.schema.names)
+            if self.python_predicate is not None:
+                record_batch = self._python_filter(record_batch)
             return record_batch
 
         inter_arrays = []
@@ -106,11 +106,11 @@ class DataFileBatchReader(RecordBatchReader):
         final_schema = pa.schema(final_fields)
 
         final_batch = pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
-        if self.predicate is not None:
-            final_batch = self._filter_batch_python(final_batch, inter_names)
+        if self.python_predicate is not None:
+            final_batch = self._python_filter(final_batch)
         return final_batch
 
-    def _filter_batch_python(self, batch: RecordBatch, field_names: List[str]) -> RecordBatch:
+    def _python_filter(self, batch: RecordBatch) -> RecordBatch:
         if batch.num_rows == 0:
             return batch
 
@@ -129,7 +129,7 @@ class DataFileBatchReader(RecordBatchReader):
 
         # Create a modified predicate with corrected field indices if needed
         modified_predicate = self._adjust_predicate_for_field_mapping(
-            self.predicate, field_name_mapping, actual_field_names
+            self.python_predicate, field_name_mapping, actual_field_names
         )
 
         for i in range(batch.num_rows):
@@ -146,15 +146,15 @@ class DataFileBatchReader(RecordBatchReader):
         filtered_batch = batch.take(pa.array(filtered_rows))
         return filtered_batch
 
-    def _adjust_predicate_for_field_mapping(self, predicate: Predicate, field_name_mapping, actual_field_names):
+    def _adjust_predicate_for_field_mapping(self, python_predicate: Predicate, field_name_mapping, actual_field_names):
         """Adjust predicate field indices to match actual field names in the batch."""
-        if predicate is None:
+        if python_predicate is None:
             return None
 
-        if predicate.method in ['and', 'or']:
+        if python_predicate.method in ['and', 'or']:
             # Recursively adjust compound predicates
             adjusted_literals = []
-            for literal_predicate in predicate.literals:
+            for literal_predicate in python_predicate.literals:
                 adjusted = self._adjust_predicate_for_field_mapping(
                     literal_predicate, field_name_mapping, actual_field_names
                 )
@@ -163,17 +163,17 @@ class DataFileBatchReader(RecordBatchReader):
             if not adjusted_literals:
                 return None
             return Predicate(
-                method=predicate.method,
-                index=predicate.index,
-                field=predicate.field,
+                method=python_predicate.method,
+                index=python_predicate.index,
+                field=python_predicate.field,
                 literals=adjusted_literals
             )
         else:
             # Handle simple predicates
-            if predicate.field is None:
-                return predicate
+            if python_predicate.field is None:
+                return python_predicate
             # Find the actual field name
-            actual_field_name = field_name_mapping.get(predicate.field)
+            actual_field_name = field_name_mapping.get(python_predicate.field)
             if actual_field_name is None:
                 # Field not found, skip this predicate
                 return None
@@ -187,10 +187,10 @@ class DataFileBatchReader(RecordBatchReader):
 
             # Create a new predicate with the adjusted index
             return Predicate(
-                method=predicate.method,
+                method=python_predicate.method,
                 index=new_index,
-                field=predicate.field,  # Keep original field name for reference
-                literals=predicate.literals
+                field=python_predicate.field,  # Keep original field name for reference
+                literals=python_predicate.literals
             )
 
     def close(self) -> None:

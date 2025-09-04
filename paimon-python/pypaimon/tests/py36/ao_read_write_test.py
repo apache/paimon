@@ -17,7 +17,7 @@ limitations under the License.
 """
 import pyarrow as pa
 
-from pypaimon.common.pyarrow_compat import table_sort_by
+from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.schema.schema import Schema
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
 

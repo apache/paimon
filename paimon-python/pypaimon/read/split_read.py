@@ -71,16 +71,14 @@ class SplitRead(ABC):
     def file_reader_supplier(self, file_path: str, for_merge_read: bool):
         _, extension = os.path.splitext(file_path)
         file_format = extension[1:]
-        python_predicate = self.predicate if self.predicate is not None else None
 
-        format_predicate = self.predicate
         format_reader: RecordBatchReader
         if file_format == "avro":
-            format_reader = FormatAvroReader(self.table.file_io, file_path, self.table.primary_keys,
-                                             self._get_final_read_data_fields(), self.read_fields, format_predicate)
+            format_reader = FormatAvroReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
+                                             self.read_fields, self.push_down_predicate)
         elif file_format == "parquet" or file_format == "orc":
-            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path, self.table.primary_keys,
-                                                self._get_final_read_data_fields(), self.read_fields, format_predicate)
+            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
+                                                self._get_final_read_data_fields(), self.push_down_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -88,10 +86,10 @@ class SplitRead(ABC):
         partition_info = self.create_partition_info()
         if for_merge_read:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, self.trimmed_primary_key,
-                                       self.table.table_schema.fields, python_predicate)
+                                       self.table.table_schema.fields, self.predicate)
         else:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
-                                       self.table.table_schema.fields, python_predicate)
+                                       self.table.table_schema.fields, self.predicate)
 
     @abstractmethod
     def _get_all_data_fields(self):

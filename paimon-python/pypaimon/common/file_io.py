@@ -49,116 +49,6 @@ class FileIO:
         else:
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
 
-    def __getstate__(self):
-        """Custom serialization to handle non-serializable objects."""
-        state = self.__dict__.copy()
-        # Remove non-serializable filesystem object
-        state['filesystem'] = None
-        state['logger'] = None
-        return state
-
-    def __setstate__(self, state):
-        """Custom deserialization to reconstruct non-serializable objects."""
-        self.__dict__.update(state)
-        # Reconstruct logger
-        self.logger = logging.getLogger(__name__)
-        # Reconstruct filesystem
-        try:
-            if hasattr(self, '_scheme'):
-                scheme = self._scheme
-                netloc = self._netloc
-            else:
-                # Fallback to parsing warehouse again
-                scheme, netloc, path = self.parse_location(self._warehouse)
-                self._scheme = scheme
-                self._netloc = netloc
-                self._path = path
-
-            if scheme in {"oss"}:
-                self.filesystem = self._initialize_oss_fs()
-            elif scheme in {"s3", "s3a", "s3n"}:
-                self.filesystem = self._initialize_s3_fs()
-            elif scheme in {"hdfs", "viewfs"}:
-                self.filesystem = self._initialize_hdfs_fs(scheme, netloc)
-            elif scheme in {"file"}:
-                self.filesystem = self._initialize_local_fs()
-            else:
-                # Create a mock filesystem if reconstruction fails
-                class MockFileSystem:
-                    def open_input_file(self, path):
-                        class MockInputFile:
-                            def read(self):
-                                return b""
-
-                            def __enter__(self):
-                                return self
-
-                            def __exit__(self, *args):
-                                pass
-
-                        return MockInputFile()
-
-                    def open_output_stream(self, path):
-                        class MockOutputStream:
-                            def write(self, data):
-                                pass
-
-                            def __enter__(self):
-                                return self
-
-                            def __exit__(self, *args):
-                                pass
-
-                        return MockOutputStream()
-
-                    def get_file_info(self, paths):
-                        class MockFileInfo:
-                            def __init__(self):
-                                self.type = pyarrow.fs.FileType.NotFound
-                                self.size = 0
-
-                        return [MockFileInfo()]
-
-                self.filesystem = MockFileSystem()
-        except Exception:
-            # Create a minimal mock filesystem
-            class MockFileSystem:
-                def open_input_file(self, path):
-                    class MockInputFile:
-                        def read(self):
-                            return b""
-
-                        def __enter__(self):
-                            return self
-
-                        def __exit__(self, *args):
-                            pass
-
-                    return MockInputFile()
-
-                def open_output_stream(self, path):
-                    class MockOutputStream:
-                        def write(self, data):
-                            pass
-
-                        def __enter__(self):
-                            return self
-
-                        def __exit__(self, *args):
-                            pass
-
-                    return MockOutputStream()
-
-                def get_file_info(self, paths):
-                    class MockFileInfo:
-                        def __init__(self):
-                            self.type = pyarrow.fs.FileType.NotFound
-                            self.size = 0
-
-                    return [MockFileInfo()]
-
-            self.filesystem = MockFileSystem()
-
     @staticmethod
     def parse_location(location: str):
         uri = urlparse(location)
@@ -405,6 +295,7 @@ class FileIO:
             # Convert RecordBatch to Table if necessary for PyArrow 6.0.1 compatibility
             if isinstance(data, pa.RecordBatch):
                 table = pa.Table.from_batches([data])
+
             with self.new_output_stream(path) as output_stream:
                 pq.write_table(table, output_stream, **kwargs)
 
@@ -416,13 +307,7 @@ class FileIO:
         try:
             """Write ORC file using PyArrow ORC writer."""
             import pyarrow as pa
-            try:
-                import pyarrow.orc as orc
-            except ImportError:
-                # Fallback to parquet if ORC is not available
-                self.logger.warning("PyArrow ORC support not available, falling back to parquet format")
-                return self.write_parquet(path, table, compression=compression, **kwargs)
-
+            import pyarrow.orc as orc
             # Convert RecordBatch to Table if necessary
             if isinstance(table, pa.RecordBatch):
                 table = pa.Table.from_batches([table])
@@ -443,20 +328,9 @@ class FileIO:
             from pypaimon.schema.data_types import PyarrowFieldParser
             avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
 
-        if isinstance(data, pyarrow.RecordBatch):
-            records_dict = data.to_pydict()
-        else:
-            batch = data.to_batches()[0] if data.to_batches() else None
-            if batch is None:
-                records = []
-            else:
-                records_dict = batch.to_pydict()
-
-        if 'records_dict' in locals() and records_dict:
-            records = [{col: records_dict[col][i] for col in records_dict.keys()}
-                       for i in range(len(list(records_dict.values())[0]))]
-        else:
-            records = []
+        records_dict = data.to_pydict()
+        records = [{col: records_dict[col][i] for col in records_dict.keys()}
+                   for i in range(len(list(records_dict.values())[0]))]
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)

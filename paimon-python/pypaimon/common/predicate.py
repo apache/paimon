@@ -38,10 +38,7 @@ class Predicate:
         if self.method == 'equal':
             return record.get_field(self.index) == self.literals[0]
         elif self.method == 'notEqual':
-            field_value = record.get_field(self.index)
-            if field_value is None:
-                return False
-            return field_value != self.literals[0]
+            return record.get_field(self.index) != self.literals[0]
         elif self.method == 'lessThan':
             return record.get_field(self.index) < self.literals[0]
         elif self.method == 'lessOrEqual':
