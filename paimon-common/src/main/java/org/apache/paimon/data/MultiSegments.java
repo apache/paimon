@@ -34,7 +34,7 @@ public class MultiSegments implements Segments {
     public MultiSegments(ArrayList<MemorySegment> segments, int limitInLastSegment) {
         this.segments = segments;
         this.limitInLastSegment = limitInLastSegment;
-        this.pageSize = segments.get(0).size();
+        this.pageSize = segments.isEmpty() ? 0 : segments.get(0).size();
         this.totalMemorySize = ((long) segments.size()) * pageSize;
     }
 
