@@ -25,7 +25,6 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.offset_row import OffsetRow
 
 
 class DataFileBatchReader(RecordBatchReader):
@@ -49,9 +48,6 @@ class DataFileBatchReader(RecordBatchReader):
             return None
 
         if self.partition_info is None and self.index_mapping is None:
-            # Still need to apply Python-level filtering even when no partition/mapping is needed
-            if self.python_predicate is not None:
-                record_batch = self._python_filter(record_batch)
             return record_batch
 
         inter_arrays = []
@@ -104,93 +100,7 @@ class DataFileBatchReader(RecordBatchReader):
             final_fields.append(target_field)
         final_schema = pa.schema(final_fields)
 
-        final_batch = pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
-        if self.python_predicate is not None:
-            final_batch = self._python_filter(final_batch)
-        return final_batch
-
-    def _python_filter(self, batch: RecordBatch) -> RecordBatch:
-        if batch.num_rows == 0:
-            return batch
-
-        pydict = batch.to_pydict()
-        filtered_rows = []
-
-        actual_field_names = batch.schema.names
-        # Create a mapping from original field names to actual field names (handles _KEY_ prefix)
-        field_name_mapping = {}
-        for actual_name in actual_field_names:
-            if actual_name.startswith("_KEY_"):
-                original_name = actual_name[5:]  # Remove "_KEY_" prefix
-                field_name_mapping[original_name] = actual_name
-            else:
-                field_name_mapping[actual_name] = actual_name
-
-        # Create a modified predicate with corrected field indices if needed
-        modified_predicate = self._adjust_predicate_for_field_mapping(
-            self.python_predicate, field_name_mapping, actual_field_names
-        )
-
-        for i in range(batch.num_rows):
-            row_data = tuple(pydict[field_name][i] for field_name in actual_field_names)
-            row = OffsetRow(row_data, 0, len(actual_field_names))
-            if not modified_predicate:
-                filtered_rows.append(i)
-            elif modified_predicate and modified_predicate.test(row):
-                filtered_rows.append(i)
-
-        if not filtered_rows:
-            return batch.slice(0, 0)
-
-        filtered_batch = batch.take(pa.array(filtered_rows))
-        return filtered_batch
-
-    def _adjust_predicate_for_field_mapping(self, python_predicate: Predicate, field_name_mapping, actual_field_names):
-        """Adjust predicate field indices to match actual field names in the batch."""
-        if python_predicate is None:
-            return None
-
-        if python_predicate.method in ['and', 'or']:
-            # Recursively adjust compound predicates
-            adjusted_literals = []
-            for literal_predicate in python_predicate.literals:
-                adjusted = self._adjust_predicate_for_field_mapping(
-                    literal_predicate, field_name_mapping, actual_field_names
-                )
-                if adjusted is not None:
-                    adjusted_literals.append(adjusted)
-            if not adjusted_literals:
-                return None
-            return Predicate(
-                method=python_predicate.method,
-                index=python_predicate.index,
-                field=python_predicate.field,
-                literals=adjusted_literals
-            )
-        else:
-            # Handle simple predicates
-            if python_predicate.field is None:
-                return python_predicate
-            # Find the actual field name
-            actual_field_name = field_name_mapping.get(python_predicate.field)
-            if actual_field_name is None:
-                # Field not found, skip this predicate
-                return None
-
-            # Find the new index in actual_field_names
-            try:
-                new_index = actual_field_names.index(actual_field_name)
-            except ValueError:
-                # Field not found in actual names, skip this predicate
-                return None
-
-            # Create a new predicate with the adjusted index
-            return Predicate(
-                method=python_predicate.method,
-                index=new_index,
-                field=python_predicate.field,  # Keep original field name for reference
-                literals=python_predicate.literals
-            )
+        return pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
 
     def close(self) -> None:
         self.format_reader.close()

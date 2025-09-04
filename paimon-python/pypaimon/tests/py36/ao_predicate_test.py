@@ -211,24 +211,6 @@ class PredicatePy36Test(unittest.TestCase):
         predicate = predicate_builder.is_not_null('f1')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:3])
 
-    def testStartswithAppend(self):
-        table = self.catalog.get_table('default.test_append')
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        predicate = predicate_builder.startswith('f1', 'ab')
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:1])
-
-    def testEndswithAppend(self):
-        table = self.catalog.get_table('default.test_append')
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        predicate = predicate_builder.endswith('f1', 'bc')
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
-
-    def testContainsAppend(self):
-        table = self.catalog.get_table('default.test_append')
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        predicate = predicate_builder.contains('f1', 'bb')
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[1]])
-
     def testIsInAppend(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
@@ -251,9 +233,9 @@ class PredicatePy36Test(unittest.TestCase):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate1 = predicate_builder.greater_than('f0', 1)
-        predicate2 = predicate_builder.startswith('f1', 'ab')
+        predicate2 = predicate_builder.less_than('f0', 4)
         predicate = predicate_builder.and_predicates([predicate1, predicate2])
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[1]])
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[1:2])
 
     def testOrPredicates(self):
         table = self.catalog.get_table('default.test_append')

@@ -300,12 +300,22 @@ class FileIO:
     def write_orc(self, path: Path, table: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer."""
+            import sys
             import pyarrow as pa
             import pyarrow.orc as orc
             table = pa.Table.from_batches([table])
 
             with self.new_output_stream(path) as output_stream:
-                orc.write_table(table, output_stream, **kwargs)
+                # Check Python version - if 3.6, don't use compression parameter
+                if sys.version_info[:2] == (3, 6):
+                    orc.write_table(table, output_stream, **kwargs)
+                else:
+                    orc.write_table(
+                        table,
+                        output_stream,
+                        compression=compression,
+                        **kwargs
+                    )
 
         except Exception as e:
             self.delete_quietly(path)
@@ -318,8 +328,13 @@ class FileIO:
             avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
 
         records_dict = data.to_pydict()
-        records = [{col: records_dict[col][i] for col in records_dict.keys()}
-                   for i in range(len(list(records_dict.values())[0]))]
+
+        def record_generator():
+            num_rows = len(list(records_dict.values())[0])
+            for i in range(num_rows):
+                yield {col: records_dict[col][i] for col in records_dict.keys()}
+
+        records = record_generator()
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)

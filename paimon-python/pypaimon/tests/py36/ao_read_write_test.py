@@ -76,20 +76,15 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
         self.assertEqual(table_sort_by(actual, 'user_id'), expected)
 
         p7 = predicate_builder.startswith('behavior', 'a')
-        p10 = predicate_builder.equal('item_id', 1002)
-        p11 = predicate_builder.is_null('behavior')
-        p9 = predicate_builder.contains('behavior', 'f')
-        p8 = predicate_builder.endswith('dt', 'p2')
-        g2 = predicate_builder.or_predicates([p7, p8, p9, p10, p11])
+        p8 = predicate_builder.equal('item_id', 1002)
+        p9 = predicate_builder.is_null('behavior')
+        g2 = predicate_builder.or_predicates([p7, p8, p9])
         read_builder = table.new_read_builder().with_filter(g2)
         actual = self._read_test_table(read_builder)
-        self.assertEqual(table_sort_by(actual, 'user_id'), self.expected)
-
-        g3 = predicate_builder.and_predicates([g1, g2])
-        read_builder = table.new_read_builder().with_filter(g3)
-        actual = self._read_test_table(read_builder)
         expected = pa.concat_tables([
-            self.expected.slice(5, 1)  # 6/f
+            self.expected.slice(0, 1),  # 1/a
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(3, 1),  # 5/e
         ])
         self.assertEqual(table_sort_by(actual, 'user_id'), expected)
 
