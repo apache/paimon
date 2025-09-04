@@ -135,7 +135,7 @@ public class CodeGenUtils {
                     Thread.sleep(5_000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw error;
+                    throw new RuntimeException("Thread interrupted while generating class", e);
                 }
                 toThrow = error;
             }
