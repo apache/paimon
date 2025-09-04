@@ -16,11 +16,10 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import List, Optional, Any
 
 import fastavro
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
@@ -36,7 +35,7 @@ class FormatAvroReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str], full_fields: List[DataField],
-                 push_down_predicate: pc.Expression | bool, batch_size: int = 4096):
+                 push_down_predicate: Any, batch_size: int = 4096):
         self._file = file_io.filesystem.open_input_file(file_path)
         self._avro_reader = fastavro.reader(self._file)
         self._batch_size = batch_size

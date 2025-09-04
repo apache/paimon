@@ -17,7 +17,7 @@
 
 import json
 from dataclasses import field, fields, is_dataclass
-from typing import Any, Dict, Type, TypeVar, Union, get_args, get_origin
+from typing import Any, Dict, Type, TypeVar, Union, List
 
 T = TypeVar("T")
 
@@ -86,14 +86,14 @@ class JSON:
         for field_info in fields(target_class):
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
-            origin_type = get_origin(field_info.type)
-            args = get_args(field_info.type)
+            origin_type = getattr(field_info.type, '__origin__', None)
+            args = getattr(field_info.type, '__args__', None)
             field_type = field_info.type
             if origin_type is Union and len(args) == 2:
                 field_type = args[0]
             if is_dataclass(field_type):
                 type_mapping[json_name] = field_type
-            elif origin_type is list and is_dataclass(args[0]):
+            elif origin_type in (list, List) and is_dataclass(args[0]):
                 type_mapping[json_name] = field_info.type
 
         # Map JSON data to field names
@@ -102,9 +102,9 @@ class JSON:
             if json_name in field_mapping:
                 field_name = field_mapping[json_name]
                 if json_name in type_mapping:
-                    tp = get_origin(type_mapping[json_name])
-                    if tp is list:
-                        item_type = get_args(type_mapping[json_name])[0]
+                    tp = getattr(type_mapping[json_name], '__origin__', None)
+                    if tp in (list, List):
+                        item_type = getattr(type_mapping[json_name], '__args__', None)[0]
                         if is_dataclass(item_type):
                             kwargs[field_name] = [
                                 item_type.from_dict(item)

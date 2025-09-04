@@ -27,7 +27,6 @@ import pyarrow
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
-from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class FileIO:
@@ -288,10 +287,10 @@ class FileIO:
     def write_parquet(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'snappy', **kwargs):
         try:
             import pyarrow.parquet as pq
+            table = pyarrow.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
-                with pq.ParquetWriter(output_stream, data.schema, compression=compression, **kwargs) as pw:
-                    pw.write_batch(data)
+                pq.write_table(table, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
@@ -299,15 +298,22 @@ class FileIO:
 
     def write_orc(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
         try:
+            """Write ORC file using PyArrow ORC writer."""
+            import sys
             import pyarrow.orc as orc
             table = pyarrow.Table.from_batches([data])
+
             with self.new_output_stream(path) as output_stream:
-                orc.write_table(
-                    table,
-                    output_stream,
-                    compression=compression,
-                    **kwargs
-                )
+                # Check Python version - if 3.6, don't use compression parameter
+                if sys.version_info[:2] == (3, 6):
+                    orc.write_table(table, output_stream, **kwargs)
+                else:
+                    orc.write_table(
+                        table,
+                        output_stream,
+                        compression=compression,
+                        **kwargs
+                    )
 
         except Exception as e:
             self.delete_quietly(path)
@@ -315,9 +321,18 @@ class FileIO:
 
     def write_avro(self, path: Path, data: pyarrow.RecordBatch, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
         import fastavro
-
         if avro_schema is None:
+            from pypaimon.schema.data_types import PyarrowFieldParser
             avro_schema = PyarrowFieldParser.to_avro_schema(data.schema)
-        records = data.to_pylist()
+
+        records_dict = data.to_pydict()
+
+        def record_generator():
+            num_rows = len(list(records_dict.values())[0])
+            for i in range(num_rows):
+                yield {col: records_dict[col][i] for col in records_dict.keys()}
+
+        records = record_generator()
+
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
