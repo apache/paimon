@@ -779,7 +779,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
-    @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()
