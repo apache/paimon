@@ -33,15 +33,13 @@ public class CompactedChangelogPathResolverTest {
         Path regularFile =
                 new Path(
                         "/path/to/table/bucket-0/changelog-25b05ab0-6f90-4865-a984-8d9629bac735-1426.parquet");
-        assertThat(CompactedChangelogPathResolver.isCompactedChangelogPath(regularFile))
-                .isFalse();
+        assertThat(CompactedChangelogPathResolver.isCompactedChangelogPath(regularFile)).isFalse();
 
         // Test compacted changelog file
         Path compactedFile =
                 new Path(
                         "/path/to/table/bucket-0/compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253.cc-parquet");
-        assertThat(CompactedChangelogPathResolver.isCompactedChangelogPath(compactedFile))
-                .isTrue();
+        assertThat(CompactedChangelogPathResolver.isCompactedChangelogPath(compactedFile)).isTrue();
 
         // Test regular data file
         Path dataFile = new Path("/path/to/table/bucket-0/data-file-1.parquet");
