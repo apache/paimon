@@ -43,7 +43,7 @@ import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests the local timezone conversion for Parquet files */
+/** Tests the local timezone conversion for Parquet files. */
 public class HiveTimestampTimezoneIssueITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore HMS = new TestHiveMetastore();
