@@ -92,12 +92,6 @@ public class FileIndexPredicate implements Closeable {
             return result;
         }
 
-        // for now we only support single column.
-        List<SortValue> orders = topN.orders();
-        if (orders.size() != 1) {
-            return result;
-        }
-
         int k = topN.limit();
         if (result instanceof BitmapIndexResult) {
             long cardinality = ((BitmapIndexResult) result).get().getCardinality();
@@ -106,6 +100,7 @@ public class FileIndexPredicate implements Closeable {
             }
         }
 
+        List<SortValue> orders = topN.orders();
         String requiredName = orders.get(0).field().name();
         Set<FileIndexReader> readers = reader.readColumnIndex(requiredName);
         for (FileIndexReader reader : readers) {
