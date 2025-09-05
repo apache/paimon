@@ -268,7 +268,7 @@ SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC LIMIT 10;
 
 SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score DESC LIMIT 10;
 
--- support multi sort keys, and the first sort key must be created with range-bitmap.
+-- if there are multiple sort keys, the first sort key must be created with range-bitmap.
 SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC, col DESC LIMIT 10;
 SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score DESC, col ASC LIMIT 10;
 ```
