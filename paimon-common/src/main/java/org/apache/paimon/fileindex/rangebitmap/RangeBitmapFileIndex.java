@@ -159,7 +159,7 @@ public class RangeBitmapFileIndex implements FileIndexer {
 
             // If multiple columns, use first column with strict=false (allow duplicates)
             boolean strict = orders.size() == 1;
-            SortValue sort = orders.get(0); // Always use first column
+            SortValue sort = orders.get(0);
 
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;
