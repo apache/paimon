@@ -26,8 +26,8 @@ import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
-import org.apache.paimon.utils.SimpleObjectsFile;
 
 import java.util.ArrayList;
 
@@ -35,7 +35,7 @@ import java.util.ArrayList;
  * This file includes several Iceberg {@link IcebergManifestFileMeta}s, representing the additional
  * changes since last snapshot.
  */
-public class IcebergManifestList extends SimpleObjectsFile<IcebergManifestFileMeta> {
+public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
 
     public IcebergManifestList(
             FileIO fileIO,

@@ -26,9 +26,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.SimpleObjectsFile;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
@@ -37,7 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Index manifest file. */
-public class IndexManifestFile extends SimpleObjectsFile<IndexManifestEntry> {
+public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
     private IndexManifestFile(
             FileIO fileIO,

@@ -28,10 +28,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.SimpleObjectsFile;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
@@ -44,7 +44,7 @@ import java.util.List;
  * This file includes several {@link ManifestFileMeta}, representing all data of the whole table at
  * the corresponding snapshot.
  */
-public class ManifestList extends SimpleObjectsFile<ManifestFileMeta> {
+public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
     @VisibleForTesting
     public ManifestList(

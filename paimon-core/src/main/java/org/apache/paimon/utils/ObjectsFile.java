@@ -70,8 +70,10 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
         this.cache = cache == null ? null : createCache(cache, formatType);
     }
 
-    protected abstract ObjectsCache<Path, T, ?> createCache(
-            SegmentsCache<Path> cache, RowType formatType);
+    protected ObjectsCache<Path, T, ?> createCache(SegmentsCache<Path> cache, RowType formatType) {
+        return new SimpleObjectsCache<>(
+                cache, serializer, formatType, this::fileSize, this::createIterator);
+    }
 
     public ObjectsFile<T> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
         if (cache != null) {

@@ -41,8 +41,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
-import org.apache.paimon.utils.SimpleObjectsFile;
 
 import javax.annotation.Nullable;
 
@@ -58,7 +58,7 @@ import static org.apache.paimon.iceberg.manifest.IcebergConversions.toByteBuffer
  * This file includes several Iceberg {@link ManifestEntry}s, representing the additional changes
  * since last snapshot.
  */
-public class IcebergManifestFile extends SimpleObjectsFile<IcebergManifestEntry> {
+public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     private static final long UNASSIGNED_SEQ = -1L;
 
