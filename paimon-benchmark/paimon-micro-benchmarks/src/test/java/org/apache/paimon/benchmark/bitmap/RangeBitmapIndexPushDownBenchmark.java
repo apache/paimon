@@ -239,17 +239,25 @@ public class RangeBitmapIndexPushDownBenchmark {
 
     private void benchmarkMultipleTopN(Map<String, Table> tables, int bound, int k) {
         Benchmark benchmark =
-                new Benchmark("multiple-topn", ROW_COUNT).setNumWarmupIters(1).setOutputPerIteration(false);
+                new Benchmark("multiple-topn", ROW_COUNT)
+                        .setNumWarmupIters(1)
+                        .setOutputPerIteration(false);
         for (String name : tables.keySet()) {
             benchmark.addCase(
                     name + "-" + bound + "-" + k,
                     1,
                     () -> {
                         Table table = tables.get(name);
-                        List<SortValue> orders = Arrays.asList(
-                                new SortValue(new FieldRef(0, "k", DataTypes.INT()), DESCENDING, NULLS_LAST),
-                                new SortValue(new FieldRef(1, "f1", DataTypes.STRING()), ASCENDING, NULLS_LAST)
-                        );
+                        List<SortValue> orders =
+                                Arrays.asList(
+                                        new SortValue(
+                                                new FieldRef(0, "k", DataTypes.INT()),
+                                                DESCENDING,
+                                                NULLS_LAST),
+                                        new SortValue(
+                                                new FieldRef(1, "f1", DataTypes.STRING()),
+                                                ASCENDING,
+                                                NULLS_LAST));
                         TopN topN = new TopN(orders, k);
                         List<Split> splits = table.newReadBuilder().newScan().plan().splits();
                         AtomicLong readCount = new AtomicLong(0);
