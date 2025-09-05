@@ -58,8 +58,6 @@ case class MergeIntoPaimonTable(
 
   lazy val relation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
 
-  lazy val tableSchema: StructType = v2Table.schema
-
   private lazy val (targetOnlyCondition, filteredTargetPlan): (Option[Expression], LogicalPlan) = {
     val filtersOnlyTarget = getExpressionOnlyRelated(mergeCondition, targetTable)
     (
@@ -281,7 +279,7 @@ case class MergeIntoPaimonTable(
     val matchedOutputs = processMergeActions(matchedActions)
     val notMatchedBySourceOutputs = processMergeActions(notMatchedBySourceActions)
     val notMatchedOutputs = processMergeActions(notMatchedActions)
-    val outputFields = mutable.ArrayBuffer(tableSchema.fields: _*)
+    val outputFields = mutable.ArrayBuffer(targetTable.schema.fields: _*)
     if (writeRowLineage) {
       outputFields += PaimonMetadataColumn.ROW_ID.toStructField
       outputFields += PaimonMetadataColumn.SEQUENCE_NUMBER.toStructField

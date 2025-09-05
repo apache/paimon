@@ -15,7 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from typing import Optional
+from typing import Optional, Dict
 
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.common.config import CatalogOptions
@@ -28,43 +28,44 @@ class ResourcePaths:
     TABLE_DETAILS = "table-details"
 
     def __init__(self, prefix: str):
-        self.base_path = f"/{self.V1}/{prefix}".rstrip("/")
+        self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
 
     @classmethod
     def for_catalog_properties(
-            cls, options: dict[str, str]) -> "ResourcePaths":
+            cls, options: Dict[str, str]) -> "ResourcePaths":
         prefix = options.get(CatalogOptions.PREFIX, "")
         return cls(prefix)
 
     @staticmethod
     def config() -> str:
-        return f"/{ResourcePaths.V1}/config"
+        return "/{}/config".format(ResourcePaths.V1)
 
     def databases(self) -> str:
-        return f"{self.base_path}/{self.DATABASES}"
+        return "{}/{}".format(self.base_path, self.DATABASES)
 
     def database(self, name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(name)}"
+        return "{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(name))
 
     def tables(self, database_name: Optional[str] = None) -> str:
         if database_name:
-            return f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}/{self.TABLES}"
-        return f"{self.base_path}/{self.TABLES}"
+            return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                        RESTUtil.encode_string(database_name), self.TABLES)
+        return "{}/{}".format(self.base_path, self.TABLES)
 
     def table(self, database_name: str, table_name: str) -> str:
-        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
-                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}")
+        return ("{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                self.TABLES, RESTUtil.encode_string(table_name)))
 
     def table_details(self, database_name: str) -> str:
-        return f"{self.base_path}/{self.DATABASES}/{database_name}/{self.TABLE_DETAILS}"
+        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES, database_name, self.TABLE_DETAILS)
 
     def table_token(self, database_name: str, table_name: str) -> str:
-        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
-                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/token")
+        return ("{}/{}/{}/{}/{}/token".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                self.TABLES, RESTUtil.encode_string(table_name)))
 
     def rename_table(self) -> str:
-        return f"{self.base_path}/{self.TABLES}/rename"
+        return "{}/{}/rename".format(self.base_path, self.TABLES)
 
     def commit_table(self, database_name: str, table_name: str) -> str:
-        return (f"{self.base_path}/{self.DATABASES}/{RESTUtil.encode_string(database_name)}"
-                f"/{self.TABLES}/{RESTUtil.encode_string(table_name)}/commit")
+        return ("{}/{}/{}/{}/{}/commit".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                self.TABLES, RESTUtil.encode_string(table_name)))

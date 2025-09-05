@@ -16,13 +16,12 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import List, Optional, Any
 
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
 
@@ -32,19 +31,12 @@ class FormatPyArrowReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
-    def __init__(self, file_io: FileIO, file_format: str, file_path: str, primary_keys: List[str],
-                 fields: List[str], predicate: Predicate, batch_size: int = 4096):
-
-        if primary_keys:
-            # TODO: utilize predicate to improve performance
-            predicate = None
-        if predicate is not None:
-            predicate = predicate.to_arrow()
-
+    def __init__(self, file_io: FileIO, file_format: str, file_path: str, read_fields: List[str],
+                 push_down_predicate: Any, batch_size: int = 4096):
         self.dataset = ds.dataset(file_path, format=file_format, filesystem=file_io.filesystem)
         self.reader = self.dataset.scanner(
-            columns=fields,
-            filter=predicate,
+            columns=read_fields,
+            filter=push_down_predicate,
             batch_size=batch_size
         ).to_reader()
 
@@ -56,38 +48,4 @@ class FormatPyArrowReader(RecordBatchReader):
 
     def close(self):
         if self.reader is not None:
-            self.reader.close()
             self.reader = None
-
-
-def _filter_predicate_by_primary_keys(predicate: Predicate, primary_keys):
-    """
-    Filter out predicates that are not related to primary key fields.
-    """
-    if predicate is None or primary_keys is None:
-        return predicate
-
-    if predicate.method in ['and', 'or']:
-        filtered_literals = []
-        for literal in predicate.literals:
-            filtered = _filter_predicate_by_primary_keys(literal, primary_keys)
-            if filtered is not None:
-                filtered_literals.append(filtered)
-
-        if not filtered_literals:
-            return None
-
-        if len(filtered_literals) == 1:
-            return filtered_literals[0]
-
-        return Predicate(
-            method=predicate.method,
-            index=predicate.index,
-            field=predicate.field,
-            literals=filtered_literals
-        )
-
-    if predicate.field in primary_keys:
-        return predicate
-    else:
-        return None

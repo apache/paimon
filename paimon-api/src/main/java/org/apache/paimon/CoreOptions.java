@@ -779,7 +779,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
-    @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()
@@ -788,7 +787,6 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
-    @Immutable
     public static final ConfigOption<SortOrder> SEQUENCE_FIELD_SORT_ORDER =
             key("sequence.field.sort-order")
                     .enumType(SortOrder.class)

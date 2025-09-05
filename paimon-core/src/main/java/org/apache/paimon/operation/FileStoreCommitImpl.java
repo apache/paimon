@@ -387,7 +387,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
-            LOG.info("Finished commit to table {}, duration {} ms", tableName, commitDuration);
+            LOG.info(
+                    "Finished (Uncertain of success) commit to table {}, duration {} ms",
+                    tableName,
+                    commitDuration);
             if (this.commitMetrics != null) {
                 reportCommit(
                         appendTableFiles,

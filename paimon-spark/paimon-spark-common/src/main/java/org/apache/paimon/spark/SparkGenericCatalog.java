@@ -93,6 +93,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         return this.sparkCatalog.paimonCatalog();
     }
 
+    // ======================= database methods ===============================
+
     @Override
     public String[] defaultNamespace() {
         return asNamespaceCatalog().defaultNamespace();
@@ -148,6 +150,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         }
         return asNamespaceCatalog().dropNamespace(namespace, cascade);
     }
+
+    // ======================= table methods ===============================
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
@@ -353,6 +357,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     private FunctionCatalog asFunctionCatalog() {
         return (FunctionCatalog) getDelegateCatalog();
     }
+
+    // ======================= Function methods ===============================
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {

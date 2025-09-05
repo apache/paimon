@@ -71,6 +71,7 @@ import org.apache.parquet.internal.column.columnindex.ColumnIndex;
 import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexFilter;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore.MissingOffsetIndexException;
 import org.apache.parquet.internal.filter2.columnindex.RowRanges;
 import org.apache.parquet.internal.hadoop.metadata.IndexReference;
 import org.apache.parquet.io.InputFile;
@@ -811,30 +812,40 @@ public class ParquetFileReader implements Closeable {
     private RowRanges calculateRowRanges(int blockIndex) {
         BlockMetaData block = blocks.get(blockIndex);
         RowRanges rowRanges = RowRanges.createSingle(block.getRowCount());
-        if (selection != null) {
+        FilterCompat.Filter recordFilter = options.getRecordFilter();
+        boolean filteringRequired = FilterCompat.isFilteringRequired(recordFilter);
+        if (selection != null || filteringRequired) {
             ColumnIndexStore store = getColumnIndexStore(blockIndex);
-            List<OffsetIndex> offsets =
-                    paths.keySet().stream()
-                            .map(store::getOffsetIndex)
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
-            long rowCount = block.getRowCount();
-            long rowIndexOffset = block.getRowIndexOffset();
-            for (OffsetIndex offset : offsets) {
-                // avoiding creating too many ranges, just filter columns pages
-                RowRanges result = RowRanges.create(rowCount, rowIndexOffset, offset, selection);
+
+            // do filter by selection
+            if (selection != null) {
+                List<OffsetIndex> offsets = new ArrayList<>();
+                for (ColumnChunkMetaData mc : block.getColumns()) {
+                    ColumnPath pathKey = mc.getPath();
+                    if (paths.containsKey(pathKey)) {
+                        try {
+                            offsets.add(store.getOffsetIndex(pathKey));
+                        } catch (MissingOffsetIndexException ignored) {
+                        }
+                    }
+                }
+                long rowCount = block.getRowCount();
+                long rowIndexOffset = block.getRowIndexOffset();
+                for (OffsetIndex offset : offsets) {
+                    // avoiding creating too many ranges, just filter columns pages
+                    RowRanges result =
+                            RowRanges.create(rowCount, rowIndexOffset, offset, selection);
+                    rowRanges = RowRanges.intersection(result, rowRanges);
+                }
+            }
+
+            // do filter by push down filter
+            if (filteringRequired) {
+                RowRanges result =
+                        ColumnIndexFilter.calculateRowRanges(
+                                recordFilter, store, paths.keySet(), block.getRowCount());
                 rowRanges = RowRanges.intersection(result, rowRanges);
             }
-        }
-
-        if (FilterCompat.isFilteringRequired(options.getRecordFilter())) {
-            RowRanges result =
-                    ColumnIndexFilter.calculateRowRanges(
-                            options.getRecordFilter(),
-                            getColumnIndexStore(blockIndex),
-                            paths.keySet(),
-                            block.getRowCount());
-            rowRanges = RowRanges.intersection(result, rowRanges);
         }
         return rowRanges;
     }

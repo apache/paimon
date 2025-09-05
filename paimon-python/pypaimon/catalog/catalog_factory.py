@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from typing import Dict
 
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
@@ -32,12 +33,12 @@ class CatalogFactory:
     }
 
     @staticmethod
-    def create(catalog_options: dict) -> Catalog:
+    def create(catalog_options: Dict) -> Catalog:
         identifier = catalog_options.get(CatalogOptions.METASTORE, "filesystem")
         catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
         if catalog_class is None:
-            raise ValueError(f"Unknown catalog identifier: {identifier}. "
-                             f"Available types: {list(CatalogFactory.CATALOG_REGISTRY.keys())}")
+            raise ValueError("Unknown catalog identifier: {}. "
+                             "Available types: {}".format(identifier, list(CatalogFactory.CATALOG_REGISTRY.keys())))
         return catalog_class(
             CatalogContext.create_from_options(Options(catalog_options))) if identifier == "rest" else catalog_class(
             catalog_options)

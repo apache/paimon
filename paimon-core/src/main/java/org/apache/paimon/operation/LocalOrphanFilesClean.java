@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -213,20 +214,47 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
      */
     private Map<String, Pair<Path, Long>> getCandidateDeletingFiles() {
         List<Path> fileDirs = listPaimonFileDirs();
-        Function<Path, List<Pair<Path, Long>>> processor =
-                path ->
-                        tryBestListingDirs(path).stream()
-                                .filter(this::oldEnough)
-                                .map(status -> Pair.of(status.getPath(), status.getLen()))
-                                .collect(Collectors.toList());
+        Set<Path> emptyDirs = Collections.synchronizedSet(new HashSet<>());
         Iterator<Pair<Path, Long>> allFilesInfo =
-                randomlyExecuteSequentialReturn(executor, processor, fileDirs);
+                randomlyExecuteSequentialReturn(executor, pathProcessor(emptyDirs), fileDirs);
         Map<String, Pair<Path, Long>> result = new HashMap<>();
         while (allFilesInfo.hasNext()) {
             Pair<Path, Long> fileInfo = allFilesInfo.next();
             result.put(fileInfo.getLeft().getName(), fileInfo);
         }
+
+        // delete empty dir
+        while (!dryRun && !emptyDirs.isEmpty()) {
+            Set<Path> newEmptyDir = new HashSet<>();
+            for (Path emptyDir : emptyDirs) {
+                try {
+                    if (!table.location().equals(emptyDir) && fileIO.delete(emptyDir, false)) {
+                        // recursive cleaning
+                        newEmptyDir.add(emptyDir.getParent());
+                    }
+                } catch (IOException ignored) {
+                }
+            }
+            emptyDirs = newEmptyDir;
+        }
+
         return result;
+    }
+
+    private Function<Path, List<Pair<Path, Long>>> pathProcessor(Set<Path> emptyDirs) {
+        return path -> {
+            List<FileStatus> files = tryBestListingDirs(path);
+
+            if (files.isEmpty()) {
+                emptyDirs.add(path);
+                return Collections.emptyList();
+            }
+
+            return files.stream()
+                    .filter(this::oldEnough)
+                    .map(status -> Pair.of(status.getPath(), status.getLen()))
+                    .collect(Collectors.toList());
+        };
     }
 
     public static List<LocalOrphanFilesClean> createOrphanFilesCleans(

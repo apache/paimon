@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import List, Optional, Any
 
 import fastavro
 import pyarrow as pa
@@ -24,7 +24,6 @@ import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
@@ -35,25 +34,17 @@ class FormatAvroReader(RecordBatchReader):
     provided predicate and projection, and converts Avro records to RecordBatch format.
     """
 
-    def __init__(self, file_io: FileIO, file_path: str, primary_keys: List[str],
-                 fields: List[str], full_fields: List[DataField], predicate: Predicate, batch_size: int = 4096):
+    def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str], full_fields: List[DataField],
+                 push_down_predicate: Any, batch_size: int = 4096):
         self._file = file_io.filesystem.open_input_file(file_path)
         self._avro_reader = fastavro.reader(self._file)
         self._batch_size = batch_size
-        self._primary_keys = primary_keys
+        self._push_down_predicate = push_down_predicate
 
-        self._fields = fields
+        self._fields = read_fields
         full_fields_map = {field.name: field for field in full_fields}
-        projected_data_fields = [full_fields_map[name] for name in fields]
+        projected_data_fields = [full_fields_map[name] for name in read_fields]
         self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
-
-        if primary_keys:
-            # TODO: utilize predicate to improve performance
-            predicate = None
-        if predicate is not None:
-            self._predicate = predicate.to_arrow()
-        else:
-            self._predicate = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         pydict_data = {name: [] for name in self._fields}
@@ -68,12 +59,12 @@ class FormatAvroReader(RecordBatchReader):
 
         if records_in_batch == 0:
             return None
-        if self._predicate is None:
+        if self._push_down_predicate is None:
             return pa.RecordBatch.from_pydict(pydict_data, self._schema)
         else:
             pa_batch = pa.Table.from_pydict(pydict_data, self._schema)
             dataset = ds.InMemoryDataset(pa_batch)
-            scanner = dataset.scanner(filter=self._predicate)
+            scanner = dataset.scanner(filter=self._push_down_predicate)
             combine_chunks = scanner.to_table().combine_chunks()
             if combine_chunks.num_rows > 0:
                 return combine_chunks.to_batches()[0]

@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
@@ -49,11 +49,13 @@ NULL_FIELD_INDEX = -1
 class SplitRead(ABC):
     """Abstract base class for split reading operations."""
 
-    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField], split: Split):
+    def __init__(self, table, predicate: Optional[Predicate], push_down_predicate,
+                 read_type: List[DataField], split: Split):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
+        self.push_down_predicate = push_down_predicate
         self.split = split
         self.value_arity = len(read_type)
 
@@ -72,11 +74,11 @@ class SplitRead(ABC):
 
         format_reader: RecordBatchReader
         if file_format == "avro":
-            format_reader = FormatAvroReader(self.table.file_io, file_path, self.table.primary_keys,
-                                             self._get_final_read_data_fields(), self.read_fields, self.predicate)
+            format_reader = FormatAvroReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
+                                             self.read_fields, self.push_down_predicate)
         elif file_format == "parquet" or file_format == "orc":
-            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path, self.table.primary_keys,
-                                                self._get_final_read_data_fields(), self.predicate)
+            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
+                                                self._get_final_read_data_fields(), self.push_down_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -182,7 +184,7 @@ class SplitRead(ABC):
         return [field.name for field in fields_without_partition]
 
     def _get_trimmed_fields(self, read_data_fields: List[DataField],
-                            all_data_fields: List[DataField]) -> tuple[List[int], List[DataField]]:
+                            all_data_fields: List[DataField]) -> Tuple[List[int], List[DataField]]:
         trimmed_mapping = [0] * len(read_data_fields)
         trimmed_fields = []
 
