@@ -73,7 +73,7 @@ public class SegmentsCache<T> {
     }
 
     private int weigh(T cacheKey, Segments segments) {
-        return OBJECT_MEMORY_SIZE + segments.segments().size() * pageSize;
+        return (int) (OBJECT_MEMORY_SIZE + segments.totalMemorySize());
     }
 
     @Nullable

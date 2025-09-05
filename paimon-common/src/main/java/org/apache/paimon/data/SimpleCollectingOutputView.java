@@ -25,7 +25,6 @@ import org.apache.paimon.utils.MathUtils;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.List;
 
 /**
  * The list with the full segments contains at any point all completely full segments, plus the
@@ -33,7 +32,7 @@ import java.util.List;
  */
 public class SimpleCollectingOutputView extends AbstractPagedOutputView {
 
-    private final List<MemorySegment> fullSegments;
+    private final ArrayList<MemorySegment> fullSegments;
 
     private final MemorySegmentSource memorySource;
 
@@ -46,7 +45,9 @@ public class SimpleCollectingOutputView extends AbstractPagedOutputView {
     }
 
     public SimpleCollectingOutputView(
-            List<MemorySegment> fullSegmentTarget, MemorySegmentSource memSource, int segmentSize) {
+            ArrayList<MemorySegment> fullSegmentTarget,
+            MemorySegmentSource memSource,
+            int segmentSize) {
         super(memSource.nextSegment(), segmentSize);
         this.segmentSizeBits = MathUtils.log2strict(segmentSize);
         this.fullSegments = fullSegmentTarget;
@@ -54,8 +55,12 @@ public class SimpleCollectingOutputView extends AbstractPagedOutputView {
         this.fullSegments.add(getCurrentSegment());
     }
 
+    public ArrayList<MemorySegment> fullSegments() {
+        return fullSegments;
+    }
+
     public void reset() {
-        if (this.fullSegments.size() != 0) {
+        if (!this.fullSegments.isEmpty()) {
             throw new IllegalStateException("The target list still contains memory segments.");
         }
 

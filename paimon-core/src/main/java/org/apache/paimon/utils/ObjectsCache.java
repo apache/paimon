@@ -18,40 +18,33 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.RandomAccessInputView;
 import org.apache.paimon.data.Segments;
-import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.io.EOFException;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 @ThreadSafe
-public class ObjectsCache<K, V> {
+public abstract class ObjectsCache<K, V, S extends Segments> {
 
-    private final SegmentsCache<K> cache;
-    private final ObjectSerializer<V> projectedSerializer;
-    private final ThreadLocal<InternalRowSerializer> formatSerializer;
-    private final FunctionWithIOException<K, Long> fileSizeFunction;
-    private final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
+    protected final SegmentsCache<K> cache;
+    protected final ObjectSerializer<V> projectedSerializer;
+    protected final ThreadLocal<InternalRowSerializer> formatSerializer;
+    protected final FunctionWithIOException<K, Long> fileSizeFunction;
+    protected final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
 
-    @Nullable private CacheMetrics cacheMetrics;
+    @Nullable protected CacheMetrics cacheMetrics;
 
-    public ObjectsCache(
+    protected ObjectsCache(
             SegmentsCache<K> cache,
             ObjectSerializer<V> projectedSerializer,
             RowType formatSchema,
@@ -69,15 +62,14 @@ public class ObjectsCache<K, V> {
         this.cacheMetrics = cacheMetrics;
     }
 
-    public List<V> read(
-            K key, @Nullable Long fileSize, Filter<InternalRow> readFilter, Filter<V> readVFilter)
-            throws IOException {
-        Segments segments = cache.getIfPresents(key);
+    public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
+        @SuppressWarnings("unchecked")
+        S segments = (S) cache.getIfPresents(key);
         if (segments != null) {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return readFromSegments(segments, readFilter, readVFilter);
+            return readFromSegments(segments, filters);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
@@ -86,55 +78,40 @@ public class ObjectsCache<K, V> {
                 fileSize = fileSizeFunction.apply(key);
             }
             if (fileSize <= cache.maxElementSize()) {
-                segments = readSegments(key, fileSize);
+                segments = createSegments(key, fileSize);
                 cache.put(key, segments);
-                return readFromSegments(segments, readFilter, readVFilter);
+                return readFromSegments(segments, filters);
             } else {
                 return readFromIterator(
-                        reader.apply(key, fileSize), projectedSerializer, readFilter, readVFilter);
+                        reader.apply(key, fileSize),
+                        projectedSerializer,
+                        filters.readFilter(),
+                        filters.readVFilter());
             }
         }
     }
 
-    private List<V> readFromSegments(
-            Segments segments, Filter<InternalRow> readFilter, Filter<V> readVFilter)
-            throws IOException {
-        InternalRowSerializer formatSerializer = this.formatSerializer.get();
-        List<V> entries = new ArrayList<>();
-        RandomAccessInputView view =
-                new RandomAccessInputView(
-                        segments.segments(), cache.pageSize(), segments.limitInLastSegment());
-        BinaryRow binaryRow = new BinaryRow(formatSerializer.getArity());
-        while (true) {
-            try {
-                formatSerializer.mapFromPages(binaryRow, view);
-                if (readFilter.test(binaryRow)) {
-                    V v = projectedSerializer.fromRow(binaryRow);
-                    if (readVFilter.test(v)) {
-                        entries.add(v);
-                    }
-                }
-            } catch (EOFException e) {
-                return entries;
-            }
-        }
-    }
+    protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
 
-    private Segments readSegments(K key, @Nullable Long fileSize) {
-        InternalRowSerializer formatSerializer = this.formatSerializer.get();
-        try (CloseableIterator<InternalRow> iterator = reader.apply(key, fileSize)) {
-            ArrayList<MemorySegment> segments = new ArrayList<>();
-            MemorySegmentSource segmentSource =
-                    () -> MemorySegment.allocateHeapMemory(cache.pageSize());
-            SimpleCollectingOutputView output =
-                    new SimpleCollectingOutputView(segments, segmentSource, cache.pageSize());
-            while (iterator.hasNext()) {
-                InternalRow row = iterator.next();
-                formatSerializer.serializeToPages(row, output);
-            }
-            return new Segments(segments, output.getCurrentPositionInSegment());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    protected abstract S createSegments(K k, @Nullable Long fileSize);
+
+    /** Filter context for reading. */
+    public static class Filters<V> {
+
+        private final Filter<InternalRow> readFilter;
+        private final Filter<V> readVFilter;
+
+        public Filters(Filter<InternalRow> readFilter, Filter<V> readVFilter) {
+            this.readFilter = readFilter;
+            this.readVFilter = readVFilter;
+        }
+
+        public Filter<InternalRow> readFilter() {
+            return readFilter;
+        }
+
+        public Filter<V> readVFilter() {
+            return readVFilter;
         }
     }
 }
