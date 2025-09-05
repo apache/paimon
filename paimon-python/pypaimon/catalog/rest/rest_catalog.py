@@ -205,8 +205,10 @@ class RESTCatalog(Catalog):
         )
         path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
         path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
+        table_path = path_parsed.netloc + "/" + path_parsed.path \
+            if path_parsed.scheme == "file" else path_parsed.path[1:]
         table = self.create(data_file_io(path),
-                            Path(path_parsed.netloc + "/" + path_parsed.path),
+                            Path(table_path),
                             schema,
                             catalog_env)
         return table
