@@ -51,6 +51,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.manifest.ManifestEntrySerializer.bucketGetter;
@@ -83,6 +84,10 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         Function<InternalRow, Integer> totalBucketGetter = totalBucketGetter();
         MemorySegmentSource segmentSource =
                 () -> MemorySegment.allocateHeapMemory(cache.pageSize());
+        Supplier<SimpleCollectingOutputView> outViewSupplier =
+                () ->
+                        new SimpleCollectingOutputView(
+                                new ArrayList<>(), segmentSource, cache.pageSize());
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         try (CloseableIterator<InternalRow> iterator = reader.apply(path, fileSize)) {
             while (iterator.hasNext()) {
@@ -92,26 +97,18 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
                 int totalBucket = totalBucketGetter.apply(row);
                 Triple<BinaryRow, Integer, Integer> key = Triple.of(partition, bucket, totalBucket);
                 SimpleCollectingOutputView view =
-                        segments.computeIfAbsent(
-                                key,
-                                k ->
-                                        new SimpleCollectingOutputView(
-                                                new ArrayList<>(),
-                                                segmentSource,
-                                                cache.pageSize()));
+                        segments.computeIfAbsent(key, k -> outViewSupplier.get());
                 formatSerializer.serializeToPages(row, view);
             }
             List<RichSegments> result = new ArrayList<>();
-            segments.forEach(
-                    (k, v) ->
-                            result.add(
-                                    new RichSegments(
-                                            k.f0,
-                                            k.f1,
-                                            k.f2,
-                                            Segments.create(
-                                                    v.fullSegments(),
-                                                    v.getCurrentPositionInSegment()))));
+            for (Map.Entry<Triple<BinaryRow, Integer, Integer>, SimpleCollectingOutputView> entry :
+                    segments.entrySet()) {
+                Triple<BinaryRow, Integer, Integer> key = entry.getKey();
+                SimpleCollectingOutputView view = entry.getValue();
+                Segments seg =
+                        Segments.create(view.fullSegments(), view.getCurrentPositionInSegment());
+                result.add(new RichSegments(key.f0, key.f1, key.f2, seg));
+            }
             return new ManifestEntrySegments(result);
         } catch (Exception e) {
             throw new RuntimeException(e);
