@@ -19,27 +19,39 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.MathUtils;
 
 import java.util.ArrayList;
 
-/** Segments contains multiple {@link MultiSegments}. */
-public interface Segments {
+/** A {@link Segments} with limit in last segment. */
+public class MultiSegments implements Segments {
 
-    long totalMemorySize();
+    private final ArrayList<MemorySegment> segments;
 
-    static Segments create(ArrayList<MemorySegment> segments, int limitInLastSegment) {
-        if (segments.size() == 1) {
-            MemorySegment segment = segments.get(0);
-            int roundUp = MathUtils.roundUpToPowerOf2(limitInLastSegment);
-            if (roundUp < segment.size()) {
-                MemorySegment newSegment = MemorySegment.allocateHeapMemory(roundUp);
-                segment.copyTo(0, newSegment, 0, limitInLastSegment);
-                segment = newSegment;
-            }
-            return new SingleSegments(segment, limitInLastSegment);
-        } else {
-            return new MultiSegments(segments, limitInLastSegment);
-        }
+    private final int limitInLastSegment;
+    private final int pageSize;
+    private final long totalMemorySize;
+
+    public MultiSegments(ArrayList<MemorySegment> segments, int limitInLastSegment) {
+        this.segments = segments;
+        this.limitInLastSegment = limitInLastSegment;
+        this.pageSize = segments.isEmpty() ? 0 : segments.get(0).size();
+        this.totalMemorySize = ((long) segments.size()) * pageSize;
+    }
+
+    public int pageSize() {
+        return pageSize;
+    }
+
+    public ArrayList<MemorySegment> segments() {
+        return segments;
+    }
+
+    public int limitInLastSegment() {
+        return limitInLastSegment;
+    }
+
+    @Override
+    public long totalMemorySize() {
+        return totalMemorySize;
     }
 }

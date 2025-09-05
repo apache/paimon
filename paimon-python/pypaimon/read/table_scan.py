@@ -67,8 +67,8 @@ class TableScan:
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
 
-        self.only_read_real_buckets = True \
-            if (self.table.options.get('bucket', -1) == BucketMode.POSTPONE_BUCKET.value) else False
+        self.only_read_real_buckets = True if int(
+            self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
 
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()

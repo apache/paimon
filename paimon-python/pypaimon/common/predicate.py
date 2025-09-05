@@ -214,7 +214,7 @@ class Predicate:
                 return result
             except Exception:
                 # Fallback to True
-                return True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -226,7 +226,7 @@ class Predicate:
                 return result
             except Exception:
                 # Fallback to True
-                return True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -238,7 +238,7 @@ class Predicate:
                 return result
             except Exception:
                 # Fallback to True
-                return True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         elif self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])

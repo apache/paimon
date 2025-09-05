@@ -70,9 +70,9 @@ class FileStoreTable(Table):
 
     def bucket_mode(self) -> BucketMode:
         if self.is_primary_key_table:
-            if self.options.get(CoreOptions.BUCKET, -1) == -2:
+            if int(self.options.get(CoreOptions.BUCKET, -1)) == -2:
                 return BucketMode.POSTPONE_MODE
-            elif self.options.get(CoreOptions.BUCKET, -1) == -1:
+            elif int(self.options.get(CoreOptions.BUCKET, -1)) == -1:
                 if self.cross_partition_update:
                     return BucketMode.CROSS_PARTITION
                 else:
@@ -80,7 +80,7 @@ class FileStoreTable(Table):
             else:
                 return BucketMode.HASH_FIXED
         else:
-            if self.options.get(CoreOptions.BUCKET, -1) == -1:
+            if int(self.options.get(CoreOptions.BUCKET, -1)) == -1:
                 return BucketMode.BUCKET_UNAWARE
             else:
                 return BucketMode.HASH_FIXED
