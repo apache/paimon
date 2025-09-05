@@ -40,8 +40,7 @@ import java.util.List;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 @ThreadSafe
-public class SimpleObjectsCache<K, V>
-        extends ObjectsCache<K, V, ObjectsCache.Filters<V>, Segments> {
+public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
 
     public SimpleObjectsCache(
             SegmentsCache<K> cache,

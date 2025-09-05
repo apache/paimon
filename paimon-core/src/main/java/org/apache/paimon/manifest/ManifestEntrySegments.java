@@ -26,15 +26,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A {@link Segments} for manifest entries. */
-public class ManifestSegments implements Segments {
+/**
+ * A {@link Segments} for manifest entries, it builds indexes based on partitions and buckets, which
+ * can make subsequent queries very fast based on {@link ManifestEntryFilters}.
+ */
+public class ManifestEntrySegments implements Segments {
 
     private final List<RichSegments> segments;
     private final long totalMemorySize;
 
     private final Map<BinaryRow, Map<Integer, List<RichSegments>>> indexedSegments;
 
-    public ManifestSegments(List<RichSegments> segments) {
+    public ManifestEntrySegments(List<RichSegments> segments) {
         this.segments = segments;
         this.totalMemorySize =
                 segments.stream()

@@ -24,7 +24,7 @@ import org.apache.paimon.data.Segments;
 import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestSegments.RichSegments;
+import org.apache.paimon.manifest.ManifestEntrySegments.RichSegments;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -57,12 +57,15 @@ import static org.apache.paimon.manifest.ManifestEntrySerializer.bucketGetter;
 import static org.apache.paimon.manifest.ManifestEntrySerializer.partitionGetter;
 import static org.apache.paimon.manifest.ManifestEntrySerializer.totalBucketGetter;
 
-/** Cache records to {@link SegmentsCache} by compacted serializer. */
+/**
+ * Cache {@link ManifestEntry} records to {@link SegmentsCache}, unlike {@link SimpleObjectsCache},
+ * it builds fast indexed queries based on {@link ManifestEntryFilters} and {@link
+ * ManifestEntrySegments}.
+ */
 @ThreadSafe
-public class ManifestObjectsCache
-        extends ObjectsCache<Path, ManifestEntry, ManifestEntryFilters, ManifestSegments> {
+public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, ManifestEntrySegments> {
 
-    public ManifestObjectsCache(
+    public ManifestEntryCache(
             SegmentsCache<Path> cache,
             ObjectSerializer<ManifestEntry> projectedSerializer,
             RowType formatSchema,
@@ -72,7 +75,7 @@ public class ManifestObjectsCache
     }
 
     @Override
-    protected ManifestSegments createSegments(Path path, @Nullable Long fileSize) {
+    protected ManifestEntrySegments createSegments(Path path, @Nullable Long fileSize) {
         Map<Triple<BinaryRow, Integer, Integer>, SimpleCollectingOutputView> segments =
                 new HashMap<>();
         Function<InternalRow, BinaryRow> partitionGetter = partitionGetter();
@@ -109,7 +112,7 @@ public class ManifestObjectsCache
                                             Segments.create(
                                                     v.fullSegments(),
                                                     v.getCurrentPositionInSegment()))));
-            return new ManifestSegments(result);
+            return new ManifestEntrySegments(result);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -117,10 +120,15 @@ public class ManifestObjectsCache
 
     @Override
     protected List<ManifestEntry> readFromSegments(
-            ManifestSegments manifestSegments, ManifestEntryFilters filters) throws IOException {
-        List<Segments> segmentsList = new ArrayList<>();
-        PartitionPredicate partitionFilter = filters.partitionFilter;
-        BucketFilter bucketFilter = filters.bucketFilter;
+            ManifestEntrySegments manifestSegments, Filters<ManifestEntry> filters)
+            throws IOException {
+        PartitionPredicate partitionFilter = null;
+        BucketFilter bucketFilter = null;
+        if (filters instanceof ManifestEntryFilters) {
+            partitionFilter = ((ManifestEntryFilters) filters).partitionFilter;
+            bucketFilter = ((ManifestEntryFilters) filters).bucketFilter;
+        }
+
         List<RichSegments> segments = manifestSegments.segments();
 
         // try to do fast filter first
@@ -144,6 +152,7 @@ public class ManifestObjectsCache
         }
 
         // do force loop filter
+        List<Segments> segmentsList = new ArrayList<>();
         for (RichSegments richSegments : segments) {
             if (partitionFilter != null && !partitionFilter.test(richSegments.partition())) {
                 continue;

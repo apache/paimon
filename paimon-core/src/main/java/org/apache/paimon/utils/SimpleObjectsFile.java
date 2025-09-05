@@ -18,8 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Segments;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
@@ -29,8 +27,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 /** A file which contains several {@link T}s, provides read and write. */
-public abstract class SimpleObjectsFile<T>
-        extends ObjectsFile<T, ObjectsCache.Filters<T>, Segments> {
+public abstract class SimpleObjectsFile<T> extends ObjectsFile<T> {
 
     public SimpleObjectsFile(
             FileIO fileIO,
@@ -57,11 +54,5 @@ public abstract class SimpleObjectsFile<T>
             SegmentsCache<Path> cache, RowType formatType) {
         return new SimpleObjectsCache<>(
                 cache, serializer, formatType, super::fileSize, super::createIterator);
-    }
-
-    @Override
-    protected ObjectsCache.Filters<T> createFilters(
-            Filter<InternalRow> readFilter, Filter<T> readTFilter) {
-        return new ObjectsCache.Filters<>(readFilter, readTFilter);
     }
 }

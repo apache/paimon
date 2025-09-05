@@ -34,7 +34,7 @@ import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 @ThreadSafe
-public abstract class ObjectsCache<K, V, F extends ObjectsCache.Filters<V>, S extends Segments> {
+public abstract class ObjectsCache<K, V, S extends Segments> {
 
     protected final SegmentsCache<K> cache;
     protected final ObjectSerializer<V> projectedSerializer;
@@ -62,7 +62,7 @@ public abstract class ObjectsCache<K, V, F extends ObjectsCache.Filters<V>, S ex
         this.cacheMetrics = cacheMetrics;
     }
 
-    public List<V> read(K key, @Nullable Long fileSize, F filters) throws IOException {
+    public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
         @SuppressWarnings("unchecked")
         S segments = (S) cache.getIfPresents(key);
         if (segments != null) {
@@ -91,7 +91,7 @@ public abstract class ObjectsCache<K, V, F extends ObjectsCache.Filters<V>, S ex
         }
     }
 
-    protected abstract List<V> readFromSegments(S segments, F filters) throws IOException;
+    protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
 
     protected abstract S createSegments(K k, @Nullable Long fileSize);
 

@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Segments;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -42,8 +41,7 @@ import java.util.List;
 import static org.apache.paimon.utils.FileUtils.checkExists;
 
 /** A file which contains several {@link T}s, provides read and write. */
-public abstract class ObjectsFile<T, F extends ObjectsCache.Filters<T>, S extends Segments>
-        implements SimpleFileReader<T> {
+public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
@@ -52,7 +50,7 @@ public abstract class ObjectsFile<T, F extends ObjectsCache.Filters<T>, S extend
     protected final String compression;
     protected final PathFactory pathFactory;
 
-    @Nullable protected final ObjectsCache<Path, T, F, S> cache;
+    @Nullable protected final ObjectsCache<Path, T, ?> cache;
 
     public ObjectsFile(
             FileIO fileIO,
@@ -72,12 +70,10 @@ public abstract class ObjectsFile<T, F extends ObjectsCache.Filters<T>, S extend
         this.cache = cache == null ? null : createCache(cache, formatType);
     }
 
-    protected abstract ObjectsCache<Path, T, F, S> createCache(
+    protected abstract ObjectsCache<Path, T, ?> createCache(
             SegmentsCache<Path> cache, RowType formatType);
 
-    protected abstract F createFilters(Filter<InternalRow> readFilter, Filter<T> readTFilter);
-
-    public ObjectsFile<T, F, S> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+    public ObjectsFile<T> withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
         if (cache != null) {
             cache.withCacheMetrics(cacheMetrics);
         }
@@ -142,7 +138,7 @@ public abstract class ObjectsFile<T, F extends ObjectsCache.Filters<T>, S extend
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, createFilters(readFilter, readTFilter));
+            return cache.read(path, fileSize, new ObjectsCache.Filters<>(readFilter, readTFilter));
         }
 
         return readFromIterator(

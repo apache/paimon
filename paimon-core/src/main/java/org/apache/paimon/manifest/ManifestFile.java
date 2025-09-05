@@ -51,8 +51,7 @@ import java.util.List;
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
  * snapshot.
  */
-public class ManifestFile
-        extends ObjectsFile<ManifestEntry, ManifestEntryFilters, ManifestSegments> {
+public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
@@ -87,9 +86,9 @@ public class ManifestFile
     }
 
     @Override
-    protected ManifestObjectsCache createCache(
+    protected ManifestEntryCache createCache(
             @Nullable SegmentsCache<Path> cache, RowType formatType) {
-        return new ManifestObjectsCache(
+        return new ManifestEntryCache(
                 cache, serializer, formatType, super::fileSize, super::createIterator);
     }
 
@@ -97,12 +96,6 @@ public class ManifestFile
     public ManifestFile withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
         super.withCacheMetrics(cacheMetrics);
         return this;
-    }
-
-    @Override
-    protected ManifestEntryFilters createFilters(
-            Filter<InternalRow> readFilter, Filter<ManifestEntry> readTFilter) {
-        return new ManifestEntryFilters(null, null, readFilter, readTFilter);
     }
 
     public List<ManifestEntry> read(

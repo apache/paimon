@@ -25,7 +25,10 @@ import org.apache.paimon.utils.ObjectsCache;
 
 import javax.annotation.Nullable;
 
-/** Manifest entry Filter context for reading. */
+/**
+ * Filters for {@link ManifestEntry} for reading, it includes more partition filtering and bucket
+ * filtering.
+ */
 public class ManifestEntryFilters extends ObjectsCache.Filters<ManifestEntry> {
 
     public final @Nullable PartitionPredicate partitionFilter;
