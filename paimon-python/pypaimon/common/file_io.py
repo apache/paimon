@@ -57,14 +57,13 @@ class FileIO:
 
     def _initialize_oss_fs(self) -> FileSystem:
         from pyarrow.fs import S3FileSystem
-
+        bucket_name = self.properties.get("prefix")
         client_kwargs = {
-            "endpoint_override": self.properties.get(OssOptions.OSS_ENDPOINT),
+            "endpoint_override": bucket_name + "." + self.properties.get(OssOptions.OSS_ENDPOINT),
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             "session_token": self.properties.get(OssOptions.OSS_SECURITY_TOKEN),
             "region": self.properties.get(OssOptions.OSS_REGION),
-            "force_virtual_addressing": True,
         }
 
         return S3FileSystem(**client_kwargs)

@@ -134,7 +134,7 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -2)
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -2))
         if num_buckets != BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(f"Postpone bucket mode requires bucket = -2, got {num_buckets}")
 
