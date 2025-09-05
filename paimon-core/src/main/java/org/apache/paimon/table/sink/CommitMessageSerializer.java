@@ -148,8 +148,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-
-        if (version == 9) {
+        if (version >= 9) {
             return () -> dataFileSerializer.deserializeList(view);
         } else if (version == 8) {
             if (dataFileMetaFirstRowIdLegacySerializer == null) {
@@ -182,7 +181,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer(
             int version, DataInputView view) {
-        if (version >= 8) {
+        if (version >= 9) {
             return () -> indexEntrySerializer.deserializeList(view);
         } else if (version >= 5) {
             if (indexEntryV2Deserializer == null) {
