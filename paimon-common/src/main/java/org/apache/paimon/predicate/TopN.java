@@ -20,12 +20,14 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.predicate.SortValue.NullOrdering;
 import org.apache.paimon.predicate.SortValue.SortDirection;
-import org.apache.paimon.utils.Preconditions;
 
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Represents the TopN predicate. */
 public class TopN implements Serializable {
@@ -36,7 +38,8 @@ public class TopN implements Serializable {
     private final int limit;
 
     public TopN(List<SortValue> orders, int limit) {
-        this.orders = Preconditions.checkNotNull(orders);
+        checkArgument(!isNullOrEmpty(orders), "orders should not be null or empty");
+        this.orders = orders;
         this.limit = limit;
     }
 
