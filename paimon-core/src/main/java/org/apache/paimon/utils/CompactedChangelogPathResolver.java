@@ -56,7 +56,7 @@ public class CompactedChangelogPathResolver {
 
     /**
      * Resolves a file path, handling compacted changelog file path resolution if applicable.
-     * 
+     *
      * <p>For compacted changelog files, resolves fake file paths to their real file paths
      * as described in the protocol above. For non-compacted changelog files, returns the
      * path unchanged.
