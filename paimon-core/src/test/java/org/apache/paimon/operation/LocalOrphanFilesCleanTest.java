@@ -544,6 +544,28 @@ public class LocalOrphanFilesCleanTest {
         assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isGreaterThan(0);
     }
 
+    @Test
+    public void testRemovingEmptyDirectories() throws Exception {
+        List<List<TestPojo>> committedData = new ArrayList<>();
+        Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
+        SnapshotManager snapshotManager = table.snapshotManager();
+        writeData(snapshotManager, committedData, snapshotData, new HashMap<>(), 1);
+
+        Path emptyDirectory1 = new Path(tablePath.toString(), "part1=1/part2=2/bucket-0");
+        Path emptyDirectory2 = new Path(tablePath.toString(), "part1=1/part2=2/bucket-1");
+        fileIO.mkdirs(emptyDirectory1);
+        fileIO.mkdirs(emptyDirectory2);
+        assertThat(fileIO.exists(emptyDirectory1)).isTrue();
+        assertThat(fileIO.exists(emptyDirectory2)).isTrue();
+
+        LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
+        assertThat(fileIO.exists(emptyDirectory1)).isFalse();
+        assertThat(fileIO.exists(emptyDirectory2)).isFalse();
+
+        validate(deleted, snapshotData, new HashMap<>());
+    }
+
     private void writeData(
             SnapshotManager snapshotManager,
             List<List<TestPojo>> committedData,
