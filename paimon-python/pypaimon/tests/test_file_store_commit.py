@@ -22,7 +22,9 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -84,7 +86,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
+        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
         # Verify results
         self.assertEqual(len(statistics), 1)
@@ -145,7 +147,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
+        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
         # Verify results
         self.assertEqual(len(statistics), 1)
@@ -213,7 +215,8 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message_1, commit_message_2])
+        statistics = file_store_commit._generate_partition_statistics(
+            self._to_entries([commit_message_1, commit_message_2]))
 
         # Verify results
         self.assertEqual(len(statistics), 2)
@@ -268,7 +271,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
+        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
         # Verify results
         self.assertEqual(len(statistics), 1)
@@ -308,7 +311,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
+        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
         # Verify results
         self.assertEqual(len(statistics), 1)
@@ -347,7 +350,7 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
+        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
         # Verify results - should fallback to index-based naming
         self.assertEqual(len(statistics), 1)
@@ -372,29 +375,20 @@ class TestFileStoreCommit(unittest.TestCase):
         # Verify results
         self.assertEqual(len(statistics), 0)
 
-    def test_generate_partition_statistics_commit_message_no_files(
-            self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
-        """Test partition statistics generation with commit message containing no files."""
-        # Create FileStoreCommit instance
-        file_store_commit = self._create_file_store_commit()
-
-        commit_message = CommitMessage(
-            partition=('2024-01-15', 'us-east-1'),
-            bucket=0,
-            new_files=[]  # No files
-        )
-
-        # Test method
-        statistics = file_store_commit._generate_partition_statistics([commit_message])
-
-        # Verify results - should still create a partition entry with zero counts
-        self.assertEqual(len(statistics), 1)
-
-        stat = statistics[0]
-        self.assertEqual(stat.spec, {'dt': '2024-01-15', 'region': 'us-east-1'})
-        self.assertEqual(stat.record_count, 0)
-        self.assertEqual(stat.file_count, 0)
-        self.assertEqual(stat.file_size_in_bytes, 0)
+    @staticmethod
+    def _to_entries(commit_messages):
+        commit_entries = []
+        for msg in commit_messages:
+            partition = BinaryRow(list(msg.partition), None)
+            for file in msg.new_files:
+                commit_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=None,
+                    file=file
+                ))
+        return commit_entries
 
 
 if __name__ == '__main__':
