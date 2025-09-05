@@ -31,7 +31,7 @@ install_requires = [
     'ossfs==2021.8.0; python_version=="3.6"',
     'pyarrow>=16;   python_version >= "3.8"',
     'pyarrow==6.0.1; python_version < "3.8"',
-    'pandas==2.3.2; python_version >= "3.9"',
+    'pandas==2.3.2; python_version >= "3.7"',
     'pandas==1.1.5; python_version < "3.7"',
     'polars==1.32.0; python_version>"3.6"',
     'polars==0.9.12; python_version=="3.6"',
