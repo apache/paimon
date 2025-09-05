@@ -32,6 +32,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -50,6 +51,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +61,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 
 /** Benchmark for table read. */
@@ -92,6 +95,7 @@ public class RangeBitmapIndexPushDownBenchmark {
 
             // benchmark TopN
             benchmarkTopN(tables, bound, 1);
+            benchmarkMultipleTopN(tables, bound, 1);
         }
     }
 
@@ -213,6 +217,40 @@ public class RangeBitmapIndexPushDownBenchmark {
                         Table table = tables.get(name);
                         FieldRef ref = new FieldRef(0, "k", DataTypes.INT());
                         TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
+                        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+                        AtomicLong readCount = new AtomicLong(0);
+                        try {
+                            for (Split split : splits) {
+                                RecordReader<InternalRow> reader =
+                                        table.newReadBuilder()
+                                                .withTopN(topN)
+                                                .newRead()
+                                                .createReader(split);
+                                reader.forEachRemaining(row -> readCount.incrementAndGet());
+                                reader.close();
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        }
+        benchmark.run();
+    }
+
+    private void benchmarkMultipleTopN(Map<String, Table> tables, int bound, int k) {
+        Benchmark benchmark =
+                new Benchmark("multiple-topn", ROW_COUNT).setNumWarmupIters(1).setOutputPerIteration(false);
+        for (String name : tables.keySet()) {
+            benchmark.addCase(
+                    name + "-" + bound + "-" + k,
+                    1,
+                    () -> {
+                        Table table = tables.get(name);
+                        List<SortValue> orders = Arrays.asList(
+                                new SortValue(new FieldRef(0, "k", DataTypes.INT()), DESCENDING, NULLS_LAST),
+                                new SortValue(new FieldRef(1, "f1", DataTypes.STRING()), ASCENDING, NULLS_LAST)
+                        );
+                        TopN topN = new TopN(orders, k);
                         List<Split> splits = table.newReadBuilder().newScan().plan().splits();
                         AtomicLong readCount = new AtomicLong(0);
                         try {
