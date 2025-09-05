@@ -37,8 +37,8 @@ install_requires = [
     'polars==0.9.12; python_version=="3.6"',
     'fastavro==1.11.1; python_version>"3.6"',
     'fastavro==1.4.7; python_version=="3.6"',
-    'zstandard==0.24.0; python_version>"3.7"',
-    'zstandard==0.19.0; python_version=="3.7"',
+    'zstandard==0.24.0; python_version>="3.7"',
+    'zstandard==0.19.0; python_version<"3.7"',
     'dataclasses==0.8.0; python_version < "3.7"',
     'pip==21.3.1'
 ]
