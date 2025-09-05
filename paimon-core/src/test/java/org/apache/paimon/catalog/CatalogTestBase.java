@@ -51,6 +51,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -608,11 +609,11 @@ public abstract class CatalogTestBase {
                 datas[j] = GenericRow.of(random.nextInt(), partitionValue);
             }
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            try (BatchTableWrite write = writeBuilder.newWrite()) {
+            try (FormatTableWrite write = (FormatTableWrite) writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {
                     write.write(row);
                 }
-                write.prepareCommit();
+                write.commit();
             }
             List<InternalRow> readData;
             readData = read(table, null, null, null, null);

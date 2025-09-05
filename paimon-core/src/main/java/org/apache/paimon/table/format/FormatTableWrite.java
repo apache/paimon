@@ -49,8 +49,6 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     private final FormatTableFileWrite write;
     private final RowPartitionKeyExtractor partitionKeyExtractor;
 
-    private boolean batchCommitted = false;
-
     private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
 
@@ -108,16 +106,40 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
-    public int getBucket(InternalRow row) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void write(InternalRow row) throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
         BinaryRow partition = partitionKeyExtractor.partition(row);
         write.write(partition, row);
+    }
+
+    @Override
+    public void close() throws Exception {
+        write.close();
+    }
+
+    @Override
+    public List<CommitMessage> prepareCommit() throws Exception {
+        write.flush();
+        return new ArrayList<>();
+    }
+
+    public void commit() throws Exception {
+        this.prepareCommit();
+    }
+
+    private void checkNullability(InternalRow row) {
+        for (int idx : notNullFieldIndex) {
+            if (row.isNullAt(idx)) {
+                String columnName = rowType.getFields().get(idx).name();
+                throw new RuntimeException(
+                        String.format("Cannot write null to non-null column(%s)", columnName));
+            }
+        }
+    }
+
+    private InternalRow wrapDefaultValue(InternalRow row) {
+        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 
     @Override
@@ -142,20 +164,14 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
-    public void close() throws Exception {
-        write.close();
+    public int getBucket(InternalRow row) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public List<CommitMessage> prepareCommit() throws Exception {
-        write.flush();
-        return new ArrayList<>();
     }
 
     @Override
@@ -166,19 +182,5 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     @Override
     public void restore(List<State<InternalRow>> state) {
         throw new UnsupportedOperationException();
-    }
-
-    private void checkNullability(InternalRow row) {
-        for (int idx : notNullFieldIndex) {
-            if (row.isNullAt(idx)) {
-                String columnName = rowType.getFields().get(idx).name();
-                throw new RuntimeException(
-                        String.format("Cannot write null to non-null column(%s)", columnName));
-            }
-        }
-    }
-
-    private InternalRow wrapDefaultValue(InternalRow row) {
-        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 }
