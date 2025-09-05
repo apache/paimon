@@ -25,8 +25,8 @@ from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
-from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.schema.schema import Schema
+from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
 
 
@@ -168,15 +168,6 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
         self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
-
-    def testReaderDuckDB(self):
-        read_builder = self.table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        duckdb_con = table_read.to_duckdb(splits, 'duckdb_table')
-        actual = duckdb_con.query("SELECT * FROM duckdb_table").fetchdf()
-        expect = pd.DataFrame(self.raw_data)
-        pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
 
     def testWriteWideTableLargeData(self):
         logging.basicConfig(level=logging.INFO)
