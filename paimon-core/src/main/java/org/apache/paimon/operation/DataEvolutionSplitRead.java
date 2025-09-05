@@ -72,6 +72,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    private final boolean deletionVectorsEnabled;
 
     protected RowType readRowType;
 
@@ -81,7 +82,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             TableSchema schema,
             RowType rowType,
             FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            boolean deletionVectorsEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -89,6 +91,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.readRowType = rowType;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     @Override
@@ -127,7 +130,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         schema -> rowTypeWithRowLineage(schema.logicalRowType(), true).getFields(),
                         null,
                         null,
-                        null);
+                        null,
+                        deletionVectorsEnabled);
 
         List<List<DataFileMeta>> splitByRowId = DataEvolutionSplitGenerator.split(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {

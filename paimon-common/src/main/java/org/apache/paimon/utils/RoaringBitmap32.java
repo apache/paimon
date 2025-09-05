@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
+import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.RoaringBitmap;
 
 import java.io.DataInput;
@@ -106,7 +107,28 @@ public class RoaringBitmap32 {
     }
 
     public RoaringBitmap32 limit(int k) {
-        return new RoaringBitmap32(roaringBitmap.limit(k));
+        return limit(k, true);
+    }
+
+    public RoaringBitmap32 limit(int k, boolean head) {
+        if (getCardinality() <= k) {
+            return clone();
+        }
+
+        // limit from head
+        if (head) {
+            return new RoaringBitmap32(roaringBitmap.limit(k));
+        }
+
+        // limit from tail
+        int limit = k;
+        RoaringBitmap bitmap = new RoaringBitmap();
+        IntIterator iterator = roaringBitmap.getReverseIntIterator();
+        while (iterator.hasNext() && limit > 0) {
+            bitmap.add(iterator.next());
+            limit--;
+        }
+        return new RoaringBitmap32(bitmap);
     }
 
     public void remove(int position) {
