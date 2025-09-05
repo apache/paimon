@@ -33,7 +33,7 @@ class BatchWriteBuilder:
         self.static_partition = None
 
     def overwrite(self, static_partition: Optional[dict] = None):
-        self.static_partition = static_partition
+        self.static_partition = static_partition if static_partition is not None else {}
         return self
 
     def new_write(self) -> BatchTableWrite:

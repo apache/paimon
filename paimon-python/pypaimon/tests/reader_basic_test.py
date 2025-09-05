@@ -68,8 +68,85 @@ class ReaderBasicTest(unittest.TestCase):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_overwrite(self):
-        pass
-        # TODO: support overwrite
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, partition_keys=['f0'],
+                                            options={'dynamic-partition-overwrite': 'false'})
+        self.catalog.create_table('default.test_overwrite', schema, False)
+        table = self.catalog.get_table('default.test_overwrite')
+        read_builder = table.new_read_builder()
+
+        # test normal write
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df0 = pd.DataFrame({
+            'f0': [1, 2],
+            'f1': ['apple', 'banana'],
+        })
+
+        table_write.write_pandas(df0)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df0 = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='f0')
+        df0['f0'] = df0['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df0.reset_index(drop=True), df0.reset_index(drop=True))
+
+        # test partially overwrite
+        write_builder = table.new_batch_write_builder().overwrite({'f0': 1})
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df1 = pd.DataFrame({
+            'f0': [1],
+            'f1': ['watermelon'],
+        })
+
+        table_write.write_pandas(df1)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df1 = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='f0')
+        expected_df1 = pd.DataFrame({
+            'f0': [1, 2],
+            'f1': ['watermelon', 'banana']
+        })
+        expected_df1['f0'] = expected_df1['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df1.reset_index(drop=True), expected_df1.reset_index(drop=True))
+
+        # test fully overwrite
+        write_builder = table.new_batch_write_builder().overwrite()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df2 = pd.DataFrame({
+            'f0': [3],
+            'f1': ['Neo'],
+        })
+
+        table_write.write_pandas(df2)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df2 = table_read.to_pandas(table_scan.plan().splits())
+        df2['f0'] = df2['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
 
     def testWriteWrongSchema(self):
         self.catalog.create_table('default.test_wrong_schema',
