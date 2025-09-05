@@ -155,18 +155,14 @@ public class RangeBitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
-            List<SortValue> orders = topN.orders();
-
-            // If multiple columns, use first column with strict=false (allow duplicates)
-            boolean strict = orders.size() == 1;
-            SortValue sort = orders.get(0);
-
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;
 
             int limit = topN.limit();
+            List<SortValue> orders = topN.orders();
+            SortValue sort = orders.get(0);
             SortValue.NullOrdering nullOrdering = sort.nullOrdering();
-
+            boolean strict = orders.size() == 1;
             if (ASCENDING.equals(sort.direction())) {
                 return new BitmapIndexResult(
                         () -> bitmap.bottomK(limit, nullOrdering, foundSet, strict));
