@@ -1924,6 +1924,13 @@ public class CoreOptions implements Serializable {
                                     + "and 'hilbert' for 5 or more columns.");
 
     @Immutable
+    public static final ConfigOption<String> LIQUID_CLUSTERING_COLUMNS =
+            key("liquid-clustering.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies the column name(s) used for liquid clustering, in the format 'columnName1,columnName2'. ");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -2978,6 +2985,10 @@ public class CoreOptions implements Serializable {
 
     public OrderType clusteringStrategy(int columnSize) {
         return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
+    }
+
+    public List<String> liquidClusterColumns() {
+        return clusteringColumns(options.get(LIQUID_CLUSTERING_COLUMNS));
     }
 
     public static List<String> clusteringColumns(String clusteringColumns) {
