@@ -158,9 +158,8 @@ public class RangeBitmapFileIndex implements FileIndexer {
             List<SortValue> orders = topN.orders();
 
             // If multiple columns, use first column with strict=false (allow duplicates)
-            boolean isMultiColumn = orders.size() > 1;
+            boolean strict = orders.size() == 1;
             SortValue sort = orders.get(0); // Always use first column
-            boolean strict = !isMultiColumn;
 
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;

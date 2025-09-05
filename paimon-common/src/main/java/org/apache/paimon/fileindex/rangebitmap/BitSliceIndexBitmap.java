@@ -178,23 +178,21 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.and(e, getSlice(i));
-                if (strict) {
-                    break;
-                }
-                // If not strict, continue to include all rows with the same value
+                break;
             }
         }
 
-        // Return all results if not strict, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        if (strict) {
-            long n = f.getCardinality() - k;
-            if (n > 0) {
-                Iterator<Integer> iterator = e.iterator();
-                while (iterator.hasNext() && n > 0) {
-                    f.remove(iterator.next());
-                    n--;
-                }
+        if (!strict) {
+            return f;
+        }
+
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
             }
         }
         return f;
@@ -227,23 +225,21 @@ public class BitSliceIndexBitmap {
                 e = RoaringBitmap32.and(e, getSlice(i));
             } else {
                 e = RoaringBitmap32.andNot(e, getSlice(i));
-                if (strict) {
-                    break;
-                }
-                // If not strict, continue to include all rows with the same value
+                break;
             }
         }
 
-        // Return all results if not strict, otherwise limit to k
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
-        if (strict) {
-            long n = f.getCardinality() - k;
-            if (n > 0) {
-                Iterator<Integer> iterator = e.iterator();
-                while (iterator.hasNext() && n > 0) {
-                    f.remove(iterator.next());
-                    n--;
-                }
+        if (!strict) {
+            return f;
+        }
+
+        long n = f.getCardinality() - k;
+        if (n > 0) {
+            Iterator<Integer> iterator = e.iterator();
+            while (iterator.hasNext() && n > 0) {
+                f.remove(iterator.next());
+                n--;
             }
         }
         return f;
