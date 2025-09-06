@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -257,7 +258,7 @@ public interface FormatTable extends Table {
 
     @Override
     default BatchWriteBuilder newBatchWriteBuilder() {
-        throw new UnsupportedOperationException();
+        return new FormatBatchWriteBuilder(this);
     }
 
     default RowType partitionType() {

@@ -51,6 +51,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -579,6 +580,46 @@ public abstract class CatalogTestBase {
                                         conflictOptionsSchema,
                                         false))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void testFormatTableWrite() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random random = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        String[] formats = {"parquet", "csv", "json"};
+        int partitionValue = 10;
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("target-file-size", "1 kb");
+        schemaBuilder.option("file.compression", "gzip");
+        for (String format : formats) {
+            Identifier identifier = Identifier.create(dbName, "table_" + format);
+            schemaBuilder.option("file.format", format);
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            Table table = catalog.getTable(identifier);
+            int size = 5;
+            InternalRow[] datas = new InternalRow[size];
+            for (int j = 0; j < size; j++) {
+                datas[j] = GenericRow.of(random.nextInt(), partitionValue);
+            }
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (FormatTableWrite write = (FormatTableWrite) writeBuilder.newWrite()) {
+                for (InternalRow row : datas) {
+                    write.write(row);
+                }
+                write.commit();
+            }
+            List<InternalRow> readData;
+            readData = read(table, null, null, null, null);
+            assertThat(readData).containsExactlyInAnyOrder(datas);
+            catalog.dropTable(Identifier.create(dbName, format), true);
+        }
     }
 
     @ParameterizedTest
