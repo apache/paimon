@@ -73,16 +73,25 @@ class TableScan:
     def plan(self) -> Plan:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
-            return Plan([])
+            return Plan([], [])
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
 
-        file_entries = []
+        deleted_entries = set()
+        added_entries = []
+        # TODO: filter manifest files by predicate
         for manifest_file in manifest_files:
             manifest_entries = self.manifest_file_manager.read(manifest_file.file_name,
                                                                lambda row: self._bucket_filter(row))
             for entry in manifest_entries:
                 if entry.kind == 0:
-                    file_entries.append(entry)
+                    added_entries.append(entry)
+                else:
+                    deleted_entries.add((tuple(entry.partition.values), entry.bucket, entry.file.file_name))
+
+        file_entries = [
+            entry for entry in added_entries
+            if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entries
+        ]
 
         if self.predicate:
             file_entries = self._filter_by_predicate(file_entries)
@@ -100,7 +109,7 @@ class TableScan:
 
         splits = self._apply_push_down_limit(splits)
 
-        return Plan(splits)
+        return Plan(file_entries, splits)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.idx_of_this_subtask = idx_of_this_subtask

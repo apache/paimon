@@ -24,9 +24,8 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.table.row.binary_row import (BinaryRow, BinaryRowDeserializer,
+from pypaimon.table.row.binary_row import (BinaryRowDeserializer,
                                            BinaryRowSerializer)
-from pypaimon.write.commit_message import CommitMessage
 
 
 class ManifestFileManager:
@@ -99,46 +98,43 @@ class ManifestFileManager:
             entries.append(entry)
         return entries
 
-    def write(self, file_name, commit_messages: List[CommitMessage]):
+    def write(self, file_name, entries: List[ManifestEntry]):
         avro_records = []
-        for message in commit_messages:
-            partition_bytes = BinaryRowSerializer.to_bytes(
-                BinaryRow(list(message.partition), self.table.table_schema.get_partition_key_fields()))
-            for file in message.new_files:
-                avro_record = {
-                    "_VERSION": 2,
-                    "_KIND": 0,
-                    "_PARTITION": partition_bytes,
-                    "_BUCKET": message.bucket,
-                    "_TOTAL_BUCKETS": self.table.total_buckets,
-                    "_FILE": {
-                        "_FILE_NAME": file.file_name,
-                        "_FILE_SIZE": file.file_size,
-                        "_ROW_COUNT": file.row_count,
-                        "_MIN_KEY": BinaryRowSerializer.to_bytes(file.min_key),
-                        "_MAX_KEY": BinaryRowSerializer.to_bytes(file.max_key),
-                        "_KEY_STATS": {
-                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.min_values),
-                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.key_stats.max_values),
-                            "_NULL_COUNTS": file.key_stats.null_counts,
-                        },
-                        "_VALUE_STATS": {
-                            "_MIN_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.min_values),
-                            "_MAX_VALUES": BinaryRowSerializer.to_bytes(file.value_stats.max_values),
-                            "_NULL_COUNTS": file.value_stats.null_counts,
-                        },
-                        "_MIN_SEQUENCE_NUMBER": file.min_sequence_number,
-                        "_MAX_SEQUENCE_NUMBER": file.max_sequence_number,
-                        "_SCHEMA_ID": file.schema_id,
-                        "_LEVEL": file.level,
-                        "_EXTRA_FILES": file.extra_files,
-                        "_CREATION_TIME": file.creation_time,
-                        "_DELETE_ROW_COUNT": file.delete_row_count,
-                        "_EMBEDDED_FILE_INDEX": file.embedded_index,
-                        "_FILE_SOURCE": file.file_source,
-                    }
+        for entry in entries:
+            avro_record = {
+                "_VERSION": 2,
+                "_KIND": entry.kind,
+                "_PARTITION": BinaryRowSerializer.to_bytes(entry.partition),
+                "_BUCKET": entry.bucket,
+                "_TOTAL_BUCKETS": entry.bucket,
+                "_FILE": {
+                    "_FILE_NAME": entry.file.file_name,
+                    "_FILE_SIZE": entry.file.file_size,
+                    "_ROW_COUNT": entry.file.row_count,
+                    "_MIN_KEY": BinaryRowSerializer.to_bytes(entry.file.min_key),
+                    "_MAX_KEY": BinaryRowSerializer.to_bytes(entry.file.max_key),
+                    "_KEY_STATS": {
+                        "_MIN_VALUES": BinaryRowSerializer.to_bytes(entry.file.key_stats.min_values),
+                        "_MAX_VALUES": BinaryRowSerializer.to_bytes(entry.file.key_stats.max_values),
+                        "_NULL_COUNTS": entry.file.key_stats.null_counts,
+                    },
+                    "_VALUE_STATS": {
+                        "_MIN_VALUES": BinaryRowSerializer.to_bytes(entry.file.value_stats.min_values),
+                        "_MAX_VALUES": BinaryRowSerializer.to_bytes(entry.file.value_stats.max_values),
+                        "_NULL_COUNTS": entry.file.value_stats.null_counts,
+                    },
+                    "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
+                    "_MAX_SEQUENCE_NUMBER": entry.file.max_sequence_number,
+                    "_SCHEMA_ID": entry.file.schema_id,
+                    "_LEVEL": entry.file.level,
+                    "_EXTRA_FILES": entry.file.extra_files,
+                    "_CREATION_TIME": entry.file.creation_time,
+                    "_DELETE_ROW_COUNT": entry.file.delete_row_count,
+                    "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
+                    "_FILE_SOURCE": entry.file.file_source,
                 }
-                avro_records.append(avro_record)
+            }
+            avro_records.append(avro_record)
 
         manifest_path = self.manifest_path / file_name
         try:

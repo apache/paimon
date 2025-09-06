@@ -53,7 +53,7 @@ class BatchTableCommit:
         try:
             if self.overwrite_partition is not None:
                 self.file_store_commit.overwrite(
-                    partition=self.overwrite_partition,
+                    overwrite_partition=self.overwrite_partition,
                     commit_messages=non_empty_messages,
                     commit_identifier=commit_identifier
                 )
