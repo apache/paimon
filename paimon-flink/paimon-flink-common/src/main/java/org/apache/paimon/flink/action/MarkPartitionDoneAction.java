@@ -29,7 +29,7 @@ import java.util.Map;
 import static org.apache.paimon.flink.sink.listener.PartitionMarkDoneListener.markDone;
 
 /** Table partition mark done action for Flink. */
-public class MarkPartitionDoneAction extends TableActionBase {
+public class MarkPartitionDoneAction extends TableActionBase implements LocalAction {
 
     private final FileStoreTable fileStoreTable;
     private final List<Map<String, String>> partitions;
@@ -52,7 +52,7 @@ public class MarkPartitionDoneAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(
                         getClass().getClassLoader(), fileStoreTable, fileStoreTable.coreOptions());

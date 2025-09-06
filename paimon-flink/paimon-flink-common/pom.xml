@@ -217,6 +217,20 @@ under the License.
             <version>${apache.hc.client.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.reflections</groupId>
+            <artifactId>reflections</artifactId>
+            <version>0.10.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.ow2.asm</groupId>
+            <artifactId>asm</artifactId>
+            <version>9.4</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 

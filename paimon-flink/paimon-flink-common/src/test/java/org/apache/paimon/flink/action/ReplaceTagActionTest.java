@@ -23,7 +23,12 @@ import org.apache.paimon.utils.TagManager;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -37,8 +42,9 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testReplaceTag() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testReplaceTag(boolean startFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
@@ -63,8 +69,8 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
         assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained()).isEqualTo(null);
 
         // replace tag with new time_retained
-        createAction(
-                        ReplaceTagAction.class,
+        List<String> args1 =
+                Arrays.asList(
                         "replace_tag",
                         "--warehouse",
                         warehouse,
@@ -75,13 +81,17 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--tag_name",
                         "test_tag",
                         "--time_retained",
-                        "1 d")
-                .run();
+                        "1 d");
+        if (startFlinkJob) {
+            args1 = new ArrayList<>(args1);
+            args1.add("--force_start_flink_job");
+        }
+        createAction(ReplaceTagAction.class, args1.toArray(new String[0])).run();
         assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(24);
 
         // replace tag with new snapshot and time_retained
-        createAction(
-                        ReplaceTagAction.class,
+        List<String> args2 =
+                Arrays.asList(
                         "replace_tag",
                         "--warehouse",
                         warehouse,
@@ -94,8 +104,12 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--snapshot",
                         "1",
                         "--time_retained",
-                        "2 d")
-                .run();
+                        "2 d");
+        if (startFlinkJob) {
+            args2 = new ArrayList<>(args2);
+            args2.add("--force_start_flink_job");
+        }
+        createAction(ReplaceTagAction.class, args2.toArray(new String[0])).run();
         assertThat(tagManager.getOrThrow("test_tag").id()).isEqualTo(1);
         assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(48);
     }

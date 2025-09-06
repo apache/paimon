@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 /** Rollback to specific timestamp action for Flink. */
-public class RollbackToTimestampAction extends TableActionBase {
+public class RollbackToTimestampAction extends TableActionBase implements LocalAction {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollbackToTimestampAction.class);
 
@@ -45,7 +45,7 @@ public class RollbackToTimestampAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         LOG.debug("Run rollback-to-timestamp action with timestamp '{}'.", timestamp);
 
         if (!(table instanceof DataTable)) {

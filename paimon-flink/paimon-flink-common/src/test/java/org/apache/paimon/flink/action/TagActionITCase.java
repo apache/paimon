@@ -32,7 +32,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
@@ -41,12 +40,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT cases for tag management actions. */
 public class TagActionITCase extends ActionITCaseBase {
 
-    private static Stream<String> testData() {
-        return Stream.of("action", "procedure_indexed", "procedure_named");
-    }
-
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testCreateAndDeleteTag(String invoker) throws Exception {
         init(warehouse);
 
@@ -74,6 +69,23 @@ public class TagActionITCase extends ActionITCaseBase {
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
 
         switch (invoker) {
+            case "action_job":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--snapshot",
+                                "2",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "action":
                 createAction(
                                 CreateTagAction.class,
@@ -126,6 +138,21 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag2")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                DeleteTagAction.class,
+                                "delete_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format("CALL sys.delete_tag('%s.%s', 'tag2')", database, tableName));
@@ -157,6 +184,23 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag1",
                                 "--snapshot",
                                 "1")
+                        .run();
+                break;
+            case "action_job":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag1",
+                                "--snapshot",
+                                "1",
+                                "--force_start_flink_job")
                         .run();
                 break;
             case "procedure_indexed":
@@ -192,6 +236,23 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "3")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag3",
+                                "--snapshot",
+                                "3",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -222,6 +283,21 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag1,tag3")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                DeleteTagAction.class,
+                                "delete_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag1,tag3",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -241,7 +317,7 @@ public class TagActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testRenameTag(String invoker) throws Exception {
         init(warehouse);
 
@@ -282,6 +358,21 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag2")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -315,6 +406,23 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag3")
                         .run();
                 break;
+            case "action_job":
+                createAction(
+                                RenameTagAction.class,
+                                "rename_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--target_tag_name",
+                                "tag3",
+                                "--force_start_flink_job")
+                        .run();
+                break;
             case "procedure_indexed":
                 executeSQL(
                         String.format(
@@ -336,7 +444,7 @@ public class TagActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testCreateLatestTag(String invoker) throws Exception {
         init(warehouse);
 
@@ -376,6 +484,21 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag2")
+                        .run();
+                break;
+            case "action_job":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--force_start_flink_job")
                         .run();
                 break;
             case "procedure_indexed":
