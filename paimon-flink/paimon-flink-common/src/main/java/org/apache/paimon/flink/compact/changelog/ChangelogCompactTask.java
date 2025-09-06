@@ -228,8 +228,14 @@ public class ChangelogCompactTask implements Serializable {
                                 + CompactedChangelogReadOnlyFormat.getIdentifier(
                                         baseResult.meta.fileFormat()),
                         baseResult.meta);
+        Path realExternalDir =
+                baseResult.meta.externalPath().map(p -> new Path(p).getParent()).orElse(null);
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Rename {} to {}", changelogTempPath, realPath);
+            LOG.debug(
+                    "Rename {} to {} with external dir {}",
+                    changelogTempPath,
+                    realPath,
+                    realExternalDir);
         }
         table.fileIO().rename(changelogTempPath, realPath);
 
@@ -250,10 +256,14 @@ public class ChangelogCompactTask implements Serializable {
                                 + "."
                                 + CompactedChangelogReadOnlyFormat.getIdentifier(
                                         result.meta.fileFormat());
+                DataFileMeta file = result.meta.rename(name);
+                if (realExternalDir != null) {
+                    file = file.newExternalPath(new Path(realExternalDir, name).toString());
+                }
                 if (result.isCompactResult) {
-                    compactChangelog.add(result.meta.rename(name));
+                    compactChangelog.add(file);
                 } else {
-                    newFilesChangelog.add(result.meta.rename(name));
+                    newFilesChangelog.add(file);
                 }
             }
 
