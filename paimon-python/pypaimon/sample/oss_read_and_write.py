@@ -21,6 +21,7 @@ import pyarrow as pa
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 
+
 def oss_read_and_write():
     warehouse = 'oss://<your-bucket>/<warehouse-path>'
     catalog = CatalogFactory.create({
