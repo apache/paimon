@@ -21,15 +21,14 @@ import pyarrow as pa
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 
-
 def oss_read_and_write():
     warehouse = 'oss://<your-bucket>/<warehouse-path>'
     catalog = CatalogFactory.create({
         'warehouse': warehouse,
-        's3.endpoint': 'oss-<your-region>.aliyuncs.com',
-        's3.access-key': '<your-ak>',
-        's3.secret-key': '<your-sk>',
-        's3.region': '<your-region>'
+        'fs.oss.endpoint': 'oss-<your-region>.aliyuncs.com',
+        'fs.oss.accessKeyId': '<your-ak>',
+        'fs.oss.accessKeySecret': '<your-sk>',
+        'fs.oss.region': '<your-region>'
     })
     simple_pa_schema = pa.schema([
         ('f0', pa.int32()),
