@@ -24,7 +24,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.MemoryFileStoreWrite;
@@ -35,6 +37,7 @@ import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +56,10 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
     private boolean forceBufferSpill = false;
     protected final Map<BinaryRow, RecordWriter<InternalRow>> writers;
 
+    // Temp directory for HDFS atomic writes
+    private Path tempDirectory;
+    private final List<FormatTableFileInfo> tempFileList;
+
     public FormatTableFileWrite(
             FileIO fileIO,
             long schemaId,
@@ -67,6 +74,7 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.writers = new HashMap<>();
+        this.tempFileList = new ArrayList<>();
     }
 
     @Override
@@ -107,12 +115,22 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
     }
 
     protected RecordWriter<InternalRow> createWriter(BinaryRow partition) {
+        DataFilePathFactory dataPathFactory;
+
+        if (tempDirectory != null) {
+            // For HDFS: create temp file path factory
+            dataPathFactory = createTempDataFilePathFactory(partition);
+        } else {
+            // For S3/OSS: use original path factory (direct write to target)
+            dataPathFactory = pathFactory.createFormatTableDataFilePathFactory(partition);
+        }
+
         return new FormatTableRecordWriter(
                 fileIO,
                 ioManager,
                 fileFormat,
                 options.targetFileSize(false),
-                pathFactory.createFormatTableDataFilePathFactory(partition),
+                dataPathFactory,
                 options.spillCompressOptions(),
                 options.writeBufferSpillDiskSize(),
                 options.useWriteBufferForAppend() || forceBufferSpill,
@@ -125,5 +143,37 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
         for (RecordWriter<InternalRow> writer : writers.values()) {
             writer.prepareCommit(false);
         }
+    }
+
+    public FileIO getFileIO() {
+        return fileIO;
+    }
+
+    public FileStorePathFactory getPathFactory() {
+        return pathFactory;
+    }
+
+    /** Set temp directory for HDFS atomic writes. */
+    public void setTempDirectory(Path tempDirectory) {
+        this.tempDirectory = tempDirectory;
+    }
+
+    /** Get list of temp files for HDFS commit. */
+    public List<FormatTableFileInfo> getTempFileList() {
+        return new ArrayList<>(tempFileList);
+    }
+
+    /** Create temp data file path factory for HDFS. */
+    private DataFilePathFactory createTempDataFilePathFactory(BinaryRow partition) {
+        // Create a custom path factory that writes to temp directory
+        DataFilePathFactory originalFactory =
+                pathFactory.createFormatTableDataFilePathFactory(partition);
+        return new TempDataFilePathFactory(
+                originalFactory,
+                tempDirectory,
+                partition,
+                tempFileList,
+                fileFormat.getFormatIdentifier(),
+                options.fileCompression());
     }
 }
