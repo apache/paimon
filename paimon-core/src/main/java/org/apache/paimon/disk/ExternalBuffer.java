@@ -60,7 +60,7 @@ public class ExternalBuffer implements RowBuffer {
 
     private boolean addCompleted;
 
-    ExternalBuffer(
+    public ExternalBuffer(
             IOManager ioManager,
             MemorySegmentPool pool,
             AbstractRowDataSerializer<?> serializer,

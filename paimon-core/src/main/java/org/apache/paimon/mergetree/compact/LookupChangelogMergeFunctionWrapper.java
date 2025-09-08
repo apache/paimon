@@ -30,10 +30,7 @@ import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -104,9 +101,11 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     @Override
     public ChangelogResult getResult() {
+        mergeFunction.complete();
+
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
-        boolean containLevel0 = containLevel0();
+        boolean containLevel0 = mergeFunction.containLevel0();
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
@@ -122,7 +121,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 }
             }
             if (highLevel != null) {
-                insertInto(mergeFunction.candidates(), highLevel);
+                mergeFunction.insertInto(highLevel, comparator);
             }
         }
 
@@ -136,33 +135,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         return reusedResult.setResult(result);
-    }
-
-    public boolean containLevel0() {
-        for (KeyValue kv : mergeFunction.candidates()) {
-            if (kv.level() == 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void insertInto(LinkedList<KeyValue> candidates, KeyValue highLevel) {
-        List<KeyValue> newCandidates = new ArrayList<>();
-        for (KeyValue candidate : candidates) {
-            if (highLevel != null && comparator.compare(highLevel, candidate) < 0) {
-                newCandidates.add(highLevel);
-                newCandidates.add(candidate);
-                highLevel = null;
-            } else {
-                newCandidates.add(candidate);
-            }
-        }
-        if (highLevel != null) {
-            newCandidates.add(highLevel);
-        }
-        candidates.clear();
-        candidates.addAll(newCandidates);
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {
