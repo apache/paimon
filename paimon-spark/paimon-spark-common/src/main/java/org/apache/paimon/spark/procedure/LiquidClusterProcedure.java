@@ -22,11 +22,16 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.cluster.ClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.ProcedureUtils;
 
@@ -44,10 +49,15 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import scala.collection.JavaConverters;
+import scala.collection.Seq;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
@@ -160,6 +170,7 @@ public class LiquidClusterProcedure extends BaseProcedure {
                                                                 entry.getValue().files())
                                                         .toArray(new DataSplit[0])));
 
+        // sort in partition
         TableSorter sorter = TableSorter.getSorter(table, orderType, clusterColumns);
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
@@ -175,10 +186,48 @@ public class LiquidClusterProcedure extends BaseProcedure {
                         .reduce(Dataset::union)
                         .orElse(null);
         if (datasetForWrite != null) {
-            PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
-            // Use dynamic partition overwrite
-            writer.writeBuilder().withOverwrite();
-            writer.commit(writer.write(datasetForWrite));
+            // set to write only to prevent invoking compaction
+            PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
+            // do not use overwrite, we don't need to overwrite the whole partition
+            Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
+
+            // re-organize the commit messages to generate the compact messages
+            Map<BinaryRow, List<DataFileMeta>> clusterAfter = new HashMap<>();
+            for (CommitMessage commitMessage : JavaConverters.seqAsJavaList(commitMessages)) {
+                checkArgument(commitMessage.bucket() == 0);
+                clusterAfter
+                        .computeIfAbsent(commitMessage.partition(), k -> new ArrayList<>())
+                        .addAll(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
+            }
+
+            List<CommitMessage> clusterMessages = new ArrayList<>();
+            for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : clusterAfter.entrySet()) {
+                BinaryRow partition = entry.getKey();
+                List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
+                CompactIncrement compactIncrement =
+                        new CompactIncrement(
+                                clusterBefore, entry.getValue(), Collections.emptyList());
+                clusterMessages.add(
+                        new CommitMessageImpl(
+                                partition,
+                                // bucket 0 is bucket for unaware-bucket table
+                                // for compatibility with the old design
+                                0,
+                                table.coreOptions().bucket(),
+                                DataIncrement.emptyIncrement(),
+                                compactIncrement));
+            }
+
+            writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
         }
+    }
+
+    public static ProcedureBuilder builder() {
+        return new BaseProcedure.Builder<LiquidClusterProcedure>() {
+            @Override
+            public LiquidClusterProcedure doBuild() {
+                return new LiquidClusterProcedure(tableCatalog());
+            }
+        };
     }
 }
