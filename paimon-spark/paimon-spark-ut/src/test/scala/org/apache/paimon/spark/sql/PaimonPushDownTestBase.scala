@@ -282,7 +282,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Paimon pushDown: topN for append-only tables") {
+  test("Paimon pushDown: TopN for append-only tables") {
     assume(gteqSpark3_3)
     spark.sql("""
                 |CREATE TABLE T (pt INT, id INT, price BIGINT) PARTITIONED BY (pt)
@@ -355,7 +355,44 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(qe1.optimizedPlan.containsPattern(LIMIT))
   }
 
-  test("Paimon pushDown: topN for primary-key tables with deletion vector") {
+  test("Paimon pushDown: multi TopN for append-only tables") {
+    assume(gteqSpark3_3)
+    spark.sql("""
+                |CREATE TABLE T (pt INT, id INT, price BIGINT) PARTITIONED BY (pt)
+                |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
+                |""".stripMargin)
+    Assertions.assertTrue(getScanBuilder().isInstanceOf[SupportsPushDownTopN])
+
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |(1, 10, 100L),
+                |(1, 20, 100L),
+                |(1, 20, 200L),
+                |(1, 20, 200L),
+                |(1, 20, 200L),
+                |(1, 20, 200L),
+                |(1, 20, 300L),
+                |(1, 30, 100L)
+                |""".stripMargin)
+
+    // test ASC
+    checkAnswer(
+      spark.sql("SELECT id, price FROM T ORDER BY id ASC, price ASC LIMIT 2"),
+      Row(10, 100L) :: Row(20, 100L) :: Nil)
+    checkAnswer(
+      spark.sql("SELECT id, price FROM T ORDER BY id ASC, price DESC LIMIT 2"),
+      Row(10, 100L) :: Row(20, 300L) :: Nil)
+
+    // test DESC
+    checkAnswer(
+      spark.sql("SELECT id, price FROM T ORDER BY id DESC, price ASC LIMIT 2"),
+      Row(30, 100L) :: Row(20, 100L) :: Nil)
+    checkAnswer(
+      spark.sql("SELECT id, price FROM T ORDER BY id DESC, price DESC LIMIT 2"),
+      Row(30, 100L) :: Row(20, 300L) :: Nil)
+  }
+
+  test("Paimon pushDown: TopN for primary-key tables with deletion vector") {
     assume(gteqSpark3_3)
     withTable("dv_test") {
       spark.sql("""
@@ -398,7 +435,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Paimon pushDown: topN for append-only tables with deletion vector") {
+  test("Paimon pushDown: TopN for append-only tables with deletion vector") {
     assume(gteqSpark3_3)
     withTable("dv_test") {
       spark.sql("""
