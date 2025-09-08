@@ -1923,12 +1923,14 @@ public class CoreOptions implements Serializable {
                                     + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
+    @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether enable unique row id for append table.");
 
+    @Immutable
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ENABLED =
             key("data-evolution.enabled")
                     .booleanType()
