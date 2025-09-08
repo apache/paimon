@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.writer;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.columnar.ColumnVector;
 
@@ -25,7 +26,7 @@ import org.apache.arrow.vector.FieldVector;
 
 import javax.annotation.Nullable;
 
-import static java.lang.String.format;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A reusable writer to convert a field into Arrow {@link FieldVector}. */
 public abstract class ArrowFieldWriter {
@@ -71,12 +72,14 @@ public abstract class ArrowFieldWriter {
     /** Get the value from the row at the given position and write to specified row index. */
     public void write(int rowIndex, DataGetters getters, int pos) {
         if (getters.isNullAt(pos)) {
-            if (!isNullable) {
-                throw new IllegalArgumentException(
-                        format(
-                                "Arrow does not support null values in non-nullable fields. Field name : %s expected not null but found null",
-                                fieldVector.getName()));
-            }
+            checkArgument(
+                    isNullable,
+                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                            + "table used %s or %s merge-engine and the aggregate function produced "
+                            + "null value when retracting.",
+                    fieldVector.getName(),
+                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                    CoreOptions.MergeEngine.AGGREGATE);
             fieldVector.setNull(rowIndex);
         } else {
             doWrite(rowIndex, getters, pos);

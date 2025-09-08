@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -36,6 +37,8 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link FieldWriter}. */
 public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
@@ -240,14 +243,20 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     public class RowWriter implements FieldWriter {
 
         private final FieldWriter[] fieldWriters;
+        private final String[] fieldNames;
+        private final boolean[] isNullable;
 
         private RowWriter(Schema schema, List<DataField> fields) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldWriters = new FieldWriter[schemaFields.size()];
+            this.fieldNames = new String[schemaFields.size()];
+            this.isNullable = new boolean[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
                 DataType type = fields.get(i).type();
                 fieldWriters[i] = visit(field.schema(), type);
+                fieldNames[i] = field.name();
+                isNullable[i] = type.isNullable();
             }
         }
 
@@ -259,7 +268,18 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
         public void writeRow(InternalRow row, Encoder encoder) throws IOException {
             for (int i = 0; i < fieldWriters.length; i += 1) {
-                fieldWriters[i].write(row, i, encoder);
+                try {
+                    fieldWriters[i].write(row, i, encoder);
+                } catch (NullPointerException npe) {
+                    checkArgument(
+                            isNullable[i] || !row.isNullAt(i),
+                            "Field '%s' expected not null but found null value. A possible cause is that the "
+                                    + "table used %s or %s merge-engine and the aggregate function produced "
+                                    + "null value when retracting.",
+                            fieldNames[i],
+                            CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                            CoreOptions.MergeEngine.AGGREGATE);
+                }
             }
         }
     }
