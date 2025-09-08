@@ -31,7 +31,7 @@ import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedException, UnresolvedFunction, UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.catalog.CatalogFunction
 import org.apache.spark.sql.catalyst.expressions.{Expression, Unevaluable}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunction, DropFunction, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunction, DropFunction, LogicalPlan, SubqueryAlias, UnresolvedWith}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.{CatalogManager, CatalogPlugin, LookupCatalog}
@@ -49,7 +49,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
       return plan
     }
 
-    plan.resolveOperatorsUp {
+    val applied = plan.resolveOperatorsUp {
       case CreateFunction(
             CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent),
             className,
@@ -82,9 +82,18 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
         } else {
           d
         }
+    }
 
-      // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer can resolve
-      // the 'arguments' without throwing an exception, saying that function is not supported.
+    // Needs to be done here and transform to `UnResolvedPaimonV1Function`, so that spark's Analyzer can resolve
+    // the 'arguments' without throwing an exception, saying that function is not supported.
+    transformPaimonV1Function(applied)
+  }
+
+  private def transformPaimonV1Function(plan: LogicalPlan): LogicalPlan = {
+    plan.resolveOperatorsUp {
+      case u: UnresolvedWith =>
+        u.copy(cteRelations = u.cteRelations.map(
+          t => (t._1, transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias])))
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
           case u: UnresolvedFunction =>

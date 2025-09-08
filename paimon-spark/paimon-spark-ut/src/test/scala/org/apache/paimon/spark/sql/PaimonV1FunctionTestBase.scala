@@ -174,6 +174,46 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
       }
     }
   }
+
+  test("Paimon V1 Function: select with CTE and subquery") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, b INT)")
+        sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+
+        checkAnswer(
+          sql("""
+                |WITH tmp_view AS (
+                |  SELECT udf_add2(a, b) AS c1 FROM t
+                |)
+                |SELECT * FROM tmp_view
+                |""".stripMargin),
+          Seq(Row(3), Row(7))
+        )
+
+        checkAnswer(
+          sql("""
+                |WITH tmp_view AS (
+                |  SELECT udf_add2(1, 2)
+                |)
+                |SELECT * FROM tmp_view
+                |""".stripMargin),
+          Seq(Row(3))
+        )
+
+        checkAnswer(
+          sql("""
+                |SELECT * FROM (SELECT udf_add2(a, b) AS c1 FROM t)
+                |""".stripMargin),
+          Seq(Row(3), Row(7))
+        )
+      }
+    }
+  }
 }
 
 class DisablePaimonV1FunctionTest extends PaimonSparkTestWithRestCatalogBase {
