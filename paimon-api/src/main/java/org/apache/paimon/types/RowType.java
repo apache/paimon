@@ -63,11 +63,11 @@ public final class RowType extends DataType {
 
     private final List<DataField> fields;
 
-    private transient Map<String, DataField> laziedNameToField;
-    private transient Map<String, Integer> laziedNameToIndex;
+    private transient volatile Map<String, DataField> laziedNameToField;
+    private transient volatile Map<String, Integer> laziedNameToIndex;
 
-    private transient Map<Integer, DataField> laziedFieldIdToField;
-    private transient Map<Integer, Integer> laziedFieldIdToIndex;
+    private transient volatile Map<Integer, DataField> laziedFieldIdToField;
+    private transient volatile Map<Integer, Integer> laziedFieldIdToIndex;
 
     public RowType(boolean isNullable, List<DataField> fields) {
         super(isNullable, DataTypeRoot.ROW);
