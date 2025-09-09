@@ -47,7 +47,7 @@ public class ClusterManager {
     private final SnapshotReader snapshotReader;
 
     private final ClusterStrategy clusterStrategy;
-    private final String clusterCurve;
+    private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
 
     private int maxLevel;
@@ -63,8 +63,7 @@ public class ClusterManager {
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger());
-        this.clusterCurve =
-                options.clusteringStrategy(options.liquidClusterColumns().size()).toString();
+        this.clusterCurve = options.clusteringStrategy(options.liquidClusterColumns().size());
         this.clusterKeys = options.liquidClusterColumns();
         this.maxLevel = options.numLevels();
     }
@@ -155,7 +154,13 @@ public class ClusterManager {
         return splits;
     }
 
-    public String clusterCurve() {
+    public List<DataFileMeta> upgrade(List<DataFileMeta> filesAfterCluster, int outputLevel) {
+        return filesAfterCluster.stream()
+                .map(file -> file.upgrade(outputLevel))
+                .collect(Collectors.toList());
+    }
+
+    public CoreOptions.OrderType clusterCurve() {
         return clusterCurve;
     }
 
