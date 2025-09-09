@@ -265,22 +265,23 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         }
 
         public void writeRow(InternalRow row, Encoder encoder) throws IOException {
-            for (int i = 0; i < fieldWriters.length; i += 1) {
-                try {
+            int i = 0;
+            try {
+                for (; i < fieldWriters.length; i += 1) {
                     fieldWriters[i].write(row, i, encoder);
-                } catch (NullPointerException npe) {
-                    if (!isNullable[i] && row.isNullAt(i)) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Field '%s' expected not null but found null value. A possible cause is that the "
-                                                + "table used %s or %s merge-engine and the aggregate function produced "
-                                                + "null value when retracting.",
-                                        fieldNames[i],
-                                        CoreOptions.MergeEngine.PARTIAL_UPDATE,
-                                        CoreOptions.MergeEngine.AGGREGATE));
-                    } else {
-                        throw npe;
-                    }
+                }
+            } catch (NullPointerException npe) {
+                if (!isNullable[i] && row.isNullAt(i)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                                            + "table used %s or %s merge-engine and the aggregate function produced "
+                                            + "null value when retracting.",
+                                    fieldNames[i],
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                    CoreOptions.MergeEngine.AGGREGATE));
+                } else {
+                    throw npe;
                 }
             }
         }
