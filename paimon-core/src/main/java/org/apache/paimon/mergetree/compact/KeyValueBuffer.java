@@ -48,8 +48,6 @@ public interface KeyValueBuffer {
 
     void put(KeyValue kv);
 
-    void complete();
-
     CloseableIterator<KeyValue> iterator();
 
     /** A {@link KeyValueBuffer} implemented by hybrid. */
@@ -85,13 +83,6 @@ public interface KeyValueBuffer {
                 if (listBuffer.list.size() > threshold) {
                     spillToBinary();
                 }
-            }
-        }
-
-        @Override
-        public void complete() {
-            if (binaryBuffer != null) {
-                binaryBuffer.complete();
             }
         }
 
@@ -134,9 +125,6 @@ public interface KeyValueBuffer {
         public void put(KeyValue kv) {
             list.add(kv);
         }
-
-        @Override
-        public void complete() {}
     }
 
     /** A {@link KeyValueBuffer} implemented by binary with spilling. */
@@ -165,11 +153,6 @@ public interface KeyValueBuffer {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        }
-
-        @Override
-        public void complete() {
-            buffer.complete();
         }
 
         @Override
@@ -256,6 +239,5 @@ public interface KeyValueBuffer {
         for (KeyValue kv : newCandidates) {
             buffer.put(kv);
         }
-        buffer.complete();
     }
 }

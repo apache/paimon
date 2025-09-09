@@ -81,10 +81,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         return containLevel0;
     }
 
-    public void complete() {
-        candidates.complete();
-    }
-
     @Nullable
     public KeyValue pickHighLevel() {
         KeyValue highLevel = null;

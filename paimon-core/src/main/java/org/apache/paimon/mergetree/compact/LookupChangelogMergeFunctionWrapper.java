@@ -101,8 +101,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     @Override
     public ChangelogResult getResult() {
-        mergeFunction.complete();
-
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
         boolean containLevel0 = mergeFunction.containLevel0();

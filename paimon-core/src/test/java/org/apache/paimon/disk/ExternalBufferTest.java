@@ -214,7 +214,6 @@ public class ExternalBufferTest {
     private List<Long> insertMulti(ExternalBuffer buffer, int cnt) throws IOException {
         ArrayList<Long> expected = new ArrayList<>(cnt);
         insertMulti(buffer, cnt, expected);
-        buffer.complete();
         return expected;
     }
 

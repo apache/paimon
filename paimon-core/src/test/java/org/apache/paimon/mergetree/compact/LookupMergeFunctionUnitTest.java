@@ -160,7 +160,6 @@ public class LookupMergeFunctionUnitTest {
         for (int i = 5; i >= 0; i--) {
             function.add(new KeyValue().replace(row(1), 1, INSERT, row(i)).setLevel(i));
         }
-        function.complete();
         KeyValue result = function.getResult();
         assertThat(result).isNotNull();
         assertThat(result.value().getInt(0)).isEqualTo(0);

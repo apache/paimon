@@ -37,8 +37,6 @@ public interface RowBuffer {
 
     long memoryOccupancy();
 
-    void complete();
-
     void reset();
 
     boolean flushMemory() throws IOException;

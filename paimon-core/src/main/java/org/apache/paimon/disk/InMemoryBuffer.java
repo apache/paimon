@@ -111,9 +111,6 @@ public class InMemoryBuffer implements RowBuffer {
     }
 
     @Override
-    public void complete() {}
-
-    @Override
     public long memoryOccupancy() {
         return currentDataBufferOffset;
     }

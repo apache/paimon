@@ -172,7 +172,6 @@ public interface SinkWriter<T> {
         public List<DataFileMeta> flush() throws IOException {
             List<DataFileMeta> flushedFiles = new ArrayList<>();
             if (writeBuffer != null) {
-                writeBuffer.complete();
                 RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
