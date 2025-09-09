@@ -23,6 +23,11 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+from pypaimon.table.row.row_kind import RowKind
+
+from pypaimon.table.row.binary_row import BinaryRow, BinaryRowSerializer, BinaryRowDeserializer
+
+from pypaimon.schema.data_types import DataField, AtomicType
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
@@ -192,3 +197,28 @@ class ReaderBasicTest(unittest.TestCase):
         actual = duckdb_con.query("SELECT * FROM duckdb_table").fetchdf()
         expect = pd.DataFrame(self.raw_data)
         pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
+
+    def test_to_bytes_with_long_string(self):
+        """Test serialization of strings longer than 7 bytes which require variable part storage."""
+        # Create fields with a long string value
+        fields = [
+            DataField(0, "long_string", AtomicType("STRING")),
+        ]
+
+        # String longer than 7 bytes will be stored in variable part
+        long_string = "This is a long string that exceeds 7 bytes"
+        values = [long_string]
+
+        binary_row = BinaryRow(values, fields, RowKind.INSERT)
+        serialized_bytes = BinaryRowSerializer.to_bytes(binary_row)
+
+        # Verify the last 6 bytes are 0
+        # This is because the variable part data is rounded to the nearest word (8 bytes)
+        # The last 6 bytes check is to ensure proper padding
+        self.assertEqual(serialized_bytes[-6:], b'\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(serialized_bytes[20:62].decode('utf-8'), long_string)
+        # Deserialize to verify
+        deserialized_row = BinaryRowDeserializer.from_bytes(serialized_bytes, fields)
+
+        self.assertEqual(deserialized_row.values[0], long_string)
+        self.assertEqual(deserialized_row.row_kind, RowKind.INSERT)

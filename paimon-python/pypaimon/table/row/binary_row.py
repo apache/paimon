@@ -276,9 +276,11 @@ class BinaryRowSerializer:
                     header_byte = 0x80 | length
                     fixed_part[field_fixed_offset + 7] = header_byte
                 else:
+                    var_length = cls._round_number_of_bytes_to_nearest_word(len(value_bytes))
+                    var_value_bytes = value_bytes + b'\x00' * (var_length - length)
                     offset_in_variable_part = current_variable_offset
-                    variable_part_data.append(value_bytes)
-                    current_variable_offset += length
+                    variable_part_data.append(var_value_bytes)
+                    current_variable_offset += var_length
 
                     absolute_offset = fixed_part_size + offset_in_variable_part
                     offset_and_len = (absolute_offset << 32) | length
@@ -401,3 +403,11 @@ class BinaryRowSerializer:
         else:
             millis = value.hour * 3600000 + value.minute * 60000 + value.second * 1000 + value.microsecond // 1000
         return struct.pack('<i', millis)
+
+    @classmethod
+    def _round_number_of_bytes_to_nearest_word(cls, num_bytes: int) -> int:
+        remainder = num_bytes & 0x07
+        if remainder == 0:
+            return num_bytes
+        else:
+            return num_bytes + (8 - remainder)
