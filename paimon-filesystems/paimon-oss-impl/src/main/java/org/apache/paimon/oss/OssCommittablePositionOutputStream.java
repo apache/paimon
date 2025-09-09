@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** OSS implementation of CommittablePositionOutputStream using multipart upload. */
 public class OssCommittablePositionOutputStream extends CommittablePositionOutputStream {
@@ -156,7 +157,7 @@ public class OssCommittablePositionOutputStream extends CommittablePositionOutpu
         File tempFile = null;
         try {
             byte[] data = buffer.toByteArray();
-            tempFile = Files.createTempFile("paimon-oss-part-", ".tmp").toFile();
+            tempFile = Files.createTempFile("oss-part-" + UUID.randomUUID(), ".tmp").toFile();
             try (FileOutputStream fos = new FileOutputStream(tempFile)) {
                 fos.write(data);
                 fos.flush();

@@ -21,12 +21,16 @@ package org.apache.paimon.s3;
 import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.Path;
 
-import org.apache.hadoop.fs.s3a.S3AFileSystem;
+import com.amazonaws.services.s3.model.PartETag;
+import com.amazonaws.services.s3.model.UploadPartResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -37,32 +41,36 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
     private static final Logger LOG =
             LoggerFactory.getLogger(S3CommittablePositionOutputStream.class);
 
-    // Minimum part size for S3 multipart upload (5MB)
     private static final int MIN_PART_SIZE = 5 * 1024 * 1024;
 
-    private final S3AFileSystem s3FileSystem;
+    private final S3Accessor s3Accessor;
     private final org.apache.hadoop.fs.Path hadoopPath;
     private final Path targetPath;
-    private final boolean overwrite;
     private final ByteArrayOutputStream buffer;
-    private final List<String> uploadedParts;
+    private final List<PartETag> uploadedParts;
+    private final String uploadId;
+    private final String objectName;
 
-    private String uploadId;
     private long position;
     private boolean closed = false;
 
     public S3CommittablePositionOutputStream(
-            S3AFileSystem s3FileSystem,
+            S3Accessor s3Accessor,
             org.apache.hadoop.fs.Path hadoopPath,
             Path targetPath,
             boolean overwrite) {
-        this.s3FileSystem = s3FileSystem;
+        this.s3Accessor = s3Accessor;
         this.hadoopPath = hadoopPath;
         this.targetPath = targetPath;
-        this.overwrite = overwrite;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.position = 0;
+        this.objectName = s3Accessor.pathToObject(hadoopPath);
+        try {
+            this.uploadId = s3Accessor.startMultiPartUpload(this.objectName);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -94,20 +102,6 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        if (b == null) {
-            throw new NullPointerException();
-        }
-        if ((off < 0)
-                || (off > b.length)
-                || (len < 0)
-                || ((off + len) > b.length)
-                || ((off + len) < 0)) {
-            throw new IndexOutOfBoundsException();
-        }
-        if (len == 0) {
-            return;
-        }
-
         buffer.write(b, off, len);
         position += len;
 
@@ -119,8 +113,6 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
 
     @Override
     public void flush() throws IOException {
-        // S3 multipart upload doesn't support flushing individual parts
-        // We just ensure the buffer is ready
         if (closed) {
             throw new IOException("Stream is closed");
         }
@@ -129,7 +121,6 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
     @Override
     public void close() throws IOException {
         if (!closed) {
-            // For close(), we commit the data automatically
             Committer committer = closeForCommit();
             committer.commit();
         }
@@ -140,56 +131,36 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
         if (closed) {
             throw new IOException("Stream is already closed");
         }
-
         closed = true;
-
-        // Initialize multipart upload if not already done
-        if (uploadId == null) {
-            initializeMultipartUpload();
-        }
-
-        // Upload the remaining data as the final part (if any)
         if (buffer.size() > 0) {
             uploadPart();
         }
 
-        return new S3Committer(s3FileSystem, hadoopPath, targetPath, uploadId, uploadedParts);
-    }
-
-    private void initializeMultipartUpload() throws IOException {
-        try {
-            // Generate a unique upload ID
-            this.uploadId = UUID.randomUUID().toString();
-            LOG.debug(
-                    "Initialized S3 multipart upload with ID: {} for path: {}",
-                    uploadId,
-                    hadoopPath);
-        } catch (Exception e) {
-            throw new IOException("Failed to initialize S3 multipart upload for " + hadoopPath, e);
-        }
+        return new S3Committer(
+                s3Accessor, targetPath, objectName, uploadId, uploadedParts, position);
     }
 
     private void uploadPart() throws IOException {
         if (buffer.size() == 0) {
             return;
         }
-
-        if (uploadId == null) {
-            initializeMultipartUpload();
-        }
-
+        File tempFile = null;
         try {
             byte[] data = buffer.toByteArray();
-            String partETag =
-                    "part-" + (uploadedParts.size() + 1) + "-" + System.currentTimeMillis();
-            uploadedParts.add(partETag);
+            tempFile = Files.createTempFile("s3-part-" + UUID.randomUUID(), ".tmp").toFile();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(data);
+                fos.flush();
+            }
+            UploadPartResult result =
+                    s3Accessor.uploadPart(
+                            s3Accessor.pathToObject(hadoopPath),
+                            uploadId,
+                            uploadedParts.size() + 1,
+                            tempFile,
+                            data.length);
+            uploadedParts.add(result.getPartETag());
             buffer.reset();
-
-            LOG.debug(
-                    "Uploaded part {} for upload ID: {}, size: {} bytes",
-                    uploadedParts.size(),
-                    uploadId,
-                    data.length);
         } catch (Exception e) {
             throw new IOException(
                     "Failed to upload part "
@@ -197,57 +168,59 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
                             + " for upload ID: "
                             + uploadId,
                     e);
+        } finally {
+            if (tempFile != null && tempFile.exists()) {
+                if (!tempFile.delete()) {
+                    LOG.warn("Failed to delete temporary file: {}", tempFile.getAbsolutePath());
+                }
+            }
         }
     }
 
     /** S3 Committer implementation that completes or aborts the multipart upload. */
     private static class S3Committer implements Committer {
 
-        private final S3AFileSystem s3FileSystem;
-        private final org.apache.hadoop.fs.Path hadoopPath;
+        private final S3Accessor s3Accessor;
         private final Path targetPath;
+        private final String objectName;
         private final String uploadId;
-        private final List<String> uploadedParts;
+        private final List<PartETag> uploadedParts;
         private boolean committed = false;
         private boolean discarded = false;
+        private long numBytesInParts;
 
         public S3Committer(
-                S3AFileSystem s3FileSystem,
-                org.apache.hadoop.fs.Path hadoopPath,
+                S3Accessor s3Accessor,
                 Path targetPath,
+                String objectName,
                 String uploadId,
-                List<String> uploadedParts) {
-            this.s3FileSystem = s3FileSystem;
-            this.hadoopPath = hadoopPath;
+                List<PartETag> uploadedParts,
+                long numBytesInParts) {
             this.targetPath = targetPath;
+            this.s3Accessor = s3Accessor;
+            this.objectName = objectName;
             this.uploadId = uploadId;
             this.uploadedParts = new ArrayList<>(uploadedParts);
+            this.numBytesInParts = numBytesInParts;
         }
 
         @Override
         public void commit() throws IOException {
             if (committed) {
-                return; // Already committed
+                return;
             }
             if (discarded) {
                 throw new IOException("Cannot commit: committer has been discarded");
             }
 
             try {
-                // Complete the multipart upload
-                LOG.debug(
-                        "Committing S3 multipart upload with ID: {} for path: {}",
-                        uploadId,
-                        hadoopPath);
-
-                // In a real implementation, this would call S3's CompleteMultipartUpload API
-                // For now, we simulate success
+                s3Accessor.commitMultiPartUpload(
+                        objectName, uploadId, uploadedParts, numBytesInParts, null);
                 committed = true;
-
                 LOG.info(
-                        "Successfully committed S3 multipart upload with ID: {} for path: {}",
+                        "Successfully committed S3 multipart upload with ID: {} for object: {}",
                         uploadId,
-                        hadoopPath);
+                        objectName);
             } catch (Exception e) {
                 throw new IOException(
                         "Failed to commit S3 multipart upload with ID: " + uploadId, e);
@@ -257,27 +230,19 @@ public class S3CommittablePositionOutputStream extends CommittablePositionOutput
         @Override
         public void discard() throws IOException {
             if (discarded) {
-                return; // Already discarded
+                return;
             }
 
             try {
-                // Abort the multipart upload
-                LOG.debug(
-                        "Discarding S3 multipart upload with ID: {} for path: {}",
-                        uploadId,
-                        hadoopPath);
-
-                // In a real implementation, this would call S3's AbortMultipartUpload API
-                // For now, we simulate success
+                s3Accessor.abortMultipartUpload(objectName, uploadId);
                 discarded = true;
 
                 LOG.info(
-                        "Successfully discarded S3 multipart upload with ID: {} for path: {}",
+                        "Successfully discarded S3 multipart upload with ID: {} for object: {}",
                         uploadId,
-                        hadoopPath);
+                        objectName);
             } catch (Exception e) {
                 LOG.warn("Failed to discard S3 multipart upload with ID: " + uploadId, e);
-                // Don't throw exception on discard failure
             }
         }
 

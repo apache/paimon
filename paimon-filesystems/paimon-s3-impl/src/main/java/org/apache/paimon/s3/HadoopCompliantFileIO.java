@@ -64,7 +64,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
-        return new S3CommittablePositionOutputStream(fs, hadoopPath, path, overwrite);
+        return new S3CommittablePositionOutputStream(
+                new S3Accessor(fs, fs.getConf()), hadoopPath, path, overwrite);
     }
 
     @Override
