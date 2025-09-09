@@ -115,14 +115,7 @@ public class LiquidClusterProcedure extends BaseProcedure {
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
                     InternalRow internalRow =
-                            newInternalRow(
-                                    execute(
-                                            (FileStoreTable) table,
-                                            isFull,
-                                            coreOptions.clusteringStrategy(
-                                                    table.partitionKeys().size()),
-                                            coreOptions.liquidClusterColumns(),
-                                            relation));
+                            newInternalRow(execute((FileStoreTable) table, isFull, relation));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -132,28 +125,19 @@ public class LiquidClusterProcedure extends BaseProcedure {
         return "This procedure execute liquid cluster action on paimon table.";
     }
 
-    private boolean execute(
-            FileStoreTable table,
-            boolean isFull,
-            CoreOptions.OrderType curve,
-            List<String> clusterColumns,
-            DataSourceV2Relation relation) {
+    private boolean execute(FileStoreTable table, boolean isFull, DataSourceV2Relation relation) {
         BucketMode bucketMode = table.bucketMode();
 
         checkArgument(
                 bucketMode == BucketMode.BUCKET_UNAWARE,
                 "Liquid cluster only support unaware-bucket append-only table yet.");
 
-        sortCompactUnAwareBucketTable(table, curve, clusterColumns, isFull, relation);
+        sortCompactUnAwareBucketTable(table, isFull, relation);
         return true;
     }
 
     private void sortCompactUnAwareBucketTable(
-            FileStoreTable table,
-            CoreOptions.OrderType orderType,
-            List<String> clusterColumns,
-            boolean fullCompaction,
-            DataSourceV2Relation relation) {
+            FileStoreTable table, boolean fullCompaction, DataSourceV2Relation relation) {
         ClusterManager clusterManager = new ClusterManager(table);
         Map<BinaryRow, CompactUnit> compactUnits = clusterManager.prepareForCluster(fullCompaction);
 
@@ -171,7 +155,9 @@ public class LiquidClusterProcedure extends BaseProcedure {
                                                         .toArray(new DataSplit[0])));
 
         // sort in partition
-        TableSorter sorter = TableSorter.getSorter(table, orderType, clusterColumns);
+        TableSorter sorter =
+                TableSorter.getSorter(
+                        table, clusterManager.clusterCurve(), clusterManager.clusterKeys());
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
                         .map(
@@ -192,21 +178,24 @@ public class LiquidClusterProcedure extends BaseProcedure {
             Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
 
             // re-organize the commit messages to generate the compact messages
-            Map<BinaryRow, List<DataFileMeta>> clusterAfter = new HashMap<>();
+            Map<BinaryRow, List<DataFileMeta>> partitionClustered = new HashMap<>();
             for (CommitMessage commitMessage : JavaConverters.seqAsJavaList(commitMessages)) {
                 checkArgument(commitMessage.bucket() == 0);
-                clusterAfter
+                partitionClustered
                         .computeIfAbsent(commitMessage.partition(), k -> new ArrayList<>())
                         .addAll(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
             }
 
             List<CommitMessage> clusterMessages = new ArrayList<>();
-            for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : clusterAfter.entrySet()) {
+            for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : partitionClustered.entrySet()) {
                 BinaryRow partition = entry.getKey();
                 List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
+                // upgrade the clustered file to outputLevel
+                List<DataFileMeta> clusterAfter =
+                        clusterManager.upgrade(
+                                entry.getValue(), compactUnits.get(partition).outputLevel());
                 CompactIncrement compactIncrement =
-                        new CompactIncrement(
-                                clusterBefore, entry.getValue(), Collections.emptyList());
+                        new CompactIncrement(clusterBefore, clusterAfter, Collections.emptyList());
                 clusterMessages.add(
                         new CommitMessageImpl(
                                 partition,
