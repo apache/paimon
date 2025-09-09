@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroSchemaConverter;
 import org.apache.paimon.fs.FileIO;
@@ -29,6 +30,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -145,6 +147,15 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         //
         // Because there is no merging when reading, sequence id across files are useless.
         withIgnorePreviousFiles(true);
+    }
+
+    @Override
+    public PostponeBucketFileStoreWrite withIOManager(IOManager ioManager) {
+        super.withIOManager(ioManager);
+        if (mfFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
+        }
+        return this;
     }
 
     @Override

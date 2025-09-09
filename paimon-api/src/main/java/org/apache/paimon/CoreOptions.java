@@ -1950,6 +1950,18 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
+    public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
+            key("lookup.merge-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.VALUE_8_MB)
+                    .withDescription("Buffer memory size for one key merging in lookup.");
+
+    public static final ConfigOption<Integer> LOOKUP_MERGE_RECORDS_THRESHOLD =
+            key("lookup.merge-records-threshold")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("Threshold for merging records to binary buffer in lookup.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2987,6 +2999,14 @@ public class CoreOptions implements Serializable {
         } else {
             return OrderType.of(clusteringStrategy);
         }
+    }
+
+    public long lookupMergeBufferSize() {
+        return options.get(LOOKUP_MERGE_BUFFER_SIZE).getBytes();
+    }
+
+    public int lookupMergeRecordsThreshold() {
+        return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
     }
 
     /** Specifies the merge engine for table with primary key. */

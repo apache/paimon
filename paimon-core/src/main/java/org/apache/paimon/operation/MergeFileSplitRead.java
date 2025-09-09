@@ -33,6 +33,7 @@ import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
@@ -186,6 +187,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
+        if (mfFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
+        }
         return this;
     }
 

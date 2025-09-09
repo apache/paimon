@@ -480,4 +480,18 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         assertThat(inExternalPath).contains("bucket-0/index-");
         assertThat(inExternalPath).doesNotContain("index/index-");
     }
+
+    @Test
+    public void testLookupMergeBufferSize() {
+        sql(
+                "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'lookup.merge-records-threshold' = '2')");
+        for (int i = 0; i < 5; i++) {
+            sql(
+                    String.format(
+                            "INSERT INTO T /*+ OPTIONS('write-only' = '%s') */ VALUES (1, '%s')",
+                            i != 4, i));
+        }
+        assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, String.valueOf(4)));
+    }
 }
