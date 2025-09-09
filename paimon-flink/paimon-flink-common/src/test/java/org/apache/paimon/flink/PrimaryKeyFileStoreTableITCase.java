@@ -36,6 +36,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -1089,6 +1090,48 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
 
         assertThat(actual).hasSameElementsAs(expected);
+    }
+
+    @Test
+    public void testReadOptimizedWithHint() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse'='%s');",
+                        getTempDirPath()));
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql(
+                "CREATE TABLE t ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " hh INT,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt, hh) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO t VALUES (1, '100', 15, '20221208'), (1, '100', 16, '20221208'), (1, '100', 15, '20221209')")
+                .await();
+
+        List<Row> beforeFullCompact = new ArrayList<>();
+        tEnv.executeSql("SELECT * FROM `t` /*+ OPTIONS('read-optimized'='true') */")
+                .collect()
+                .forEachRemaining(beforeFullCompact::add);
+        assertThat(beforeFullCompact).isEmpty();
+
+        tEnv.executeSql("CALL sys.compact(`table` => 'test_db.t', compact_strategy => 'full')")
+                .await();
+
+        List<Row> afterFullCompact = new ArrayList<>();
+        tEnv.executeSql("SELECT * FROM `t` /*+ OPTIONS('read-optimized'='true') */")
+                .collect()
+                .forEachRemaining(afterFullCompact::add);
+        assertThat(afterFullCompact).size().isEqualTo(3);
     }
 
     // ------------------------------------------------------------------------
