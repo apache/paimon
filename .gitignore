@@ -24,7 +24,6 @@ paimon-python/.idea/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
-paimon-python/pypaimon/tests/py4j
 
 ### VS Code ###
 .vscode/
