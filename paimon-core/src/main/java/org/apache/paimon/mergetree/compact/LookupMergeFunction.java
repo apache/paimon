@@ -56,7 +56,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         this.mergeFunction = mergeFunction;
         Supplier<BinaryBuffer> binarySupplier =
                 () -> createBinaryBuffer(options, keyType, valueType, ioManager);
-        int threshold = options.lookupMergeRecordsThreshold();
+        int threshold = options == null ? 1024 : options.lookupMergeRecordsThreshold();
         this.candidates =
                 new KeyValueBuffer.HybridBuffer(threshold, new LazyField<>(binarySupplier));
     }

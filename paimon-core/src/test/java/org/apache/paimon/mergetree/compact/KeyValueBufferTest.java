@@ -138,9 +138,10 @@ public class KeyValueBufferTest {
             binaryBuffer.put(kv);
         }
 
+        binaryBuffer.complete();
+
         // Verify data through iterator
-        CloseableIterator<KeyValue> iterator = binaryBuffer.iterator();
-        try {
+        try (CloseableIterator<KeyValue> iterator = binaryBuffer.iterator()) {
             int count = 0;
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
@@ -152,8 +153,6 @@ public class KeyValueBufferTest {
                 count++;
             }
             assertThat(count).isEqualTo(testData.size());
-        } finally {
-            iterator.close();
         }
     }
 }
