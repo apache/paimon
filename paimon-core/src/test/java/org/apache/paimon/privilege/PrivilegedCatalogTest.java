@@ -49,11 +49,12 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         catalog = create(catalog, "root", PASSWORD_ROOT);
     }
 
-    @Override
     @Test
-    public void testGetTable() throws Exception {
-        super.testGetTable();
+    public void testGetTablePrivilege() throws Exception {
+        catalog.createDatabase("test_db", false);
+
         Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
 
         PrivilegedCatalog rootCatalog = ((PrivilegedCatalog) catalog);
         rootCatalog.createPrivilegedUser(USERNAME_TEST_USER, PASSWORD_TEST_USER);

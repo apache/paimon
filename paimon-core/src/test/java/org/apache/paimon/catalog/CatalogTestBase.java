@@ -777,6 +777,25 @@ public abstract class CatalogTestBase {
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
 
+        // Get manifests system table and read it
+        Table table = catalog.getTable(Identifier.create("test_db", "test_table"));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit(); ) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("2"), BinaryString.fromString("3")));
+            commit.commit(write.prepareCommit());
+        }
+        Table manifestsTable =
+                catalog.getTable(Identifier.create("test_db", "test_table$manifests"));
+        ReadBuilder readBuilder = manifestsTable.newReadBuilder();
+        List<String> manifestFiles = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> manifestFiles.add(r.getString(0).toString()));
+        assertThat(manifestFiles).hasSize(1);
+
         // Get system table throws TableNotExistException when data table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
