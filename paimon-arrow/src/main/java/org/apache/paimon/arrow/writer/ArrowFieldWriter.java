@@ -26,8 +26,6 @@ import org.apache.arrow.vector.FieldVector;
 
 import javax.annotation.Nullable;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** A reusable writer to convert a field into Arrow {@link FieldVector}. */
 public abstract class ArrowFieldWriter {
 
@@ -72,14 +70,15 @@ public abstract class ArrowFieldWriter {
     /** Get the value from the row at the given position and write to specified row index. */
     public void write(int rowIndex, DataGetters getters, int pos) {
         if (getters.isNullAt(pos)) {
-            checkArgument(
-                    isNullable,
-                    "Field '%s' expected not null but found null value. A possible cause is that the "
-                            + "table used %s or %s merge-engine and the aggregate function produced "
-                            + "null value when retracting.",
-                    fieldVector.getName(),
-                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
-                    CoreOptions.MergeEngine.AGGREGATE);
+            if (!isNullable) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Field '%s' expected not null but found null value. A possible cause is that the table used "
+                                        + "%s or %s merge-engine and the aggregate function produced null value when retracting.",
+                                fieldVector.getName(),
+                                CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                CoreOptions.MergeEngine.AGGREGATE));
+            }
             fieldVector.setNull(rowIndex);
         } else {
             doWrite(rowIndex, getters, pos);

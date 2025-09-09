@@ -28,8 +28,6 @@ import org.apache.orc.TypeDescription;
 
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** A {@link Vectorizer} of {@link InternalRow} type element. */
 public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
@@ -58,14 +56,16 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
         for (int i = 0; i < row.getFieldCount(); ++i) {
             ColumnVector fieldColumn = batch.cols[i];
             if (row.isNullAt(i)) {
-                checkArgument(
-                        isNullable[i],
-                        "Field '%s' expected not null but found null value. A possible cause is that the "
-                                + "table used %s or %s merge-engine and the aggregate function produced "
-                                + "null value when retracting.",
-                        fieldNames[i],
-                        CoreOptions.MergeEngine.PARTIAL_UPDATE,
-                        CoreOptions.MergeEngine.AGGREGATE);
+                if (!isNullable[i]) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                                            + "table used %s or %s merge-engine and the aggregate function produced "
+                                            + "null value when retracting.",
+                                    fieldNames[i],
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                    CoreOptions.MergeEngine.AGGREGATE));
+                }
                 fieldColumn.noNulls = false;
                 fieldColumn.isNull[rowId] = true;
             } else {

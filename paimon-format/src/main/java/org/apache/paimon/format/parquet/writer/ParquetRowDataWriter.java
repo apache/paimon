@@ -545,14 +545,16 @@ public class ParquetRowDataWriter {
                     writer.write(row, i);
                     recordConsumer.endField(fieldName, i);
                 } else {
-                    checkArgument(
-                            isNullable[i],
-                            "Field '%s' expected not null but found null value. A possible cause is that the "
-                                    + "table used %s or %s merge-engine and the aggregate function produced "
-                                    + "null value when retracting.",
-                            fieldNames[i],
-                            CoreOptions.MergeEngine.PARTIAL_UPDATE,
-                            CoreOptions.MergeEngine.AGGREGATE);
+                    if (!isNullable[i]) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Field '%s' expected not null but found null value. A possible cause is that the "
+                                                + "table used %s or %s merge-engine and the aggregate function produced "
+                                                + "null value when retracting.",
+                                        fieldNames[i],
+                                        CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                        CoreOptions.MergeEngine.AGGREGATE));
+                    }
                 }
             }
         }

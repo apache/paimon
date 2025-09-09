@@ -38,8 +38,6 @@ import org.jetbrains.annotations.NotNull;
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Factory to create {@link FieldWriter}. */
 public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
@@ -271,14 +269,18 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                 try {
                     fieldWriters[i].write(row, i, encoder);
                 } catch (NullPointerException npe) {
-                    checkArgument(
-                            isNullable[i] || !row.isNullAt(i),
-                            "Field '%s' expected not null but found null value. A possible cause is that the "
-                                    + "table used %s or %s merge-engine and the aggregate function produced "
-                                    + "null value when retracting.",
-                            fieldNames[i],
-                            CoreOptions.MergeEngine.PARTIAL_UPDATE,
-                            CoreOptions.MergeEngine.AGGREGATE);
+                    if (!isNullable[i] && row.isNullAt(i)) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Field '%s' expected not null but found null value. A possible cause is that the "
+                                                + "table used %s or %s merge-engine and the aggregate function produced "
+                                                + "null value when retracting.",
+                                        fieldNames[i],
+                                        CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                        CoreOptions.MergeEngine.AGGREGATE));
+                    } else {
+                        throw npe;
+                    }
                 }
             }
         }
