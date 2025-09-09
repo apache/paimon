@@ -106,7 +106,7 @@ class ManifestFileManager:
                 "_KIND": entry.kind,
                 "_PARTITION": BinaryRowSerializer.to_bytes(entry.partition),
                 "_BUCKET": entry.bucket,
-                "_TOTAL_BUCKETS": entry.bucket,
+                "_TOTAL_BUCKETS": entry.total_buckets,
                 "_FILE": {
                     "_FILE_NAME": entry.file.file_name,
                     "_FILE_SIZE": entry.file.file_size,

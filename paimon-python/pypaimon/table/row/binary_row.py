@@ -241,9 +241,6 @@ class BinaryRowSerializer:
 
     @classmethod
     def to_bytes(cls, binary_row: BinaryRow) -> bytes:
-        if not binary_row.values:
-            return b''
-
         arity = len(binary_row.fields)
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
         fixed_part_size = null_bits_size_in_bytes + arity * 8
