@@ -203,7 +203,8 @@ public interface SinkWriter<T> {
         public List<DataFileMeta> flush() throws IOException {
             List<DataFileMeta> flushedFiles = new ArrayList<>();
             if (writeBuffer != null) {
-                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer> writer = writerSupplier.get();
+                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
+                        writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
@@ -231,7 +232,6 @@ public interface SinkWriter<T> {
                 throws IOException {
             List<CommittablePositionOutputStream.Committer> committers = new ArrayList<>();
             if (writeBuffer != null) {
-                writeBuffer.complete();
                 RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
                         writer = writerSupplier.get();
                 IOException exception = null;
