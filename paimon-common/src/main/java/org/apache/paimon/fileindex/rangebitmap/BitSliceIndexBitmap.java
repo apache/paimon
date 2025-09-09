@@ -152,7 +152,17 @@ public class BitSliceIndexBitmap {
         return gt(code - 1);
     }
 
-    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet) {
+    /**
+     * Find k rows with largest values in a BSI.
+     *
+     * <p>Refer to algorithm 4.1 in the paper <a
+     * href="https://www.cs.umb.edu/~poneil/SIGBSTMH.pdf">Bit-Sliced Index Arithmetic</a>
+     *
+     * @param k K largest values.
+     * @param foundSet the selection.
+     * @param strict if true, the result will be trimmed; otherwise, it will not be.
+     */
+    public RoaringBitmap32 topK(int k, @Nullable RoaringBitmap32 foundSet, boolean strict) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -182,8 +192,12 @@ public class BitSliceIndexBitmap {
             }
         }
 
-        // only k results should be returned
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
+        if (!strict) {
+            return f;
+        }
+
+        // return k rows
         long n = f.getCardinality() - k;
         if (n > 0) {
             Iterator<Integer> iterator = e.iterator();
@@ -195,7 +209,14 @@ public class BitSliceIndexBitmap {
         return f;
     }
 
-    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet) {
+    /**
+     * Find k rows with smallest values in a BSI.
+     *
+     * @param k K smallest values.
+     * @param foundSet the selection.
+     * @param strict if true, the result will be trimmed; otherwise, it will not be.
+     */
+    public RoaringBitmap32 bottomK(int k, @Nullable RoaringBitmap32 foundSet, boolean strict) {
         if (k == 0 || (foundSet != null && foundSet.isEmpty())) {
             return new RoaringBitmap32();
         }
@@ -226,8 +247,12 @@ public class BitSliceIndexBitmap {
             }
         }
 
-        // only k results should be returned
         RoaringBitmap32 f = RoaringBitmap32.or(g, e);
+        if (!strict) {
+            return f;
+        }
+
+        // return k rows
         long n = f.getCardinality() - k;
         if (n > 0) {
             Iterator<Integer> iterator = e.iterator();

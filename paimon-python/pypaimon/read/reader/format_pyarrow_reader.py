@@ -16,9 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import List, Optional, Any
 
-import pyarrow.compute as pc
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
@@ -33,7 +32,7 @@ class FormatPyArrowReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_format: str, file_path: str, read_fields: List[str],
-                 push_down_predicate: pc.Expression | bool, batch_size: int = 4096):
+                 push_down_predicate: Any, batch_size: int = 4096):
         self.dataset = ds.dataset(file_path, format=file_format, filesystem=file_io.filesystem)
         self.reader = self.dataset.scanner(
             columns=read_fields,
@@ -49,5 +48,4 @@ class FormatPyArrowReader(RecordBatchReader):
 
     def close(self):
         if self.reader is not None:
-            self.reader.close()
             self.reader = None

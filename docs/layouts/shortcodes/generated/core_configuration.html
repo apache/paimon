@@ -150,7 +150,7 @@ under the License.
             <td><h5>clustering.strategy</h5></td>
             <td style="word-wrap: break-word;">"auto"</td>
             <td>String</td>
-            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
             <td><h5>commit.callback.#.param</h5></td>
@@ -632,6 +632,18 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">sort</td>
             <td><p>Enum</p></td>
             <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>lookup.merge-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>Buffer memory size for one key merging in lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.merge-records-threshold</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Threshold for merging records to binary buffer in lookup.</td>
         </tr>
         <tr>
             <td><h5>manifest.compression</h5></td>

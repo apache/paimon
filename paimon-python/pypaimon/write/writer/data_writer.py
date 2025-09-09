@@ -90,7 +90,7 @@ class DataWriter(ABC):
         if self.pending_data is None:
             return
 
-        current_size = self.pending_data.get_total_buffer_size()
+        current_size = self.pending_data.nbytes
         if current_size > self.target_file_size:
             split_row = self._find_optimal_split_point(self.pending_data, self.target_file_size)
             if split_row > 0:
@@ -116,7 +116,9 @@ class DataWriter(ABC):
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
         # min key & max key
-        key_columns_batch = data.select(self.trimmed_primary_key)
+        table = pa.Table.from_batches([data])
+        selected_table = table.select(self.trimmed_primary_key)
+        key_columns_batch = selected_table.to_batches()[0]
         min_key_row_batch = key_columns_batch.slice(0, 1)
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
         min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
@@ -192,7 +194,7 @@ class DataWriter(ABC):
         while left <= right:
             mid = (left + right) // 2
             slice_data = data.slice(0, mid)
-            slice_size = slice_data.get_total_buffer_size()
+            slice_size = slice_data.nbytes
 
             if slice_size <= target_size:
                 best_split = mid

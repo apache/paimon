@@ -42,6 +42,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -641,7 +642,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAvroRetractNotNullField() {
+    public void testAvroRetractNotNullField() throws ExecutionException, InterruptedException {
         List<Row> input =
                 Arrays.asList(
                         Row.ofKind(RowKind.INSERT, 1, "A"), Row.ofKind(RowKind.DELETE, 1, "A"));
@@ -661,7 +662,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         () -> sEnv.executeSql("INSERT INTO avro_sink select * from source").await())
                 .satisfies(
                         anyCauseMatches(
-                                RuntimeException.class,
-                                "Caught NullPointerException, the possible reason is you have set following options together"));
+                                IllegalArgumentException.class,
+                                "Field 'a' expected not null but found null value. A possible cause is that "
+                                        + "the table used partial-update or aggregation merge-engine and the aggregate function produced null value when retracting."));
     }
 }

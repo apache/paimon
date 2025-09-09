@@ -162,16 +162,28 @@ function flake8_check() {
 
 # Pytest check
 function pytest_check() {
-
     print_function "STAGE" "pytest checks"
     if [ ! -f "$PYTEST_PATH" ]; then
         echo "For some unknown reasons, the pytest package is not complete."
     fi
 
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+
+    # Determine test directory based on Python version
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
+        TEST_DIR="pypaimon/tests/py36"
+        echo "Running tests for Python 3.6: $TEST_DIR"
+    else
+        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36"
+        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests --ignore=pypaimon/tests/py36"
+    fi
+
     # the return value of a pipeline is the status of the last command to exit
     # with a non-zero status or zero if no command exited with a non-zero status
     set -o pipefail
-    ($PYTEST_PATH) 2>&1 | tee -a $LOG_FILE
+    ($PYTEST_PATH $TEST_DIR) 2>&1 | tee -a $LOG_FILE
 
     PYCODESTYLE_STATUS=$?
     if [ $PYCODESTYLE_STATUS -ne 0 ]; then
@@ -265,4 +277,3 @@ done
 collect_checks
 # run checks
 check_stage
-

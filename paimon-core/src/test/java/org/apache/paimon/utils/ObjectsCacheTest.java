@@ -44,8 +44,8 @@ public class ObjectsCacheTest {
     @Test
     public void testObjectsCacheAndMetrics() throws IOException {
         Map<String, List<String>> map = new HashMap<>();
-        ObjectsCache<String, String> cache =
-                new ObjectsCache<>(
+        SimpleObjectsCache<String, String> cache =
+                new SimpleObjectsCache<>(
                         new SegmentsCache<>(1024, MemorySize.ofKibiBytes(5), Long.MAX_VALUE),
                         new StringSerializer(),
                         RowType.of(DataTypes.STRING()),

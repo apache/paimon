@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
@@ -237,6 +238,12 @@ public interface PartitionPredicate extends Serializable {
                 }
             }
             return true;
+        }
+
+        public Optional<BinaryRow> extractSinglePartition() {
+            return partitions.size() == 1
+                    ? Optional.of(partitions.iterator().next())
+                    : Optional.empty();
         }
     }
 

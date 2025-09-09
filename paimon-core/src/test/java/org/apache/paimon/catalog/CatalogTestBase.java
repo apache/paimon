@@ -716,12 +716,23 @@ public abstract class CatalogTestBase {
                                 null);
                 write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
             }
-            List<InternalRow> readData = read(table, predicate, projection, partitionSpec, null);
-            Integer limit = checkSize - 1;
+            List<InternalRow> readFilterData =
+                    read(table, predicate, projection, partitionSpec, null);
+            assertThat(readFilterData).containsExactlyInAnyOrder(checkDatas);
+            int limit = checkSize - 1;
             List<InternalRow> readLimitData =
                     read(table, predicate, projection, partitionSpec, limit);
             assertThat(readLimitData).hasSize(limit);
-            assertThat(readData).containsExactlyInAnyOrder(checkDatas);
+            if (partitioned) {
+                List<InternalRow> readAllData = read(table, null, null, null, null);
+                assertThat(readAllData).hasSize(size + 1);
+                PredicateBuilder partitionFilterBuilder = new PredicateBuilder(table.rowType());
+                Predicate partitionFilterPredicate =
+                        partitionFilterBuilder.equal(2, partitionValue);
+                List<InternalRow> readPartitionAndNoPartitionFilterData =
+                        read(table, partitionFilterPredicate, projection, null, null);
+                assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
+            }
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }
@@ -778,11 +789,11 @@ public abstract class CatalogTestBase {
             readBuilder.withProjection(projection);
         }
         readBuilder.withPartitionFilter(partitionSpec);
-        TableScan scan = readBuilder.newScan();
         readBuilder.withFilter(predicate);
         if (limit != null) {
             readBuilder.withLimit(limit);
         }
+        TableScan scan = readBuilder.newScan();
         try (RecordReader<InternalRow> reader =
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
@@ -806,6 +817,25 @@ public abstract class CatalogTestBase {
         assertThat(systemTableCheckWithBranch).isNotNull();
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
+
+        // Get manifests system table and read it
+        Table table = catalog.getTable(Identifier.create("test_db", "test_table"));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit(); ) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("2"), BinaryString.fromString("3")));
+            commit.commit(write.prepareCommit());
+        }
+        Table manifestsTable =
+                catalog.getTable(Identifier.create("test_db", "test_table$manifests"));
+        ReadBuilder readBuilder = manifestsTable.newReadBuilder();
+        List<String> manifestFiles = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> manifestFiles.add(r.getString(0).toString()));
+        assertThat(manifestFiles).hasSize(1);
 
         // Get system table throws TableNotExistException when data table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)

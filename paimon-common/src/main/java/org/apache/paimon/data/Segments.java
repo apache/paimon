@@ -19,26 +19,27 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.MathUtils;
 
 import java.util.ArrayList;
 
-/** Segments with limit in last segment. */
-public class Segments {
+/** Segments contains multiple {@link MultiSegments}. */
+public interface Segments {
 
-    private final ArrayList<MemorySegment> segments;
+    long totalMemorySize();
 
-    private final int limitInLastSegment;
-
-    public Segments(ArrayList<MemorySegment> segments, int limitInLastSegment) {
-        this.segments = segments;
-        this.limitInLastSegment = limitInLastSegment;
-    }
-
-    public ArrayList<MemorySegment> segments() {
-        return segments;
-    }
-
-    public int limitInLastSegment() {
-        return limitInLastSegment;
+    static Segments create(ArrayList<MemorySegment> segments, int limitInLastSegment) {
+        if (segments.size() == 1) {
+            MemorySegment segment = segments.get(0);
+            int roundUp = MathUtils.roundUpToPowerOf2(limitInLastSegment);
+            if (roundUp < segment.size()) {
+                MemorySegment newSegment = MemorySegment.allocateHeapMemory(roundUp);
+                segment.copyTo(0, newSegment, 0, limitInLastSegment);
+                segment = newSegment;
+            }
+            return new SingleSegments(segment, limitInLastSegment);
+        } else {
+            return new MultiSegments(segments, limitInLastSegment);
+        }
     }
 }

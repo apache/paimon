@@ -18,12 +18,21 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.mergetree.compact.KeyValueBuffer.BinaryBuffer;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.LazyField;
 
 import javax.annotation.Nullable;
 
-import java.util.LinkedList;
+import java.util.Comparator;
+import java.util.function.Supplier;
+
+import static org.apache.paimon.mergetree.compact.KeyValueBuffer.createBinaryBuffer;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -33,58 +42,91 @@ import java.util.LinkedList;
 public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
-    private final LinkedList<KeyValue> candidates = new LinkedList<>();
 
-    public LookupMergeFunction(MergeFunction<KeyValue> mergeFunction) {
+    private final KeyValueBuffer candidates;
+    private boolean containLevel0;
+    private InternalRow currentKey;
+
+    public LookupMergeFunction(
+            MergeFunction<KeyValue> mergeFunction,
+            CoreOptions options,
+            RowType keyType,
+            RowType valueType,
+            @Nullable IOManager ioManager) {
         this.mergeFunction = mergeFunction;
+        Supplier<BinaryBuffer> binarySupplier =
+                () -> createBinaryBuffer(options, keyType, valueType, ioManager);
+        int threshold = options == null ? 1024 : options.lookupMergeRecordsThreshold();
+        this.candidates =
+                new KeyValueBuffer.HybridBuffer(threshold, new LazyField<>(binarySupplier));
     }
 
     @Override
     public void reset() {
-        candidates.clear();
+        candidates.reset();
+        currentKey = null;
+        containLevel0 = false;
     }
 
     @Override
     public void add(KeyValue kv) {
-        candidates.add(kv);
+        currentKey = kv.key();
+        if (kv.level() == 0) {
+            containLevel0 = true;
+        }
+        candidates.put(kv);
+    }
+
+    public boolean containLevel0() {
+        return containLevel0;
     }
 
     @Nullable
     public KeyValue pickHighLevel() {
         KeyValue highLevel = null;
-        for (KeyValue kv : candidates) {
-            // records that has not been stored on the disk yet, such as the data in the write
-            // buffer being at level -1
-            if (kv.level() <= 0) {
-                continue;
+        try (CloseableIterator<KeyValue> iterator = candidates.iterator()) {
+            while (iterator.hasNext()) {
+                KeyValue kv = iterator.next();
+                // records that has not been stored on the disk yet, such as the data in the write
+                // buffer being at level -1
+                if (kv.level() <= 0) {
+                    continue;
+                }
+                // For high-level comparison logic (not involving Level 0), only the value of the
+                // minimum Level should be selected
+                if (highLevel == null || kv.level() < highLevel.level()) {
+                    highLevel = kv;
+                }
             }
-            // For high-level comparison logic (not involving Level 0), only the value of the
-            // minimum Level should be selected
-            if (highLevel == null || kv.level() < highLevel.level()) {
-                highLevel = kv;
-            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
         return highLevel;
     }
 
     public InternalRow key() {
-        return candidates.get(0).key();
+        return currentKey;
     }
 
-    public LinkedList<KeyValue> candidates() {
-        return candidates;
+    public void insertInto(KeyValue highLevel, Comparator<KeyValue> comparator) {
+        KeyValueBuffer.insertInto(candidates, highLevel, comparator);
     }
 
     @Override
     public KeyValue getResult() {
         mergeFunction.reset();
         KeyValue highLevel = pickHighLevel();
-        for (KeyValue kv : candidates) {
-            // records that has not been stored on the disk yet, such as the data in the write
-            // buffer being at level -1
-            if (kv.level() <= 0 || kv == highLevel) {
-                mergeFunction.add(kv);
+        try (CloseableIterator<KeyValue> iterator = candidates.iterator()) {
+            while (iterator.hasNext()) {
+                KeyValue kv = iterator.next();
+                // records that has not been stored on the disk yet, such as the data in the write
+                // buffer being at level -1
+                if (kv.level() <= 0 || kv == highLevel) {
+                    mergeFunction.add(kv);
+                }
             }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
         return mergeFunction.getResult();
     }
@@ -94,28 +136,50 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         return true;
     }
 
-    public static MergeFunctionFactory<KeyValue> wrap(MergeFunctionFactory<KeyValue> wrapped) {
+    public static MergeFunctionFactory<KeyValue> wrap(
+            MergeFunctionFactory<KeyValue> wrapped,
+            CoreOptions options,
+            RowType keyType,
+            RowType valueType) {
         if (wrapped.create() instanceof FirstRowMergeFunction) {
             // don't wrap first row, it is already OK
             return wrapped;
         }
 
-        return new Factory(wrapped);
+        return new Factory(wrapped, options, keyType, valueType);
     }
 
-    private static class Factory implements MergeFunctionFactory<KeyValue> {
+    /** Factory to create {@link LookupMergeFunction}. */
+    public static class Factory implements MergeFunctionFactory<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
         private final MergeFunctionFactory<KeyValue> wrapped;
+        private final CoreOptions options;
+        private final RowType keyType;
+        private final RowType valueType;
 
-        private Factory(MergeFunctionFactory<KeyValue> wrapped) {
+        private @Nullable IOManager ioManager;
+
+        private Factory(
+                MergeFunctionFactory<KeyValue> wrapped,
+                CoreOptions options,
+                RowType keyType,
+                RowType valueType) {
             this.wrapped = wrapped;
+            this.options = options;
+            this.keyType = keyType;
+            this.valueType = valueType;
+        }
+
+        public void withIOManager(@Nullable IOManager ioManager) {
+            this.ioManager = ioManager;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new LookupMergeFunction(wrapped.create(projection));
+            return new LookupMergeFunction(
+                    wrapped.create(projection), options, keyType, valueType, ioManager);
         }
 
         @Override

@@ -20,7 +20,6 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -45,10 +44,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
@@ -56,9 +57,8 @@ public class FormatReadBuilder implements ReadBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FormatTable table;
-    private final FileFormat fileFormat;
-
     private RowType readType;
+    private final CoreOptions options;
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
@@ -66,8 +66,7 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.readType = this.table.rowType();
-        CoreOptions options = new CoreOptions(table.options());
-        this.fileFormat = FileFormatDiscover.of(options).discover(options.formatType());
+        this.options = new CoreOptions(table.options());
     }
 
     @Override
@@ -132,6 +131,20 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
+        PartitionPredicate partitionFilter = this.partitionFilter;
+        if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
+            int[] fieldIdxToPartitionIdx =
+                    PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
+            Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
+                    splitAndByPartition(filter, fieldIdxToPartitionIdx);
+            List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+            if (!partitionFilters.isEmpty()) {
+                RowType partitionType = table.rowType().project(table.partitionKeys());
+                partitionFilter =
+                        PartitionPredicate.fromPredicate(
+                                partitionType, PredicateBuilder.and(partitionFilters));
+            }
+        }
         return new FormatTableScan(table, partitionFilter, limit);
     }
 
@@ -144,10 +157,11 @@ public class FormatReadBuilder implements ReadBuilder {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
-
         FormatReaderFactory readerFactory =
-                fileFormat.createReaderFactory(
-                        table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
+                FileFormatDiscover.of(options)
+                        .discover(options.formatType())
+                        .createReaderFactory(
+                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(

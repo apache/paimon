@@ -41,7 +41,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
@@ -143,12 +142,6 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read " + fileName, e);
         }
-    }
-
-    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
-            throws IOException {
-        return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
-                .toCloseableIterator();
     }
 
     private static List<IcebergManifestEntry> readFromIterator(

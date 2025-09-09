@@ -59,6 +59,7 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
                                |  (SELECT AVG(b) AS avg_b FROM T)
                                |""".stripMargin)
       val optimizedPlan = Optimize.execute(query.queryExecution.analyzed)
+      val id = optimizedPlan.asInstanceOf[WithCTE].cteDefs.head.id.toInt
 
       val df = PaimonUtils.createDataset(spark, createRelationV2("T"))
       val mergedSubquery = df
@@ -82,11 +83,11 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
       val correctAnswer = WithCTE(
         OneRowRelation()
           .select(
-            extractorExpression(0, analyzedMergedSubquery.output, 0),
-            extractorExpression(0, analyzedMergedSubquery.output, 1),
-            extractorExpression(0, analyzedMergedSubquery.output, 2)
+            extractorExpression(id, analyzedMergedSubquery.output, 0),
+            extractorExpression(id, analyzedMergedSubquery.output, 1),
+            extractorExpression(id, analyzedMergedSubquery.output, 2)
           ),
-        Seq(definitionNode(analyzedMergedSubquery, 0))
+        Seq(definitionNode(analyzedMergedSubquery, id))
       )
       // Check the plan applied MergePaimonScalarSubqueries.
       comparePlans(optimizedPlan.analyze, correctAnswer.analyze)

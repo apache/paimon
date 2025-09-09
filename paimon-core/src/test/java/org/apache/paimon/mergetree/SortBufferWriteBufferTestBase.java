@@ -266,7 +266,7 @@ public abstract class SortBufferWriteBufferTestBase {
                             Arrays.asList("f0", "f1"),
                             Arrays.asList(DataTypes.INT().notNull(), DataTypes.BIGINT()),
                             Collections.singletonList("f0"));
-            return LookupMergeFunction.wrap(aggMergeFunction).create();
+            return LookupMergeFunction.wrap(aggMergeFunction, null, null, null).create();
         }
     }
 

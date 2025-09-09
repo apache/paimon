@@ -226,9 +226,18 @@ public class CatalogUtils {
             return toIcebergTable(identifier, schema, dataFileIO);
         }
 
+        Identifier tableIdentifier = identifier;
+        if (identifier.isSystemTable()) {
+            tableIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName());
+        }
+
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier,
+                        tableIdentifier,
                         metadata.uuid(),
                         catalog.catalogLoader(),
                         lockFactory,

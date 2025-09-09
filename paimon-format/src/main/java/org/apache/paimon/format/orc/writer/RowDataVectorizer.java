@@ -18,30 +18,36 @@
 
 package org.apache.paimon.format.orc.writer;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** A {@link Vectorizer} of {@link InternalRow} type element. */
 public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
-    private final List<FieldWriter> fieldWriters;
+    private final FieldWriter[] fieldWriters;
+    private final String[] fieldNames;
+    private final boolean[] isNullable;
 
     public RowDataVectorizer(
-            TypeDescription schema, DataType[] fieldTypes, boolean legacyTimestampLtzType) {
+            TypeDescription schema, List<DataField> dataFields, boolean legacyTimestampLtzType) {
         super(schema);
         FieldWriterFactory fieldWriterFactory = new FieldWriterFactory(legacyTimestampLtzType);
-        this.fieldWriters =
-                Arrays.stream(fieldTypes)
-                        .map(t -> t.accept(fieldWriterFactory))
-                        .collect(Collectors.toList());
+        this.fieldWriters = new FieldWriter[dataFields.size()];
+        this.fieldNames = new String[dataFields.size()];
+        this.isNullable = new boolean[dataFields.size()];
+        for (int i = 0; i < dataFields.size(); i++) {
+            DataField field = dataFields.get(i);
+            fieldWriters[i] = field.type().accept(fieldWriterFactory);
+            fieldNames[i] = field.name();
+            isNullable[i] = field.type().isNullable();
+        }
     }
 
     @Override
@@ -50,10 +56,20 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
         for (int i = 0; i < row.getFieldCount(); ++i) {
             ColumnVector fieldColumn = batch.cols[i];
             if (row.isNullAt(i)) {
+                if (!isNullable[i]) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                                            + "table used %s or %s merge-engine and the aggregate function produced "
+                                            + "null value when retracting.",
+                                    fieldNames[i],
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                    CoreOptions.MergeEngine.AGGREGATE));
+                }
                 fieldColumn.noNulls = false;
                 fieldColumn.isNull[rowId] = true;
             } else {
-                fieldWriters.get(i).write(rowId, fieldColumn, row, i);
+                fieldWriters[i].write(rowId, fieldColumn, row, i);
             }
         }
     }

@@ -21,7 +21,7 @@ from typing import Any, Callable, List, Optional
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, Keyword
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.key_value import KeyValue
@@ -180,9 +180,8 @@ class HeapEntry:
 
 def builtin_key_comparator(key_schema: List[DataField]) -> Callable[[Any, Any], int]:
     # Precompute comparability flags to avoid repeated type checks
-    comparable_types = ["BOOLEAN", "DECIMAL", "NUMERIC", "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT", "FLOAT",
-                        "DOUBLE", "TIMESTAMP", "TIMESTAMP_LTZ"]
-    comparable_flags = [field.type.type in comparable_types for field in key_schema]
+    comparable_types = {member.value for member in Keyword if member is not Keyword.VARIANT}
+    comparable_flags = [field.type.type.split(' ')[0] in comparable_types for field in key_schema]
 
     def comparator(key1: InternalRow, key2: InternalRow) -> int:
         if key1 is None and key2 is None:

@@ -64,7 +64,8 @@ def extract_predicate_to_dict(result: Dict, input_predicate: 'Predicate', keys: 
             return
         # condition: only one key for 'or', and the key belongs to keys
         involved_fields = {p.field for p in input_predicate.literals}
-        if len(involved_fields) == 1 and (field := involved_fields.pop()) in keys:
+        field = involved_fields.pop() if len(involved_fields) == 1 else None
+        if field is not None and field in keys:
             result[field].append(input_predicate)
         return
 

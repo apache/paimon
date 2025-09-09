@@ -31,6 +31,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
@@ -54,6 +55,7 @@ import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.FullCompactTrigger;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.FirstRowMergeFunctionWrapperFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.LookupMergeFunctionWrapperFactory;
@@ -106,7 +108,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
-    private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
     private final RowType partitionType;
@@ -143,7 +144,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 dbMaintainerFactory,
                 dvMaintainerFactory,
                 tableName);
-        this.fileIO = fileIO;
         this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -175,6 +175,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.logDedupEqualSupplier = logDedupEqualSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
+    }
+
+    @Override
+    public KeyValueFileStoreWrite withIOManager(IOManager ioManager) {
+        super.withIOManager(ioManager);
+        if (mfFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
+        }
+        return this;
     }
 
     @Override

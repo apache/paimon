@@ -57,7 +57,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test Base class for Format. */
 public abstract class FormatReadWriteTest {
@@ -247,6 +250,26 @@ public abstract class FormatReadWriteTest {
         BinaryArray array = (BinaryArray) internalRow.getArray(0);
         assertThat(array.getVariant(0).toJson()).isEqualTo("{\"age\":35,\"city\":\"Chicago\"}");
         assertThat(array.getVariant(1).toJson()).isEqualTo("{\"age\":45,\"city\":\"Beijing\"}");
+    }
+
+    @Test
+    public void testWriteNullToNonNullField() {
+        FileFormat format = fileFormat();
+        String identifier = format.getFormatIdentifier();
+        // no agg for these formats now
+        assumeTrue(!identifier.equals("csv") && !identifier.equals("json"));
+
+        FormatWriterFactory factory =
+                format.createWriterFactory(
+                        RowType.builder().field("f0", DataTypes.INT().notNull()).build());
+
+        assertThatThrownBy(() -> write(factory, file, GenericRow.of((Object) null)))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Field 'f0' expected not null but found null value. A possible cause is "
+                                        + "that the table used partial-update or aggregation merge-engine and the aggregate "
+                                        + "function produced null value when retracting."));
     }
 
     protected void write(FormatWriterFactory factory, Path file, InternalRow... rows)

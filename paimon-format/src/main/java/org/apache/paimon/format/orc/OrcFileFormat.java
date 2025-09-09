@@ -57,7 +57,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.format.OrcOptions.ORC_TIMESTAMP_LTZ_LEGACY_TYPE;
-import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
 @ThreadSafe
@@ -144,12 +143,11 @@ public class OrcFileFormat extends FileFormat {
      */
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        DataType refinedType = refineDataType(type);
-        DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
-
-        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
+        RowType refinedType = (RowType) refineDataType(type);
+        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema(refinedType);
         Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription, orcTypes, legacyTimestampLtzType);
+                new RowDataVectorizer(
+                        typeDescription, refinedType.getFields(), legacyTimestampLtzType);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }

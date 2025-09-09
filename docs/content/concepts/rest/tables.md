@@ -1,9 +1,9 @@
 ---
-title: "Table Types"
-weight: 6
+title: "Tables"
+weight: 5
 type: docs
 aliases:
-- /concepts/table-types.html
+- /concepts/rest/tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,20 +24,18 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Table Types
+# Tables
 
-Paimon supports table types:
+Paimon supports tables:
 
-1. table with pk: Paimon Data Table with Primary key
-2. table w/o pk: Paimon Data Table without Primary key
-3. view: metastore required, views in SQL are a kind of virtual table
-4. format-table: file format table refers to a directory that contains multiple files of the same format, where
-   operations on this table allow for reading or writing to these files, compatible with Hive tables
-5. object table: provides metadata indexes for unstructured data objects in the specified Object Storage directory.
-6. materialized-table: aimed at simplifying both batch and stream data pipelines, providing a consistent development
-   experience, see [Flink Materialized Table](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/materialized-table/overview/)
+1. paimon table: Paimon Data Table with or without Primary key
+2. format-table: file format table refers to a directory that contains multiple files of the same format, where
+   operations on this table allow for reading or writing to these files, compatible with Hive tables.
+3. object table: provides metadata indexes for unstructured data objects in the specified Object Storage directory.
 
-## Table with PK
+## Paimon Table
+
+### Primary Key Table
 
 See [Paimon with Primary key]({{< ref "primary-key-table/overview" >}}).
 
@@ -75,9 +73,9 @@ CREATE TABLE my_table (
 {{< /tab >}}
 {{< /tabs >}}
 
-## Table w/o PK
+### Append Table
 
-See [Paimon w/o Primary key]({{< ref "append-table/overview" >}}).
+See [Append Table]({{< ref "append-table/overview" >}}).
 
 If a table does not have a primary key defined, it is an append table. Compared to the primary key table, it does not
 have the ability to directly receive changelogs. It cannot be directly updated with data through streaming upsert. It 
@@ -92,58 +90,16 @@ CREATE TABLE my_table (
 )
 ```
 
-## View
-
-View is supported when the metastore can support view, for example, hive metastore. If you don't have metastore, you
-can only use temporary View, which only exists in the current session. This chapter mainly describes persistent views.
-
-View will currently save the original SQL. If you need to use View across engines, you can write a cross engine
-SQL statement. For example:
-
-{{< tabs "view" >}}
-{{< tab "Flink SQL" >}}
-
-```sql
-CREATE VIEW [IF NOT EXISTS] [catalog_name.][db_name.]view_name
-   [( columnName [, columnName ]* )] [COMMENT view_comment]
-AS query_expression;
-
-DROP VIEW  [IF EXISTS] [catalog_name.][db_name.]view_name;
-
-SHOW VIEWS;
-
-SHOW CREATE VIEW my_view;
-```
-{{< /tab >}}
-
-{{< tab "Spark SQL" >}}
-
-```sql
-CREATE [OR REPLACE] VIEW [IF NOT EXISTS] [catalog_name.][db_name.]view_name
-   [( columnName [, columnName ]* )] [COMMENT view_comment]
-AS query_expression;
-
-DROP VIEW  [IF EXISTS] [catalog_name.][db_name.]view_name;
-
-SHOW VIEWS;
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
 ## Format Table
 
-Format table is supported when the metastore can support format table, for example, hive metastore. The Hive tables
-inside the metastore will be mapped to Paimon's Format Table for computing engines (Spark, Hive, Flink) to read and write.
+The Hive tables inside the metastore will be mapped to Paimon's Format Table for computing engines (Spark, Hive, Flink)
+to read and write.
 
 Format table refers to a directory that contains multiple files of the same format, where operations on this table
 allow for reading or writing to these files, facilitating the retrieval of existing data and the addition of new files.
 
 Partitioned file format table just like the standard hive format. Partitions are discovered and inferred based on
 directory structure.
-
-Format Table is enabled by default, you can disable it by configuring Catalog option: `'format-table.enabled'`.
 
 Currently only support `CSV`, `Parquet`, `ORC`, `JSON` formats.
 
@@ -252,25 +208,5 @@ CREATE TABLE `my_object_table` TBLPROPERTIES (
 {{< /tab >}}
 {{< /tabs >}}
 
-## Materialized Table
-
-Materialized Table aimed at simplifying both batch and stream data pipelines, providing a consistent development
-experience, see [Flink Materialized Table](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/materialized-table/overview/).
-
-Now only Flink SQL integrate to Materialized Table, we plan to support it in Spark SQL too.
-
-```sql
-CREATE MATERIALIZED TABLE continuous_users_shops
-PARTITIONED BY (ds)
-FRESHNESS = INTERVAL '30' SECOND
-AS SELECT
-  user_id,
-  ds,
-  SUM (payment_amount_cents) AS payed_buy_fee_sum,
-  SUM (1) AS PV
-FROM (
-  SELECT user_id, order_created_at AS ds, payment_amount_cents
-    FROM json_source
-  ) AS tmp
-GROUP BY user_id, ds;
-```
+We recommend using [pvfs]({{< ref "concepts/rest/pvfs" >}}). to access files in the object table, access to the files
+through the permission system of Paimon REST Catalog.

@@ -15,11 +15,10 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Any
 
 import pandas
 import pyarrow
-import pyarrow.compute as pc
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -55,10 +54,10 @@ class TableRead:
 
         return _record_generator()
 
-    def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.RecordBatchReader:
+    def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.ipc.RecordBatchReader:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         batch_iterator = self._arrow_batch_generator(splits, schema)
-        return pyarrow.RecordBatchReader.from_batches(schema, batch_iterator)
+        return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
 
     def to_arrow(self, splits: List[Split]) -> Optional[pyarrow.Table]:
         batch_reader = self.to_arrow_batch_reader(splits)
@@ -109,7 +108,7 @@ class TableRead:
 
         return ray.data.from_arrow(self.to_arrow(splits))
 
-    def _push_down_predicate(self) -> pc.Expression | bool:
+    def _push_down_predicate(self) -> Any:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:

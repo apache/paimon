@@ -34,8 +34,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,6 +62,12 @@ public final class RowType extends DataType {
     public static final String FORMAT = "ROW<%s>";
 
     private final List<DataField> fields;
+
+    private transient volatile Map<String, DataField> laziedNameToField;
+    private transient volatile Map<String, Integer> laziedNameToIndex;
+
+    private transient volatile Map<Integer, DataField> laziedFieldIdToField;
+    private transient volatile Map<Integer, Integer> laziedFieldIdToIndex;
 
     public RowType(boolean isNullable, List<DataField> fields) {
         super(isNullable, DataTypeRoot.ROW);
@@ -101,39 +109,23 @@ public final class RowType extends DataType {
     }
 
     public int getFieldIndex(String fieldName) {
-        for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).name().equals(fieldName)) {
-                return i;
-            }
-        }
-        return -1;
+        return nameToIndex().getOrDefault(fieldName, -1);
     }
 
     public int[] getFieldIndices(List<String> projectFields) {
-        List<String> fieldNames = getFieldNames();
         int[] projection = new int[projectFields.size()];
         for (int i = 0; i < projection.length; i++) {
-            projection[i] = fieldNames.indexOf(projectFields.get(i));
+            projection[i] = getFieldIndex(projectFields.get(i));
         }
         return projection;
     }
 
     public boolean containsField(String fieldName) {
-        for (DataField field : fields) {
-            if (field.name().equals(fieldName)) {
-                return true;
-            }
-        }
-        return false;
+        return nameToField().containsKey(fieldName);
     }
 
     public boolean containsField(int fieldId) {
-        for (DataField field : fields) {
-            if (field.id() == fieldId) {
-                return true;
-            }
-        }
-        return false;
+        return fieldIdToField().containsKey(fieldId);
     }
 
     public boolean notContainsField(String fieldName) {
@@ -141,31 +133,27 @@ public final class RowType extends DataType {
     }
 
     public DataField getField(String fieldName) {
-        for (DataField field : fields) {
-            if (field.name().equals(fieldName)) {
-                return field;
-            }
+        DataField field = nameToField().get(fieldName);
+        if (field == null) {
+            throw new RuntimeException("Cannot find field: " + fieldName);
         }
-
-        throw new RuntimeException("Cannot find field: " + fieldName);
+        return field;
     }
 
     public DataField getField(int fieldId) {
-        for (DataField field : fields) {
-            if (field.id() == fieldId) {
-                return field;
-            }
+        DataField field = fieldIdToField().get(fieldId);
+        if (field == null) {
+            throw new RuntimeException("Cannot find field by field id: " + fieldId);
         }
-        throw new RuntimeException("Cannot find field by field id: " + fieldId);
+        return field;
     }
 
     public int getFieldIndexByFieldId(int fieldId) {
-        for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).id() == fieldId) {
-                return i;
-            }
+        Integer index = fieldIdToIndex().get(fieldId);
+        if (index == null) {
+            throw new RuntimeException("Cannot find field index by FieldId " + fieldId);
         }
-        throw new RuntimeException("Cannot find field index by FieldId " + fieldId);
+        return index;
     }
 
     @Override
@@ -329,6 +317,54 @@ public final class RowType extends DataType {
 
     public RowType project(String... names) {
         return project(Arrays.asList(names));
+    }
+
+    private Map<String, DataField> nameToField() {
+        Map<String, DataField> nameToField = this.laziedNameToField;
+        if (nameToField == null) {
+            nameToField = new HashMap<>();
+            for (DataField field : fields) {
+                nameToField.put(field.name(), field);
+            }
+            this.laziedNameToField = nameToField;
+        }
+        return nameToField;
+    }
+
+    private Map<String, Integer> nameToIndex() {
+        Map<String, Integer> nameToIndex = this.laziedNameToIndex;
+        if (nameToIndex == null) {
+            nameToIndex = new HashMap<>();
+            for (int i = 0; i < fields.size(); i++) {
+                nameToIndex.put(fields.get(i).name(), i);
+            }
+            this.laziedNameToIndex = nameToIndex;
+        }
+        return nameToIndex;
+    }
+
+    private Map<Integer, DataField> fieldIdToField() {
+        Map<Integer, DataField> fieldIdToField = this.laziedFieldIdToField;
+        if (fieldIdToField == null) {
+            fieldIdToField = new HashMap<>();
+            for (DataField field : fields) {
+                fieldIdToField.put(field.id(), field);
+            }
+            this.laziedFieldIdToField = fieldIdToField;
+        }
+        return fieldIdToField;
+    }
+
+    private Map<Integer, Integer> fieldIdToIndex() {
+        Map<Integer, Integer> fieldIdToIndex = this.laziedFieldIdToIndex;
+        if (fieldIdToIndex == null) {
+            fieldIdToIndex = new HashMap<>();
+            for (int i = 0; i < fields.size(); i++) {
+                fieldIdToIndex.put(fields.get(i).id(), i);
+            }
+            this.laziedFieldIdToIndex = fieldIdToIndex;
+        }
+        return fieldIdToIndex;
     }
 
     public static RowType of() {

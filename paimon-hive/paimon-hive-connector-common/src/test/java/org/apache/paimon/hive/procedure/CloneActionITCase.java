@@ -826,6 +826,126 @@ public class CloneActionITCase extends ActionITCaseBase {
         Assertions.assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
     }
 
+    @Test
+    public void testMigrateCsvTable() throws Exception {
+        String format = "textfile";
+        String dbName = "hivedb" + StringUtils.randomNumericString(10);
+        String tableName = "hivetable" + StringUtils.randomNumericString(10);
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE " + dbName);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING) PARTITIONED BY (id2 INT, id3 INT) "
+                        + "ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe' STORED AS %s ",
+                dbName,
+                tableName,
+                format);
+        sql(tEnv, "INSERT INTO %s.%s VALUES %s", dbName, tableName, data(100));
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+
+        List<Row> r1 = sql(tEnv, "SELECT * FROM %s.%s", dbName, tableName);
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone",
+                                "--database",
+                                dbName,
+                                "--table",
+                                tableName,
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse));
+
+        createAction(CloneAction.class, args).run();
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+
+        assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+
+        List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    @Test
+    public void testMigrateJsonTable() throws Exception {
+        String format = "textfile";
+        String dbName = "hivedb" + StringUtils.randomNumericString(10);
+        String tableName = "hivetable" + StringUtils.randomNumericString(10);
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE " + dbName);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING) PARTITIONED BY (id2 INT, id3 INT)"
+                        + "ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe' STORED AS %s ",
+                dbName,
+                tableName,
+                format);
+        sql(tEnv, "INSERT INTO %s.%s VALUES %s", dbName, tableName, data(100));
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+
+        List<Row> r1 = sql(tEnv, "SELECT * FROM %s.%s", dbName, tableName);
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone",
+                                "--database",
+                                dbName,
+                                "--table",
+                                tableName,
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse));
+
+        createAction(CloneAction.class, args).run();
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+
+        assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+
+        List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
     private String[] ddls(String format) {
         // has primary key
         String ddl0 =
@@ -893,14 +1013,14 @@ public class CloneActionITCase extends ActionITCaseBase {
     private String randomFormat() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        String[] formats = new String[] {"orc", "parquet", "avro"};
+        String[] formats = new String[] {"orc", "parquet", "avro", "textfile"};
         return formats[i];
     }
 
     private String randomFormat(String excludedFormat) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        String[] formats = new String[] {"orc", "parquet", "avro"};
+        String[] formats = new String[] {"orc", "parquet", "avro", "textfile"};
         if (Objects.equals(excludedFormat, formats[i])) {
             return formats[(i + 1) % 3];
         }

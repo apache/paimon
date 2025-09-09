@@ -1,0 +1,366 @@
+"""
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+import logging
+
+import pandas as pd
+import pyarrow as pa
+
+from pypaimon.api.options import Options
+from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema import Schema
+from pypaimon.tests.py36.pyarrow_compat import table_sort_by
+from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
+
+
+class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
+
+    def test_overwrite(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, partition_keys=['f0'],
+                                            options={'dynamic-partition-overwrite': 'false'})
+        self.rest_catalog.create_table('default.test_overwrite', schema, False)
+        table = self.rest_catalog.get_table('default.test_overwrite')
+        read_builder = table.new_read_builder()
+
+        # test normal write
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df0 = pd.DataFrame({
+            'f0': [1, 2],
+            'f1': ['apple', 'banana'],
+        })
+
+        table_write.write_pandas(df0)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df0 = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='f0')
+        df0['f0'] = df0['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df0.reset_index(drop=True), df0.reset_index(drop=True))
+
+        # test partially overwrite
+        write_builder = table.new_batch_write_builder().overwrite({'f0': 1})
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df1 = pd.DataFrame({
+            'f0': [1],
+            'f1': ['watermelon'],
+        })
+
+        table_write.write_pandas(df1)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df1 = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='f0')
+        expected_df1 = pd.DataFrame({
+            'f0': [1, 2],
+            'f1': ['watermelon', 'banana']
+        })
+        expected_df1['f0'] = expected_df1['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df1.reset_index(drop=True), expected_df1.reset_index(drop=True))
+
+        # test fully overwrite
+        write_builder = table.new_batch_write_builder().overwrite()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        df2 = pd.DataFrame({
+            'f0': [3],
+            'f1': ['Neo'],
+        })
+
+        table_write.write_pandas(df2)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df2 = table_read.to_pandas(table_scan.plan().splits())
+        df2['f0'] = df2['f0'].astype('int32')
+        pd.testing.assert_frame_equal(
+            actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
+
+    def testParquetAppendOnlyReader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        self.assertEqual(actual, self.expected)
+
+    def testOrcAppendOnlyReader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'orc'})
+        self.rest_catalog.create_table('default.test_append_only_orc', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_orc')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        self.assertEqual(actual, self.expected)
+
+    def testAvroAppendOnlyReader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
+        self.rest_catalog.create_table('default.test_append_only_avro', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_avro')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        self.assertEqual(actual, self.expected)
+
+    def testAppendOnlyReaderWithFilter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_filter', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.less_than('user_id', 7)
+        p2 = predicate_builder.greater_or_equal('user_id', 2)
+        p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
+        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
+        p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
+        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(5, 1)  # 6/f
+        ])
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
+
+        p7 = predicate_builder.startswith('behavior', 'a')
+        p8 = predicate_builder.equal('item_id', 1002)
+        p9 = predicate_builder.is_null('behavior')
+        g2 = predicate_builder.or_predicates([p7, p8, p9])
+        read_builder = table.new_read_builder().with_filter(g2)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(0, 1),  # 1/a
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(3, 1),  # 5/e
+        ])
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
+
+        # Same as java, 'not_equal' will also filter records of 'None' value
+        p12 = predicate_builder.not_equal('behavior', 'f')
+        read_builder = table.new_read_builder().with_filter(p12)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            # not only 6/f, but also 4/d will be filtered
+            self.expected.slice(0, 1),  # 1/a
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(2, 1),  # 3/c
+            self.expected.slice(4, 1),  # 5/e
+            self.expected.slice(6, 1),  # 7/g
+            self.expected.slice(7, 1),  # 8/h
+        ])
+        self.assertEqual(table_sort_by(actual, 'user_id'), expected)
+
+    def testAppendOnlyReaderWithProjection(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_projection', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_projection')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        expected = self.expected.select(['dt', 'user_id'])
+        self.assertEqual(actual, expected)
+
+    def testAvroAppendOnlyReaderWithProjection(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
+        self.rest_catalog.create_table('default.test_avro_append_only_projection', schema, False)
+        table = self.rest_catalog.get_table('default.test_avro_append_only_projection')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        expected = self.expected.select(['dt', 'user_id'])
+        self.assertEqual(actual, expected)
+
+    def testAppendOnlyReaderWithLimit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_limit', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_limit')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_limit(1)
+        actual = self._read_test_table(read_builder)
+        # only records from 1st commit (1st split) will be read
+        # might be split of "dt=1" or split of "dt=2"
+        self.assertEqual(actual.num_rows, 4)
+
+    def testWriteWrongSchema(self):
+        self.rest_catalog.create_table('default.test_wrong_schema',
+                                       Schema.from_pyarrow_schema(self.pa_schema),
+                                       False)
+        table = self.rest_catalog.get_table('default.test_wrong_schema')
+
+        data = {
+            'f0': [1, 2, 3],
+            'f1': ['a', 'b', 'c'],
+        }
+        df = pd.DataFrame(data)
+        schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+        record_batch = pa.RecordBatch.from_pandas(df, schema)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+
+        with self.assertRaises(ValueError) as e:
+            table_write.write_arrow_batch(record_batch)
+        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
+
+    def testWriteWideTableLargeData(self):
+        logging.basicConfig(level=logging.INFO)
+        catalog = CatalogFactory.create(self.options)
+
+        # Build table structure: 200 data columns + 1 partition column
+        # Create PyArrow schema
+        pa_fields = []
+
+        # Create 200 data columns f0 to f199
+        for i in range(200):
+            pa_fields.append(pa.field(f"f{i}", pa.string(), metadata={"description": f"Column f{i}"}))
+
+        # Add partition column dt
+        pa_fields.append(pa.field("dt", pa.string(), metadata={"description": "Partition column dt"}))
+
+        # Create PyArrow schema
+        pa_schema = pa.schema(pa_fields)
+
+        # Convert to Paimon Schema and specify partition key
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=["dt"])
+
+        # Create table
+        table_identifier = Identifier.create("default", "wide_table_200cols")
+        try:
+            # If table already exists, drop it first
+            try:
+                catalog.get_table(table_identifier)
+                catalog.drop_table(table_identifier)
+                print(f"Dropped existing table {table_identifier}")
+            except Exception:
+                # Table does not exist, continue creating
+                pass
+
+            # Create new table
+            catalog.create_table(
+                identifier=table_identifier,
+                schema=schema,
+                ignore_if_exists=False
+            )
+
+            print(
+                f"Successfully created table {table_identifier} with {len(pa_fields) - 1} "
+                f"data columns and 1 partition column")
+            print(
+                f"Table schema: {len([f for f in pa_fields if f.name != 'dt'])} data columns (f0-f199) + dt partition")
+
+        except Exception as e:
+            print(f"Error creating table: {e}")
+            raise e
+        import random
+
+        table_identifier = Identifier.create("default", "wide_table_200cols")
+        table = catalog.get_table(table_identifier)
+
+        total_rows = 500000  # rows of data
+        batch_size = 100000  # 100,000 rows per batch
+        commit_batches = total_rows // batch_size
+
+        for commit_batch in range(commit_batches):
+            start_idx = commit_batch * batch_size
+            end_idx = start_idx + batch_size
+
+            print(f"Processing batch {commit_batch + 1}/{commit_batches} ({start_idx:,} - {end_idx:,})...")
+            # Generate data for current batch - generate data for all 200 columns
+            data = {}
+            # Generate data for f0-f199
+            for i in range(200):
+                if i == 0:
+                    data[f"f{i}"] = [f'value_{j}' for j in range(start_idx, end_idx)]
+                elif i == 1:
+                    data[f"f{i}"] = [random.choice(['A', 'B', 'C', 'D', 'E']) for _ in range(batch_size)]
+                elif i == 2:
+                    data[f"f{i}"] = [f'detail_{random.randint(1, 1000)}' for _ in range(batch_size)]
+                elif i == 3:
+                    data[f"f{i}"] = [f'id_{j:06d}' for j in range(start_idx, end_idx)]
+                else:
+                    # Generate random string data for other columns
+                    data[f"f{i}"] = [f'col{i}_val_{random.randint(1, 10000)}' for _ in range(batch_size)]
+
+            # Add partition column data
+            data['dt'] = ['2025-09-01' for _ in range(batch_size)]
+            # Convert dictionary to PyArrow RecordBatch
+            arrow_batch = pa.RecordBatch.from_pydict(data)
+            # Create new write and commit objects for each commit batch
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+
+            try:
+                # Write current batch data
+                table_write.write_arrow_batch(arrow_batch)
+                print("Batch data write completed, committing...")
+                # Commit current batch
+                commit_messages = table_write.prepare_commit()
+                table_commit.commit(commit_messages)
+                print(f"Batch {commit_batch + 1} committed successfully! Written {end_idx:,} rows of data")
+
+            finally:
+                # Ensure resource cleanup
+                table_write.close()
+                table_commit.close()
+
+        print(
+            f"All data writing completed! "
+            f"Total written {total_rows:,} rows of data to 200-column wide table in {commit_batches} commits")
+        rest_catalog = RESTCatalog(CatalogContext.create_from_options(Options(self.options)))
+        table = rest_catalog.get_table('default.wide_table_200cols')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        read_builder = (table.new_read_builder()
+                        .with_projection(['f0', 'f1'])
+                        .with_filter(predicate=predicate_builder.equal("dt", "2025-09-01")))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        self.assertEqual(table_read.to_arrow(splits).num_rows, total_rows)

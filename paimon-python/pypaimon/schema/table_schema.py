@@ -122,7 +122,7 @@ class TableSchema:
                 highest_field_id=data[TableSchema.FIELD_HIGHEST_FIELD_ID],
                 partition_keys=data[TableSchema.FIELD_PARTITION_KEYS],
                 primary_keys=data[TableSchema.FIELD_PRIMARY_KEYS],
-                options=options,
+                options=options or {},
                 comment=data.get(TableSchema.FIELD_COMMENT),
                 time_millis=data.get(TableSchema.FIELD_TIME_MILLIS)
             )

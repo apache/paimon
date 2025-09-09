@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -28,10 +29,13 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
+import org.apache.paimon.operation.metrics.CacheMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -40,6 +44,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -79,6 +84,43 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
+    }
+
+    @Override
+    protected ManifestEntryCache createCache(
+            @Nullable SegmentsCache<Path> cache, RowType formatType) {
+        return new ManifestEntryCache(
+                cache, serializer, formatType, super::fileSize, super::createIterator);
+    }
+
+    @Override
+    public ManifestFile withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
+        super.withCacheMetrics(cacheMetrics);
+        return this;
+    }
+
+    public List<ManifestEntry> read(
+            String fileName,
+            @Nullable Long fileSize,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            Filter<InternalRow> readFilter,
+            Filter<ManifestEntry> readTFilter) {
+        try {
+            Path path = pathFactory.toPath(fileName);
+            if (cache != null) {
+                return cache.read(
+                        path,
+                        fileSize,
+                        new ManifestEntryFilters(
+                                partitionFilter, bucketFilter, readFilter, readTFilter));
+            }
+
+            return readFromIterator(
+                    createIterator(path, fileSize), serializer, readFilter, readTFilter);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @VisibleForTesting

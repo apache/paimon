@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet.writer;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -55,7 +56,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static java.lang.String.format;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.computeMinBytesForDecimalPrecision;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -75,7 +75,7 @@ public class ParquetRowDataWriter {
             RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
         this.conf = conf;
         this.recordConsumer = recordConsumer;
-        this.rowWriter = new RowWriter(rowType, schema, false);
+        this.rowWriter = new RowWriter(rowType, schema);
     }
 
     /**
@@ -94,37 +94,35 @@ public class ParquetRowDataWriter {
             switch (t.getTypeRoot()) {
                 case CHAR:
                 case VARCHAR:
-                    return new StringWriter(t.isNullable());
+                    return new StringWriter();
                 case BOOLEAN:
-                    return new BooleanWriter(t.isNullable());
+                    return new BooleanWriter();
                 case BINARY:
                 case VARBINARY:
-                    return new BinaryWriter(t.isNullable());
+                    return new BinaryWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;
-                    return createDecimalWriter(
-                            decimalType.getPrecision(), decimalType.getScale(), t.isNullable());
+                    return createDecimalWriter(decimalType.getPrecision(), decimalType.getScale());
                 case TINYINT:
-                    return new ByteWriter(t.isNullable());
+                    return new ByteWriter();
                 case SMALLINT:
-                    return new ShortWriter(t.isNullable());
+                    return new ShortWriter();
                 case DATE:
                 case TIME_WITHOUT_TIME_ZONE:
                 case INTEGER:
-                    return new IntWriter(t.isNullable());
+                    return new IntWriter();
                 case BIGINT:
-                    return new LongWriter(t.isNullable());
+                    return new LongWriter();
                 case FLOAT:
-                    return new FloatWriter(t.isNullable());
+                    return new FloatWriter();
                 case DOUBLE:
-                    return new DoubleWriter(t.isNullable());
+                    return new DoubleWriter();
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                     TimestampType timestampType = (TimestampType) t;
-                    return createTimestampWriter(timestampType.getPrecision(), t.isNullable());
+                    return createTimestampWriter(timestampType.getPrecision());
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                     LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) t;
-                    return createTimestampWriter(
-                            localZonedTimestampType.getPrecision(), t.isNullable());
+                    return createTimestampWriter(localZonedTimestampType.getPrecision());
                 default:
                     throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -134,26 +132,19 @@ public class ParquetRowDataWriter {
 
             if (t instanceof ArrayType
                     && annotation instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                return new ArrayWriter(((ArrayType) t).getElementType(), groupType, t.isNullable());
+                return new ArrayWriter(((ArrayType) t).getElementType(), groupType);
             } else if (t instanceof MapType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
-                        ((MapType) t).getKeyType(),
-                        ((MapType) t).getValueType(),
-                        groupType,
-                        t.isNullable());
+                        ((MapType) t).getKeyType(), ((MapType) t).getValueType(), groupType);
             } else if (t instanceof MultisetType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
-                        ((MultisetType) t).getElementType(),
-                        new IntType(false),
-                        groupType,
-                        t.isNullable());
+                        ((MultisetType) t).getElementType(), new IntType(false), groupType);
             } else if (t instanceof RowType && type instanceof GroupType) {
-                return new RowWriter((RowType) t, groupType, t.isNullable());
+                return new RowWriter((RowType) t, groupType);
             } else if (t instanceof VariantType && type instanceof GroupType) {
                 return new VariantWriter(
-                        t.isNullable(),
                         groupType,
                         VariantUtils.extractShreddingSchemaFromConf(conf, type.getName()));
             } else {
@@ -162,38 +153,24 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private FieldWriter createTimestampWriter(int precision, boolean isNullable) {
+    private FieldWriter createTimestampWriter(int precision) {
         if (precision <= 3) {
-            return new TimestampMillsWriter(precision, isNullable);
+            return new TimestampMillsWriter(precision);
         } else if (precision > 6) {
-            return new TimestampInt96Writer(precision, isNullable);
+            return new TimestampInt96Writer(precision);
         } else {
-            return new TimestampMicrosWriter(precision, isNullable);
+            return new TimestampMicrosWriter(precision);
         }
     }
 
-    private abstract static class FieldWriter {
+    private interface FieldWriter {
 
-        private final boolean isNullable;
+        void write(InternalRow row, int ordinal);
 
-        public FieldWriter(boolean isNullable) {
-            this.isNullable = isNullable;
-        }
-
-        abstract void write(InternalRow row, int ordinal);
-
-        abstract void write(InternalArray arrayData, int ordinal);
-
-        public boolean isNullable() {
-            return isNullable;
-        }
+        void write(InternalArray arrayData, int ordinal);
     }
 
-    private class BooleanWriter extends FieldWriter {
-
-        public BooleanWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class BooleanWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -210,11 +187,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class ByteWriter extends FieldWriter {
-
-        public ByteWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class ByteWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -231,11 +204,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class ShortWriter extends FieldWriter {
-
-        public ShortWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class ShortWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -252,11 +221,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class LongWriter extends FieldWriter {
-
-        public LongWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class LongWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -273,11 +238,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class FloatWriter extends FieldWriter {
-
-        public FloatWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class FloatWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -294,11 +255,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class DoubleWriter extends FieldWriter {
-
-        public DoubleWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class DoubleWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -315,11 +272,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class StringWriter extends FieldWriter {
-
-        public StringWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class StringWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -336,11 +289,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class BinaryWriter extends FieldWriter {
-
-        public BinaryWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class BinaryWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -357,11 +306,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class IntWriter extends FieldWriter {
-
-        public IntWriter(boolean isNullable) {
-            super(isNullable);
-        }
+    private class IntWriter implements FieldWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
@@ -378,12 +323,11 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class TimestampMillsWriter extends FieldWriter {
+    private class TimestampMillsWriter implements FieldWriter {
 
         private final int precision;
 
-        private TimestampMillsWriter(int precision, boolean isNullable) {
-            super(isNullable);
+        private TimestampMillsWriter(int precision) {
             checkArgument(precision <= 3);
             this.precision = precision;
         }
@@ -403,12 +347,11 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class TimestampMicrosWriter extends FieldWriter {
+    private class TimestampMicrosWriter implements FieldWriter {
 
         private final int precision;
 
-        private TimestampMicrosWriter(int precision, boolean isNullable) {
-            super(isNullable);
+        private TimestampMicrosWriter(int precision) {
             checkArgument(precision > 3);
             checkArgument(precision <= 6);
             this.precision = precision;
@@ -429,12 +372,11 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class TimestampInt96Writer extends FieldWriter {
+    private class TimestampInt96Writer implements FieldWriter {
 
         private final int precision;
 
-        private TimestampInt96Writer(int precision, boolean isNullable) {
-            super(isNullable);
+        private TimestampInt96Writer(int precision) {
             checkArgument(precision > 6);
             this.precision = precision;
         }
@@ -455,7 +397,7 @@ public class ParquetRowDataWriter {
     }
 
     /** It writes a map field to parquet, both key and value are nullable. */
-    private class MapWriter extends FieldWriter {
+    private class MapWriter implements FieldWriter {
 
         private final String repeatedGroupName;
         private final String keyName;
@@ -463,9 +405,7 @@ public class ParquetRowDataWriter {
         private final FieldWriter keyWriter;
         private final FieldWriter valueWriter;
 
-        private MapWriter(
-                DataType keyType, DataType valueType, GroupType groupType, boolean isNullable) {
-            super(isNullable);
+        private MapWriter(DataType keyType, DataType valueType, GroupType groupType) {
             // Get the internal map structure (MAP_KEY_VALUE)
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -529,14 +469,13 @@ public class ParquetRowDataWriter {
     }
 
     /** It writes an array type field to parquet. */
-    private class ArrayWriter extends FieldWriter {
+    private class ArrayWriter implements FieldWriter {
 
         private final String elementName;
         private final FieldWriter elementWriter;
         private final String repeatedGroupName;
 
-        private ArrayWriter(DataType t, GroupType groupType, boolean isNullable) {
-            super(isNullable);
+        private ArrayWriter(DataType t, GroupType groupType) {
             // Get the internal array structure
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -580,17 +519,19 @@ public class ParquetRowDataWriter {
     }
 
     /** It writes a row type field to parquet. */
-    private class RowWriter extends FieldWriter {
+    private class RowWriter implements FieldWriter {
         private final FieldWriter[] fieldWriters;
         private final String[] fieldNames;
+        private final boolean[] isNullable;
 
-        public RowWriter(RowType rowType, GroupType groupType, boolean isNullable) {
-            super(isNullable);
+        public RowWriter(RowType rowType, GroupType groupType) {
             this.fieldNames = rowType.getFieldNames().toArray(new String[0]);
             List<DataType> fieldTypes = rowType.getFieldTypes();
             this.fieldWriters = new FieldWriter[rowType.getFieldCount()];
+            this.isNullable = new boolean[rowType.getFieldCount()];
             for (int i = 0; i < fieldWriters.length; i++) {
                 fieldWriters[i] = createWriter(fieldTypes.get(i), groupType.getType(i));
+                isNullable[i] = fieldTypes.get(i).isNullable();
             }
         }
 
@@ -604,11 +545,15 @@ public class ParquetRowDataWriter {
                     writer.write(row, i);
                     recordConsumer.endField(fieldName, i);
                 } else {
-                    if (!fieldWriters[i].isNullable()) {
+                    if (!isNullable[i]) {
                         throw new IllegalArgumentException(
-                                format(
-                                        "Parquet does not support null values in non-nullable fields. Field name : %s expected not null but found null",
-                                        fieldNames[i]));
+                                String.format(
+                                        "Field '%s' expected not null but found null value. A possible cause is that the "
+                                                + "table used %s or %s merge-engine and the aggregate function produced "
+                                                + "null value when retracting.",
+                                        fieldNames[i],
+                                        CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                        CoreOptions.MergeEngine.AGGREGATE));
                     }
                 }
             }
@@ -631,17 +576,15 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private class VariantWriter extends FieldWriter {
+    private class VariantWriter implements FieldWriter {
 
         @Nullable private final VariantSchema variantSchema;
         @Nullable private final RowWriter shreddedVariantWriter;
 
-        public VariantWriter(
-                boolean isNullable, GroupType groupType, @Nullable RowType shreddingSchema) {
-            super(isNullable);
+        public VariantWriter(GroupType groupType, @Nullable RowType shreddingSchema) {
             if (shreddingSchema != null) {
                 variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
-                shreddedVariantWriter = new RowWriter(shreddingSchema, groupType, isNullable);
+                shreddedVariantWriter = new RowWriter(shreddingSchema, groupType);
             } else {
                 variantSchema = null;
                 shreddedVariantWriter = null;
@@ -695,18 +638,14 @@ public class ParquetRowDataWriter {
         return Binary.fromConstantByteBuffer(buf);
     }
 
-    private FieldWriter createDecimalWriter(int precision, int scale, boolean isNullable) {
+    private FieldWriter createDecimalWriter(int precision, int scale) {
         checkArgument(
                 precision <= DecimalType.MAX_PRECISION,
                 "Decimal precision %s exceeds max precision %s",
                 precision,
                 DecimalType.MAX_PRECISION);
 
-        class Int32Writer extends FieldWriter {
-
-            public Int32Writer(boolean isNullable) {
-                super(isNullable);
-            }
+        class Int32Writer implements FieldWriter {
 
             @Override
             public void write(InternalArray arrayData, int ordinal) {
@@ -726,11 +665,7 @@ public class ParquetRowDataWriter {
             }
         }
 
-        class Int64Writer extends FieldWriter {
-
-            public Int64Writer(boolean isNullable) {
-                super(isNullable);
-            }
+        class Int64Writer implements FieldWriter {
 
             @Override
             public void write(InternalArray arrayData, int ordinal) {
@@ -750,12 +685,11 @@ public class ParquetRowDataWriter {
             }
         }
 
-        class UnscaledBytesWriter extends FieldWriter {
+        class UnscaledBytesWriter implements FieldWriter {
             private final int numBytes;
             private final byte[] decimalBuffer;
 
-            private UnscaledBytesWriter(boolean isNullable) {
-                super(isNullable);
+            private UnscaledBytesWriter() {
                 this.numBytes = computeMinBytesForDecimalPrecision(precision);
                 this.decimalBuffer = new byte[numBytes];
             }
@@ -789,11 +723,11 @@ public class ParquetRowDataWriter {
         }
 
         if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-            return new Int32Writer(isNullable);
+            return new Int32Writer();
         } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-            return new Int64Writer(isNullable);
+            return new Int64Writer();
         } else {
-            return new UnscaledBytesWriter(isNullable);
+            return new UnscaledBytesWriter();
         }
     }
 }

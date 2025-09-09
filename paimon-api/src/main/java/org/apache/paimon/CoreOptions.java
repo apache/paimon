@@ -779,7 +779,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
-    @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()
@@ -788,7 +787,6 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
-    @Immutable
     public static final ConfigOption<SortOrder> SEQUENCE_FIELD_SORT_ORDER =
             key("sequence.field.sort-order")
                     .enumType(SortOrder.class)
@@ -1922,15 +1920,17 @@ public class CoreOptions implements Serializable {
                             "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
                                     + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
                                     + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
-                                    + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
+    @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether enable unique row id for append table.");
 
+    @Immutable
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ENABLED =
             key("data-evolution.enabled")
                     .booleanType()
@@ -1949,6 +1949,18 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
+
+    public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
+            key("lookup.merge-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.VALUE_8_MB)
+                    .withDescription("Buffer memory size for one key merging in lookup.");
+
+    public static final ConfigOption<Integer> LOOKUP_MERGE_RECORDS_THRESHOLD =
+            key("lookup.merge-records-threshold")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("Threshold for merging records to binary buffer in lookup.");
 
     private final Options options;
 
@@ -2987,6 +2999,14 @@ public class CoreOptions implements Serializable {
         } else {
             return OrderType.of(clusteringStrategy);
         }
+    }
+
+    public long lookupMergeBufferSize() {
+        return options.get(LOOKUP_MERGE_BUFFER_SIZE).getBytes();
+    }
+
+    public int lookupMergeRecordsThreshold() {
+        return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
     }
 
     /** Specifies the merge engine for table with primary key. */

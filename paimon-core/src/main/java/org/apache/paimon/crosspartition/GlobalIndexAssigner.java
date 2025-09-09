@@ -207,7 +207,6 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     public CloseableIterator<BinaryRow> endBoostrapWithoutEmit(boolean isEndInput)
             throws Exception {
         bootstrap = false;
-        bootstrapRecords.complete();
         boolean isEmpty = true;
         if (bootstrapKeys.size() > 0) {
             RocksDBBulkLoader bulkLoader = keyIndex.createBulkLoader();
