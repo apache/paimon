@@ -30,7 +30,7 @@ import java.util.Iterator;
  * @param <T> record type.
  * @param <R> file result to collect.
  */
-public interface FileWriter<T, R> extends Closeable {
+public interface FileWriter<T, R, C> extends Closeable {
 
     /**
      * Add only one record to this file writer.
@@ -108,4 +108,8 @@ public interface FileWriter<T, R> extends Closeable {
 
     /** @return the result for this closed file writer. */
     R result() throws IOException;
+
+    default C committer() {
+        throw new UnsupportedOperationException();
+    }
 }

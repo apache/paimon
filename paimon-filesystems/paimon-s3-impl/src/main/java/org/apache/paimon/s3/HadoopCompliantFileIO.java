@@ -18,6 +18,7 @@
 
 package org.apache.paimon.s3;
 
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -28,6 +29,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
 
 import java.io.IOException;
 import java.util.Map;
@@ -55,6 +57,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
+    }
+
+    @Override
+    public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
+        return new S3CommittablePositionOutputStream(fs, hadoopPath, path, overwrite);
     }
 
     @Override

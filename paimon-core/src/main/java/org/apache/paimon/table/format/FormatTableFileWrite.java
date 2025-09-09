@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -121,10 +122,11 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
             // For HDFS: create temp file path factory
             dataPathFactory = createTempDataFilePathFactory(partition);
         } else {
-            // For S3/OSS: use original path factory (direct write to target)
+            // For S3/OSS and other: use original path factory
             dataPathFactory = pathFactory.createFormatTableDataFilePathFactory(partition);
         }
 
+        // Use regular FormatTableRecordWriter
         return new FormatTableRecordWriter(
                 fileIO,
                 ioManager,
@@ -141,7 +143,13 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
 
     public void flush() throws Exception {
         for (RecordWriter<InternalRow> writer : writers.values()) {
-            writer.prepareCommit(false);
+            if (writer instanceof FormatTableRecordWriter) {
+                FormatTableRecordWriter formatWriter = (FormatTableRecordWriter) writer;
+                for (CommittablePositionOutputStream.Committer committer :
+                        formatWriter.getCommitters()) {
+                    committer.commit();
+                }
+            }
         }
     }
 

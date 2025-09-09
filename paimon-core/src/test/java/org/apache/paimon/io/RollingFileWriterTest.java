@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
@@ -58,7 +59,8 @@ public class RollingFileWriterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private RollingFileWriter<InternalRow, DataFileMeta> rollingFileWriter;
+    private RollingFileWriter<InternalRow, DataFileMeta, CommittablePositionOutputStream.Committer>
+            rollingFileWriter;
 
     public void initialize(String identifier) {
         initialize(identifier, false);
@@ -98,7 +100,8 @@ public class RollingFileWriterTest {
                                         true,
                                         statsDenseStore,
                                         false,
-                                        null),
+                                        null,
+                                        false),
                         TARGET_FILE_SIZE);
     }
 

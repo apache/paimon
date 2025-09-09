@@ -24,6 +24,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.avro.AvroFileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
@@ -37,7 +38,9 @@ import java.util.Arrays;
 import java.util.List;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
-public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
+public class RowDataRollingFileWriter
+        extends RollingFileWriter<
+                InternalRow, DataFileMeta, CommittablePositionOutputStream.Committer> {
 
     public RowDataRollingFileWriter(
             FileIO fileIO,
@@ -53,7 +56,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            boolean useCommittableOutputStream) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -69,7 +73,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
-                                writeCols),
+                                writeCols,
+                                useCommittableOutputStream),
                 targetFileSize);
     }
 

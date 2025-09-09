@@ -24,17 +24,17 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
-import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
@@ -47,9 +47,7 @@ import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 /** {@link RecordWriter} for format table. */
@@ -57,7 +55,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
-    private final List<DataFileMeta> files;
     private final @Nullable IOManager ioManager;
     private final CompressOptions spillCompression;
     private final MemorySize maxDiskSize;
@@ -88,7 +85,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
         this.spillCompression = spillCompression;
         this.fileCompression = fileCompression;
         this.maxDiskSize = maxDiskSize;
-        this.files = new ArrayList<>();
         this.writeSchema = writeSchema;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
@@ -108,7 +104,7 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
                 rowData.getRowKind());
         boolean success = sinkWriter.write(rowData);
         if (!success) {
-            flush();
+            closeAndGetCommitters();
             success = sinkWriter.write(rowData);
             if (!success) {
                 // Should not get here, because writeBuffer will throw too big exception out.
@@ -119,8 +115,8 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
         }
     }
 
-    private void flush() throws Exception {
-        files.addAll(sinkWriter.flush());
+    private void closeAndGetCommitters() throws Exception {
+        sinkWriter.closeAndGetCommitters();
     }
 
     @Override
@@ -128,12 +124,12 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void addNewFiles(List<DataFileMeta> files) {
-        this.files.addAll(files);
+        throw new UnsupportedOperationException("Not supported.");
     }
 
     @Override
     public Collection<DataFileMeta> dataFiles() {
-        return new ArrayList<>(files);
+        throw new UnsupportedOperationException("Not supported.");
     }
 
     @Override
@@ -156,7 +152,7 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
     public void flushMemory() throws Exception {
         boolean success = sinkWriter.flushMemory();
         if (!success) {
-            flush();
+            closeAndGetCommitters();
         }
     }
 
@@ -182,23 +178,18 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
                 pathFactory,
                 new LongCounter(0),
                 fileCompression,
-                null,
+                new SimpleColStatsCollector.Factory[0],
                 new FileIndexOptions(),
                 FileSource.APPEND,
                 false,
                 false,
-                null);
+                null,
+                true);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        flush();
-        List<DataFileMeta> result = new ArrayList<>(files);
-        files.clear();
-        return new CommitIncrement(
-                new DataIncrement(result, Collections.emptyList(), Collections.emptyList()),
-                CompactIncrement.emptyIncrement(),
-                null);
+        throw new UnsupportedOperationException("Not supported.");
     }
 
     @VisibleForTesting
@@ -221,4 +212,9 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void writeBundle(BundleRecords record) throws Exception {}
+
+    /** Get committers from the underlying SinkWriter. */
+    public List<CommittablePositionOutputStream.Committer> getCommitters() throws Exception {
+        return sinkWriter.closeAndGetCommitters();
+    }
 }

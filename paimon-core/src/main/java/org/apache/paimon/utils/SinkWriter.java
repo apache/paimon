@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RollingFileWriter;
@@ -43,6 +44,8 @@ public interface SinkWriter<T> {
 
     List<DataFileMeta> flush() throws IOException;
 
+    List<CommittablePositionOutputStream.Committer> closeAndGetCommitters() throws IOException;
+
     boolean flushMemory() throws IOException;
 
     long memoryOccupancy();
@@ -59,11 +62,19 @@ public interface SinkWriter<T> {
      */
     class DirectSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
+        private final Supplier<
+                        RollingFileWriter<
+                                T, DataFileMeta, CommittablePositionOutputStream.Committer>>
+                writerSupplier;
 
-        private RollingFileWriter<T, DataFileMeta> writer;
+        private RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer;
 
-        public DirectSinkWriter(Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier) {
+        public DirectSinkWriter(
+                Supplier<
+                                RollingFileWriter<
+                                        T, DataFileMeta, CommittablePositionOutputStream.Committer>>
+                        writerSupplier) {
             this.writerSupplier = writerSupplier;
         }
 
@@ -92,6 +103,19 @@ public interface SinkWriter<T> {
                 writer = null;
             }
             return flushedFiles;
+        }
+
+        @Override
+        public List<CommittablePositionOutputStream.Committer> closeAndGetCommitters()
+                throws IOException {
+            List<CommittablePositionOutputStream.Committer> commits = new ArrayList<>();
+
+            if (writer != null) {
+                writer.close();
+                commits.addAll(writer.committer());
+                writer = null;
+            }
+            return commits;
         }
 
         @Override
@@ -129,7 +153,10 @@ public interface SinkWriter<T> {
      */
     class BufferedSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
+        private final Supplier<
+                        RollingFileWriter<
+                                T, DataFileMeta, CommittablePositionOutputStream.Committer>>
+                writerSupplier;
         private final Function<T, InternalRow> toRow;
         private final Function<InternalRow, T> fromRow;
         private final IOManager ioManager;
@@ -139,9 +166,13 @@ public interface SinkWriter<T> {
         private final CompressOptions compression;
 
         private RowBuffer writeBuffer;
+        private List<CommittablePositionOutputStream.Committer> lastCommitters = new ArrayList<>();
 
         public BufferedSinkWriter(
-                Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier,
+                Supplier<
+                                RollingFileWriter<
+                                        T, DataFileMeta, CommittablePositionOutputStream.Committer>>
+                        writerSupplier,
                 Function<T, InternalRow> toRow,
                 Function<InternalRow, T> fromRow,
                 IOManager ioManager,
@@ -173,7 +204,8 @@ public interface SinkWriter<T> {
             List<DataFileMeta> flushedFiles = new ArrayList<>();
             if (writeBuffer != null) {
                 writeBuffer.complete();
-                RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
+                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
+                        writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
@@ -194,6 +226,36 @@ public interface SinkWriter<T> {
                 writeBuffer.reset();
             }
             return flushedFiles;
+        }
+
+        @Override
+        public List<CommittablePositionOutputStream.Committer> closeAndGetCommitters()
+                throws IOException {
+            List<CommittablePositionOutputStream.Committer> committers = new ArrayList<>();
+            if (writeBuffer != null) {
+                writeBuffer.complete();
+                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
+                        writer = writerSupplier.get();
+                IOException exception = null;
+                try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
+                    while (iterator.advanceNext()) {
+                        writer.write(fromRow.apply(iterator.getRow()));
+                    }
+                } catch (IOException e) {
+                    exception = e;
+                } finally {
+                    if (exception != null) {
+                        IOUtils.closeQuietly(writer);
+                        // cleanup code that might throw another exception
+                        throw exception;
+                    }
+                    writer.close();
+                }
+                committers.addAll(writer.committer());
+                // reuse writeBuffer
+                writeBuffer.reset();
+            }
+            return committers;
         }
 
         @Override

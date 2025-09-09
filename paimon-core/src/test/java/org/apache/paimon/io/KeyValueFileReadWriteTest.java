@@ -28,6 +28,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
@@ -101,8 +102,8 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -131,7 +132,7 @@ public class KeyValueFileReadWriteTest {
                         FailingFileIO.getFailingPath(failingName, tempDir.toString()), "avro");
 
         try {
-            FileWriter<KeyValue, ?> writer =
+            FileWriter<KeyValue, ?, ?> writer =
                     writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
             writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         } catch (Throwable e) {
@@ -155,8 +156,8 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -188,8 +189,8 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -393,8 +394,8 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();

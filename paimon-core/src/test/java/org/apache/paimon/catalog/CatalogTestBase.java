@@ -613,7 +613,7 @@ public abstract class CatalogTestBase {
                 for (InternalRow row : datas) {
                     write.write(row);
                 }
-                write.commit();
+                write.prepareCommit();
             }
             List<InternalRow> readData;
             readData = read(table, null, null, null, null);

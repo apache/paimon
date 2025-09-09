@@ -35,7 +35,7 @@ import java.util.stream.IntStream;
  * @param <T> type of records to write.
  * @param <R> type of result to produce after writing a file.
  */
-public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
+public abstract class StatsCollectingSingleFileWriter<T, R, C> extends SingleFileWriter<T, R, C> {
 
     private final RowType rowType;
     private final SimpleStatsProducer statsProducer;
@@ -48,8 +48,16 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType rowType,
-            boolean asyncWrite) {
-        super(fileIO, context.factory(), path, converter, context.compression(), asyncWrite);
+            boolean asyncWrite,
+            boolean useCommittableOutputStream) {
+        super(
+                fileIO,
+                context.factory(),
+                path,
+                converter,
+                context.compression(),
+                asyncWrite,
+                useCommittableOutputStream);
         this.rowType = rowType;
         this.statsProducer = context.statsProducer();
         this.isStatsDisabled = statsProducer.isStatsDisabled();

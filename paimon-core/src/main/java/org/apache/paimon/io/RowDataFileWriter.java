@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -42,7 +43,9 @@ import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link InternalRow}.
  * Also produces {@link DataFileMeta} after writing a file.
  */
-public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalRow, DataFileMeta> {
+public class RowDataFileWriter
+        extends StatsCollectingSingleFileWriter<
+                InternalRow, DataFileMeta, CommittablePositionOutputStream.Committer> {
 
     private final long schemaId;
     private final LongCounter seqNumCounter;
@@ -64,8 +67,16 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean isExternalPath,
-            @Nullable List<String> writeCols) {
-        super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
+            @Nullable List<String> writeCols,
+            boolean useCommittableOutputStream) {
+        super(
+                fileIO,
+                context,
+                path,
+                Function.identity(),
+                writeSchema,
+                asyncFileWrite,
+                useCommittableOutputStream);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.isExternalPath = isExternalPath;

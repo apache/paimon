@@ -29,6 +29,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -94,8 +95,8 @@ public class KeyValueFileWriterFactory {
         return formatContext.pathFactory(new WriteFormatKey(level, false));
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
-            int level, FileSource fileSource) {
+    public RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+            createRollingMergeTreeFileWriter(int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
         return new RollingFileWriter<>(
                 () -> {
@@ -106,7 +107,8 @@ public class KeyValueFileWriterFactory {
                 suggestedFileSize);
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
+    public RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+            createRollingChangelogFileWriter(int level) {
         WriteFormatKey key = new WriteFormatKey(level, true);
         return new RollingFileWriter<>(
                 () -> {

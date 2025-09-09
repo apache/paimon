@@ -18,6 +18,7 @@
 
 package org.apache.paimon.oss;
 
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -56,6 +57,18 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
+    }
+
+    @Override
+    public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        FileSystem fs = getFileSystem(hadoopPath);
+        return new OssCommittablePositionOutputStream(
+                (org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs,
+                hadoopPath,
+                path,
+                overwrite);
     }
 
     @Override

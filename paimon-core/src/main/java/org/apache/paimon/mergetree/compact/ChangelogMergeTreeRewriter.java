@@ -123,8 +123,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             throws Exception {
 
         CloseableIterator<ChangelogResult> iterator = null;
-        RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
-        RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
+        RollingFileWriter<KeyValue, DataFileMeta, ?> compactFileWriter = null;
+        RollingFileWriter<KeyValue, DataFileMeta, ?> changelogFileWriter = null;
         Exception collectedExceptions = null;
 
         try {

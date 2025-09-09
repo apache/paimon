@@ -36,27 +36,29 @@ import java.util.function.Supplier;
  * @param <T> record data type.
  * @param <R> the file metadata result.
  */
-public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
+public class RollingFileWriter<T, R, C> implements FileWriter<T, List<R>, List<C>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
 
     private static final int CHECK_ROLLING_RECORD_CNT = 1000;
 
-    private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
+    private final Supplier<? extends SingleFileWriter<T, R, C>> writerFactory;
     private final long targetFileSize;
     private final List<AbortExecutor> closedWriters;
     private final List<R> results;
+    private final List<C> committers;
 
-    private SingleFileWriter<T, R> currentWriter = null;
+    private SingleFileWriter<T, R, C> currentWriter = null;
     private long recordCount = 0;
     private boolean closed = false;
 
     public RollingFileWriter(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
+            Supplier<? extends SingleFileWriter<T, R, C>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
+        this.committers = new ArrayList<>();
     }
 
     @VisibleForTesting
@@ -132,7 +134,15 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         // cannot store whole writer, it includes lots of memory for example column vectors to read
         // and write
         closedWriters.add(currentWriter.abortExecutor());
-        results.add(currentWriter.result());
+
+        R result = currentWriter.result();
+        results.add(result);
+
+        // Collect committer if available
+        if (currentWriter.committer() != null) {
+            committers.add(currentWriter.committer());
+        }
+
         currentWriter = null;
     }
 
@@ -155,6 +165,11 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     public List<R> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
         return results;
+    }
+
+    @Override
+    public List<C> committer() {
+        return committers;
     }
 
     @Override

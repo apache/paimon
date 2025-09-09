@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -294,8 +295,10 @@ public class LookupLevelsTest {
     }
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                createWriterFactory().createRollingMergeTreeFileWriter(level, FileSource.APPEND);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer =
+                        createWriterFactory()
+                                .createRollingMergeTreeFileWriter(level, FileSource.APPEND);
         for (KeyValue kv : records) {
             writer.write(kv);
         }

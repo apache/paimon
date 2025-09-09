@@ -237,7 +237,7 @@ public class ManifestFileMerger {
             return Optional.empty();
         }
 
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+        RollingFileWriter<ManifestEntry, ManifestFileMeta, ?> writer =
                 manifestFile.createRollingWriter();
         Exception exception = null;
         try {

@@ -94,6 +94,27 @@ public interface FileIO extends Serializable, Closeable {
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
 
     /**
+     * Opens a CommittablePositionOutputStream at the indicated Path for transactional writing.
+     *
+     * <p>This method creates a stream that supports transactional writing operations. The written
+     * data becomes visible only after calling commit on the returned committer from closeForCommit
+     * method.
+     *
+     * @param path the file name to open
+     * @param overwrite if a file with this name already exists, then if true, the file will be
+     *     overwritten, and if false an error will be thrown.
+     * @return a CommittablePositionOutputStream that supports transactional writes
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
+     *     file already exists at that path and the write mode indicates to not overwrite the file.
+     * @throws UnsupportedOperationException if the filesystem does not support transactional writes
+     */
+    default CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        throw new UnsupportedOperationException(
+                "Committable output streams are not supported by this FileIO implementation");
+    }
+
+    /**
      * Return a file status object that represents the path.
      *
      * @param path The path we want information from

@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -196,8 +197,8 @@ public class ChangelogMergeTreeRewriterTest {
     public void testWriteReusedKey() throws Exception {
         Path testPath = new Path(path, UUID.randomUUID().toString());
         KeyValueFileWriterFactory writerFactory = createWriterFactory(testPath, keyType, valueType);
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingChangelogFileWriter(0);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingChangelogFileWriter(0);
 
         GenericRow key = new GenericRow(1);
         try {
@@ -273,8 +274,8 @@ public class ChangelogMergeTreeRewriterTest {
     private List<DataFileMeta> createFile(
             Map<Integer, Integer> kvs, RowType keyType, RowType valueType) throws IOException {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(path, keyType, valueType);
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingChangelogFileWriter(0);
+        RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
+                writer = writerFactory.createRollingChangelogFileWriter(0);
 
         try {
             for (Map.Entry<Integer, Integer> kv : kvs.entrySet()) {
