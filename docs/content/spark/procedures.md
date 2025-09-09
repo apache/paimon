@@ -45,7 +45,7 @@ This section introduce all available spark procedures about paimon.
             <li>partitions: partition filter. the comma (",") represents "AND", the semicolon (";") represents "OR". If you want to compact one partition with date=01 and day=01, you need to write 'date=01,day=01'. Left empty for all partitions. (Can't be used together with "where")</li>
             <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
-            <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
+            <li>order_by: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
             <li>compact_strategy: this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
