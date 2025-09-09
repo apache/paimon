@@ -876,6 +876,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enable query auth to give Catalog the opportunity to perform column level and row level permission validation on queries.</td>
         </tr>
         <tr>
+            <td><h5>read-optimized</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Improves reading performance by only scanning files which does not need merging. For primary-key tables, only scans files on the topmost level. For append tables, acts like the normal append table.</td>
+        </tr>
+        <tr>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
