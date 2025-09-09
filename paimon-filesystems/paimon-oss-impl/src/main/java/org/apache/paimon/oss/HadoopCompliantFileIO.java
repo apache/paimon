@@ -65,7 +65,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         FileSystem fs = getFileSystem(hadoopPath);
         return new OssCommittablePositionOutputStream(
-                (org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs,
+                new OSSAccessor((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
                 hadoopPath,
                 path,
                 overwrite);

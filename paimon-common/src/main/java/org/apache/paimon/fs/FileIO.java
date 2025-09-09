@@ -110,8 +110,7 @@ public interface FileIO extends Serializable, Closeable {
      */
     default CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
             throws IOException {
-        throw new UnsupportedOperationException(
-                "Committable output streams are not supported by this FileIO implementation");
+        return new TempFileCommittablePositionOutputStream(this, path, overwrite);
     }
 
     /**

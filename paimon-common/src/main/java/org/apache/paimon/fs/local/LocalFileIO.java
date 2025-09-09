@@ -97,6 +97,7 @@ public class LocalFileIO implements FileIO {
     @Override
     public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
             throws IOException {
+        LOG.debug("Invoking newCommittableOutputStream for {}", path);
         return new TempFileCommittablePositionOutputStream(this, path, overwrite);
     }
 

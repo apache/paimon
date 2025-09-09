@@ -18,13 +18,11 @@
 
 package org.apache.paimon.obs;
 
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TempFileCommittablePositionOutputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -56,13 +54,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
-    }
-
-    @Override
-    public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
-            throws IOException {
-        // Use temp file commit strategy for OBS and other filesystems
-        return new TempFileCommittablePositionOutputStream(this, path, overwrite);
     }
 
     @Override
