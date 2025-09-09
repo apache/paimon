@@ -103,7 +103,7 @@ class LiquidClusterProcedureTest extends PaimonSparkTestBase with StreamTest {
 
             var clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
-            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits();
+            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
             Assertions.assertThat(dataSplits.size()).isEqualTo(1)
             Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
             Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
@@ -176,6 +176,187 @@ class LiquidClusterProcedureTest extends PaimonSparkTestBase with StreamTest {
             Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
             Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
 
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: cluster for partitioned table") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a INT, b INT, c STRING, pt INT)
+               |PARTITIONED BY (pt)
+               |TBLPROPERTIES ('bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'liquid-clustering.columns'='a,b', 'clustering.strategy'='zorder')
+               |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, Int, String, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b", "c", "pt")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY pt")
+
+          try {
+            val random = new Random()
+            val randomStr = random.nextString(50)
+            // first write
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              inputData.addData((0, 0, c, pt))
+              inputData.addData((0, 1, c, pt))
+              inputData.addData((0, 2, c, pt))
+              inputData.addData((1, 0, c, pt))
+              inputData.addData((1, 1, c, pt))
+              inputData.addData((1, 2, c, pt))
+              inputData.addData((2, 0, c, pt))
+              inputData.addData((2, 1, c, pt))
+              inputData.addData((2, 2, c, pt))
+            }
+            stream.processAllAvailable()
+
+            val result = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              for (a <- 0 until 3) {
+                for (b <- 0 until 3) {
+                  val c = if (pt == 0) randomStr else null
+                  result.add(Row(a, b, c, pt))
+                }
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+
+            // first cluster, the outputLevel should be 5
+            checkAnswer(spark.sql("CALL paimon.sys.cluster(table => 'T')"), Row(true) :: Nil)
+
+            // first cluster result
+            val result2 = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              result2.add(Row(0, 0, c, pt))
+              result2.add(Row(0, 1, c, pt))
+              result2.add(Row(1, 0, c, pt))
+              result2.add(Row(1, 1, c, pt))
+              result2.add(Row(0, 2, c, pt))
+              result2.add(Row(1, 2, c, pt))
+              result2.add(Row(2, 0, c, pt))
+              result2.add(Row(2, 1, c, pt))
+              result2.add(Row(2, 2, c, pt))
+            }
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+
+            var clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(2)
+            dataSplits.forEach(
+              dataSplit => {
+                Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(1)
+                Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+              })
+
+            // second write
+            for (pt <- 0 until 2) {
+              inputData.addData((0, 3, null, pt), (1, 3, null, pt), (2, 3, null, pt))
+              inputData.addData(
+                (3, 0, null, pt),
+                (3, 1, null, pt),
+                (3, 2, null, pt),
+                (3, 3, null, pt))
+            }
+            stream.processAllAvailable()
+
+            val result3 = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              result3.add(Row(0, 0, c, pt))
+              result3.add(Row(0, 1, c, pt))
+              result3.add(Row(1, 0, c, pt))
+              result3.add(Row(1, 1, c, pt))
+              result3.add(Row(0, 2, c, pt))
+              result3.add(Row(1, 2, c, pt))
+              result3.add(Row(2, 0, c, pt))
+              result3.add(Row(2, 1, c, pt))
+              result3.add(Row(2, 2, c, pt))
+              for (a <- 0 until 3) {
+                result3.add(Row(a, 3, null, pt))
+              }
+              for (b <- 0 until 4) {
+                result3.add(Row(3, b, null, pt))
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+
+            // second cluster
+            checkAnswer(spark.sql("CALL paimon.sys.cluster(table => 'T')"), Row(true) :: Nil)
+            val result4 = new util.ArrayList[Row]()
+            // for partition-0: only file in level-0 will be picked for clustering, outputLevel is 4
+            result4.add(Row(0, 0, randomStr, 0))
+            result4.add(Row(0, 1, randomStr, 0))
+            result4.add(Row(1, 0, randomStr, 0))
+            result4.add(Row(1, 1, randomStr, 0))
+            result4.add(Row(0, 2, randomStr, 0))
+            result4.add(Row(1, 2, randomStr, 0))
+            result4.add(Row(2, 0, randomStr, 0))
+            result4.add(Row(2, 1, randomStr, 0))
+            result4.add(Row(2, 2, randomStr, 0))
+            result4.add(Row(0, 3, null, 0))
+            result4.add(Row(1, 3, null, 0))
+            result4.add(Row(3, 0, null, 0))
+            result4.add(Row(3, 1, null, 0))
+            result4.add(Row(2, 3, null, 0))
+            result4.add(Row(3, 2, null, 0))
+            result4.add(Row(3, 3, null, 0))
+            // for partition-1:all files will be picked for clustering, outputLevel is 5
+            result4.add(Row(0, 0, null, 1))
+            result4.add(Row(0, 1, null, 1))
+            result4.add(Row(1, 0, null, 1))
+            result4.add(Row(1, 1, null, 1))
+            result4.add(Row(0, 2, null, 1))
+            result4.add(Row(0, 3, null, 1))
+            result4.add(Row(1, 2, null, 1))
+            result4.add(Row(1, 3, null, 1))
+            result4.add(Row(2, 0, null, 1))
+            result4.add(Row(2, 1, null, 1))
+            result4.add(Row(3, 0, null, 1))
+            result4.add(Row(3, 1, null, 1))
+            result4.add(Row(2, 2, null, 1))
+            result4.add(Row(2, 3, null, 1))
+            result4.add(Row(3, 2, null, 1))
+            result4.add(Row(3, 3, null, 1))
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(2)
+            dataSplits.forEach(
+              dataSplit => {
+                if (dataSplit.partition().getInt(0) == 1) {
+                  // partition-1
+                  Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(1)
+                  Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+                } else {
+                  // partition-0
+                  Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(2)
+                  Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+                  Assertions.assertThat(dataSplit.dataFiles().get(1).level()).isEqualTo(4)
+                }
+              })
           } finally {
             stream.stop()
           }
