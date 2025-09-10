@@ -23,13 +23,14 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.AssertionsForInterfaceTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.testcontainers.shaded.org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
