@@ -15,14 +15,13 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import pyarrow as pa
+import pyarrow.compute as pc
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
-import pyarrow as pa
-import pyarrow.compute as pc
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -166,6 +165,7 @@ class DataWriter(ABC):
             extra_files=[],
             creation_time=datetime.now(),
             delete_row_count=0,
+            value_stats_cols=None,  # None means all columns have statistics
             file_path=str(file_path),
         ))
 
