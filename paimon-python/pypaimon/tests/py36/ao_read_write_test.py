@@ -33,8 +33,11 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
-
-
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
 
     def test_overwrite(self):
@@ -394,3 +397,102 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
 
         self.assertEqual(deserialized_row.values[0], long_string)
         self.assertEqual(deserialized_row.row_kind, RowKind.INSERT)
+
+    def test_manifest_entry_kind_1(self):
+        """Test ManifestEntry with _KIND=1, which should create empty BinaryRow for value_stats."""
+        # Create a catalog and table
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db", False)
+
+        # Define schema
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('price', pa.float64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.test_table", schema, False)
+        table = catalog.get_table("test_db.test_table")
+
+        # Create a ManifestFileManager
+        manifest_manager = ManifestFileManager(table)
+
+        # Create test data with _KIND=1
+        # For _KIND=1, value_stats should have empty BinaryRow for min_values and max_values
+        partition_fields = table.table_schema.get_partition_key_fields()
+        primary_key_fields = table.table_schema.get_trimmed_primary_key_fields()
+        all_fields = table.table_schema.fields
+
+        # Create empty BinaryRows for _KIND=1 case
+        empty_binary_row = BinaryRow([], [])
+
+        # Create value_stats with empty BinaryRows for _KIND=1
+        value_stats = SimpleStats(
+            min_values=empty_binary_row,  # Empty for _KIND=1
+            max_values=empty_binary_row,  # Empty for _KIND=1
+            null_counts=[0, 0, 0]  # Null counts for each field
+        )
+
+        # Create key_stats with actual data
+        # For this test, we'll use empty rows for key stats as well to keep it simple
+        key_stats = SimpleStats(
+            min_values=empty_binary_row,
+            max_values=empty_binary_row,
+            null_counts=[0, 0, 0]
+        )
+
+        # Create a DataFileMeta
+        file_meta = DataFileMeta(
+            file_name="test-file.parquet",
+            file_size=1024,
+            row_count=100,
+            min_key=empty_binary_row,
+            max_key=empty_binary_row,
+            key_stats=key_stats,
+            value_stats=value_stats,
+            min_sequence_number=1,
+            max_sequence_number=100,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            creation_time=1234567890,
+            delete_row_count=0,
+            embedded_index=None,
+            file_source=None
+        )
+
+        # Create a ManifestEntry with _KIND=1
+        entry = ManifestEntry(
+            kind=1,  # _KIND=1
+            partition=empty_binary_row,
+            bucket=0,
+            total_buckets=1,
+            file=file_meta
+        )
+
+        # Write the manifest entry
+        manifest_file_name = "manifest-test-kind-1"
+        manifest_manager.write(manifest_file_name, [entry])
+
+        # Read the manifest entry back
+        entries = manifest_manager.read(manifest_file_name)
+
+        # Verify we have exactly one entry
+        self.assertEqual(len(entries), 1)
+
+        # Get the entry
+        read_entry = entries[0]
+
+        # Verify _KIND is 1
+        self.assertEqual(read_entry.kind, 1)
+
+        # Verify value_stats has empty BinaryRows for min_values and max_values when _KIND=1
+        self.assertIsInstance(read_entry.file.value_stats.min_values, BinaryRow)
+        self.assertIsInstance(read_entry.file.value_stats.max_values, BinaryRow)
+        self.assertEqual(len(read_entry.file.value_stats.min_values.values), 0)
+        self.assertEqual(len(read_entry.file.value_stats.max_values.values), 0)
+
+        # Verify null_counts are preserved
+        self.assertEqual(read_entry.file.value_stats.null_counts, [0, 0, 0])
