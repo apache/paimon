@@ -249,10 +249,6 @@ class ReaderBasicTest(unittest.TestCase):
 
         # Create test data with _KIND=1
         # For _KIND=1, value_stats should have empty BinaryRow for min_values and max_values
-        partition_fields = table.table_schema.get_partition_key_fields()
-        primary_key_fields = table.table_schema.get_trimmed_primary_key_fields()
-        all_fields = table.table_schema.fields
-
         # Create empty BinaryRows for _KIND=1 case
         empty_binary_row = BinaryRow([], [])
 
