@@ -50,10 +50,13 @@ import java.util.Map;
 import java.util.Random;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LOCAL_MERGE_BUFFER_SIZE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.types.RowKind.DELETE;
+import static org.apache.paimon.types.RowKind.UPDATE_BEFORE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LocalMergeOperatorTest {
@@ -111,6 +114,50 @@ class LocalMergeOperatorTest {
         processElement("a", 1);
         operator.prepareSnapshotPreBarrier(0);
         assertThat(result).containsExactlyInAnyOrder("+I:a->2", "+I:b->1");
+        result.clear();
+    }
+
+    @Test
+    public void testIgnoreUpdateBefore() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IGNORE_UPDATE_BEFORE.key(), "true");
+        prepareHashOperator(options);
+
+        List<String> result = new ArrayList<>();
+        setOutput(result);
+
+        processElement("a", 1);
+        processElement(UPDATE_BEFORE, "a", 1);
+        operator.prepareSnapshotPreBarrier(0);
+        assertThat(result).containsExactlyInAnyOrder("+I:a->1");
+        result.clear();
+
+        processElement("a", 1);
+        processElement(DELETE, "a", 1);
+        operator.prepareSnapshotPreBarrier(1);
+        assertThat(result).containsExactlyInAnyOrder("-D:a->1");
+        result.clear();
+    }
+
+    @Test
+    public void testIgnoreDelete() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IGNORE_DELETE.key(), "true");
+        prepareHashOperator(options);
+
+        List<String> result = new ArrayList<>();
+        setOutput(result);
+
+        processElement("a", 1);
+        processElement(UPDATE_BEFORE, "a", 1);
+        operator.prepareSnapshotPreBarrier(0);
+        assertThat(result).containsExactlyInAnyOrder("+I:a->1");
+        result.clear();
+
+        processElement("a", 1);
+        processElement(DELETE, "a", 1);
+        operator.prepareSnapshotPreBarrier(1);
+        assertThat(result).containsExactlyInAnyOrder("+I:a->1");
         result.clear();
     }
 
