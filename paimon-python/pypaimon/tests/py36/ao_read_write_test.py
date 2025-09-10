@@ -34,10 +34,11 @@ from pypaimon.schema.schema import Schema
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+
+
 class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
 
     def test_overwrite(self):
