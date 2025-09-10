@@ -25,7 +25,7 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.binary_row import (BinaryRowDeserializer,
-                                           BinaryRowSerializer)
+                                           BinaryRowSerializer, BinaryRow)
 
 
 class ManifestFileManager:
@@ -61,11 +61,14 @@ class ManifestFileManager:
                 null_counts=key_dict['_NULL_COUNTS'],
             )
             value_dict = dict(file_dict['_VALUE_STATS'])
+            # TODO add dropStats logic to improve performance
+
             value_stats = SimpleStats(
-                min_values=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'],
-                                                            self.table.table_schema.fields),
-                max_values=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'],
-                                                            self.table.table_schema.fields),
+                min_values=BinaryRow([], []) if record['_KIND'] == 1 else BinaryRowDeserializer.from_bytes(
+                    value_dict['_MIN_VALUES'], self.table.table_schema.fields),
+                max_values=BinaryRow([], []) if record['_KIND'] == 1 else BinaryRowDeserializer.from_bytes(
+                    value_dict['_MAX_VALUES'],
+                    self.table.table_schema.fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
             file_meta = DataFileMeta(
