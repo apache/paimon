@@ -15,10 +15,9 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import fastavro
 from io import BytesIO
 from typing import List
-
-import fastavro
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
@@ -66,8 +65,8 @@ class ManifestFileManager:
             elif not file_dict.get('_VALUE_STATS_COLS'):
                 fields = []
             value_stats = SimpleStats(
-                min_values=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'], fields),
-                max_values=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'], fields),
+                min_values=GenericRowDeserializer.from_bytes(value_dict['_MIN_VALUES'], fields),
+                max_values=GenericRowDeserializer.from_bytes(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
             file_meta = DataFileMeta(
