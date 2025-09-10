@@ -23,7 +23,7 @@ from typing import List, Optional
 
 from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
                                                    SimpleStats)
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
@@ -31,8 +31,8 @@ class DataFileMeta:
     file_name: str
     file_size: int
     row_count: int
-    min_key: BinaryRow
-    max_key: BinaryRow
+    min_key: GenericRow
+    max_key: GenericRow
     key_stats: SimpleStats
     value_stats: SimpleStats
     min_sequence_number: int
@@ -51,7 +51,7 @@ class DataFileMeta:
     # not a schema field, just for internal usage
     file_path: str = None
 
-    def set_file_path(self, table_path: Path, partition: BinaryRow, bucket: int):
+    def set_file_path(self, table_path: Path, partition: GenericRow, bucket: int):
         path_builder = table_path
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():

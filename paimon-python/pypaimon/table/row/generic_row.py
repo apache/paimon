@@ -27,7 +27,7 @@ from pypaimon.table.row.row_kind import RowKind
 
 
 @dataclass
-class BinaryRow:
+class GenericRow:
     values: List[Any]
     fields: List[DataField]
     row_kind: RowKind = RowKind.INSERT
@@ -36,7 +36,7 @@ class BinaryRow:
         return {self.fields[i].name: self.values[i] for i in range(len(self.fields))}
 
 
-class BinaryRowDeserializer:
+class GenericRowDeserializer:
     HEADER_SIZE_IN_BITS = 8
     MAX_FIX_PART_DATA_SIZE = 7
     HIGHEST_FIRST_BIT = 0x80 << 56
@@ -47,9 +47,9 @@ class BinaryRowDeserializer:
             cls,
             bytes_data: bytes,
             data_fields: List[DataField]
-    ) -> BinaryRow:
+    ) -> GenericRow:
         if not bytes_data:
-            return BinaryRow([], data_fields)
+            return GenericRow([], data_fields)
 
         arity = len(data_fields)
         actual_data = bytes_data
@@ -66,7 +66,7 @@ class BinaryRowDeserializer:
                 value = cls._parse_field_value(actual_data, 0, null_bits_size_in_bytes, i, data_field.type)
             fields.append(value)
 
-        return BinaryRow(fields, data_fields, RowKind(actual_data[0]))
+        return GenericRow(fields, data_fields, RowKind(actual_data[0]))
 
     @classmethod
     def _calculate_bit_set_width_in_bytes(cls, arity: int) -> int:
@@ -235,12 +235,12 @@ class BinaryRowDeserializer:
         )
 
 
-class BinaryRowSerializer:
+class GenericRowSerializer:
     HEADER_SIZE_IN_BITS = 8
     MAX_FIX_PART_DATA_SIZE = 7
 
     @classmethod
-    def to_bytes(cls, binary_row: BinaryRow) -> bytes:
+    def to_bytes(cls, binary_row: GenericRow) -> bytes:
         arity = len(binary_row.fields)
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
         fixed_part_size = null_bits_size_in_bytes + arity * 8

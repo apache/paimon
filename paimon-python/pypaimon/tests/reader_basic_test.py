@@ -25,7 +25,7 @@ import pandas as pd
 import pyarrow as pa
 from pypaimon.table.row.row_kind import RowKind
 
-from pypaimon.table.row.binary_row import BinaryRow, BinaryRowSerializer, BinaryRowDeserializer
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer, GenericRowDeserializer
 
 from pypaimon.schema.data_types import DataField, AtomicType
 
@@ -209,8 +209,8 @@ class ReaderBasicTest(unittest.TestCase):
         long_string = "This is a long string that exceeds 7 bytes"
         values = [long_string]
 
-        binary_row = BinaryRow(values, fields, RowKind.INSERT)
-        serialized_bytes = BinaryRowSerializer.to_bytes(binary_row)
+        binary_row = GenericRow(values, fields, RowKind.INSERT)
+        serialized_bytes = GenericRowSerializer.to_bytes(binary_row)
 
         # Verify the last 6 bytes are 0
         # This is because the variable part data is rounded to the nearest word (8 bytes)
@@ -218,7 +218,7 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(serialized_bytes[-6:], b'\x00\x00\x00\x00\x00\x00')
         self.assertEqual(serialized_bytes[20:62].decode('utf-8'), long_string)
         # Deserialize to verify
-        deserialized_row = BinaryRowDeserializer.from_bytes(serialized_bytes, fields)
+        deserialized_row = GenericRowDeserializer.from_bytes(serialized_bytes, fields)
 
         self.assertEqual(deserialized_row.values[0], long_string)
         self.assertEqual(deserialized_row.row_kind, RowKind.INSERT)

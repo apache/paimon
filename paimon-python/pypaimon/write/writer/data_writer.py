@@ -28,7 +28,7 @@ from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 class DataWriter(ABC):
@@ -147,16 +147,16 @@ class DataWriter(ABC):
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
-            min_key=BinaryRow(min_key, self.trimmed_primary_key_fields),
-            max_key=BinaryRow(max_key, self.trimmed_primary_key_fields),
+            min_key=GenericRow(min_key, self.trimmed_primary_key_fields),
+            max_key=GenericRow(max_key, self.trimmed_primary_key_fields),
             key_stats=SimpleStats(
-                BinaryRow(min_key_stats, self.trimmed_primary_key_fields),
-                BinaryRow(max_key_stats, self.trimmed_primary_key_fields),
+                GenericRow(min_key_stats, self.trimmed_primary_key_fields),
+                GenericRow(max_key_stats, self.trimmed_primary_key_fields),
                 key_null_counts,
             ),
             value_stats=SimpleStats(
-                BinaryRow(min_value_stats, self.table.table_schema.fields),
-                BinaryRow(max_value_stats, self.table.table_schema.fields),
+                GenericRow(min_value_stats, self.table.table_schema.fields),
+                GenericRow(max_value_stats, self.table.table_schema.fields),
                 value_null_counts,
             ),
             min_sequence_number=min_seq,

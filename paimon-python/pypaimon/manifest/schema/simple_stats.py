@@ -19,13 +19,13 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
 class SimpleStats:
-    min_values: BinaryRow
-    max_values: BinaryRow
+    min_values: GenericRow
+    max_values: GenericRow
     null_counts: Optional[List[int]]
 
 

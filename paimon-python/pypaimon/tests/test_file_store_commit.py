@@ -24,7 +24,7 @@ from unittest.mock import Mock, patch
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -379,7 +379,7 @@ class TestFileStoreCommit(unittest.TestCase):
     def _to_entries(commit_messages):
         commit_entries = []
         for msg in commit_messages:
-            partition = BinaryRow(list(msg.partition), None)
+            partition = GenericRow(list(msg.partition), None)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,

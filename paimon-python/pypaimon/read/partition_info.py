@@ -19,7 +19,7 @@
 from typing import Any, List
 
 from pypaimon.schema.data_types import DataField
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 class PartitionInfo:
@@ -27,7 +27,7 @@ class PartitionInfo:
     Partition information about how the row mapping of outer row.
     """
 
-    def __init__(self, mapping: List[int], partition: BinaryRow):
+    def __init__(self, mapping: List[int], partition: GenericRow):
         self.mapping = mapping
         self.partition_values = partition.values
         self.partition_fields = partition.fields
