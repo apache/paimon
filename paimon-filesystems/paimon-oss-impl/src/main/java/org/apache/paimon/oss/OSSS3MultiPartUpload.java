@@ -18,56 +18,55 @@
 
 package org.apache.paimon.oss;
 
+import org.apache.paimon.fs.MultiPartUploadStore;
+
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
-
-import javax.annotation.Nonnull;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
-/** Provides the bridging logic between Hadoop's abstract filesystem and Aliyun OSS. */
-public class OSSAccessor {
+/** Provides the multipart upload by Aliyun OSS. */
+public class OSSS3MultiPartUpload
+        implements MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> {
 
     private AliyunOSSFileSystem fs;
     private AliyunOSSFileSystemStore store;
 
-    public OSSAccessor(AliyunOSSFileSystem fs) {
+    public OSSS3MultiPartUpload(AliyunOSSFileSystem fs) {
         this.fs = fs;
         this.store = fs.getStore();
     }
 
-    public String pathToObject(org.apache.hadoop.fs.Path hadoopPath) {
-        if (!hadoopPath.isAbsolute()) {
-            hadoopPath = new org.apache.hadoop.fs.Path(fs.getWorkingDirectory(), hadoopPath);
-        }
-
-        return hadoopPath.toUri().getPath().substring(1);
+    @Override
+    public Path getWorkingDirectory() {
+        return fs.getWorkingDirectory();
     }
 
-    public String startMultipartUpload(String objectName) {
+    @Override
+    public String startMultiPartUpload(String objectName) throws IOException {
         return store.getUploadId(objectName);
     }
 
+    @Override
     public CompleteMultipartUploadResult completeMultipartUpload(
-            String objectName, String uploadId, List<PartETag> partETags) {
+            String objectName, String uploadId, List<PartETag> partETags, long numBytesInParts) {
         return store.completeMultipartUpload(objectName, uploadId, partETags);
     }
 
+    @Override
+    public PartETag uploadPart(
+            String objectName, String uploadId, int partNumber, File file, long byteLength)
+            throws IOException {
+        return store.uploadPart(file, objectName, uploadId, partNumber);
+    }
+
+    @Override
     public void abortMultipartUpload(String objectName, String uploadId) {
         store.abortMultipartUpload(objectName, uploadId);
-    }
-
-    public PartETag uploadPart(File file, String objectName, String uploadId, int idx)
-            throws IOException {
-        return store.uploadPart(file, objectName, uploadId, idx);
-    }
-
-    @Nonnull
-    public String getScheme() {
-        return fs.getScheme();
     }
 }

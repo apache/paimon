@@ -18,11 +18,13 @@
 
 package org.apache.paimon.s3;
 
+import org.apache.paimon.fs.MultiPartUploadStore;
+
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 import com.amazonaws.services.s3.model.UploadPartRequest;
-import com.amazonaws.services.s3.model.UploadPartResult;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.WriteOperationHelper;
 import org.apache.hadoop.fs.s3a.statistics.S3AStatisticsContext;
@@ -36,14 +38,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Provides the bridging logic between Hadoop's abstract filesystem and Amazon S3. */
-public class S3Accessor {
+/** Provides the multipart upload by Amazon S3. */
+public class S3MultiPartUpload
+        implements MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> {
 
     private final S3AFileSystem s3a;
 
     private final InternalWriteOperationHelper s3accessHelper;
 
-    public S3Accessor(S3AFileSystem s3a, Configuration conf) {
+    public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
         checkNotNull(s3a);
         this.s3accessHelper =
                 new InternalWriteOperationHelper(
@@ -55,38 +58,41 @@ public class S3Accessor {
         this.s3a = s3a;
     }
 
-    public String pathToObject(org.apache.hadoop.fs.Path hadoopPath) {
-        if (!hadoopPath.isAbsolute()) {
-            hadoopPath = new org.apache.hadoop.fs.Path(s3a.getWorkingDirectory(), hadoopPath);
-        }
-
-        return hadoopPath.toUri().getPath().substring(1);
+    @Override
+    public Path getWorkingDirectory() {
+        return s3a.getWorkingDirectory();
     }
 
-    public String startMultiPartUpload(String key) throws IOException {
-        return s3accessHelper.initiateMultiPartUpload(key);
+    @Override
+    public String startMultiPartUpload(String objectName) throws IOException {
+        return s3accessHelper.initiateMultiPartUpload(objectName);
     }
 
-    public UploadPartResult uploadPart(
-            String key, String uploadId, int partNumber, File inputFile, long length)
+    @Override
+    public CompleteMultipartUploadResult completeMultipartUpload(
+            String objectName, String uploadId, List<PartETag> partETags, long numBytesInParts)
+            throws IOException {
+        return s3accessHelper.completeMPUwithRetries(
+                objectName, uploadId, partETags, numBytesInParts, new AtomicInteger(0));
+    }
+
+    @Override
+    public PartETag uploadPart(
+            String objectName, String uploadId, int partNumber, File file, long byteLength)
             throws IOException {
         final UploadPartRequest uploadRequest =
                 s3accessHelper.newUploadPartRequest(
-                        key, uploadId, partNumber, checkedDownCast(length), null, inputFile, 0L);
-        return s3accessHelper.uploadPart(uploadRequest);
+                        objectName,
+                        uploadId,
+                        partNumber,
+                        checkedDownCast(byteLength),
+                        null,
+                        file,
+                        0L);
+        return s3accessHelper.uploadPart(uploadRequest).getPartETag();
     }
 
-    public CompleteMultipartUploadResult commitMultiPartUpload(
-            String destKey,
-            String uploadId,
-            List<PartETag> partETags,
-            long length,
-            AtomicInteger errorCount)
-            throws IOException {
-        return s3accessHelper.completeMPUwithRetries(
-                destKey, uploadId, partETags, length, errorCount);
-    }
-
+    @Override
     public void abortMultipartUpload(String destKey, String uploadId) throws IOException {
         s3accessHelper.abortMultipartUpload(destKey, uploadId, false, null);
     }

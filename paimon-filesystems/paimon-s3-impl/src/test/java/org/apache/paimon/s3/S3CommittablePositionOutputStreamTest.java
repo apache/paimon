@@ -23,7 +23,6 @@ import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
-import com.amazonaws.services.s3.model.UploadPartResult;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +36,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -47,7 +45,7 @@ class S3CommittablePositionOutputStreamTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private MockS3Accessor mockAccessor;
+    private MockS3MultiPartUpload mockAccessor;
     private S3CommittablePositionOutputStream stream;
     private Path targetPath;
     private File targetFile;
@@ -60,7 +58,7 @@ class S3CommittablePositionOutputStreamTest {
         targetFile = tempDir.resolve("target-file.parquet").toFile();
         targetFile.getParentFile().mkdirs();
 
-        mockAccessor = new MockS3Accessor(targetFile);
+        mockAccessor = new MockS3MultiPartUpload(targetFile);
     }
 
     private S3CommittablePositionOutputStream createStream() throws IOException {
@@ -212,7 +210,7 @@ class S3CommittablePositionOutputStreamTest {
      * Mock implementation that uses local files to simulate S3 multipart upload behavior. Extends
      * S3Accessor but overrides all methods to avoid initialization issues.
      */
-    private static class MockS3Accessor extends S3Accessor {
+    private static class MockS3MultiPartUpload extends S3MultiPartUpload {
         private final List<File> tempPartFiles = new ArrayList<>();
         private final File targetFile;
         private final String mockUploadId = "mock-upload-id-12345";
@@ -225,7 +223,7 @@ class S3CommittablePositionOutputStreamTest {
         int abortMultipartUploadCallCount = 0;
 
         @SuppressWarnings("unused")
-        public MockS3Accessor(File targetFile) {
+        public MockS3MultiPartUpload(File targetFile) {
             super(createStubFileSystem(), new Configuration());
             this.targetFile = targetFile;
         }
@@ -247,8 +245,8 @@ class S3CommittablePositionOutputStreamTest {
         }
 
         @Override
-        public UploadPartResult uploadPart(
-                String key, String uploadId, int partNumber, File inputFile, long length)
+        public PartETag uploadPart(
+                String key, String uploadId, int partNumber, File inputFile, long byteLength)
                 throws IOException {
             uploadPartCalls++;
 
@@ -265,16 +263,12 @@ class S3CommittablePositionOutputStreamTest {
             tempPartFiles.add(tempPartFile);
 
             // Return mock UploadPartResult
-            return new MockUploadPartResult("etag-" + partNumber, partNumber);
+            return new PartETag(partNumber, "etag-" + partNumber);
         }
 
         @Override
-        public CompleteMultipartUploadResult commitMultiPartUpload(
-                String destKey,
-                String uploadId,
-                List<PartETag> partETags,
-                long length,
-                AtomicInteger errorCount) {
+        public CompleteMultipartUploadResult completeMultipartUpload(
+                String destKey, String uploadId, List<PartETag> partETags, long length) {
             completeMultipartUploadCalled = true;
 
             // Simulate combining all parts into the final target file
@@ -322,22 +316,6 @@ class S3CommittablePositionOutputStreamTest {
             if (targetFile.exists()) {
                 targetFile.delete();
             }
-        }
-    }
-
-    /** Mock implementation of UploadPartResult. */
-    private static class MockUploadPartResult extends UploadPartResult {
-        private final String eTag;
-        private final int partNumber;
-
-        public MockUploadPartResult(String eTag, int partNumber) {
-            this.eTag = eTag;
-            this.partNumber = partNumber;
-        }
-
-        @Override
-        public PartETag getPartETag() {
-            return new MockPartETag(eTag, partNumber);
         }
     }
 

@@ -46,7 +46,7 @@ public class OssCommittablePositionOutputStreamTest {
     @TempDir java.nio.file.Path tempDir;
 
     private OssCommittablePositionOutputStream stream;
-    private MockOSSAccessor mockAccessor;
+    private MockOSSS3MultiPartUpload mockAccessor;
     private org.apache.hadoop.fs.Path hadoopPath;
     private Path targetPath;
     private File targetFile;
@@ -58,7 +58,7 @@ public class OssCommittablePositionOutputStreamTest {
         targetFile = tempDir.resolve("target-file.parquet").toFile();
         targetFile.getParentFile().mkdirs();
 
-        mockAccessor = new MockOSSAccessor(targetFile);
+        mockAccessor = new MockOSSS3MultiPartUpload(targetFile);
     }
 
     private OssCommittablePositionOutputStream createStream() {
@@ -139,7 +139,7 @@ public class OssCommittablePositionOutputStreamTest {
 
         assertThatThrownBy(committer::commit)
                 .isInstanceOf(IOException.class)
-                .hasMessageContaining("Failed to commit OSS multipart upload");
+                .hasMessageContaining("Failed to commit multipart upload");
 
         // Target file should not exist on failed commit
         assertThat(targetFile.exists()).isFalse();
@@ -203,7 +203,7 @@ public class OssCommittablePositionOutputStreamTest {
      * Mock implementation that actually uses local files to simulate OSS multipart upload behavior.
      * Extends OSSAccessor but overrides all methods to avoid initialization issues.
      */
-    private static class MockOSSAccessor extends OSSAccessor {
+    private static class MockOSSS3MultiPartUpload extends OSSS3MultiPartUpload {
 
         boolean startMultipartUploadCalled = false;
         int uploadPartCalls = 0;
@@ -219,7 +219,7 @@ public class OssCommittablePositionOutputStreamTest {
         private final File targetFile;
 
         @SuppressWarnings("unused")
-        public MockOSSAccessor(File targetFile) {
+        public MockOSSS3MultiPartUpload(File targetFile) {
             super(createStubFileSystem()); // Create minimal stub to avoid null pointer
             this.targetFile = targetFile;
         }
@@ -235,13 +235,14 @@ public class OssCommittablePositionOutputStreamTest {
         }
 
         @Override
-        public String startMultipartUpload(String objectName) {
+        public String startMultiPartUpload(String objectName) {
             startMultipartUploadCalled = true;
             return mockUploadId;
         }
 
         @Override
-        public PartETag uploadPart(File file, String objectName, String uploadId, int idx)
+        public PartETag uploadPart(
+                String objectName, String uploadId, int partNumber, File file, long byteLength)
                 throws IOException {
             uploadPartCalls++;
 
@@ -255,17 +256,21 @@ public class OssCommittablePositionOutputStreamTest {
             }
 
             // Store the part file in a temporary location (simulating storing in OSS)
-            File partFile = Files.createTempFile("mock-oss-part-" + idx + "-", ".tmp").toFile();
+            File partFile =
+                    Files.createTempFile("mock-oss-part-" + partNumber + "-", ".tmp").toFile();
             Files.copy(file.toPath(), partFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             tempPartFiles.add(partFile);
 
-            MockPartETag mockPartETag = new MockPartETag(idx, "mock-etag-" + idx);
+            MockPartETag mockPartETag = new MockPartETag(partNumber, "mock-etag-" + partNumber);
             return mockPartETag;
         }
 
         @Override
         public CompleteMultipartUploadResult completeMultipartUpload(
-                String objectName, String uploadId, List<PartETag> partETags) {
+                String objectName,
+                String uploadId,
+                List<PartETag> partETags,
+                long numBytesInParts) {
             completeMultipartUploadCalled = true;
             completeMultipartUploadCallCount++;
 
