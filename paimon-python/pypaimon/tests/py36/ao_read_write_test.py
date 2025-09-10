@@ -432,17 +432,14 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
             test_name="empty_case"
         )
 
-        # Test case 3: _VALUE_STATS_COLS has specific columns (should raise RuntimeError)
-        with self.assertRaises(RuntimeError) as context:
-            self._test_value_stats_cols_case(
-                manifest_manager,
-                table,
-                value_stats_cols=['id', 'name'],
-                expected_fields_count=2,  # Only 2 specified fields
-                test_name="specific_case"
-            )
-        self.assertEqual("_VALUE_STATS_COLS should be None or empty. We don't support other values now.",
-                         str(context.exception))
+        # Test case 3: _VALUE_STATS_COLS has specific columns
+        self._test_value_stats_cols_case(
+            manifest_manager,
+            table,
+            value_stats_cols=['id', 'name'],
+            expected_fields_count=2,  # Only 2 specified fields
+            test_name="specific_case"
+        )
 
     def _test_value_stats_cols_case(self, manifest_manager, table, value_stats_cols, expected_fields_count, test_name):
         """Helper method to test a specific _VALUE_STATS_COLS case."""

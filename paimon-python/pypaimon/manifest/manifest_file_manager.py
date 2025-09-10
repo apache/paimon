@@ -65,7 +65,7 @@ class ManifestFileManager:
             elif not file_dict.get('_VALUE_STATS_COLS'):
                 fields = []
             else:
-                raise RuntimeError("_VALUE_STATS_COLS should be None or empty. We don't support other values now.")
+                fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
             value_stats = SimpleStats(
                 min_values=GenericRowDeserializer.from_bytes(value_dict['_MIN_VALUES'], fields),
                 max_values=GenericRowDeserializer.from_bytes(value_dict['_MAX_VALUES'], fields),
