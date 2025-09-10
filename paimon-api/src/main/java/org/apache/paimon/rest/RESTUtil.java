@@ -42,6 +42,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+
 /** Util for REST. */
 public class RESTUtil {
 
@@ -72,19 +74,30 @@ public class RESTUtil {
         if (updates == null) {
             updates = Maps.newHashMap();
         }
-        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        for (Map.Entry<String, String> entry : targets.entrySet()) {
-            if (!updates.containsKey(entry.getKey()) && entry.getValue() != null) {
-                builder.put(entry.getKey(), entry.getValue());
-            }
-        }
+
+        Map<String, String> result = Maps.newLinkedHashMap();
+
+        // First, add all non-null entries from updates
         for (Map.Entry<String, String> entry : updates.entrySet()) {
             if (entry.getValue() != null) {
-                builder.put(entry.getKey(), entry.getValue());
+                result.put(entry.getKey(), entry.getValue());
             }
         }
 
-        return builder.build();
+        // Then, add entries from targets, which take precedence (override updates)
+        for (Map.Entry<String, String> entry : targets.entrySet()) {
+            if (entry.getValue() != null) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        // Handle special case: dlf.oss-endpoint should override fs.oss.endpoint
+        String dlfOssEndpoint = result.get(DLF_OSS_ENDPOINT.key());
+        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+            result.put("fs.oss.endpoint", dlfOssEndpoint);
+        }
+
+        return ImmutableMap.copyOf(result);
     }
 
     public static String encodeString(String toEncode) {
