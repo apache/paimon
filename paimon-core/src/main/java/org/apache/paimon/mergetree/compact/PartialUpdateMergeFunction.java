@@ -84,6 +84,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private KeyValue reused;
     private boolean currentDeleteRow;
     private boolean notNullColumnFilled;
+
     /**
      * If the first value is retract, and no insert record is received, the row kind should be
      * RowKind.DELETE. (Partial update sequence group may not correctly set currentDeleteRow if no
@@ -405,7 +406,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             List<String> fieldNames = rowType.getFieldNames();
             this.fieldSeqComparators = new HashMap<>();
             Map<String, Integer> sequenceGroupMap = new HashMap<>();
-            List<Integer> allSequenceFields = new ArrayList<>();
+            List<String> allSequenceFields = new ArrayList<>();
+            List<String> fieldsProtectedBySequenceGroup = new ArrayList<>();
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
@@ -434,11 +436,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                             fieldNames.get(field), k));
                                         }
                                         fieldSeqComparators.put(field, userDefinedSeqComparator);
+                                        fieldsProtectedBySequenceGroup.add(fieldNames.get(field));
                                     });
 
                     // add self
                     for (int index : sequenceFields) {
-                        allSequenceFields.add(index);
+                        allSequenceFields.add(fieldNames.get(index));
                         String fieldName = fieldNames.get(index);
                         fieldSeqComparators.put(index, userDefinedSeqComparator);
                         sequenceGroupMap.put(fieldName, index);
@@ -447,7 +450,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
             this.fieldAggregators =
                     createFieldAggregators(
-                            rowType, primaryKeys, allSequenceFields, new CoreOptions(options));
+                            rowType,
+                            primaryKeys,
+                            allSequenceFields,
+                            fieldsProtectedBySequenceGroup,
+                            new CoreOptions(options));
 
             // check if partial-update.remove-record-on-delete and ignore-delete are enabled at the
             Preconditions.checkState(
@@ -633,7 +640,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         private Map<Integer, Supplier<FieldAggregator>> createFieldAggregators(
                 RowType rowType,
                 List<String> primaryKeys,
-                List<Integer> allSequenceFields,
+                List<String> allSequenceFields,
+                List<String> fieldsProtectedBySequenceGroup,
                 CoreOptions options) {
 
             List<String> fieldNames = rowType.getFieldNames();
@@ -643,33 +651,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
 
-                if (allSequenceFields.contains(i)) {
-                    // no agg for sequence fields
-                    continue;
-                }
-
-                if (primaryKeys.contains(fieldName)) {
-                    // aggregate by primary keys, so they do not aggregate
-                    fieldAggregators.put(
-                            i,
-                            () ->
-                                    FieldAggregatorFactory.create(
-                                            fieldType,
-                                            fieldName,
-                                            FieldPrimaryKeyAggFactory.NAME,
-                                            options));
-                    continue;
-                }
-
-                String aggFuncName = getAggFuncName(options, fieldName);
+                String aggFuncName =
+                        getAggFuncName(
+                                fieldName,
+                                options,
+                                primaryKeys,
+                                allSequenceFields,
+                                fieldsProtectedBySequenceGroup);
                 if (aggFuncName != null) {
-                    // last_non_null_value doesn't require sequence group
-                    checkArgument(
-                            aggFuncName.equals(FieldLastNonNullValueAggFactory.NAME)
-                                    || fieldSeqComparators.containsKey(
-                                            fieldNames.indexOf(fieldName)),
-                            "Must use sequence group for aggregation functions but not found for field %s.",
-                            fieldName);
                     fieldAggregators.put(
                             i,
                             () ->
@@ -679,12 +668,39 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
             return fieldAggregators;
         }
+    }
 
-        @Nullable
-        private String getAggFuncName(CoreOptions options, String fieldName) {
-            String aggFunc = options.fieldAggFunc(fieldName);
-            return aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
+    @Nullable
+    public static String getAggFuncName(
+            String fieldName,
+            CoreOptions options,
+            List<String> primaryKeys,
+            List<String> sequenceFields,
+            List<String> fieldsProtectedBySequenceGroup) {
+        if (sequenceFields.contains(fieldName)) {
+            // no agg for sequence fields
+            return null;
         }
+
+        if (primaryKeys.contains(fieldName)) {
+            // aggregate by primary keys, so they do not aggregate
+            return FieldPrimaryKeyAggFactory.NAME;
+        }
+
+        String aggFuncName = options.fieldAggFunc(fieldName);
+        if (aggFuncName == null) {
+            aggFuncName = options.fieldsDefaultFunc();
+        }
+
+        if (aggFuncName != null) {
+            // last_non_null_value doesn't require sequence group
+            checkArgument(
+                    aggFuncName.equals(FieldLastNonNullValueAggFactory.NAME)
+                            || fieldsProtectedBySequenceGroup.contains(fieldName),
+                    "Must use sequence group for aggregation functions but not found for field %s.",
+                    fieldName);
+        }
+        return aggFuncName;
     }
 
     private <T> List<WrapperWithFieldIndex<T>> getKeySortedListFromMap(Map<Integer, T> map) {

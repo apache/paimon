@@ -177,8 +177,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
-
-                String aggFuncName = getAggFuncName(fieldName, sequenceFields);
+                String aggFuncName =
+                        getAggFuncName(fieldName, options, primaryKeys, sequenceFields);
                 fieldAggregators[i] =
                         FieldAggregatorFactory.create(fieldType, fieldName, aggFuncName, options);
             }
@@ -190,27 +190,32 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                     ArrayUtils.toPrimitiveBoolean(
                             fieldTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new)));
         }
+    }
 
-        private String getAggFuncName(String fieldName, List<String> sequenceFields) {
-            if (sequenceFields.contains(fieldName)) {
-                // no agg for sequence fields, use last_value to do cover
-                return FieldLastValueAggFactory.NAME;
-            }
+    public static String getAggFuncName(
+            String fieldName,
+            CoreOptions options,
+            List<String> primaryKeys,
+            List<String> sequenceFields) {
 
-            if (primaryKeys.contains(fieldName)) {
-                // aggregate by primary keys, so they do not aggregate
-                return FieldPrimaryKeyAggFactory.NAME;
-            }
-
-            String aggFuncName = options.fieldAggFunc(fieldName);
-            if (aggFuncName == null) {
-                aggFuncName = options.fieldsDefaultFunc();
-            }
-            if (aggFuncName == null) {
-                // final default agg func
-                aggFuncName = FieldLastNonNullValueAggFactory.NAME;
-            }
-            return aggFuncName;
+        if (sequenceFields.contains(fieldName)) {
+            // no agg for sequence fields, use last_value to do cover
+            return FieldLastValueAggFactory.NAME;
         }
+
+        if (primaryKeys.contains(fieldName)) {
+            // aggregate by primary keys, so they do not aggregate
+            return FieldPrimaryKeyAggFactory.NAME;
+        }
+
+        String aggFuncName = options.fieldAggFunc(fieldName);
+        if (aggFuncName == null) {
+            aggFuncName = options.fieldsDefaultFunc();
+        }
+        if (aggFuncName == null) {
+            // final default agg func
+            aggFuncName = FieldLastNonNullValueAggFactory.NAME;
+        }
+        return aggFuncName;
     }
 }
