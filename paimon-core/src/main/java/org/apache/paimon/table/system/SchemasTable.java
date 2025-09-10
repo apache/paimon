@@ -60,17 +60,21 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -175,8 +179,8 @@ public class SchemasTable implements ReadonlyTable {
 
         private RowType readType;
 
-        private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
-        private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
+        private @Nullable Long schemaIdMin = null;
+        private @Nullable Long schemaIdMax = null;
         private final List<Long> schemaIds = new ArrayList<>();
 
         @Override
@@ -218,26 +222,24 @@ public class SchemasTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
-                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
-                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                    schemaIdMin = (Long) snapshotPred.literals().get(0);
+                    schemaIdMax = (Long) snapshotPred.literals().get(0);
                 }
 
                 if (snapshotPred.function() instanceof GreaterThan) {
-                    optionalFilterSchemaIdMin =
-                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
+                    schemaIdMin = (Long) snapshotPred.literals().get(0) + 1;
                 }
 
                 if (snapshotPred.function() instanceof GreaterOrEqual) {
-                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
+                    schemaIdMin = (Long) snapshotPred.literals().get(0);
                 }
 
                 if (snapshotPred.function() instanceof LessThan) {
-                    optionalFilterSchemaIdMax =
-                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
+                    schemaIdMax = (Long) snapshotPred.literals().get(0) - 1;
                 }
 
                 if (snapshotPred.function() instanceof LessOrEqual) {
-                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                    schemaIdMax = (Long) snapshotPred.literals().get(0);
                 }
             }
         }
@@ -260,15 +262,16 @@ public class SchemasTable implements ReadonlyTable {
             }
             SchemaManager manager = dataTable.schemaManager();
 
-            Collection<TableSchema> tableSchemas;
+            List<TableSchema> tableSchemas;
             if (!schemaIds.isEmpty()) {
-                tableSchemas = manager.schemasWithId(schemaIds);
+                tableSchemas = schemasWithId(manager, schemaIds);
             } else {
-                tableSchemas =
-                        manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
+                tableSchemas = listWithRange(manager, schemaIdMin, schemaIdMax);
             }
 
-            Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
+            @SuppressWarnings("DataFlowIssue")
+            Iterator<InternalRow> rows =
+                    Iterators.transform(tableSchemas.iterator(), SchemasTable::toRow);
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -279,23 +282,79 @@ public class SchemasTable implements ReadonlyTable {
             }
             return new IteratorRecordReader<>(rows);
         }
+    }
 
-        private InternalRow toRow(TableSchema schema) {
-            return GenericRow.of(
-                    schema.id(),
-                    toJson(schema.fields()),
-                    toJson(schema.partitionKeys()),
-                    toJson(schema.primaryKeys()),
-                    toJson(schema.options()),
-                    BinaryString.fromString(schema.comment()),
-                    Timestamp.fromLocalDateTime(
-                            LocalDateTime.ofInstant(
-                                    Instant.ofEpochMilli(schema.timeMillis()),
-                                    ZoneId.systemDefault())));
+    private static InternalRow toRow(TableSchema schema) {
+        return GenericRow.of(
+                schema.id(),
+                toJson(schema.fields()),
+                toJson(schema.partitionKeys()),
+                toJson(schema.primaryKeys()),
+                toJson(schema.options()),
+                BinaryString.fromString(schema.comment()),
+                Timestamp.fromLocalDateTime(
+                        LocalDateTime.ofInstant(
+                                Instant.ofEpochMilli(schema.timeMillis()),
+                                ZoneId.systemDefault())));
+    }
+
+    private static BinaryString toJson(Object obj) {
+        return BinaryString.fromString(JsonSerdeUtil.toFlatJson(obj));
+    }
+
+    private static List<TableSchema> schemasWithId(
+            SchemaManager schemaManager, List<Long> schemaIds) {
+        return schemaIds.stream().map(schemaManager::schema).collect(Collectors.toList());
+    }
+
+    private static List<TableSchema> listWithRange(
+            SchemaManager schemaManager,
+            @Nullable Long optionalMinSchemaId,
+            @Nullable Long optionalMaxSchemaId) {
+        long lowerBoundSchemaId = 0L;
+
+        Optional<TableSchema> latest = schemaManager.latest();
+        if (!latest.isPresent()) {
+            return Collections.emptyList();
         }
 
-        private BinaryString toJson(Object obj) {
-            return BinaryString.fromString(JsonSerdeUtil.toFlatJson(obj));
+        long upperBoundSchematId = latest.get().id();
+
+        // null check on optionalMaxSchemaId & optionalMinSchemaId return all schemas
+        if (optionalMinSchemaId == null && optionalMaxSchemaId == null) {
+            return schemaManager.listAll();
         }
+
+        if (optionalMaxSchemaId != null) {
+            if (optionalMaxSchemaId < lowerBoundSchemaId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not lower than min schema id: %s",
+                                optionalMaxSchemaId, lowerBoundSchemaId));
+            }
+            upperBoundSchematId =
+                    optionalMaxSchemaId > upperBoundSchematId
+                            ? upperBoundSchematId
+                            : optionalMaxSchemaId;
+        }
+
+        if (optionalMinSchemaId != null) {
+            if (optionalMinSchemaId > upperBoundSchematId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not greater than max schema id: %s",
+                                optionalMinSchemaId, upperBoundSchematId));
+            }
+            lowerBoundSchemaId =
+                    optionalMinSchemaId > lowerBoundSchemaId
+                            ? optionalMinSchemaId
+                            : lowerBoundSchemaId;
+        }
+
+        // +1 here to include the upperBoundSchemaId
+        return LongStream.range(lowerBoundSchemaId, upperBoundSchematId + 1)
+                .mapToObj(schemaManager::schema)
+                .sorted(Comparator.comparingLong(TableSchema::id))
+                .collect(Collectors.toList());
     }
 }
