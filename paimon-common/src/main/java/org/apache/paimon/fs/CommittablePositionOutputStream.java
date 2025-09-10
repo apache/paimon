@@ -57,12 +57,5 @@ public abstract class CommittablePositionOutputStream extends PositionOutputStre
          * @throws IOException if an I/O error occurs during discard
          */
         void discard() throws IOException;
-
-        /**
-         * Gets the path of the committed file.
-         *
-         * @return the path of the committed file
-         */
-        Path getCommittedPath();
     }
 }

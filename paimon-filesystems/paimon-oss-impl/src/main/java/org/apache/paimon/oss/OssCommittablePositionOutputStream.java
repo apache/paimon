@@ -20,7 +20,6 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.fs.MultiPartUploadCommittablePositionOutputStream;
 import org.apache.paimon.fs.MultiPartUploadStore;
-import org.apache.paimon.fs.Path;
 
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
@@ -33,9 +32,8 @@ public class OssCommittablePositionOutputStream
     public OssCommittablePositionOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath,
-            Path targetPath,
             boolean overwrite) {
-        super(multiPartUploadStore, hadoopPath, targetPath, overwrite);
+        super(multiPartUploadStore, hadoopPath, overwrite);
     }
 
     @Override

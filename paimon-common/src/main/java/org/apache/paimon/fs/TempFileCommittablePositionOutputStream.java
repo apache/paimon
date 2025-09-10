@@ -49,8 +49,6 @@ public class TempFileCommittablePositionOutputStream extends CommittablePosition
 
         // Create temporary file
         this.tempOutputStream = fileIO.newOutputStream(tempPath, overwrite);
-
-        LOG.debug("Created temporary file {} for target {}", tempPath, targetPath);
     }
 
     @Override
@@ -121,19 +119,16 @@ public class TempFileCommittablePositionOutputStream extends CommittablePosition
             }
 
             try {
-                // Ensure parent directory exists
                 Path parentDir = targetPath.getParent();
                 if (parentDir != null && !fileIO.exists(parentDir)) {
                     fileIO.mkdirs(parentDir);
                 }
 
-                // Rename temp file to target
                 if (!fileIO.rename(tempPath, targetPath)) {
                     throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
                 }
 
                 committed = true;
-                LOG.debug("Successfully committed temporary file {} to {}", tempPath, targetPath);
 
             } catch (IOException e) {
                 // Clean up temp file on failure
@@ -148,13 +143,7 @@ public class TempFileCommittablePositionOutputStream extends CommittablePosition
             if (!committed && !discarded) {
                 fileIO.deleteQuietly(tempPath);
                 discarded = true;
-                LOG.debug("Discarded temporary file {}", tempPath);
             }
-        }
-
-        @Override
-        public Path getCommittedPath() {
-            return targetPath;
         }
     }
 }

@@ -69,9 +69,6 @@ public class TempFileCommittablePositionOutputStreamTest {
         // Read and verify content
         byte[] content = Files.readAllBytes(Paths.get(targetPath.toString()));
         assertThat(new String(content)).isEqualTo(testData);
-
-        // Verify committer returns correct path
-        assertThat(committer.getCommittedPath()).isEqualTo(targetPath);
     }
 
     @Test

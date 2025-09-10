@@ -38,7 +38,6 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
             LoggerFactory.getLogger(MultiPartUploadCommittablePositionOutputStream.class);
 
     private final org.apache.hadoop.fs.Path hadoopPath;
-    private final Path targetPath;
     private final ByteArrayOutputStream buffer;
     private final List<T> uploadedParts;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
@@ -51,11 +50,9 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
     public MultiPartUploadCommittablePositionOutputStream(
             MultiPartUploadStore<T, C> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath,
-            Path targetPath,
             boolean overwrite) {
         this.multiPartUploadStore = multiPartUploadStore;
         this.hadoopPath = hadoopPath;
-        this.targetPath = targetPath;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
@@ -76,8 +73,6 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
         }
         buffer.write(b);
         position++;
-
-        // If buffer reaches minimum part size, upload a part
         if (buffer.size() >= partSizeThreshold()) {
             uploadPart();
         }
@@ -110,7 +105,6 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
     @Override
     public void close() throws IOException {
         if (!closed) {
-            // For close(), we commit the data automatically
             Committer committer = closeForCommit();
             committer.commit();
         }
@@ -130,13 +124,7 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
         }
 
         return new MultiPartUploadCommitter(
-                multiPartUploadStore,
-                hadoopPath,
-                targetPath,
-                uploadId,
-                uploadedParts,
-                objectName,
-                position);
+                multiPartUploadStore, hadoopPath, uploadId, uploadedParts, objectName, position);
     }
 
     private void initializeMultipartUpload() throws IOException {
@@ -191,7 +179,6 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
 
         private final MultiPartUploadStore<T, C> multiPartUploadStore;
         private final org.apache.hadoop.fs.Path hadoopPath;
-        private final Path targetPath;
         private final String uploadId;
         private final String objectName;
         private final List<T> uploadedParts;
@@ -202,14 +189,12 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
         public MultiPartUploadCommitter(
                 MultiPartUploadStore<T, C> multiPartUploadStore,
                 org.apache.hadoop.fs.Path hadoopPath,
-                Path targetPath,
                 String uploadId,
                 List<T> uploadedParts,
                 String objectName,
                 long byteLength) {
             this.multiPartUploadStore = multiPartUploadStore;
             this.hadoopPath = hadoopPath;
-            this.targetPath = targetPath;
             this.uploadId = uploadId;
             this.objectName = objectName;
             this.uploadedParts = new ArrayList<>(uploadedParts);
@@ -254,11 +239,6 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
             } catch (Exception e) {
                 LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
             }
-        }
-
-        @Override
-        public Path getCommittedPath() {
-            return targetPath;
         }
     }
 }

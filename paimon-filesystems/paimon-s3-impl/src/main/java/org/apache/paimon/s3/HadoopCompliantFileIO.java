@@ -65,7 +65,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
         return new S3CommittablePositionOutputStream(
-                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path, overwrite);
+                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, overwrite);
     }
 
     @Override

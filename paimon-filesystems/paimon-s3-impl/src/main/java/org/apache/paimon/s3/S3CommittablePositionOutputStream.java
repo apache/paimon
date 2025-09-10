@@ -20,7 +20,6 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.MultiPartUploadCommittablePositionOutputStream;
 import org.apache.paimon.fs.MultiPartUploadStore;
-import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
@@ -33,9 +32,8 @@ public class S3CommittablePositionOutputStream
     public S3CommittablePositionOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath,
-            Path targetPath,
             boolean overwrite) {
-        super(multiPartUploadStore, hadoopPath, targetPath, overwrite);
+        super(multiPartUploadStore, hadoopPath, overwrite);
     }
 
     @Override

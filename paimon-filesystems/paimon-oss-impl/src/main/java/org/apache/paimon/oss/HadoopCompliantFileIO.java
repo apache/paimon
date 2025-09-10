@@ -67,7 +67,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return new OssCommittablePositionOutputStream(
                 new OSSS3MultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
                 hadoopPath,
-                path,
                 overwrite);
     }
 

@@ -62,7 +62,7 @@ public class OssCommittablePositionOutputStreamTest {
     }
 
     private OssCommittablePositionOutputStream createStream() {
-        return new OssCommittablePositionOutputStream(mockAccessor, hadoopPath, targetPath, false);
+        return new OssCommittablePositionOutputStream(mockAccessor, hadoopPath, false);
     }
 
     @Test
