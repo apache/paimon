@@ -68,6 +68,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -844,7 +845,9 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
-            return api.listViews(databaseName);
+            return CatalogUtils.isSystemDatabase(databaseName)
+                    ? Collections.emptyList()
+                    : api.listViews(databaseName);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
