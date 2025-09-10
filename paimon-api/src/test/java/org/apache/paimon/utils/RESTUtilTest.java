@@ -121,62 +121,18 @@ public class RESTUtilTest {
     }
 
     @Test
-    public void testMergeDlfOssEndpointSpecialCase() {
-        // Test case 1: dlf.oss-endpoint overrides fs.oss.endpoint when present and non-empty
-        {
-            Map<String, String> targets = new HashMap<>();
-            targets.put("fs.oss.endpoint", "original-endpoint");
-            targets.put("other.config", "value1");
-            Map<String, String> updates = new HashMap<>();
-            updates.put(DLF_OSS_ENDPOINT.key(), "new-oss-endpoint");
-            updates.put("other.config", "value2"); // This should not override
-            Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("fs.oss.endpoint"), "new-oss-endpoint");
-            assertEquals(result.get("other.config"), "value1"); // targets takes precedence
-            assertEquals(result.size(), 3);
-        }
-
-        // Test case 2: dlf.oss-endpoint adds fs.oss.endpoint when not present in targets
-        {
-            Map<String, String> targets = new HashMap<>();
-            targets.put("other.config", "value1");
-            Map<String, String> updates = new HashMap<>();
-            updates.put(DLF_OSS_ENDPOINT.key(), "new-oss-endpoint");
-            Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("fs.oss.endpoint"), "new-oss-endpoint");
-            assertEquals(result.get("other.config"), "value1");
-            assertEquals(result.size(), 3);
-        }
-
-        // Test case 3: Empty dlf.oss-endpoint should not override
-        {
-            Map<String, String> targets = new HashMap<>();
-            targets.put("fs.oss.endpoint", "original-endpoint");
-            Map<String, String> updates = new HashMap<>();
-            updates.put(DLF_OSS_ENDPOINT.key(), "");
-            Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("fs.oss.endpoint"), "original-endpoint");
-        }
-
-        // Test case 4: Null dlf.oss-endpoint should not override
-        {
-            Map<String, String> targets = new HashMap<>();
-            targets.put("fs.oss.endpoint", "original-endpoint");
-            Map<String, String> updates = new HashMap<>();
-            updates.put(DLF_OSS_ENDPOINT.key(), null);
-            Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("fs.oss.endpoint"), "original-endpoint");
-        }
-
-        // Test case 5: No dlf.oss-endpoint in updates, fs.oss.endpoint unchanged
-        {
-            Map<String, String> targets = new HashMap<>();
-            targets.put("fs.oss.endpoint", "original-endpoint");
-            Map<String, String> updates = new HashMap<>();
-            updates.put("other.config", "value1");
-            Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("fs.oss.endpoint"), "original-endpoint");
-            assertEquals(result.get("other.config"), "value1");
-        }
+    public void testMergeWithoutDlfOssEndpointHandling() {
+        Map<String, String> targets = new HashMap<>();
+        targets.put("fs.oss.endpoint", "original-endpoint");
+        targets.put("other.config", "value1");
+        Map<String, String> updates = new HashMap<>();
+        updates.put(DLF_OSS_ENDPOINT.key(), "new-oss-endpoint");
+        updates.put("other.config", "value2"); // This should not override
+        Map<String, String> result = RESTUtil.merge(targets, updates);
+        // fs.oss.endpoint should remain unchanged as RESTUtil.merge no longer handles this
+        assertEquals(result.get("fs.oss.endpoint"), "original-endpoint");
+        assertEquals(result.get("other.config"), "value1"); // targets takes precedence
+        assertEquals(result.get(DLF_OSS_ENDPOINT.key()), "new-oss-endpoint");
+        assertEquals(result.size(), 3);
     }
 }

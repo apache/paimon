@@ -35,17 +35,21 @@ import org.apache.paimon.utils.ThreadUtils;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -162,8 +166,8 @@ public class RESTTokenFileIO implements FileIO {
             }
 
             Options options = catalogContext.options();
-            // the original options are not overwritten
-            options = new Options(RESTUtil.merge(token.token(), options.toMap()));
+            options =
+                    new Options(mergeTokenWithDlfEndpointHandling(token.token(), options.toMap()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -209,6 +213,33 @@ public class RESTTokenFileIO implements FileIO {
                 response.getExpiresAtMillis());
 
         token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
+    }
+
+    /**
+     * Merges token properties with catalog properties and handles DLF OSS endpoint configuration.
+     *
+     * <p>This method performs the same merge logic as {@link RESTUtil#merge(Map, Map)} but also
+     * handles the special case where the DLF OSS endpoint should override the standard OSS
+     * endpoint. When 'dlf.oss-endpoint' is present in the merged properties, it will be used to set
+     * 'fs.oss.endpoint' for OSS file system configuration.
+     *
+     * @param restTokenProperties the properties from the REST token
+     * @param catalogProperties the catalog properties to merge with
+     * @return merged properties with DLF OSS endpoint handling applied
+     */
+    private Map<String, String> mergeTokenWithDlfEndpointHandling(
+            Map<String, String> restTokenProperties, Map<String, String> catalogProperties) {
+        // Use RESTUtil.merge for the basic merge logic
+        Map<String, String> result =
+                Maps.newLinkedHashMap(RESTUtil.merge(catalogProperties, restTokenProperties));
+
+        // Handle special case: dlf.oss-endpoint should override fs.oss.endpoint
+        String dlfOssEndpoint = result.get(DLF_OSS_ENDPOINT.key());
+        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+            result.put("fs.oss.endpoint", dlfOssEndpoint);
+        }
+
+        return ImmutableMap.copyOf(result);
     }
 
     /**

@@ -42,8 +42,6 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-
 /** Util for REST. */
 public class RESTUtil {
 
@@ -66,38 +64,39 @@ public class RESTUtil {
         return result;
     }
 
+    /**
+     * Merges two string maps with override properties taking precedence over base properties.
+     *
+     * <p>This method combines two maps of string key-value pairs, where the override map's values
+     * will override any conflicting keys from the base map. Only non-null values are included in
+     * the final result.
+     */
     public static Map<String, String> merge(
-            Map<String, String> targets, Map<String, String> updates) {
-        if (targets == null) {
-            targets = Maps.newHashMap();
+            Map<String, String> overrideProperties, Map<String, String> baseProperties) {
+        if (overrideProperties == null) {
+            overrideProperties = Maps.newHashMap();
         }
-        if (updates == null) {
-            updates = Maps.newHashMap();
+        if (baseProperties == null) {
+            baseProperties = Maps.newHashMap();
         }
 
-        Map<String, String> result = Maps.newLinkedHashMap();
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
 
-        // First, add all non-null entries from updates
-        for (Map.Entry<String, String> entry : updates.entrySet()) {
-            if (entry.getValue() != null) {
-                result.put(entry.getKey(), entry.getValue());
+        // First, add all non-null entries from baseProperties that are not in overrideProperties
+        for (Map.Entry<String, String> entry : baseProperties.entrySet()) {
+            if (entry.getValue() != null && !overrideProperties.containsKey(entry.getKey())) {
+                builder.put(entry.getKey(), entry.getValue());
             }
         }
 
-        // Then, add entries from targets, which take precedence (override updates)
-        for (Map.Entry<String, String> entry : targets.entrySet()) {
+        // Then, add all non-null entries from overrideProperties (these take precedence)
+        for (Map.Entry<String, String> entry : overrideProperties.entrySet()) {
             if (entry.getValue() != null) {
-                result.put(entry.getKey(), entry.getValue());
+                builder.put(entry.getKey(), entry.getValue());
             }
         }
 
-        // Handle special case: dlf.oss-endpoint should override fs.oss.endpoint
-        String dlfOssEndpoint = result.get(DLF_OSS_ENDPOINT.key());
-        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
-            result.put("fs.oss.endpoint", dlfOssEndpoint);
-        }
-
-        return ImmutableMap.copyOf(result);
+        return builder.build();
     }
 
     public static String encodeString(String toEncode) {
