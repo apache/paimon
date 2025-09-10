@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: Check Code Style and Test
+name: Python Check Code Style and Test
 
 on:
   push:
