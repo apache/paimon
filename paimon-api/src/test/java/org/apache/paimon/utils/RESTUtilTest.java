@@ -25,14 +25,13 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link RESTUtil}. */
 public class RESTUtilTest {
     @Test
     public void testMerge() {
-        // Test case 1: targets has precedence over updates for existing keys
+        // Test case 1: updates has precedence over targets for existing keys
         {
             Map<String, String> targets = new HashMap<>();
             targets.put("key1", "default1");
@@ -41,11 +40,11 @@ public class RESTUtilTest {
             updates.put("key2", "update2");
             Map<String, String> result = RESTUtil.merge(targets, updates);
             assertEquals(result.get("key1"), "default1");
-            // key2 should keep targets value, not be overridden by updates
-            assertEquals(result.get("key2"), "default2");
+            // key2 should be overridden by updates value
+            assertEquals(result.get("key2"), "update2");
         }
 
-        // Test case 2: targets has precedence even when updates has same value
+        // Test case 2: updates has precedence even when targets has same value
         {
             Map<String, String> targets = new HashMap<>();
             targets.put("key1", "default1");
@@ -55,8 +54,8 @@ public class RESTUtilTest {
             updates.put("key2", "update2");
             Map<String, String> result = RESTUtil.merge(targets, updates);
             assertEquals(result.get("key1"), "default1");
-            // key2 should keep targets value
-            assertEquals(result.get("key2"), "default2");
+            // key2 should be overridden by updates value
+            assertEquals(result.get("key2"), "update2");
         }
 
         // Test case 3: empty updates, targets unchanged
@@ -118,21 +117,5 @@ public class RESTUtilTest {
             assertEquals(result.get("key3"), "update3");
             assertEquals(result.size(), 3);
         }
-    }
-
-    @Test
-    public void testMergeWithoutDlfOssEndpointHandling() {
-        Map<String, String> targets = new HashMap<>();
-        targets.put("fs.oss.endpoint", "original-endpoint");
-        targets.put("other.config", "value1");
-        Map<String, String> updates = new HashMap<>();
-        updates.put(DLF_OSS_ENDPOINT.key(), "new-oss-endpoint");
-        updates.put("other.config", "value2"); // This should not override
-        Map<String, String> result = RESTUtil.merge(targets, updates);
-        // fs.oss.endpoint should remain unchanged as RESTUtil.merge no longer handles this
-        assertEquals(result.get("fs.oss.endpoint"), "original-endpoint");
-        assertEquals(result.get("other.config"), "value1"); // targets takes precedence
-        assertEquals(result.get(DLF_OSS_ENDPOINT.key()), "new-oss-endpoint");
-        assertEquals(result.size(), 3);
     }
 }

@@ -72,7 +72,7 @@ public class RESTUtil {
      * the final result.
      */
     public static Map<String, String> merge(
-            Map<String, String> overrideProperties, Map<String, String> baseProperties) {
+            Map<String, String> baseProperties, Map<String, String> overrideProperties) {
         if (overrideProperties == null) {
             overrideProperties = Maps.newHashMap();
         }
