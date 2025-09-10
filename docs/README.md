@@ -6,24 +6,28 @@ that you always have docs corresponding to your checked-out version.
 
 # Requirements
 
-### Build the site locally
+### Install Hugo
 
 Make sure you have installed Hugo on your system.
-Note: An extended version of Hugo <= 0.124.1 is required. you can Find this at [Hugo](https://github.com/gohugoio/hugo/releases/tag/v0.124.1)
-```sh
-go install -tags extended,withdeploy github.com/gohugoio/hugo@v0.124.1
-```
+Note: An extended version of Hugo <= [0.124.1](https://github.com/gohugoio/hugo/releases/tag/v0.124.1) is required.
 
 From this directory:
 
-  * Fetch the theme submodule
-	```sh
-	git submodule update --init --recursive
-	```
-  * Start local server
-	```sh
-	hugo -b "" serve
-	```
+```sh
+# Install Hugo
+./setup_hugo.sh
+
+# Fetch the theme submodule
+git submodule update --init --recursive
+```
+
+### Start Hugo local server
+
+From this directory:
+
+```sh
+hugo -b "" serve
+```
 
 The site can be viewed at http://localhost:1313/
 

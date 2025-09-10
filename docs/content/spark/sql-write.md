@@ -223,35 +223,7 @@ WHEN NOT MATCHED THEN
 INSERT *      -- when not matched, insert this row without any transformation;
 ```
 
-## Streaming Write
-
-{{< hint info >}}
-
-Paimon Structured Streaming only supports the two `append` and `complete` modes.
-
-{{< /hint >}}
-
-```scala
-// Create a paimon table if not exists.
-spark.sql(s"""
-           |CREATE TABLE T (k INT, v STRING)
-           |TBLPROPERTIES ('primary-key'='k', 'bucket'='3')
-           |""".stripMargin)
-
-// Here we use MemoryStream to fake a streaming source.
-val inputData = MemoryStream[(Int, String)]
-val df = inputData.toDS().toDF("k", "v")
-
-// Streaming Write to paimon table.
-val stream = df
-  .writeStream
-  .outputMode("append")
-  .option("checkpointLocation", "/path/to/checkpoint")
-  .format("paimon")
-  .start("/path/to/paimon/sink/table")
-```
-
-## Schema Evolution
+## Write Merge Schema
 
 {{< hint info >}}
 
@@ -259,7 +231,7 @@ Since the table schema may be updated during writing, catalog caching needs to b
 
 {{< /hint >}}
 
-Schema evolution is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
+Write merge schema is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
 
 Paimon supports automatic schema merging of source data and current table data while data is being written, and uses the merged schema as the latest schema of the table, and it only requires configuring `write.merge-schema`.
 
@@ -277,7 +249,7 @@ When enable `write.merge-schema`, Paimon can allow users to perform the followin
 
 Paimon also supports explicit type conversions between certain types (e.g. String -> Date, Long -> Int), it requires an explicit configuration `write.merge-schema.explicit-cast`.
 
-Schema evolution can be used in streaming mode at the same time.
+Write merge schema can be used in streaming mode at the same time.
 
 ```scala
 val inputData = MemoryStream[(Int, String)]
