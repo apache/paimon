@@ -38,7 +38,7 @@ case class SparkTableWrite(
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
-  private val write: BatchTableWrite = {
+  private val write = {
     val _write = writeBuilder.newWrite()
     _write.withIOManager(ioManager)
     if (writeRowLineage) {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -115,8 +114,9 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
         }
     }
 
-    private void closeAndGetCommitters() throws Exception {
-        sinkWriter.closeAndGetCommitters();
+    public List<CommittablePositionOutputStream.Committer> closeAndGetCommitters()
+            throws Exception {
+        return sinkWriter.closeAndGetCommitters();
     }
 
     @Override
@@ -192,11 +192,6 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
         throw new UnsupportedOperationException("Not supported.");
     }
 
-    @VisibleForTesting
-    public boolean useBufferedSinkWriter() {
-        return sinkWriter instanceof BufferedSinkWriter;
-    }
-
     @Override
     public boolean compactNotCompleted() {
         return false;
@@ -212,9 +207,4 @@ public class FormatTableRecordWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void writeBundle(BundleRecords record) throws Exception {}
-
-    /** Get committers from the underlying SinkWriter. */
-    public List<CommittablePositionOutputStream.Committer> getCommitters() throws Exception {
-        return sinkWriter.closeAndGetCommitters();
-    }
 }

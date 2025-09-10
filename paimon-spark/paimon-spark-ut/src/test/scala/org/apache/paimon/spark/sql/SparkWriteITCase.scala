@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkConf
@@ -292,7 +293,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
           org.apache.paimon.data.Timestamp
             .fromSQLTimestamp(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"))))
       val commit = writeBuilder.newCommit
-      commit.commit(write.prepareCommit())
+      commit.commit(write.prepareCommit().asInstanceOf[java.util.List[CommitMessage]])
       commit.close()
       write.close()
 

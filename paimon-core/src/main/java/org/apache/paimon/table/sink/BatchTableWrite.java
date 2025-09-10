@@ -29,14 +29,14 @@ import java.util.List;
  * @since 0.4.0
  */
 @Public
-public interface BatchTableWrite extends TableWrite {
+public interface BatchTableWrite<T> extends TableWrite {
 
     /**
      * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
      *
      * @see BatchTableCommit#commit
      */
-    List<CommitMessage> prepareCommit() throws Exception;
+    List<T> prepareCommit() throws Exception;
 
     /**
      * Specified the writing rowType, currently only work for table without primary key and row

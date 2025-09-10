@@ -52,7 +52,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *
  * @param <T> type of record to write into {@link FileStore}.
  */
-public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
+public class TableWriteImpl<T>
+        implements InnerTableWrite<CommitMessage>, Restorable<List<State<T>>> {
 
     private final RowType rowType;
     private final FileStoreWrite<T> write;

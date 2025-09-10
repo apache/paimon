@@ -33,6 +33,7 @@ import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.csv.CsvFileFormatFactory;
 import org.apache.paimon.format.json.JsonFileFormatFactory;
 import org.apache.paimon.format.parquet.ParquetFileFormatFactory;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -609,13 +610,16 @@ public abstract class CatalogTestBase {
                 datas[j] = GenericRow.of(random.nextInt(), partitionValue);
             }
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            List<InternalRow> readData;
             try (FormatTableWrite write = (FormatTableWrite) writeBuilder.newWrite()) {
                 for (InternalRow row : datas) {
                     write.write(row);
                 }
-                write.prepareCommit();
+                List<CommittablePositionOutputStream.Committer> committers = write.prepareCommit();
+                readData = read(table, null, null, null, null);
+                assertThat(readData).isEmpty();
+                write.commit(committers);
             }
-            List<InternalRow> readData;
             readData = read(table, null, null, null, null);
             assertThat(readData).containsExactlyInAnyOrder(datas);
             catalog.dropTable(Identifier.create(dbName, format), true);

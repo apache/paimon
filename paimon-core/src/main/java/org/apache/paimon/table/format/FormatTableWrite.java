@@ -22,7 +22,7 @@ import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -39,12 +39,13 @@ import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /** {@link TableWrite} implementation for format table. */
-public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<InternalRow>>> {
+public class FormatTableWrite
+        implements InnerTableWrite<CommittablePositionOutputStream.Committer>,
+                Restorable<List<State<InternalRow>>> {
 
     private final RowType rowType;
     private final FormatTableFileWrite write;
@@ -52,8 +53,6 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
 
     private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
-
-    private final FileIO fileIO;
 
     public FormatTableWrite(
             RowType rowType,
@@ -63,7 +62,6 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
         this.rowType = rowType;
         this.write = write;
         this.partitionKeyExtractor = partitionKeyExtractor;
-        this.fileIO = write.getFileIO();
         List<String> notNullColumnNames =
                 rowType.getFields().stream()
                         .filter(field -> !field.type().isNullable())
@@ -122,9 +120,15 @@ public class FormatTableWrite implements InnerTableWrite, Restorable<List<State<
     }
 
     @Override
-    public List<CommitMessage> prepareCommit() throws Exception {
-        write.flush();
-        return new ArrayList<>();
+    public List<CommittablePositionOutputStream.Committer> prepareCommit() throws Exception {
+        return write.closeAndGetCommitters();
+    }
+
+    public void commit(List<CommittablePositionOutputStream.Committer> committers)
+            throws Exception {
+        for (CommittablePositionOutputStream.Committer committer : committers) {
+            committer.commit();
+        }
     }
 
     private void checkNullability(InternalRow row) {
