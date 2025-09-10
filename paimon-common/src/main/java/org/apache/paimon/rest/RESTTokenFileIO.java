@@ -169,7 +169,7 @@ public class RESTTokenFileIO implements FileIO {
             options =
                     new Options(
                             RESTTokenFileIO.mergeTokenWithDlfEndpointHandling(
-                                    token.token(), options.toMap()));
+                                    options.toMap(), token.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -230,7 +230,7 @@ public class RESTTokenFileIO implements FileIO {
      * @return merged properties with DLF OSS endpoint handling applied
      */
     public static Map<String, String> mergeTokenWithDlfEndpointHandling(
-            Map<String, String> restTokenProperties, Map<String, String> catalogProperties) {
+            Map<String, String> catalogProperties, Map<String, String> restTokenProperties) {
         // Use RESTUtil.merge for the basic merge logic
         Map<String, String> result =
                 Maps.newLinkedHashMap(RESTUtil.merge(catalogProperties, restTokenProperties));
