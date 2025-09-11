@@ -167,8 +167,23 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             writer = null;
         }
         if (out != null) {
-            IOUtils.closeQuietly(out);
+            if (out instanceof CommittablePositionOutputStream) {
+                try {
+                    committer = ((CommittablePositionOutputStream) out).closeForCommit();
+                } catch (Throwable e) {
+                    LOG.debug("Exception occurs when closing out" + committer, e);
+                }
+            } else {
+                IOUtils.closeQuietly(out);
+            }
             out = null;
+        }
+        if (committer != null) {
+            try {
+                committer.discard();
+            } catch (Throwable e) {
+                LOG.debug("Exception occurs when closing out" + committer, e);
+            }
         }
         fileIO.deleteQuietly(path);
     }

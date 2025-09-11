@@ -604,7 +604,8 @@ public abstract class CatalogTestBase {
             schemaBuilder.option("file.format", format);
             catalog.createTable(identifier, schemaBuilder.build(), true);
             Table table = catalog.getTable(identifier);
-            int size = 5;
+            // use 2000 as there will be two splits
+            int size = 2000;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
                 datas[j] = GenericRow.of(random.nextInt(), partitionValue);

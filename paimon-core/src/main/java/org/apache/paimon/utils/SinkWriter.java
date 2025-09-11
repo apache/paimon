@@ -155,7 +155,6 @@ public interface SinkWriter<T> {
         private final CompressOptions compression;
 
         private RowBuffer writeBuffer;
-        private List<CommittablePositionOutputStream.Committer> lastCommitters = new ArrayList<>();
 
         public BufferedSinkWriter(
                 Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier,
