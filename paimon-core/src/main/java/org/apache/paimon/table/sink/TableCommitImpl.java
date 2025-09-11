@@ -33,6 +33,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
@@ -300,6 +301,15 @@ public class TableCommitImpl implements InnerTableCommit {
             }
         }
 
+        // Resolve compacted changelog files to their real file paths
+        List<Path> resolvedFiles = new ArrayList<>();
+        for (Path file : files) {
+            resolvedFiles.add(CompactedChangelogPathResolver.resolveCompactedChangelogPath(file));
+        }
+        // Deduplicate paths as multiple compacted changelog references may resolve to the same
+        // physical file
+        resolvedFiles = resolvedFiles.stream().distinct().collect(Collectors.toList());
+
         Predicate<Path> nonExists =
                 p -> {
                     try {
@@ -314,7 +324,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         randomlyExecuteSequentialReturn(
                                 getExecutorService(null),
                                 f -> nonExists.test(f) ? singletonList(f) : emptyList(),
-                                files));
+                                resolvedFiles));
 
         if (!nonExistFiles.isEmpty()) {
             String message =
