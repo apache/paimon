@@ -281,9 +281,9 @@ class FileStoreCommit:
             # Following Java implementation: PartitionEntry.fromDataFile()
             file_meta = entry.file
             # Extract actual file metadata (following Java DataFileMeta pattern)
-            record_count = file_meta.row_count
-            file_size_in_bytes = file_meta.file_size
-            file_count = 1
+            record_count = file_meta.row_count if entry.kind == 0 else file_meta.row_count * -1
+            file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
+            file_count = 1 if entry.kind == 0 else -1
 
             # Convert creation_time to milliseconds (Java uses epoch millis)
             if file_meta.creation_time:
