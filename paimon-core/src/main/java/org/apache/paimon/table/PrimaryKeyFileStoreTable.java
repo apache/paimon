@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
@@ -170,7 +171,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                 rowKind,
                                 record.row()),
                 rowKindGenerator(),
-                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
+                RowKindFilter.of(coreOptions()));
     }
 
     @Override

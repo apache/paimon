@@ -489,6 +489,13 @@ public class CoreOptions implements Serializable {
                             "partial-update.ignore-delete")
                     .withDescription("Whether to ignore delete records.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> IGNORE_UPDATE_BEFORE =
+            key("ignore-update-before")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore update-before records.");
+
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
                     .enumType(SortEngine.class)
@@ -2286,6 +2293,10 @@ public class CoreOptions implements Serializable {
 
     public boolean ignoreDelete() {
         return options.get(IGNORE_DELETE);
+    }
+
+    public boolean ignoreUpdateBefore() {
+        return options.get(IGNORE_UPDATE_BEFORE);
     }
 
     public SortEngine sortEngine() {

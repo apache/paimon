@@ -619,7 +619,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDeleteWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
-                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+                        + "WITH ('ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
@@ -629,6 +629,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B', '+I')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B", "+I"));
+    }
+
+    @Test
+    public void testIgnoreUpdateBeforeWithRowKindField() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
+                        + "WITH ('ignore-update-before' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '-U')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '-D')");
+        assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
     }
 
     @Test

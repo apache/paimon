@@ -41,6 +41,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowKindFilter;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -56,6 +57,8 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
@@ -70,7 +73,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
-    private final boolean ignoreDelete;
+    private final @Nullable RowKindFilter rowKindFilter;
 
     private transient Projection keyProjection;
 
@@ -87,7 +90,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
-        this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
+        this.rowKindFilter = RowKindFilter.of(CoreOptions.fromMap(schema.options()));
         setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
@@ -170,7 +173,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         InternalRow row = record.getValue();
 
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
-        if (ignoreDelete && rowKind.isRetract()) {
+        if (rowKindFilter != null && !rowKindFilter.test(rowKind)) {
             return;
         }
 
