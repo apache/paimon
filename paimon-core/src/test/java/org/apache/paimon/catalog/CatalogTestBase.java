@@ -840,6 +840,8 @@ public abstract class CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         AllTableOptionsTable.ALL_TABLE_OPTIONS,
                         CatalogOptionsTable.CATALOG_OPTIONS);
+
+        assertThat(catalog.listViews(SYSTEM_DATABASE_NAME)).isEmpty();
     }
 
     @Test
