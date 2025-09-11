@@ -91,11 +91,12 @@ pa_schema = pa.schema([
     ('value', pa.string())
 ])
 
-schema = Schema.from_pyarrow_schema(pa_schema=pa_schema,
-                                    partition_keys=['dt', 'hh'],
-                                    primary_keys=['dt', 'hh', 'pk'],
-                                    options={'bucket': '2'},
-                                    comment='my test table')
+schema = Schema.from_pyarrow_schema(
+    pa_schema=pa_schema,
+    partition_keys=['dt', 'hh'],
+    primary_keys=['dt', 'hh', 'pk'],
+    options={'bucket': '2'},
+    comment='my test table')
 ```
 
 See [Data Types]({{< ref "python-api#data-types" >}}) for all supported `pyarrow-to-paimon` data types mapping.
