@@ -20,7 +20,7 @@ import os
 
 import pyarrow as pa
 
-from pypaimon.schema.schema import Schema
+from pypaimon import Schema
 from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,

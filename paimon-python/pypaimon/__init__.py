@@ -16,7 +16,11 @@
 #  under the License.
 
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.schema.schema import Schema
 
 __all__ = [
     "PaimonVirtualFileSystem",
+    "CatalogFactory",
+    "Schema",
 ]
