@@ -64,21 +64,33 @@ public class RESTUtil {
         return result;
     }
 
+    /**
+     * Merges two string maps with override properties taking precedence over base properties.
+     *
+     * <p>This method combines two maps of string key-value pairs, where the override map's values
+     * will override any conflicting keys from the base map. Only non-null values are included in
+     * the final result.
+     */
     public static Map<String, String> merge(
-            Map<String, String> targets, Map<String, String> updates) {
-        if (targets == null) {
-            targets = Maps.newHashMap();
+            Map<String, String> baseProperties, Map<String, String> overrideProperties) {
+        if (overrideProperties == null) {
+            overrideProperties = Maps.newHashMap();
         }
-        if (updates == null) {
-            updates = Maps.newHashMap();
+        if (baseProperties == null) {
+            baseProperties = Maps.newHashMap();
         }
+
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        for (Map.Entry<String, String> entry : targets.entrySet()) {
-            if (!updates.containsKey(entry.getKey()) && entry.getValue() != null) {
+
+        // First, add all non-null entries from baseProperties that are not in overrideProperties
+        for (Map.Entry<String, String> entry : baseProperties.entrySet()) {
+            if (entry.getValue() != null && !overrideProperties.containsKey(entry.getKey())) {
                 builder.put(entry.getKey(), entry.getValue());
             }
         }
-        for (Map.Entry<String, String> entry : updates.entrySet()) {
+
+        // Then, add all non-null entries from overrideProperties (these take precedence)
+        for (Map.Entry<String, String> entry : overrideProperties.entrySet()) {
             if (entry.getValue() != null) {
                 builder.put(entry.getKey(), entry.getValue());
             }
