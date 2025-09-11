@@ -125,7 +125,7 @@ class AoReaderTest(unittest.TestCase):
         p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
         p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
         p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
-        p6 = predicate_builder.is_not_null('behavior')    # exclude 4/d
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
         g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder)
