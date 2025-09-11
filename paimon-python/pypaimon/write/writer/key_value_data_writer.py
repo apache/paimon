@@ -25,11 +25,11 @@ from pypaimon.write.writer.data_writer import DataWriter
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting."""
 
-    def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
+    def _process_data(self, data: pa.RecordBatch) -> pa.Table:
         enhanced_data = self._add_system_fields(data)
-        return self._sort_by_primary_key(enhanced_data)
+        return pa.Table.from_batches([self._sort_by_primary_key(enhanced_data)])
 
-    def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
+    def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
         combined = pa.concat_tables([existing_data, new_data])
         return self._sort_by_primary_key(combined)
 
