@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +72,25 @@ public class ClusterManager {
     public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
         // 1. construct LSM structure for each partition
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
+        if (LOG.isDebugEnabled()) {
+            partitionLevels.forEach(
+                    (partition, levelSortedRuns) -> {
+                        String runsInfo =
+                                levelSortedRuns.stream()
+                                        .map(
+                                                lsr ->
+                                                        String.format(
+                                                                "level-%s:%s",
+                                                                lsr.level(),
+                                                                lsr.run().files().size()))
+                                        .collect(Collectors.joining(","));
+                        LOG.debug(
+                                "Partition {} has {} runs: [{}]",
+                                partition,
+                                levelSortedRuns.size(),
+                                runsInfo);
+                    });
+        }
 
         // 2. pick files to be clustered for each partition
         // TODO：consider the maxLevel in existed files
@@ -86,9 +106,34 @@ public class ClusterManager {
                                                         fullCompaction)));
 
         // 3. filter out empty units
-        return units.entrySet().stream()
-                .filter(entry -> entry.getValue().isPresent())
-                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().get()));
+        Map<BinaryRow, CompactUnit> filteredUnits =
+                units.entrySet().stream()
+                        .filter(entry -> entry.getValue().isPresent())
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey, entry -> entry.getValue().get()));
+        if (LOG.isDebugEnabled()) {
+            filteredUnits.forEach(
+                    (partition, compactUnit) -> {
+                        String filesInfo =
+                                compactUnit.files().stream()
+                                        .map(
+                                                file ->
+                                                        String.format(
+                                                                "%s,%s,%s",
+                                                                file.fileName(),
+                                                                file.level(),
+                                                                file.fileSize()))
+                                        .collect(Collectors.joining(", "));
+                        LOG.debug(
+                                "Partition {}, outputLevel:{}, clustered with {} files: [{}]",
+                                partition,
+                                compactUnit.outputLevel(),
+                                compactUnit.files().size(),
+                                filesInfo);
+                    });
+        }
+        return filteredUnits;
     }
 
     public Map<BinaryRow, List<LevelSortedRun>> constructLevels() {
@@ -125,6 +170,9 @@ public class ClusterManager {
                         new LevelSortedRun(level, SortedRun.fromSorted(entry.getValue())));
             }
         }
+
+        // sort by level
+        partitionLevels.sort(Comparator.comparing(LevelSortedRun::level));
         return partitionLevels;
     }
 

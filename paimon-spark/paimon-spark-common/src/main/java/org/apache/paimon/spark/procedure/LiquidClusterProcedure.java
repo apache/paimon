@@ -158,6 +158,11 @@ public class LiquidClusterProcedure extends BaseProcedure {
         TableSorter sorter =
                 TableSorter.getSorter(
                         table, clusterManager.clusterCurve(), clusterManager.clusterKeys());
+        LOG.info(
+                "Start to sort in partition, cluster curve is {}, cluster keys is {}",
+                clusterManager.clusterCurve(),
+                clusterManager.clusterKeys());
+
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
                         .map(
@@ -176,6 +181,7 @@ public class LiquidClusterProcedure extends BaseProcedure {
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
             // do not use overwrite, we don't need to overwrite the whole partition
             Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
+            LOG.info("Commit messages after writing:{}", commitMessages);
 
             // re-organize the commit messages to generate the compact messages
             Map<BinaryRow, List<DataFileMeta>> partitionClustered = new HashMap<>();
@@ -194,6 +200,10 @@ public class LiquidClusterProcedure extends BaseProcedure {
                 List<DataFileMeta> clusterAfter =
                         clusterManager.upgrade(
                                 entry.getValue(), compactUnits.get(partition).outputLevel());
+                LOG.info(
+                        "Partition {}: upgrade file level to {}",
+                        partition,
+                        compactUnits.get(partition).outputLevel());
                 CompactIncrement compactIncrement =
                         new CompactIncrement(clusterBefore, clusterAfter, Collections.emptyList());
                 clusterMessages.add(
@@ -206,6 +216,7 @@ public class LiquidClusterProcedure extends BaseProcedure {
                                 DataIncrement.emptyIncrement(),
                                 compactIncrement));
             }
+            LOG.info("Commit messages after reorganizing:{}", clusterMessages);
 
             writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
         }
