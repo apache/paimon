@@ -104,6 +104,49 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_pk_multi_write_once_commit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '2'})
+        self.catalog.create_table('default.test_pk_multi', schema, False)
+        table = self.catalog.get_table('default.test_pk_multi')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table1 = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        data2 = {
+            'user_id': [5, 2, 7, 8],
+            'item_id': [1005, 1002, 1007, 1008],
+            'behavior': ['e', 'b-new', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p1', 'p2']
+        }
+        pa_table2 = pa.Table.from_pydict(data2, schema=self.pa_schema)
+
+        table_write.write_arrow(pa_table1)
+        table_write.write_arrow(pa_table2)
+
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+        }, schema=self.pa_schema)
+        self.assertEqual(actual, expected)
+
     def testPkReaderWithFilter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],

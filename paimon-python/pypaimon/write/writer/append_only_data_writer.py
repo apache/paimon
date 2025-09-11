@@ -24,8 +24,8 @@ from pypaimon.write.writer.data_writer import DataWriter
 class AppendOnlyDataWriter(DataWriter):
     """Data writer for append-only tables."""
 
-    def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        return data
+    def _process_data(self, data: pa.RecordBatch) -> pa.Table:
+        return pa.Table.from_batches([data])
 
-    def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
+    def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
         return pa.concat_tables([existing_data, new_data])

@@ -53,7 +53,7 @@ class DataWriter(ABC):
         self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
-        self.pending_data: Optional[pa.RecordBatch] = None
+        self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
 
     def write(self, data: pa.RecordBatch):
@@ -100,7 +100,7 @@ class DataWriter(ABC):
                 self.pending_data = remaining_data
                 self._check_and_roll_if_needed()
 
-    def _write_data_to_file(self, data: pa.RecordBatch):
+    def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
             return
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
@@ -115,8 +115,8 @@ class DataWriter(ABC):
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
         # min key & max key
-        table = pa.Table.from_batches([data])
-        selected_table = table.select(self.trimmed_primary_key)
+
+        selected_table = data.select(self.trimmed_primary_key)
         key_columns_batch = selected_table.to_batches()[0]
         min_key_row_batch = key_columns_batch.slice(0, 1)
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)

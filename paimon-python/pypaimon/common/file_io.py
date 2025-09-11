@@ -283,32 +283,30 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: Path, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
         try:
             import pyarrow.parquet as pq
-            table = pyarrow.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
-                pq.write_table(table, output_stream, compression=compression, **kwargs)
+                pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: Path, data: pyarrow.RecordBatch, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: Path, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer."""
             import sys
             import pyarrow.orc as orc
-            table = pyarrow.Table.from_batches([data])
 
             with self.new_output_stream(path) as output_stream:
                 # Check Python version - if 3.6, don't use compression parameter
                 if sys.version_info[:2] == (3, 6):
-                    orc.write_table(table, output_stream, **kwargs)
+                    orc.write_table(data, output_stream, **kwargs)
                 else:
                     orc.write_table(
-                        table,
+                        data,
                         output_stream,
                         compression=compression,
                         **kwargs
@@ -318,7 +316,7 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: Path, data: pyarrow.RecordBatch, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(self, path: Path, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
