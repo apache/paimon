@@ -19,6 +19,7 @@
 package org.apache.paimon.arrow.writer;
 
 import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -39,6 +40,7 @@ import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.IntArrayList;
 
 import org.apache.arrow.vector.BigIntVector;
@@ -94,7 +96,25 @@ public class ArrowFieldWriters {
 
         @Override
         protected void doWrite(int rowIndex, DataGetters getters, int pos) {
-            ((VarCharVector) fieldVector).setSafe(rowIndex, getters.getString(pos).toBytes());
+            BinaryString binaryString = getters.getString(pos);
+            MemorySegment[] segments = binaryString.getSegments();
+
+            // Very important performance optimization, which can avoid copying out new byte array
+            if (segments.length == 1) {
+                byte[] heapMemory = segments[0].getHeapMemory();
+                if (heapMemory != null) {
+                    ((VarCharVector) fieldVector)
+                            .setSafe(
+                                    rowIndex,
+                                    heapMemory,
+                                    binaryString.getOffset(),
+                                    binaryString.getSizeInBytes());
+                    return;
+                }
+            }
+
+            // Else copy new byte array
+            ((VarCharVector) fieldVector).setSafe(rowIndex, binaryString.toBytes());
         }
     }
 
