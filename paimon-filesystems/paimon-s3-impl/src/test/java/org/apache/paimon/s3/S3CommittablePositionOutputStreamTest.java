@@ -19,7 +19,6 @@
 package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.CommittablePositionOutputStream;
-import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
@@ -47,14 +46,12 @@ class S3CommittablePositionOutputStreamTest {
 
     private MockS3MultiPartUpload mockAccessor;
     private S3CommittablePositionOutputStream stream;
-    private Path targetPath;
     private File targetFile;
     private org.apache.hadoop.fs.Path hadoopPath;
 
     @BeforeEach
     void setUp() throws IOException {
         hadoopPath = new org.apache.hadoop.fs.Path("/test/file.parquet");
-        targetPath = new Path("s3a://bucket/test/file.parquet");
         targetFile = tempDir.resolve("target-file.parquet").toFile();
         targetFile.getParentFile().mkdirs();
 

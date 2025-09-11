@@ -24,7 +24,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
@@ -143,8 +142,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        RollingFileWriter<ManifestEntry, ManifestFileMeta, CommittablePositionOutputStream> writer =
-                createRollingWriter();
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
         try {
             writer.write(entries);
             writer.close();
@@ -154,8 +152,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         return writer.result();
     }
 
-    public RollingFileWriter<ManifestEntry, ManifestFileMeta, CommittablePositionOutputStream>
-            createRollingWriter() {
+    public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
         return new RollingFileWriter<>(
                 () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
                 suggestedFileSize);
@@ -166,9 +163,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     }
 
     /** Writer for {@link ManifestEntry}. */
-    public class ManifestEntryWriter
-            extends SingleFileWriter<
-                    ManifestEntry, ManifestFileMeta, CommittablePositionOutputStream> {
+    public class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private final SimpleStatsCollector partitionStatsCollector;
         private final SimpleStatsConverter partitionStatsSerializer;

@@ -62,19 +62,11 @@ public interface SinkWriter<T> {
      */
     class DirectSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<
-                        RollingFileWriter<
-                                T, DataFileMeta, CommittablePositionOutputStream.Committer>>
-                writerSupplier;
+        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
 
-        private RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
-                writer;
+        private RollingFileWriter<T, DataFileMeta> writer;
 
-        public DirectSinkWriter(
-                Supplier<
-                                RollingFileWriter<
-                                        T, DataFileMeta, CommittablePositionOutputStream.Committer>>
-                        writerSupplier) {
+        public DirectSinkWriter(Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier) {
             this.writerSupplier = writerSupplier;
         }
 
@@ -112,7 +104,7 @@ public interface SinkWriter<T> {
 
             if (writer != null) {
                 writer.close();
-                commits.addAll(writer.committer());
+                commits.addAll(writer.committers());
                 writer = null;
             }
             return commits;
@@ -153,10 +145,7 @@ public interface SinkWriter<T> {
      */
     class BufferedSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<
-                        RollingFileWriter<
-                                T, DataFileMeta, CommittablePositionOutputStream.Committer>>
-                writerSupplier;
+        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
         private final Function<T, InternalRow> toRow;
         private final Function<InternalRow, T> fromRow;
         private final IOManager ioManager;
@@ -169,10 +158,7 @@ public interface SinkWriter<T> {
         private List<CommittablePositionOutputStream.Committer> lastCommitters = new ArrayList<>();
 
         public BufferedSinkWriter(
-                Supplier<
-                                RollingFileWriter<
-                                        T, DataFileMeta, CommittablePositionOutputStream.Committer>>
-                        writerSupplier,
+                Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier,
                 Function<T, InternalRow> toRow,
                 Function<InternalRow, T> fromRow,
                 IOManager ioManager,
@@ -203,8 +189,7 @@ public interface SinkWriter<T> {
         public List<DataFileMeta> flush() throws IOException {
             List<DataFileMeta> flushedFiles = new ArrayList<>();
             if (writeBuffer != null) {
-                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
-                        writer = writerSupplier.get();
+                RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
@@ -232,8 +217,7 @@ public interface SinkWriter<T> {
                 throws IOException {
             List<CommittablePositionOutputStream.Committer> committers = new ArrayList<>();
             if (writeBuffer != null) {
-                RollingFileWriter<T, DataFileMeta, CommittablePositionOutputStream.Committer>
-                        writer = writerSupplier.get();
+                RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
@@ -249,7 +233,7 @@ public interface SinkWriter<T> {
                     }
                     writer.close();
                 }
-                committers.addAll(writer.committer());
+                committers.addAll(writer.committers());
                 // reuse writeBuffer
                 writeBuffer.reset();
             }

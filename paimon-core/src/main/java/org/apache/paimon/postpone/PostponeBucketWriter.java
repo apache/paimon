@@ -23,7 +23,6 @@ import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -99,8 +98,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
                         : new DirectSinkWriter<>(this::createRollingRowWriter);
     }
 
-    private RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
-            createRollingRowWriter() {
+    private RollingFileWriter<KeyValue, DataFileMeta> createRollingRowWriter() {
         return writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
     }
 

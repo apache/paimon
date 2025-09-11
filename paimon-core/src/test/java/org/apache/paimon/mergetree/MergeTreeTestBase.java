@@ -30,7 +30,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -610,10 +609,8 @@ public abstract class MergeTreeTestBase {
         public CompactResult rewrite(
                 int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
-            RollingFileWriter<KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer>
-                    writer =
-                            writerFactory.createRollingMergeTreeFileWriter(
-                                    outputLevel, FileSource.COMPACT);
+            RollingFileWriter<KeyValue, DataFileMeta> writer =
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel, FileSource.COMPACT);
             RecordReader<KeyValue> reader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,

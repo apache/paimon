@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.utils.Preconditions;
 
@@ -36,24 +37,24 @@ import java.util.function.Supplier;
  * @param <T> record data type.
  * @param <R> the file metadata result.
  */
-public class RollingFileWriter<T, R, C> implements FileWriter<T, List<R>, List<C>> {
+public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
 
     private static final int CHECK_ROLLING_RECORD_CNT = 1000;
 
-    private final Supplier<? extends SingleFileWriter<T, R, C>> writerFactory;
+    private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
     private final List<AbortExecutor> closedWriters;
     private final List<R> results;
-    private final List<C> committers;
+    private final List<CommittablePositionOutputStream.Committer> committers;
 
-    private SingleFileWriter<T, R, C> currentWriter = null;
+    private SingleFileWriter<T, R> currentWriter = null;
     private long recordCount = 0;
     private boolean closed = false;
 
     public RollingFileWriter(
-            Supplier<? extends SingleFileWriter<T, R, C>> writerFactory, long targetFileSize) {
+            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
@@ -138,9 +139,9 @@ public class RollingFileWriter<T, R, C> implements FileWriter<T, List<R>, List<C
         R result = currentWriter.result();
         results.add(result);
 
-        // Collect committer if available
-        if (currentWriter.committer() != null) {
-            committers.add(currentWriter.committer());
+        // Collect committers if available
+        if (currentWriter.committers() != null) {
+            committers.addAll(currentWriter.committers());
         }
 
         currentWriter = null;
@@ -168,7 +169,7 @@ public class RollingFileWriter<T, R, C> implements FileWriter<T, List<R>, List<C
     }
 
     @Override
-    public List<C> committer() {
+    public List<CommittablePositionOutputStream.Committer> committers() {
         return committers;
     }
 

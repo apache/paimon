@@ -25,7 +25,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergOptions;
@@ -171,7 +170,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     public List<IcebergManifestFileMeta> rollingWrite(
             Iterator<IcebergManifestEntry> entries, long sequenceNumber, Content content) {
-        RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta, ?> writer =
+        RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> writer =
                 new RollingFileWriter<>(
                         () -> createWriter(sequenceNumber, content), targetFileSize.getBytes());
         try {
@@ -183,17 +182,14 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         return writer.result();
     }
 
-    public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta, ?> createWriter(
+    public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> createWriter(
             long sequenceNumber, Content content) {
         return new IcebergManifestEntryWriter(
                 writerFactory, pathFactory.newPath(), compression, sequenceNumber, content);
     }
 
     private class IcebergManifestEntryWriter
-            extends SingleFileWriter<
-                    IcebergManifestEntry,
-                    IcebergManifestFileMeta,
-                    CommittablePositionOutputStream.Committer> {
+            extends SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> {
 
         private final SimpleStatsCollector partitionStatsCollector;
         private final long sequenceNumber;

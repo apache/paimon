@@ -25,7 +25,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RowHelper;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -54,8 +53,7 @@ import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
  * to produce {@link DataFileMeta}.
  */
 public abstract class KeyValueDataFileWriter
-        extends StatsCollectingSingleFileWriter<
-                KeyValue, DataFileMeta, CommittablePositionOutputStream.Committer> {
+        extends StatsCollectingSingleFileWriter<KeyValue, DataFileMeta> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeyValueDataFileWriter.class);
 

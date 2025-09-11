@@ -213,11 +213,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 waitForLatestCompaction = true;
             }
 
-            final RollingFileWriter<KeyValue, DataFileMeta, ?> changelogWriter =
+            final RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
                     changelogProducer == ChangelogProducer.INPUT
                             ? writerFactory.createRollingChangelogFileWriter(0)
                             : null;
-            final RollingFileWriter<KeyValue, DataFileMeta, ?> dataWriter =
+            final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
                     writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
 
             try {

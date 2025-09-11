@@ -35,7 +35,7 @@ import java.util.stream.IntStream;
  * @param <T> type of records to write.
  * @param <R> type of result to produce after writing a file.
  */
-public abstract class StatsCollectingSingleFileWriter<T, R, C> extends SingleFileWriter<T, R, C> {
+public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
     private final RowType rowType;
     private final SimpleStatsProducer statsProducer;

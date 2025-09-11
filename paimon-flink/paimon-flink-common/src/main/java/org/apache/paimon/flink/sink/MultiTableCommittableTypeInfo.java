@@ -69,7 +69,7 @@ public class MultiTableCommittableTypeInfo extends TypeInformation<MultiTableCom
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
      */
     public TypeSerializer<MultiTableCommittable> createSerializer(ExecutionConfig config) {
-        // no copy, so that data from writer is directly going into committer while chaining
+        // no copy, so that data from writer is directly going into committers while chaining
         return new NoneCopyVersionedSerializerTypeSerializerProxy<MultiTableCommittable>(
                 () -> new MultiTableCommittableSerializer(new CommitMessageSerializer())) {};
     }

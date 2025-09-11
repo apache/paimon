@@ -30,11 +30,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.IOUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -43,7 +46,7 @@ import java.util.function.Function;
  * @param <T> type of records to write.
  * @param <R> type of result to produce after writing a file.
  */
-public abstract class SingleFileWriter<T, R, C> implements FileWriter<T, R, C> {
+public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     private static final Logger LOG = LoggerFactory.getLogger(SingleFileWriter.class);
 
@@ -213,11 +216,11 @@ public abstract class SingleFileWriter<T, R, C> implements FileWriter<T, R, C> {
     }
 
     @Override
-    public C committer() {
+    public List<CommittablePositionOutputStream.Committer> committers() {
         if (!closed) {
             throw new RuntimeException("Writer should be closed before getting committer!");
         }
-        return (C) committer;
+        return Lists.newArrayList(committer);
     }
 
     /** Get the result, subclasses should implement this method. */

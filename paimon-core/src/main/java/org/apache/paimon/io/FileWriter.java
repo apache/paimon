@@ -18,11 +18,13 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.utils.CloseableIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 
 /**
  * File writer to accept one record or a branch of records and generate metadata after closing it.
@@ -30,7 +32,7 @@ import java.util.Iterator;
  * @param <T> record type.
  * @param <R> file result to collect.
  */
-public interface FileWriter<T, R, C> extends Closeable {
+public interface FileWriter<T, R> extends Closeable {
 
     /**
      * Add only one record to this file writer.
@@ -109,7 +111,7 @@ public interface FileWriter<T, R, C> extends Closeable {
     /** @return the result for this closed file writer. */
     R result() throws IOException;
 
-    default C committer() {
+    default List<CommittablePositionOutputStream.Committer> committers() {
         throw new UnsupportedOperationException();
     }
 }
