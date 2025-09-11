@@ -155,6 +155,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     @Nullable private PartitionExpire partitionExpire;
+    private boolean baseEntryContainsTime;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -231,6 +232,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
+        this.baseEntryContainsTime = false;
     }
 
     @Override
@@ -242,6 +244,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire) {
         this.partitionExpire = partitionExpire;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit baseEntryContainsTime(boolean baseEntryContainsTime) {
+        this.baseEntryContainsTime = baseEntryContainsTime;
         return this;
     }
 
@@ -308,7 +316,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 appendHashIndexFiles,
                 compactDvIndexFiles);
         try {
-            List<SimpleFileEntry> appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
+            List<SimpleFileEntry> appendSimpleEntries =
+                    SimpleFileEntry.from(appendTableFiles, false);
             if (!ignoreEmptyCommit
                     || !appendTableFiles.isEmpty()
                     || !appendChangelog.isEmpty()
@@ -326,7 +335,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     // so we need to contain all changes
                     baseEntries.addAll(
                             readAllEntriesFromChangedPartitions(
-                                    latestSnapshot, appendTableFiles, compactTableFiles));
+                                    latestSnapshot, false, appendTableFiles, compactTableFiles));
                     noConflictsOrFail(
                             latestSnapshot.commitUser(),
                             baseEntries,
@@ -365,7 +374,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     noConflictsOrFail(
                             latestSnapshot.commitUser(),
                             baseEntries,
-                            SimpleFileEntry.from(compactTableFiles),
+                            SimpleFileEntry.from(compactTableFiles, false),
                             Snapshot.CommitKind.COMPACT);
                     // assume this compact commit follows just after the append commit created above
                     safeLatestSnapshotId += 1;
@@ -983,19 +992,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
                 List<SimpleFileEntry> incremental =
                         readIncrementalChanges(
-                                retryResult.latestSnapshot, latestSnapshot, changedPartitions);
+                                retryResult.latestSnapshot,
+                                latestSnapshot,
+                                changedPartitions,
+                                baseEntryContainsTime);
                 if (!incremental.isEmpty()) {
                     baseDataFiles.addAll(incremental);
                     baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
                 }
             } else {
                 baseDataFiles =
-                        readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+                        readAllEntriesFromChangedPartitions(
+                                latestSnapshot, changedPartitions, baseEntryContainsTime);
             }
             noConflictsOrFail(
                     latestSnapshot.commitUser(),
                     baseDataFiles,
-                    SimpleFileEntry.from(deltaFiles),
+                    SimpleFileEntry.from(deltaFiles, false),
                     commitKind);
         }
 
@@ -1310,14 +1323,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private List<SimpleFileEntry> readIncrementalChanges(
-            Snapshot from, Snapshot to, List<BinaryRow> changedPartitions) {
+            Snapshot from, Snapshot to, List<BinaryRow> changedPartitions, boolean containsTime) {
         List<SimpleFileEntry> entries = new ArrayList<>();
         for (long i = from.id() + 1; i <= to.id(); i++) {
             List<SimpleFileEntry> delta =
                     scan.withSnapshot(i)
                             .withKind(ScanMode.DELTA)
                             .withPartitionFilter(changedPartitions)
-                            .readSimpleEntries();
+                            .readSimpleEntries(containsTime);
             entries.addAll(delta);
         }
         return entries;
@@ -1325,23 +1338,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @SafeVarargs
     private final List<SimpleFileEntry> readAllEntriesFromChangedPartitions(
-            Snapshot snapshot, List<ManifestEntry>... changes) {
+            Snapshot snapshot, boolean containsTime, List<ManifestEntry>... changes) {
         List<BinaryRow> changedPartitions =
                 Arrays.stream(changes)
                         .flatMap(Collection::stream)
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());
-        return readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+        return readAllEntriesFromChangedPartitions(snapshot, changedPartitions, containsTime);
     }
 
     private List<SimpleFileEntry> readAllEntriesFromChangedPartitions(
-            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+            Snapshot snapshot, List<BinaryRow> changedPartitions, boolean containsTime) {
         try {
             return scan.withSnapshot(snapshot)
                     .withKind(ScanMode.ALL)
                     .withPartitionFilter(changedPartitions)
-                    .readSimpleEntries();
+                    .readSimpleEntries(containsTime);
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
         }

@@ -108,11 +108,15 @@ public interface FileStoreScan {
                 : snapshot.totalRecordCount();
     }
 
+    default List<SimpleFileEntry> readSimpleEntries() {
+        return readSimpleEntries(false);
+    }
+
     /**
      * Read {@link SimpleFileEntry}s, SimpleFileEntry only retains some critical information, so it
      * cannot perform filtering based on statistical information.
      */
-    List<SimpleFileEntry> readSimpleEntries();
+    List<SimpleFileEntry> readSimpleEntries(boolean containsTime);
 
     List<PartitionEntry> readPartitionEntries();
 
