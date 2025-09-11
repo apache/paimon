@@ -22,7 +22,7 @@ import pyarrow
 
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
-from pypaimon.schema.schema import Schema
+from pypaimon import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 

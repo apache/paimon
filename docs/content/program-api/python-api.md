@@ -44,7 +44,7 @@ pip install pypaimon
 Before coming into contact with the Table, you need to create a Catalog.
 
 ```python
-from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon import CatalogFactory
 
 # Note that keys and values are all string
 catalog_options = {

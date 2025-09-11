@@ -30,8 +30,8 @@ from pypaimon.table.row.generic_row import GenericRow
 
 from pypaimon.schema.data_types import DataField, AtomicType
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.schema import Schema
+from pypaimon import CatalogFactory
+from pypaimon import Schema
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta

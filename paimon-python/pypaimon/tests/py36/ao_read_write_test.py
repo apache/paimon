@@ -23,7 +23,7 @@ import pandas as pd
 import pyarrow as pa
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -31,7 +31,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import DataField, AtomicType
-from pypaimon.schema.schema import Schema
+from pypaimon import Schema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer, GenericRowDeserializer
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
