@@ -834,6 +834,41 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         "+I[2, 220, 2200]");
     }
 
+    @Test
+    public void testBranchesTableFilter() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 1)");
+        sql("CALL sys.create_branch('default.T', 'b1')");
+        sql("CALL sys.create_branch('default.T', 'b2')");
+        sql("CALL sys.create_branch('default.T', 'b3')");
+
+        // no filter
+        assertThat(collectResult("SELECT branch_name FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[b1]", "+I[b2]", "+I[b3]");
+
+        // equals
+        assertThat(collectResult("SELECT branch_name FROM `T$branches` WHERE branch_name = 'b2'"))
+                .containsExactlyInAnyOrder("+I[b2]");
+
+        // in
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name FROM `T$branches` WHERE branch_name IN ('b1', 'b3')"))
+                .containsExactlyInAnyOrder("+I[b1]", "+I[b3]");
+
+        // in with non-existent branch
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name FROM `T$branches` WHERE branch_name IN ('b1', 'non_existent')"))
+                .containsExactlyInAnyOrder("+I[b1]");
+
+        // equals with non-existent branch
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name FROM `T$branches` WHERE branch_name = 'non_existent'"))
+                .isEmpty();
+    }
+
     private List<String> collectResult(String sql) throws Exception {
         List<String> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
