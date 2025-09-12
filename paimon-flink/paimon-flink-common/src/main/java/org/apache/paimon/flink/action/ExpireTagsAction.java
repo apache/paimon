@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.ExpireTagsProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Expire tags action for Flink. */
-public class ExpireTagsAction extends ActionBase {
+public class ExpireTagsAction extends ActionBase implements LocalAction {
 
     private final String database;
     private final String table;
@@ -40,10 +38,9 @@ public class ExpireTagsAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         ExpireTagsProcedure expireTagsProcedure = new ExpireTagsProcedure();
         expireTagsProcedure.withCatalog(catalog);
-        expireTagsProcedure.call(
-                new DefaultProcedureContext(env), database + "." + table, olderThan);
+        expireTagsProcedure.call(null, database + "." + table, olderThan);
     }
 }
