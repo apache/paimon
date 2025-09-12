@@ -50,7 +50,7 @@ public abstract class RESTCatalogITCaseBase extends CatalogITCaseBase {
     protected RESTCatalogServer restCatalogServer;
 
     private String serverUrl;
-    private String dataPath;
+    protected String dataPath;
     protected String warehouse;
     @TempDir java.nio.file.Path tempFile;
 
