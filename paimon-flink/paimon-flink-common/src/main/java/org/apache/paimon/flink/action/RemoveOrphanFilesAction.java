@@ -34,6 +34,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     private String olderThan = null;
     private boolean dryRun = false;
+    private boolean folderBasedCheck = false;
 
     public RemoveOrphanFilesAction(
             String databaseName,
@@ -54,6 +55,10 @@ public class RemoveOrphanFilesAction extends ActionBase {
         this.dryRun = true;
     }
 
+    public void folderBasedCheck() {
+        this.folderBasedCheck = true;
+    }
+
     @Override
     public void run() throws Exception {
         executeDatabaseOrphanFiles(
@@ -61,6 +66,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
                 catalog,
                 olderThanMillis(olderThan),
                 dryRun,
+                folderBasedCheck,
                 parallelism == null ? null : Integer.parseInt(parallelism),
                 databaseName,
                 tableName);

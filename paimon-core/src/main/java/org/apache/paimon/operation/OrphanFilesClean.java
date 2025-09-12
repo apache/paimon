@@ -96,14 +96,17 @@ public abstract class OrphanFilesClean implements Serializable {
     protected final boolean dryRun;
     protected final int partitionKeysNum;
     protected final Path location;
+    protected final boolean folderBasedCheck;
 
-    public OrphanFilesClean(FileStoreTable table, long olderThanMillis, boolean dryRun) {
+    public OrphanFilesClean(
+            FileStoreTable table, long olderThanMillis, boolean dryRun, boolean folderBasedCheck) {
         this.table = table;
         this.fileIO = table.fileIO();
         this.partitionKeysNum = table.partitionKeys().size();
         this.location = table.location();
         this.olderThanMillis = olderThanMillis;
         this.dryRun = dryRun;
+        this.folderBasedCheck = folderBasedCheck;
     }
 
     protected List<String> validBranches() {
@@ -368,6 +371,10 @@ public abstract class OrphanFilesClean implements Serializable {
         List<FileStatus> dirs = tryBestListingDirs(dir);
 
         if (level == 0) {
+            if (folderBasedCheck) {
+                return filterDirs(
+                        dirs, p -> p.getName().startsWith(BUCKET_PATH_PREFIX), this::oldEnough);
+            }
             // return bucket paths
             return filterDirs(dirs, p -> p.getName().startsWith(BUCKET_PATH_PREFIX));
         }
@@ -387,6 +394,23 @@ public abstract class OrphanFilesClean implements Serializable {
         for (FileStatus status : statuses) {
             Path path = status.getPath();
             if (filter.test(path)) {
+                filtered.add(path);
+            }
+            // ignore unknown dirs
+        }
+
+        return filtered;
+    }
+
+    private List<Path> filterDirs(
+            List<FileStatus> statuses,
+            Predicate<Path> nameFilter,
+            Predicate<FileStatus> timeFilter) {
+        List<Path> filtered = new ArrayList<>();
+
+        for (FileStatus status : statuses) {
+            Path path = status.getPath();
+            if (nameFilter.test(path) && timeFilter.test(status)) {
                 filtered.add(path);
             }
             // ignore unknown dirs

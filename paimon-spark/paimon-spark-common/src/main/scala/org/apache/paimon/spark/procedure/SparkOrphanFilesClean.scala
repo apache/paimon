@@ -26,7 +26,6 @@ import org.apache.paimon.operation.{CleanOrphanFilesResult, OrphanFilesClean}
 import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX
-import org.apache.paimon.utils.SerializableConsumer
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{functions, Dataset, PaimonSparkSession, SparkSession}
@@ -47,7 +46,7 @@ case class SparkOrphanFilesClean(
     parallelism: Int,
     dryRunPara: Boolean,
     @transient spark: SparkSession)
-  extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, dryRunPara)
+  extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, dryRunPara, false)
   with SQLConfHelper
   with Logging {
 

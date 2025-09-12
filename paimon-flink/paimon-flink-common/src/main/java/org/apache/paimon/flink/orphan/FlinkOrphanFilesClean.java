@@ -81,8 +81,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             FileStoreTable table,
             long olderThanMillis,
             boolean dryRun,
+            boolean folderBasedCheck,
             @Nullable Integer parallelism) {
-        super(table, olderThanMillis, dryRun);
+        super(table, olderThanMillis, dryRun, folderBasedCheck);
         this.parallelism = parallelism;
     }
 
@@ -372,10 +373,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             Catalog catalog,
             long olderThanMillis,
             boolean dryRun,
+            boolean folderBasedCheck,
             @Nullable Integer parallelism,
             String databaseName,
             @Nullable String tableName)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+        LOG.info("execute orphan file clean using folderBasedCheck:{}", folderBasedCheck);
+
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
@@ -393,7 +397,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
             DataStream<CleanOrphanFilesResult> clean =
                     new FlinkOrphanFilesClean(
-                                    (FileStoreTable) table, olderThanMillis, dryRun, parallelism)
+                                    (FileStoreTable) table,
+                                    olderThanMillis,
+                                    dryRun,
+                                    folderBasedCheck,
+                                    parallelism)
                             .doOrphanClean(env);
             if (clean != null) {
                 orphanFilesCleans.add(clean);
