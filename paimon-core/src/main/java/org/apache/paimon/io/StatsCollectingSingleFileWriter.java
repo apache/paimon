@@ -48,8 +48,16 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType rowType,
-            boolean asyncWrite) {
-        super(fileIO, context.factory(), path, converter, context.compression(), asyncWrite);
+            boolean asyncWrite,
+            boolean useCommittableOutputStream) {
+        super(
+                fileIO,
+                context.factory(),
+                path,
+                converter,
+                context.compression(),
+                asyncWrite,
+                useCommittableOutputStream);
         this.rowType = rowType;
         this.statsProducer = context.statsProducer();
         this.isStatsDisabled = statsProducer.isStatsDisabled();

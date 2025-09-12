@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.utils.Preconditions;
 
@@ -46,6 +47,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     private final long targetFileSize;
     private final List<AbortExecutor> closedWriters;
     private final List<R> results;
+    private final List<CommittablePositionOutputStream.Committer> committers;
 
     private SingleFileWriter<T, R> currentWriter = null;
     private long recordCount = 0;
@@ -57,6 +59,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
+        this.committers = new ArrayList<>();
     }
 
     @VisibleForTesting
@@ -132,7 +135,15 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         // cannot store whole writer, it includes lots of memory for example column vectors to read
         // and write
         closedWriters.add(currentWriter.abortExecutor());
-        results.add(currentWriter.result());
+
+        R result = currentWriter.result();
+        results.add(result);
+
+        // Collect committers if available
+        if (currentWriter.committers() != null) {
+            committers.addAll(currentWriter.committers());
+        }
+
         currentWriter = null;
     }
 
@@ -155,6 +166,11 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     public List<R> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
         return results;
+    }
+
+    @Override
+    public List<CommittablePositionOutputStream.Committer> committers() {
+        return committers;
     }
 
     @Override

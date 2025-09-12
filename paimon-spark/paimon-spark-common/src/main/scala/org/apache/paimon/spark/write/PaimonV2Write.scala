@@ -133,12 +133,14 @@ private case class WriterFactory(writeSchema: StructType, batchWriteBuilder: Bat
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val batchTableWrite = batchWriteBuilder.newWrite()
+    val batchTableWrite = batchWriteBuilder.newWrite().asInstanceOf[BatchTableWrite[CommitMessage]]
     new PaimonDataWriter(batchTableWrite, writeSchema)
   }
 }
 
-private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: StructType)
+private class PaimonDataWriter(
+    batchTableWrite: BatchTableWrite[CommitMessage],
+    writeSchema: StructType)
   extends DataWriter[InternalRow] {
 
   private val ioManager = SparkUtils.createIOManager()

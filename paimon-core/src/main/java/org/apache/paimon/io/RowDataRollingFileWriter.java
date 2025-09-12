@@ -53,7 +53,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            boolean useCommittableOutputStream) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -69,7 +70,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
-                                writeCols),
+                                writeCols,
+                                useCommittableOutputStream),
                 targetFileSize);
     }
 
@@ -90,8 +92,9 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             RowType rowType,
             SimpleColStatsCollector.Factory[] statsCollectors) {
         boolean isDisabled =
-                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+                statsCollectors == null
+                        || Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
         if (isDisabled) {
             return SimpleStatsProducer.disabledProducer();
         }

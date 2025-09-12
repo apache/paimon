@@ -24,16 +24,20 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.AsyncPositionOutputStream;
+import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.IOUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -52,10 +56,12 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     private FormatWriter writer;
     private PositionOutputStream out;
+    private CommittablePositionOutputStream.Committer committer;
 
     protected long outputBytes;
     private long recordCount;
     protected boolean closed;
+    private final boolean useCommittableOutputStream;
 
     public SingleFileWriter(
             FileIO fileIO,
@@ -63,18 +69,24 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             Path path,
             Function<T, InternalRow> converter,
             String compression,
-            boolean asyncWrite) {
+            boolean asyncWrite,
+            boolean useCommittableOutputStream) {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
+        this.useCommittableOutputStream = useCommittableOutputStream;
 
         try {
             if (factory instanceof SupportsDirectWrite) {
                 writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
             } else {
-                out = fileIO.newOutputStream(path, false);
-                if (asyncWrite) {
-                    out = new AsyncPositionOutputStream(out);
+                if (useCommittableOutputStream) {
+                    out = fileIO.newCommittableOutputStream(path, false);
+                } else {
+                    out = fileIO.newOutputStream(path, false);
+                    if (asyncWrite) {
+                        out = new AsyncPositionOutputStream(out);
+                    }
                 }
                 writer = factory.create(out, compression);
             }
@@ -155,8 +167,23 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             writer = null;
         }
         if (out != null) {
-            IOUtils.closeQuietly(out);
+            if (out instanceof CommittablePositionOutputStream) {
+                try {
+                    committer = ((CommittablePositionOutputStream) out).closeForCommit();
+                } catch (Throwable e) {
+                    LOG.debug("Exception occurs when closing out" + committer, e);
+                }
+            } else {
+                IOUtils.closeQuietly(out);
+            }
             out = null;
+        }
+        if (committer != null) {
+            try {
+                committer.discard();
+            } catch (Throwable e) {
+                LOG.debug("Exception occurs when closing out" + committer, e);
+            }
         }
         fileIO.deleteQuietly(path);
     }
@@ -187,7 +214,11 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             if (out != null) {
                 out.flush();
                 outputBytes = out.getPos();
-                out.close();
+                if (useCommittableOutputStream) {
+                    committer = ((CommittablePositionOutputStream) out).closeForCommit();
+                } else {
+                    out.close();
+                }
                 out = null;
             }
         } catch (IOException e) {
@@ -198,6 +229,17 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             closed = true;
         }
     }
+
+    @Override
+    public List<CommittablePositionOutputStream.Committer> committers() {
+        if (!closed) {
+            throw new RuntimeException("Writer should be closed before getting committer!");
+        }
+        return Lists.newArrayList(committer);
+    }
+
+    /** Get the result, subclasses should implement this method. */
+    public abstract R result() throws IOException;
 
     /** Abort executor to just have reference of path instead of whole writer. */
     public static class AbortExecutor {
