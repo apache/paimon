@@ -85,7 +85,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     public LocalOrphanFilesClean(FileStoreTable table, long olderThanMillis, boolean dryRun) {
-        super(table, olderThanMillis, dryRun);
+        super(table, olderThanMillis, dryRun, false);
         this.deleteFiles = new ArrayList<>();
         this.executor =
                 createCachedThreadPool(

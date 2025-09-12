@@ -85,6 +85,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     catalog,
                                     olderThanMillis(olderThan),
                                     dryRun != null && dryRun,
+                                    false,
                                     parallelism,
                                     databaseName,
                                     tableName);

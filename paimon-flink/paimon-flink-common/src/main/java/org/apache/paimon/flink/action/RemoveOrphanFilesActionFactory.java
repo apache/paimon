@@ -26,6 +26,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "remove_orphan_files";
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
+    private static final String FOLDER_BASED_CHECK = "folder_based_check";
     private static final String PARALLELISM = "parallelism";
 
     @Override
@@ -48,6 +49,11 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
         if (params.has(DRY_RUN) && Boolean.parseBoolean(params.get(DRY_RUN))) {
             action.dryRun();
+        }
+
+        if (params.has(FOLDER_BASED_CHECK)
+                && Boolean.parseBoolean(params.get(FOLDER_BASED_CHECK))) {
+            action.folderBasedCheck();
         }
 
         return Optional.of(action);
