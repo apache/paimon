@@ -54,9 +54,7 @@ class GenericRowDeserializer:
         arity = len(data_fields)
         actual_data = bytes_data
         if len(bytes_data) >= 4:
-            arity_from_bytes = struct.unpack('>i', bytes_data[:4])[0]
-            if 0 < arity_from_bytes < 1000:
-                actual_data = bytes_data[4:]
+            actual_data = bytes_data[4:]
 
         fields = []
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
