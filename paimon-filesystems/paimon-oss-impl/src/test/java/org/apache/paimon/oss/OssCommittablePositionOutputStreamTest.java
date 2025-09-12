@@ -46,7 +46,7 @@ public class OssCommittablePositionOutputStreamTest {
     @TempDir java.nio.file.Path tempDir;
 
     private OssCommittablePositionOutputStream stream;
-    private MockOSSS3MultiPartUpload mockAccessor;
+    private MockOSSMultiPartUpload mockAccessor;
     private org.apache.hadoop.fs.Path hadoopPath;
     private Path targetPath;
     private File targetFile;
@@ -58,11 +58,11 @@ public class OssCommittablePositionOutputStreamTest {
         targetFile = tempDir.resolve("target-file.parquet").toFile();
         targetFile.getParentFile().mkdirs();
 
-        mockAccessor = new MockOSSS3MultiPartUpload(targetFile);
+        mockAccessor = new MockOSSMultiPartUpload(targetFile);
     }
 
-    private OssCommittablePositionOutputStream createStream() {
-        return new OssCommittablePositionOutputStream(mockAccessor, hadoopPath, false);
+    private OssCommittablePositionOutputStream createStream() throws IOException {
+        return new OssCommittablePositionOutputStream(mockAccessor, hadoopPath);
     }
 
     @Test
@@ -203,7 +203,7 @@ public class OssCommittablePositionOutputStreamTest {
      * Mock implementation that actually uses local files to simulate OSS multipart upload behavior.
      * Extends OSSAccessor but overrides all methods to avoid initialization issues.
      */
-    private static class MockOSSS3MultiPartUpload extends OSSS3MultiPartUpload {
+    private static class MockOSSMultiPartUpload extends OSSMultiPartUpload {
 
         boolean startMultipartUploadCalled = false;
         int uploadPartCalls = 0;
@@ -219,7 +219,7 @@ public class OssCommittablePositionOutputStreamTest {
         private final File targetFile;
 
         @SuppressWarnings("unused")
-        public MockOSSS3MultiPartUpload(File targetFile) {
+        public MockOSSMultiPartUpload(File targetFile) {
             super(createStubFileSystem()); // Create minimal stub to avoid null pointer
             this.targetFile = targetFile;
         }

@@ -18,34 +18,30 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Public;
-
 import java.io.IOException;
 
 /**
  * CommittablePositionOutputStream provides a way to write to a file and get a committer that can
- * commit the write operation.
+ * commit.
  */
 public abstract class CommittablePositionOutputStream extends PositionOutputStream {
-
     /**
      * Closes the stream for writing and returns a committer that can be used to make the written
-     * data visible/committed.
+     * data visible.
      *
      * <p>After calling this method, the stream should not be used for writing anymore. The returned
      * committer can be used to commit the data or discard it.
      *
-     * @return A committer that can be used to commit the written data
+     * @return A committer that can be used to commit the data
      * @throws IOException if an I/O error occurs during closing
      */
     public abstract Committer closeForCommit() throws IOException;
 
     /** A committer interface that can commit or discard the written data. */
-    @Public
     public interface Committer {
 
         /**
-         * Commits the written data, making it visible/accessible.
+         * Commits the written data, making it visible.
          *
          * @throws IOException if an I/O error occurs during commit
          */

@@ -31,13 +31,13 @@ import java.io.IOException;
 import java.util.List;
 
 /** Provides the multipart upload by Aliyun OSS. */
-public class OSSS3MultiPartUpload
+public class OSSMultiPartUpload
         implements MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> {
 
     private AliyunOSSFileSystem fs;
     private AliyunOSSFileSystemStore store;
 
-    public OSSS3MultiPartUpload(AliyunOSSFileSystem fs) {
+    public OSSMultiPartUpload(AliyunOSSFileSystem fs) {
         this.fs = fs;
         this.store = fs.getStore();
     }

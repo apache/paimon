@@ -64,8 +64,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
+        if (!overwrite && this.exists(path)) {
+            throw new IOException("File " + path + " already exists.");
+        }
         return new S3CommittablePositionOutputStream(
-                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, overwrite);
+                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
     }
 
     @Override

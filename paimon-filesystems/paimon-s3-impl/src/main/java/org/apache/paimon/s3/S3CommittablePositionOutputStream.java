@@ -24,6 +24,8 @@ import org.apache.paimon.fs.MultiPartUploadStore;
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 
+import java.io.IOException;
+
 /** S3 implementation of CommittablePositionOutputStream using multipart upload. */
 public class S3CommittablePositionOutputStream
         extends MultiPartUploadCommittablePositionOutputStream<
@@ -31,9 +33,9 @@ public class S3CommittablePositionOutputStream
 
     public S3CommittablePositionOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath,
-            boolean overwrite) {
-        super(multiPartUploadStore, hadoopPath, overwrite);
+            org.apache.hadoop.fs.Path hadoopPath)
+            throws IOException {
+        super(multiPartUploadStore, hadoopPath);
     }
 
     @Override

@@ -100,7 +100,7 @@ public interface FileIO extends Serializable, Closeable {
      * data becomes visible only after calling commit on the returned committer from closeForCommit
      * method.
      *
-     * @param path the file name to open
+     * @param path the file target path
      * @param overwrite if a file with this name already exists, then if true, the file will be
      *     overwritten, and if false an error will be thrown.
      * @return a CommittablePositionOutputStream that supports transactional writes

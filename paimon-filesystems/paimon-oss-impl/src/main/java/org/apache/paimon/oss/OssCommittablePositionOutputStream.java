@@ -24,6 +24,8 @@ import org.apache.paimon.fs.MultiPartUploadStore;
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
 
+import java.io.IOException;
+
 /** OSS implementation of CommittablePositionOutputStream using multipart upload. */
 public class OssCommittablePositionOutputStream
         extends MultiPartUploadCommittablePositionOutputStream<
@@ -31,9 +33,9 @@ public class OssCommittablePositionOutputStream
 
     public OssCommittablePositionOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath,
-            boolean overwrite) {
-        super(multiPartUploadStore, hadoopPath, overwrite);
+            org.apache.hadoop.fs.Path hadoopPath)
+            throws IOException {
+        super(multiPartUploadStore, hadoopPath);
     }
 
     @Override

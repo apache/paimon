@@ -62,12 +62,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
             throws IOException {
+        if (!overwrite && this.exists(path)) {
+            throw new IOException("File " + path + " already exists.");
+        }
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         FileSystem fs = getFileSystem(hadoopPath);
         return new OssCommittablePositionOutputStream(
-                new OSSS3MultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
-                hadoopPath,
-                overwrite);
+                new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
+                hadoopPath);
     }
 
     @Override

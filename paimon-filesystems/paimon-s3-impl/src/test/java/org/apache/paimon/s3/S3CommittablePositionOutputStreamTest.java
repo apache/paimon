@@ -59,7 +59,7 @@ class S3CommittablePositionOutputStreamTest {
     }
 
     private S3CommittablePositionOutputStream createStream() throws IOException {
-        return new S3CommittablePositionOutputStream(mockAccessor, hadoopPath, false);
+        return new S3CommittablePositionOutputStream(mockAccessor, hadoopPath);
     }
 
     @Test

@@ -48,14 +48,14 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
     private boolean closed = false;
 
     public MultiPartUploadCommittablePositionOutputStream(
-            MultiPartUploadStore<T, C> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath,
-            boolean overwrite) {
+            MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
+            throws IOException {
         this.multiPartUploadStore = multiPartUploadStore;
         this.hadoopPath = hadoopPath;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
+        this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
         this.position = 0;
     }
 
@@ -116,9 +116,7 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
             throw new IOException("Stream is already closed");
         }
         closed = true;
-        if (uploadId == null) {
-            initializeMultipartUpload();
-        }
+
         if (buffer.size() > 0) {
             uploadPart();
         }
@@ -127,23 +125,9 @@ public abstract class MultiPartUploadCommittablePositionOutputStream<T, C>
                 multiPartUploadStore, hadoopPath, uploadId, uploadedParts, objectName, position);
     }
 
-    private void initializeMultipartUpload() throws IOException {
-        try {
-            this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
-            LOG.debug(
-                    "Initialized multipart upload with ID: {} for path: {}", uploadId, hadoopPath);
-        } catch (Exception e) {
-            throw new IOException("Failed to initialize multipart upload for " + hadoopPath, e);
-        }
-    }
-
     private void uploadPart() throws IOException {
         if (buffer.size() == 0) {
             return;
-        }
-
-        if (uploadId == null) {
-            initializeMultipartUpload();
         }
 
         File tempFile = null;

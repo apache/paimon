@@ -43,6 +43,9 @@ public class TempFileCommittablePositionOutputStream extends CommittablePosition
 
     public TempFileCommittablePositionOutputStream(
             FileIO fileIO, Path targetPath, boolean overwrite) throws IOException {
+        if (!overwrite && fileIO.exists(targetPath)) {
+            throw new IOException("File " + targetPath + " already exists.");
+        }
         this.fileIO = fileIO;
         this.targetPath = targetPath;
         this.tempPath = generateTempPath(targetPath);
@@ -92,8 +95,7 @@ public class TempFileCommittablePositionOutputStream extends CommittablePosition
      * directory as the target with a unique suffix.
      */
     private Path generateTempPath(Path targetPath) {
-        String fileName = targetPath.getName();
-        String tempFileName = "." + fileName + ".tmp." + UUID.randomUUID().toString();
+        String tempFileName = ".tmp." + UUID.randomUUID();
         return new Path(targetPath.getParent(), tempFileName);
     }
 
