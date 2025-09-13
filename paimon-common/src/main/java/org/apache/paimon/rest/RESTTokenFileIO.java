@@ -208,7 +208,15 @@ public class RESTTokenFileIO implements FileIO {
         if (apiInstance == null) {
             apiInstance = new RESTApi(catalogContext.options(), false);
         }
-        GetTableTokenResponse response = apiInstance.loadTableToken(identifier);
+        Identifier tableIdentifier = identifier;
+        if (identifier.isSystemTable()) {
+            tableIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName());
+        }
+        GetTableTokenResponse response = apiInstance.loadTableToken(tableIdentifier);
         LOG.info(
                 "end refresh data token for identifier [{}] expiresAtMillis [{}]",
                 identifier,
