@@ -484,6 +484,19 @@ under the License.
         </profile>
 
         <profile>
+            <id>scala_2.13</id>
+            <properties>
+                <scala.binary.version>2.13</scala.binary.version>
+                <scala.version>${scala213.version}</scala.version>
+            </properties>
+            <activation>
+                <property>
+                    <name>scala_2.13</name>
+                </property>
+            </activation>
+        </profile>
+
+        <profile>
             <id>paimon-iceberg</id>
             <modules>
                 <module>paimon-iceberg</module>
