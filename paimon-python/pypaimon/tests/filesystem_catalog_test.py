@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.table.file_store_table import FileStoreTable
 
 
-class FileSystemCatalogTestCase(unittest.TestCase):
+class FileSystemCatalogTest(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")

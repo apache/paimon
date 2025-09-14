@@ -21,13 +21,13 @@ import os
 import pyarrow as pa
 
 from pypaimon import Schema
-from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
 
 
-class RESTTableTest(RESTCatalogBaseTest):
+class RESTSimpleTest(RESTBaseTest):
     def setUp(self):
         super().setUp()
         self.pa_schema = pa.schema([
