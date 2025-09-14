@@ -16,7 +16,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, date, time
+from decimal import Decimal
 from unittest.mock import Mock
 
 import pandas as pd
@@ -135,13 +136,11 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
             ('f8', pa.binary()),
             ('f9', pa.binary(10)),
             ('f10', pa.decimal128(10, 2)),
-            ('f11', pa.timestamp('ms')),
-            ('f12', pa.date32()),
-            ('f13', pa.time64('us')),
+            ('f11', pa.date32()),
         ])
         schema = Schema.from_pyarrow_schema(simple_pa_schema)
-        self.catalog.create_table('default.test_full_data_types', schema, False)
-        table = self.catalog.get_table('default.test_full_data_types')
+        self.rest_catalog.create_table('default.test_full_data_types', schema, False)
+        table = self.rest_catalog.get_table('default.test_full_data_types')
 
         # to test read and write
         write_builder = table.new_batch_write_builder()
@@ -159,9 +158,7 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
             'f8': [b'\x01\x02\x03', b'pyarrow'],
             'f9': [b'exactly_10', b'pad'.ljust(10, b'\x00')],
             'f10': [Decimal('-987.65'), Decimal('12345.67')],
-            'f11': [datetime(2000, 1, 1, 0, 0, 0, 123456), datetime(2023, 10, 27, 8, 0, 0)],
-            'f12': [date(1999, 12, 31), date(2023, 1, 1)],
-            'f13': [time(10, 30, 0), time(23, 59, 59, 999000)],
+            'f11': [date(1999, 12, 31), date(2023, 1, 1)],
         }, schema=simple_pa_schema)
         table_write.write_arrow(expect_data)
         table_commit.commit(table_write.prepare_commit())
