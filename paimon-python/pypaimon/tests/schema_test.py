@@ -20,18 +20,37 @@ import unittest
 
 import pyarrow
 
+from pypaimon import Schema
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
-from pypaimon import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 
 class SchemaTestCase(unittest.TestCase):
     def test_types(self):
         data_fields = [
-            DataField(0, "name", AtomicType('INT'), 'desc  name'),
-            DataField(1, "arr", ArrayType(True, AtomicType('INT')), 'desc arr1'),
-            DataField(2, "map1",
+            DataField(0, "f0", AtomicType('TINYINT'), 'desc'),
+            DataField(1, "f1", AtomicType('SMALLINT'), 'desc'),
+            DataField(2, "f2", AtomicType('INT'), 'desc'),
+            DataField(3, "f3", AtomicType('BIGINT'), 'desc'),
+            DataField(4, "f4", AtomicType('FLOAT'), 'desc'),
+            DataField(5, "f5", AtomicType('DOUBLE'), 'desc'),
+            DataField(6, "f6", AtomicType('BOOLEAN'), 'desc'),
+            DataField(7, "f7", AtomicType('STRING'), 'desc'),
+            DataField(8, "f8", AtomicType('BINARY(12)'), 'desc'),
+            DataField(9, "f9", AtomicType('DECIMAL(10, 6)'), 'desc'),
+            DataField(10, "f10", AtomicType('BYTES'), 'desc'),
+            DataField(11, "f11", AtomicType('DATE'), 'desc'),
+            DataField(12, "f12", AtomicType('TIME(0)'), 'desc'),
+            DataField(13, "f13", AtomicType('TIME(3)'), 'desc'),
+            DataField(14, "f14", AtomicType('TIME(6)'), 'desc'),
+            DataField(15, "f15", AtomicType('TIME(9)'), 'desc'),
+            DataField(16, "f16", AtomicType('TIMESTAMP(0)'), 'desc'),
+            DataField(17, "f17", AtomicType('TIMESTAMP(3)'), 'desc'),
+            DataField(18, "f18", AtomicType('TIMESTAMP(6)'), 'desc'),
+            DataField(19, "f19", AtomicType('TIMESTAMP(9)'), 'desc'),
+            DataField(20, "arr", ArrayType(True, AtomicType('INT')), 'desc arr1'),
+            DataField(21, "map1",
                       MapType(False, AtomicType('INT', False),
                               MapType(False, AtomicType('INT', False), AtomicType('INT', False))),
                       'desc map1'),
