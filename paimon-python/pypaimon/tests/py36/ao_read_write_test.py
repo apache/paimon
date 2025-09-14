@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import logging
-from datetime import datetime, date, time
+from datetime import datetime, date
 from decimal import Decimal
 from unittest.mock import Mock
 
