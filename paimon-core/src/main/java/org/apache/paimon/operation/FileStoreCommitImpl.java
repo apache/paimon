@@ -1283,7 +1283,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.properties(),
                         latestSnapshot.nextRowId());
 
-        return commitSnapshotImpl(newSnapshot, emptyList());
+        boolean success = commitSnapshotImpl(newSnapshot, emptyList());
+        if (!success) {
+            LOG.info("Commit failed for compact manifest, will be retried again.");
+            manifestList.delete(deltaManifestList.getLeft());
+            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+        }
+        return success;
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {
