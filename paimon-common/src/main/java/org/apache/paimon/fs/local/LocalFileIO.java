@@ -24,8 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RenameTempFileCommittablePositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TempFileCommittablePositionOutputStream;
 import org.apache.paimon.fs.VectoredReadable;
 
 import org.slf4j.Logger;
@@ -97,7 +97,7 @@ public class LocalFileIO implements FileIO {
     @Override
     public CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
             throws IOException {
-        return new TempFileCommittablePositionOutputStream(this, path, overwrite);
+        return new RenameTempFileCommittablePositionOutputStream(this, path, overwrite);
     }
 
     @Override

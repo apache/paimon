@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.Optional;
 
-/** A builder to build {@link FormatBatchWriteBuilder}. */
+/** A builder to build batch writer for {@link FormatTable}. */
 public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     private static final long serialVersionUID = 1L;
@@ -66,7 +66,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         FormatTableFileWrite writer =
                 new FormatTableFileWrite(
                         table.fileIO(),
-                        0,
                         table.rowType().notNull(),
                         table.partitionType(),
                         pathFactory(),

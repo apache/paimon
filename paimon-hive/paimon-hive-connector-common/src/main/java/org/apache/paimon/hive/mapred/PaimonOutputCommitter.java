@@ -49,7 +49,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.hive.utils.HiveUtils.createFileStoreTable;
 
-/** A Paimon table committers for adding data files to the Paimon table. */
+/** A Paimon table committer for adding data files to the Paimon table. */
 public class PaimonOutputCommitter extends OutputCommitter {
 
     private static final String PRE_COMMIT = ".preCommit";

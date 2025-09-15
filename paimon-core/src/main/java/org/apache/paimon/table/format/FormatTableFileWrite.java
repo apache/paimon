@@ -37,6 +37,7 @@ import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +58,6 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
 
     public FormatTableFileWrite(
             FileIO fileIO,
-            long schemaId,
             RowType rowType,
             RowType partitionType,
             FileStorePathFactory pathFactory,
@@ -115,13 +115,14 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
 
     public List<CommittablePositionOutputStream.Committer> closeAndGetCommitters()
             throws Exception {
+        List<CommittablePositionOutputStream.Committer> committers = new ArrayList<>();
         for (RecordWriter<InternalRow> writer : writers.values()) {
             if (writer instanceof FormatTableRecordWriter) {
                 FormatTableRecordWriter formatWriter = (FormatTableRecordWriter) writer;
-                return formatWriter.closeAndGetCommitters();
+                committers.addAll(formatWriter.closeAndGetCommitters());
             }
         }
-        throw new RuntimeException("No FormatTableRecordWriter found.");
+        return committers;
     }
 
     @Override

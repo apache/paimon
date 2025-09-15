@@ -110,7 +110,7 @@ public interface FileIO extends Serializable, Closeable {
      */
     default CommittablePositionOutputStream newCommittableOutputStream(Path path, boolean overwrite)
             throws IOException {
-        return new TempFileCommittablePositionOutputStream(this, path, overwrite);
+        return new RenameTempFileCommittablePositionOutputStream(this, path, overwrite);
     }
 
     /**

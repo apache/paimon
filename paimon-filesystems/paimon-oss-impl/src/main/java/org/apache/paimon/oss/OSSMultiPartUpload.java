@@ -43,7 +43,7 @@ public class OSSMultiPartUpload
     }
 
     @Override
-    public Path getWorkingDirectory() {
+    public Path workingDirectory() {
         return fs.getWorkingDirectory();
     }
 

@@ -31,8 +31,8 @@ import java.nio.file.Paths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link TempFileCommittablePositionOutputStream}. */
-public class TempFileCommittablePositionOutputStreamTest {
+/** Test for {@link RenameTempFileCommittablePositionOutputStream}. */
+public class RenameTempFileCommittablePositionOutputStreamTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -47,8 +47,8 @@ public class TempFileCommittablePositionOutputStreamTest {
 
     @Test
     void testSuccessfulCommit() throws IOException {
-        TempFileCommittablePositionOutputStream stream =
-                new TempFileCommittablePositionOutputStream(fileIO, targetPath, false);
+        RenameTempFileCommittablePositionOutputStream stream =
+                new RenameTempFileCommittablePositionOutputStream(fileIO, targetPath, false);
 
         // Write some data
         String testData = "Hello, World!";
@@ -73,8 +73,8 @@ public class TempFileCommittablePositionOutputStreamTest {
 
     @Test
     void testDiscard() throws IOException {
-        TempFileCommittablePositionOutputStream stream =
-                new TempFileCommittablePositionOutputStream(fileIO, targetPath, false);
+        RenameTempFileCommittablePositionOutputStream stream =
+                new RenameTempFileCommittablePositionOutputStream(fileIO, targetPath, false);
 
         // Write some data
         stream.write("Some data".getBytes());
@@ -91,8 +91,8 @@ public class TempFileCommittablePositionOutputStreamTest {
 
     @Test
     void testCloseWithoutCommit() throws IOException {
-        TempFileCommittablePositionOutputStream stream =
-                new TempFileCommittablePositionOutputStream(fileIO, targetPath, false);
+        RenameTempFileCommittablePositionOutputStream stream =
+                new RenameTempFileCommittablePositionOutputStream(fileIO, targetPath, false);
 
         // Write some data
         stream.write("Some data".getBytes());
@@ -106,8 +106,8 @@ public class TempFileCommittablePositionOutputStreamTest {
 
     @Test
     void testDoubleCommitThrows() throws IOException {
-        TempFileCommittablePositionOutputStream stream =
-                new TempFileCommittablePositionOutputStream(fileIO, targetPath, false);
+        RenameTempFileCommittablePositionOutputStream stream =
+                new RenameTempFileCommittablePositionOutputStream(fileIO, targetPath, false);
 
         stream.write("data".getBytes());
         CommittablePositionOutputStream.Committer committer = stream.closeForCommit();
@@ -121,8 +121,8 @@ public class TempFileCommittablePositionOutputStreamTest {
 
     @Test
     void testPositionTracking() throws IOException {
-        TempFileCommittablePositionOutputStream stream =
-                new TempFileCommittablePositionOutputStream(fileIO, targetPath, false);
+        RenameTempFileCommittablePositionOutputStream stream =
+                new RenameTempFileCommittablePositionOutputStream(fileIO, targetPath, false);
 
         assertThat(stream.getPos()).isEqualTo(0);
 

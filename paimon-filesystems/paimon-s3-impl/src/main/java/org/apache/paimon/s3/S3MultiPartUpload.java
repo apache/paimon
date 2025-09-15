@@ -59,7 +59,7 @@ public class S3MultiPartUpload
     }
 
     @Override
-    public Path getWorkingDirectory() {
+    public Path workingDirectory() {
         return s3a.getWorkingDirectory();
     }
 

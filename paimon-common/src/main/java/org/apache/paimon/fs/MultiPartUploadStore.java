@@ -29,13 +29,13 @@ public interface MultiPartUploadStore<T, C> {
 
     default String pathToObject(org.apache.hadoop.fs.Path hadoopPath) {
         if (!hadoopPath.isAbsolute()) {
-            hadoopPath = new org.apache.hadoop.fs.Path(getWorkingDirectory(), hadoopPath);
+            hadoopPath = new org.apache.hadoop.fs.Path(workingDirectory(), hadoopPath);
         }
 
         return hadoopPath.toUri().getPath().substring(1);
     }
 
-    Path getWorkingDirectory();
+    Path workingDirectory();
 
     String startMultiPartUpload(String objectName) throws IOException;
 

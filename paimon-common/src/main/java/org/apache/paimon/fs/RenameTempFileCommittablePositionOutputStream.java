@@ -20,9 +20,6 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.UUID;
 
@@ -31,17 +28,14 @@ import java.util.UUID;
  * commits by renaming to the target path. This follows HDFS-style commit semantics.
  */
 @Public
-public class TempFileCommittablePositionOutputStream extends CommittablePositionOutputStream {
-
-    private static final Logger LOG =
-            LoggerFactory.getLogger(TempFileCommittablePositionOutputStream.class);
+public class RenameTempFileCommittablePositionOutputStream extends CommittablePositionOutputStream {
 
     private final FileIO fileIO;
     private final Path targetPath;
     private final Path tempPath;
     private final PositionOutputStream tempOutputStream;
 
-    public TempFileCommittablePositionOutputStream(
+    public RenameTempFileCommittablePositionOutputStream(
             FileIO fileIO, Path targetPath, boolean overwrite) throws IOException {
         if (!overwrite && fileIO.exists(targetPath)) {
             throw new IOException("File " + targetPath + " already exists.");
