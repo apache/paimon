@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.Public;
 import java.util.Objects;
 
 /**
- * Data type of a variable-length character string.
+ * Data type of variable-length character string.
  *
  * <p>A conversion from and to {@code byte[]} assumes UTF-8 encoding.
  *

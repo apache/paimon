@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.Public;
 import java.util.Objects;
 
 /**
- * Data type of a decimal number with fixed precision and scale.
+ * Data type of decimal number with fixed precision and scale.
  *
  * @since 0.4.0
  */

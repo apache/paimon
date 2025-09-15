@@ -21,7 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 /**
- * Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
+ * Data type of boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
  *
  * @since 0.4.0
  */
