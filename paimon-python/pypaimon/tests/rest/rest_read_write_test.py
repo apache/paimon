@@ -27,10 +27,10 @@ from pypaimon import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon import Schema
-from pypaimon.tests.rest_catalog_base_test import RESTCatalogBaseTest
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
-class RESTTableReadWriteTest(RESTCatalogBaseTest):
+class RESTTableReadWriteTest(RESTBaseTest):
 
     def test_overwrite(self):
         simple_pa_schema = pa.schema([
@@ -113,7 +113,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         pd.testing.assert_frame_equal(
             actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
 
-    def testParquetAppendOnlyReader(self):
+    def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_parquet')
@@ -123,7 +123,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testOrcAppendOnlyReader(self):
+    def test_orc_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'orc'})
         self.rest_catalog.create_table('default.test_append_only_orc', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_orc')
@@ -133,7 +133,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testAvroAppendOnlyReader(self):
+    def test_avro_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.rest_catalog.create_table('default.test_append_only_avro', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_avro')
@@ -143,7 +143,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testAppendOnlyReaderWithFilter(self):
+    def test_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_append_only_filter', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_filter')
@@ -197,7 +197,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
 
-    def testAppendOnlyReaderWithProjection(self):
+    def test_ao_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_append_only_projection', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_projection')
@@ -208,7 +208,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
-    def testAvroAppendOnlyReaderWithProjection(self):
+    def test_avro_ao_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.rest_catalog.create_table('default.test_avro_append_only_projection', schema, False)
         table = self.rest_catalog.get_table('default.test_avro_append_only_projection')
@@ -219,7 +219,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
-    def testAppendOnlyReaderWithLimit(self):
+    def test_ao_reader_with_limit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_append_only_limit', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_limit')
@@ -231,7 +231,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         # might be split of "dt=1" or split of "dt=2"
         self.assertEqual(actual.num_rows, 4)
 
-    def testPkParquetReader(self):
+    def test_pk_parquet_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -244,7 +244,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testPkOrcReader(self):
+    def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -265,7 +265,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
             col_b = self.expected.column(i)
             self.assertEqual(col_a, col_b)
 
-    def testPkAvroReader(self):
+    def test_pk_avro_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -281,7 +281,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testPkReaderWithFilter(self):
+    def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -303,7 +303,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         ])
         self.assertEqual(actual, expected)
 
-    def testPkReaderWithProjection(self):
+    def test_pk_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -317,7 +317,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
-    def testWriteWrongSchema(self):
+    def test_write_wrong_schema(self):
         self.rest_catalog.create_table('default.test_wrong_schema',
                                        Schema.from_pyarrow_schema(self.pa_schema),
                                        False)
@@ -341,7 +341,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
             table_write.write_arrow_batch(record_batch)
         self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
 
-    def testReaderIterator(self):
+    def test_reader_iterator(self):
         read_builder = self.table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
@@ -353,7 +353,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
             value = next(iterator, None)
         self.assertEqual(result, [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008])
 
-    def testReaderDuckDB(self):
+    def test_reader_duckdb(self):
         read_builder = self.table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
@@ -362,7 +362,7 @@ class RESTTableReadWriteTest(RESTCatalogBaseTest):
         expect = pd.DataFrame(self.raw_data)
         pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
 
-    def testWriteWideTableLargeData(self):
+    def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)
         catalog = CatalogFactory.create(self.options)
 

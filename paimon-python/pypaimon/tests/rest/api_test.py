@@ -31,10 +31,10 @@ from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
                                         RowType)
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.tests.rest_server import RESTCatalogServer
+from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
-class ApiTestCase(unittest.TestCase):
+class ApiTest(unittest.TestCase):
 
     def test_parse_data(self):
         simple_type_test_cases = [

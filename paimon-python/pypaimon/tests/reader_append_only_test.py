@@ -51,7 +51,7 @@ class AoReaderTest(unittest.TestCase):
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
 
-    def testParquetAppendOnlyReader(self):
+    def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_parquet', schema, False)
         table = self.catalog.get_table('default.test_append_only_parquet')
@@ -61,7 +61,7 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testOrcAppendOnlyReader(self):
+    def test_orc_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'orc'})
         self.catalog.create_table('default.test_append_only_orc', schema, False)
         table = self.catalog.get_table('default.test_append_only_orc')
@@ -71,7 +71,7 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testAvroAppendOnlyReader(self):
+    def test_avro_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.catalog.create_table('default.test_append_only_avro', schema, False)
         table = self.catalog.get_table('default.test_append_only_avro')
@@ -115,7 +115,7 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def test_over1000cols_read(self):
+    def test_over_1000_cols_read(self):
         num_rows = 1
         num_cols = 10
         table_name = "default.testBug"
@@ -189,7 +189,7 @@ class AoReaderTest(unittest.TestCase):
         result = table_read.to_pandas(table_scan.plan().splits())
         self.assertEqual(result.to_dict(), test_df.to_dict())
 
-    def testAppendOnlyReaderWithFilter(self):
+    def test_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_filter', schema, False)
         table = self.catalog.get_table('default.test_append_only_filter')
@@ -243,7 +243,7 @@ class AoReaderTest(unittest.TestCase):
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
 
-    def testAppendOnlyReaderWithProjection(self):
+    def test_ao_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_projection', schema, False)
         table = self.catalog.get_table('default.test_append_only_projection')
@@ -254,7 +254,7 @@ class AoReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
-    def testAvroAppendOnlyReaderWithProjection(self):
+    def test_avro_ao_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.catalog.create_table('default.test_avro_append_only_projection', schema, False)
         table = self.catalog.get_table('default.test_avro_append_only_projection')
@@ -265,7 +265,7 @@ class AoReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
-    def testAppendOnlyReaderWithLimit(self):
+    def test_ao_reader_with_limit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_limit', schema, False)
         table = self.catalog.get_table('default.test_append_only_limit')
