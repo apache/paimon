@@ -177,12 +177,20 @@
                                 <excludes>
                                     <exclude>org.slf4j:*</exclude>
                                     <exclude>log4j:*</exclude>
+                                    <exclude>javax.xml.bind:*</exclude>
+                                    <exclude>javax.servlet:*</exclude>
+                                    <exclude>javax.servlet.*:*</exclude>
+                                    <exclude>com.sun.jersey:*</exclude>
+                                    <exclude>com.sun.jersey.*:*</exclude>
+                                    <exclude>com.sun.xml.*:*</exclude>
                                 </excludes>
                             </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>*</artifact>
                                     <excludes>
+                                        <exclude>NOTICE</exclude>
+                                        <exclude>LICENSE</exclude>
                                         <exclude>.gitkeep</exclude>
                                         <exclude>mime.types</exclude>
                                         <exclude>mozilla/**</exclude>
@@ -190,6 +198,8 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/*.tld</exclude>
+                                        <exclude>META-INF/maven/**/pom.xml</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
