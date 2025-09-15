@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import inspect
 import logging
 import os
 import subprocess
@@ -24,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
+from packaging.version import parse
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
@@ -66,7 +66,7 @@ class FileIO:
         }
 
         # Based on https://github.com/apache/arrow/issues/40506
-        if 'force_virtual_addressing' in inspect.signature(S3FileSystem.__init__).parameters:
+        if parse(pyarrow.__version__) >= parse("7.0.0"):
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
