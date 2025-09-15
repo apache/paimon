@@ -23,6 +23,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 import pyarrow
+from pyarrow import types
 
 
 class AtomicInteger:
@@ -385,6 +386,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def from_paimon_type(data_type: DataType) -> pyarrow.DataType:
+        # Based on Paimon DataTypes Doc: https://paimon.apache.org/docs/master/concepts/data-types/
         if isinstance(data_type, AtomicType):
             type_name = data_type.type.upper()
             if type_name == 'TINYINT':
@@ -401,31 +403,67 @@ class PyarrowFieldParser:
                 return pyarrow.float64()
             elif type_name == 'BOOLEAN':
                 return pyarrow.bool_()
-            elif type_name == 'STRING':
+            elif type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
                 return pyarrow.string()
-            elif type_name == 'BINARY':
+            elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
                 return pyarrow.binary()
+            elif type_name.startswith('BINARY'):
+                if type_name == 'BINARY':
+                    return pyarrow.binary(1)
+                match = re.fullmatch(r'BINARY\((\d+)\)', type_name)
+                if match:
+                    length = int(match.group(1))
+                    if length > 0:
+                        return pyarrow.binary(length)
+            elif type_name.startswith('DECIMAL'):
+                if type_name == 'DECIMAL':
+                    return pyarrow.decimal128(10, 0)  # default to 10, 0
+                match_ps = re.fullmatch(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+                if match_ps:
+                    precision, scale = map(int, match_ps.groups())
+                    return pyarrow.decimal128(precision, scale)
+                match_p = re.fullmatch(r'DECIMAL\((\d+)\)', type_name)
+                if match_p:
+                    precision = int(match_p.group(1))
+                    return pyarrow.decimal128(precision, 0)
+            if type_name.startswith('TIMESTAMP'):
+                # WITH_LOCAL_TIME_ZONE is ambiguous and not supported
+                if type_name == 'TIMESTAMP':
+                    return pyarrow.timestamp('us', tz=None)  # default to 6
+                match = re.fullmatch(r'TIMESTAMP\((\d+)\)', type_name)
+                if match:
+                    precision = int(match.group(1))
+                    if precision == 0:
+                        return pyarrow.timestamp('s', tz=None)
+                    elif 1 <= precision <= 3:
+                        return pyarrow.timestamp('ms', tz=None)
+                    elif 4 <= precision <= 6:
+                        return pyarrow.timestamp('us', tz=None)
+                    elif 7 <= precision <= 9:
+                        return pyarrow.timestamp('ns', tz=None)
             elif type_name == 'DATE':
                 return pyarrow.date32()
-            elif type_name == 'TIMESTAMP':
-                return pyarrow.timestamp('ms')
-            elif type_name.startswith('DECIMAL'):
-                match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+            if type_name.startswith('TIME'):
+                if type_name == 'TIME':
+                    return pyarrow.time64('us')  # default to 6
+                match = re.fullmatch(r'TIME\((\d+)\)', type_name)
                 if match:
-                    precision, scale = map(int, match.groups())
-                    return pyarrow.decimal128(precision, scale)
-                else:
-                    return pyarrow.decimal128(38, 18)
-            else:
-                raise ValueError("Unsupported data type: {}".format(type_name))
+                    precision = int(match.group(1))
+                    if precision == 0:
+                        return pyarrow.time32('s')
+                    if 1 <= precision <= 3:
+                        return pyarrow.time32('ms')
+                    if 4 <= precision <= 6:
+                        return pyarrow.time64('us')
+                    if 7 <= precision <= 9:
+                        return pyarrow.time64('ns')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
             return pyarrow.map_(key_type, value_type)
-        else:
-            raise ValueError("Unsupported data type: {}".format(data_type))
+        raise ValueError("Unsupported data type: {}".format(data_type))
 
     @staticmethod
     def from_paimon_field(data_field: DataField) -> pyarrow.Field:
@@ -444,48 +482,52 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_type(pa_type: pyarrow.DataType, nullable: bool) -> DataType:
-        type_name = str(pa_type)
-        if type_name == "int8":
+        # Based on Arrow DataTypes Doc: https://arrow.apache.org/docs/python/api/datatypes.html
+        # All safe mappings are already implemented, adding new mappings requires rigorous evaluation
+        # to avoid potential data loss
+        type_name = None
+        if types.is_int8(pa_type):
             type_name = 'TINYINT'
-        elif type_name == "int16":
+        elif types.is_int16(pa_type):
             type_name = 'SMALLINT'
-        elif type_name == "int32":
+        elif types.is_int32(pa_type):
             type_name = 'INT'
-        elif type_name == "int64":
+        elif types.is_int64(pa_type):
             type_name = 'BIGINT'
-        elif type_name.startswith('float'):
+        elif types.is_float32(pa_type):
             type_name = 'FLOAT'
-        elif type_name.startswith('double'):
+        elif types.is_float64(pa_type):
             type_name = 'DOUBLE'
-        elif type_name.startswith('bool'):
+        elif types.is_boolean(pa_type):
             type_name = 'BOOLEAN'
-        elif type_name.startswith('string'):
+        elif types.is_string(pa_type):
             type_name = 'STRING'
-        elif type_name.startswith('binary'):
-            type_name = 'BINARY'
-        elif type_name.startswith('date'):
+        elif types.is_fixed_size_binary(pa_type):
+            type_name = f'BINARY({pa_type.byte_width})'
+        elif types.is_binary(pa_type):
+            type_name = 'BYTES'
+        elif types.is_decimal(pa_type):
+            type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
+        elif types.is_timestamp(pa_type) and pa_type.tz is None:
+            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
+            type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
+        elif types.is_date32(pa_type):
             type_name = 'DATE'
-        elif type_name.startswith('timestamp'):
-            type_name = 'TIMESTAMP'
-        elif type_name.startswith('decimal'):
-            match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
-            if match:
-                precision, scale = map(int, match.groups())
-                type_name = 'DECIMAL({},{})'.format(precision, scale)
-            else:
-                type_name = 'DECIMAL(38,18)'
-        elif type_name.startswith('list'):
+        elif types.is_time(pa_type):
+            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
+            type_name = f'TIME({precision_mapping[pa_type.unit]})'
+        elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
             return ArrayType(nullable, element_type)
-        elif type_name.startswith('map'):
+        elif types.is_map(pa_type):
             pa_type: pyarrow.MapType
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
-        else:
-            raise ValueError("Unknown type: {}".format(type_name))
-        return AtomicType(type_name, nullable)
+        if type_name is not None:
+            return AtomicType(type_name, nullable)
+        raise ValueError("Unsupported pyarrow type: {}".format(pa_type))
 
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:

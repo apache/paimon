@@ -16,7 +16,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 from unittest.mock import Mock
 
 import pandas as pd
@@ -123,6 +124,66 @@ class RESTTableReadWritePy36Test(RESTCatalogBaseTest):
         df2['f0'] = df2['f0'].astype('int32')
         pd.testing.assert_frame_equal(
             actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
+
+    def test_full_data_types(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+            ('f2', pa.int32()),
+            ('f3', pa.int64()),
+            ('f4', pa.float32()),
+            ('f5', pa.float64()),
+            ('f6', pa.bool_()),
+            ('f7', pa.string()),
+            ('f8', pa.binary()),
+            ('f9', pa.binary(10)),
+            ('f10', pa.decimal128(10, 2)),
+            ('f11', pa.date32()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema)
+        self.rest_catalog.create_table('default.test_full_data_types', schema, False)
+        table = self.rest_catalog.get_table('default.test_full_data_types')
+
+        # to test read and write
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        expect_data = pa.Table.from_pydict({
+            'f0': [-1, 2],
+            'f1': [-1001, 1002],
+            'f2': [-1000001, 1000002],
+            'f3': [-10000000001, 10000000002],
+            'f4': [-1001.05, 1002.05],
+            'f5': [-1000001.05, 1000002.05],
+            'f6': [False, True],
+            'f7': ['Hello', 'World'],
+            'f8': [b'\x01\x02\x03', b'pyarrow'],
+            'f9': [b'exactly_10', b'pad'.ljust(10, b'\x00')],
+            'f10': [Decimal('-987.65'), Decimal('12345.67')],
+            'f11': [date(1999, 12, 31), date(2023, 1, 1)],
+        }, schema=simple_pa_schema)
+        table_write.write_arrow(expect_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_data = table_read.to_arrow(table_scan.plan().splits())
+        self.assertEqual(actual_data, expect_data)
+
+        # to test GenericRow ability
+        latest_snapshot = table_scan.snapshot_manager.get_latest_snapshot()
+        manifest_files = table_scan.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name,
+                                                                 lambda row: table_scan._bucket_filter(row))
+        min_value_stats = manifest_entries[0].file.value_stats.min_values.values
+        max_value_stats = manifest_entries[0].file.value_stats.max_values.values
+        expected_min_values = [col[0].as_py() for col in expect_data]
+        expected_max_values = [col[1].as_py() for col in expect_data]
+        self.assertEqual(min_value_stats, expected_min_values)
+        self.assertEqual(max_value_stats, expected_max_values)
 
     def test_mixed_add_and_delete_entries_same_partition(self):
         """Test record_count calculation with mixed ADD/DELETE entries in same partition."""
