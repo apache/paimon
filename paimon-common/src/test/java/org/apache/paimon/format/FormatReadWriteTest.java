@@ -140,6 +140,7 @@ public abstract class FormatReadWriteTest {
             assertThat(result.size()).isEqualTo(1);
             validateFullTypesResult(result.get(0), expected);
             toWrite = result.get(0);
+            fileIO.deleteQuietly(file);
         }
     }
 
