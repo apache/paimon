@@ -27,6 +27,9 @@ under the License.
 
 # Python API
 
+PyPaimon is a Python implementation for connecting Paimon catalog, reading & writing tables. The complete Python
+implementation of the brand new PyPaimon does not require JDK installation.
+
 ## Environment Settings
 
 ### SDK Installing
@@ -46,11 +49,12 @@ from pypaimon import CatalogFactory
 
 # Note that keys and values are all string
 catalog_options = {
-    'metastore': 'filesystem',
     'warehouse': 'file:///path/to/warehouse'
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
+Currently, PyPaimon only support filesystem catalog and rest catalog. See [Catalog]({{< ref "concepts/catalog" >}}).
 
 ## Create Database & Table
 
