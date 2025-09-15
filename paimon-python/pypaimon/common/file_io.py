@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
+import inspect
 import logging
 import os
 import subprocess
@@ -57,14 +57,21 @@ class FileIO:
 
     def _initialize_oss_fs(self) -> FileSystem:
         from pyarrow.fs import S3FileSystem
-        bucket_name = self.properties.get("prefix")
+
         client_kwargs = {
-            "endpoint_override": bucket_name + "." + self.properties.get(OssOptions.OSS_ENDPOINT),
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             "session_token": self.properties.get(OssOptions.OSS_SECURITY_TOKEN),
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
+
+        # Based on https://github.com/apache/arrow/issues/40506
+        if 'force_virtual_addressing' in inspect.signature(S3FileSystem.__init__).parameters:
+            client_kwargs['force_virtual_addressing'] = True
+            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+        else:
+            client_kwargs['endpoint_override'] = (self.properties.get(OssOptions.OSS_BUCKET) + "." +
+                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
 
         return S3FileSystem(**client_kwargs)
 
