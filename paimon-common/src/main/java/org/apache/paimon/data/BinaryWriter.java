@@ -62,7 +62,11 @@ public interface BinaryWriter {
 
     void writeString(int pos, BinaryString value);
 
-    void writeBinary(int pos, byte[] bytes);
+    default void writeBinary(int pos, byte[] bytes) {
+        writeBinary(pos, bytes, 0, bytes.length);
+    }
+
+    void writeBinary(int pos, byte[] bytes, int offset, int length);
 
     void writeDecimal(int pos, Decimal value, int precision);
 

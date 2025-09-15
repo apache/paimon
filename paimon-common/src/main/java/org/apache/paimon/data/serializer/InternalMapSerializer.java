@@ -106,6 +106,12 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
             return (BinaryMap) from;
         }
 
+        InternalArray keyArray = from.keyArray();
+        InternalArray valueArray = from.valueArray();
+        if (keyArray instanceof BinaryArray && valueArray instanceof BinaryArray) {
+            return BinaryMap.valueOf((BinaryArray) keyArray, (BinaryArray) valueArray);
+        }
+
         int numElements = from.size();
         if (reuseKeyArray == null) {
             reuseKeyArray = new BinaryArray();
@@ -132,8 +138,6 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
             reuseValueWriter.reset();
         }
 
-        InternalArray keyArray = from.keyArray();
-        InternalArray valueArray = from.valueArray();
         for (int i = 0; i < from.size(); i++) {
             Object key = keyGetter.getElementOrNull(keyArray, i);
             Object value = valueGetter.getElementOrNull(valueArray, i);
