@@ -52,10 +52,6 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
-        CatalogTable table = context.getCatalogTable().getOrigin();
-        if (table instanceof FormatCatalogTable) {
-            return ((FormatCatalogTable) table).createTableSource(context);
-        }
         createTableIfNeeded(context);
         return super.createDynamicTableSource(context);
     }

@@ -179,7 +179,7 @@ public class PostgresRecordParser
             case "string":
                 return DataTypes.STRING();
             case "bytes":
-                if (decimalLogicalName().equals(field.name())) {
+                if (field.name() != null && field.name().endsWith(decimalLogicalName())) {
                     int precision = field.parameters().get("connect.decimal.precision").asInt();
                     int scale = field.parameters().get("scale").asInt();
                     return DataTypes.DECIMAL(precision, scale);
@@ -270,7 +270,8 @@ public class PostgresRecordParser
             } else if (("bytes".equals(postgresSqlType) && className == null)) {
                 // binary, varbinary
                 newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(postgresSqlType) && decimalLogicalName().equals(className)) {
+            } else if ("bytes".equals(postgresSqlType)
+                    && className.endsWith(decimalLogicalName())) {
                 // numeric, decimal
                 try {
                     new BigDecimal(oldValue);

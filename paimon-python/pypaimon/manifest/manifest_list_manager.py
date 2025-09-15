@@ -25,8 +25,8 @@ from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.row.binary_row import (BinaryRowDeserializer,
-                                           BinaryRowSerializer)
+from pypaimon.table.row.generic_row import (GenericRowDeserializer,
+                                            GenericRowSerializer)
 
 
 class ManifestListManager:
@@ -58,11 +58,11 @@ class ManifestListManager:
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
             partition_stats = SimpleStats(
-                min_values=BinaryRowDeserializer.from_bytes(
+                min_values=GenericRowDeserializer.from_bytes(
                     stats_dict['_MIN_VALUES'],
                     self.table.table_schema.get_partition_key_fields()
                 ),
-                max_values=BinaryRowDeserializer.from_bytes(
+                max_values=GenericRowDeserializer.from_bytes(
                     stats_dict['_MAX_VALUES'],
                     self.table.table_schema.get_partition_key_fields()
                 ),
@@ -90,8 +90,8 @@ class ManifestListManager:
                 "_NUM_ADDED_FILES": meta.num_added_files,
                 "_NUM_DELETED_FILES": meta.num_deleted_files,
                 "_PARTITION_STATS": {
-                    "_MIN_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.min_values),
-                    "_MAX_VALUES": BinaryRowSerializer.to_bytes(meta.partition_stats.max_values),
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(meta.partition_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(meta.partition_stats.max_values),
                     "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,

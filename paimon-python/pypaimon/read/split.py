@@ -20,14 +20,14 @@ from dataclasses import dataclass
 from typing import List
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
 class Split:
     """Implementation of Split for native Python reading."""
     files: List[DataFileMeta]
-    partition: BinaryRow
+    partition: GenericRow
     bucket: int
     _file_paths: List[str]
     _row_count: int

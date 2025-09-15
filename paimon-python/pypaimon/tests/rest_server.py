@@ -42,7 +42,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
-from pypaimon.schema.schema import Schema
+from pypaimon import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 

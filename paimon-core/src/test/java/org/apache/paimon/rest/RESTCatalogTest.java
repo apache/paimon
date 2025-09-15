@@ -1313,6 +1313,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             RESTToken fileDataToken = fileIO.validToken();
             RESTToken serverDataToken = getDataTokenFromRestServer(identifier);
             assertEquals(serverDataToken, fileDataToken);
+
+            // Test system table FileIO refresh
+            Identifier systemTableIdentifier =
+                    Identifier.create(
+                            identifier.getDatabaseName(), identifier.getTableName() + "$snapshots");
+            Table systemTable = catalog.getTable(systemTableIdentifier);
+
+            // Verify system table uses the same FileIO as origin table
+            assertThat(systemTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+            RESTTokenFileIO systemTableFileIO = (RESTTokenFileIO) systemTable.fileIO();
+            RESTToken systemTableToken = systemTableFileIO.validToken();
+            assertEquals(serverDataToken, systemTableToken);
         }
     }
 
@@ -1339,6 +1351,41 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken nextFileDataToken = fileIO.validToken();
         assertEquals(newDataToken, nextFileDataToken);
         assertEquals(true, nextFileDataToken.expireAtMillis() - fileDataToken.expireAtMillis() > 0);
+
+        // Test system table FileIO refresh when expired
+        Identifier systemTableIdentifier =
+                Identifier.create(
+                        identifier.getDatabaseName(), identifier.getTableName() + "$snapshots");
+        Table systemTable = catalog.getTable(systemTableIdentifier);
+
+        // Verify system table FileIO can refresh token properly
+        assertThat(systemTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        RESTTokenFileIO systemTableFileIO = (RESTTokenFileIO) systemTable.fileIO();
+
+        // Set an even newer token to test refresh
+        RESTToken newerDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 5000_000L);
+        setDataTokenToRestServerForMock(identifier, newerDataToken);
+
+        // Verify system table can get the newest token
+        RESTToken systemTableRefreshedToken = systemTableFileIO.validToken();
+        assertEquals(newerDataToken, systemTableRefreshedToken);
+        assertEquals(
+                true,
+                systemTableRefreshedToken.expireAtMillis() - nextFileDataToken.expireAtMillis()
+                        > 0);
+
+        // Test with different system table types
+        Identifier manifestsTableIdentifier =
+                Identifier.create(
+                        identifier.getDatabaseName(), identifier.getTableName() + "$manifests");
+        Table manifestsTable = catalog.getTable(manifestsTableIdentifier);
+        assertThat(manifestsTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        RESTTokenFileIO manifestsTableFileIO = (RESTTokenFileIO) manifestsTable.fileIO();
+        RESTToken manifestsTableToken = manifestsTableFileIO.validToken();
+        assertEquals(newerDataToken, manifestsTableToken);
     }
 
     @Test

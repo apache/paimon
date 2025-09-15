@@ -22,7 +22,7 @@ from functools import cmp_to_key
 from typing import Callable, List
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
@@ -91,7 +91,7 @@ class IntervalPartition:
 @dataclass
 class HeapRun:
     run: List[DataFileMeta]
-    comparator: Callable[[BinaryRow, BinaryRow], int]
+    comparator: Callable[[GenericRow, GenericRow], int]
 
     def __lt__(self, other) -> bool:
         my_last_max = self.run[-1].max_key
@@ -99,7 +99,7 @@ class HeapRun:
         return self.comparator(my_last_max, other_last_max) < 0
 
 
-def default_key_comparator(key1: BinaryRow, key2: BinaryRow) -> int:
+def default_key_comparator(key1: GenericRow, key2: GenericRow) -> int:
     if not key1 or not key1.values:
         if not key2 or not key2.values:
             return 0

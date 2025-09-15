@@ -27,7 +27,7 @@ from pypaimon.table.row.row_kind import RowKind
 
 
 @dataclass
-class BinaryRow:
+class GenericRow:
     values: List[Any]
     fields: List[DataField]
     row_kind: RowKind = RowKind.INSERT
@@ -36,7 +36,7 @@ class BinaryRow:
         return {self.fields[i].name: self.values[i] for i in range(len(self.fields))}
 
 
-class BinaryRowDeserializer:
+class GenericRowDeserializer:
     HEADER_SIZE_IN_BITS = 8
     MAX_FIX_PART_DATA_SIZE = 7
     HIGHEST_FIRST_BIT = 0x80 << 56
@@ -47,16 +47,14 @@ class BinaryRowDeserializer:
             cls,
             bytes_data: bytes,
             data_fields: List[DataField]
-    ) -> BinaryRow:
+    ) -> GenericRow:
         if not bytes_data:
-            return BinaryRow([], data_fields)
+            return GenericRow([], data_fields)
 
         arity = len(data_fields)
         actual_data = bytes_data
         if len(bytes_data) >= 4:
-            arity_from_bytes = struct.unpack('>i', bytes_data[:4])[0]
-            if 0 < arity_from_bytes < 1000:
-                actual_data = bytes_data[4:]
+            actual_data = bytes_data[4:]
 
         fields = []
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
@@ -66,7 +64,7 @@ class BinaryRowDeserializer:
                 value = cls._parse_field_value(actual_data, 0, null_bits_size_in_bytes, i, data_field.type)
             fields.append(value)
 
-        return BinaryRow(fields, data_fields, RowKind(actual_data[0]))
+        return GenericRow(fields, data_fields, RowKind(actual_data[0]))
 
     @classmethod
     def _calculate_bit_set_width_in_bytes(cls, arity: int) -> int:
@@ -235,12 +233,12 @@ class BinaryRowDeserializer:
         )
 
 
-class BinaryRowSerializer:
+class GenericRowSerializer:
     HEADER_SIZE_IN_BITS = 8
     MAX_FIX_PART_DATA_SIZE = 7
 
     @classmethod
-    def to_bytes(cls, binary_row: BinaryRow) -> bytes:
+    def to_bytes(cls, binary_row: GenericRow) -> bytes:
         arity = len(binary_row.fields)
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
         fixed_part_size = null_bits_size_in_bytes + arity * 8
@@ -276,9 +274,11 @@ class BinaryRowSerializer:
                     header_byte = 0x80 | length
                     fixed_part[field_fixed_offset + 7] = header_byte
                 else:
+                    var_length = cls._round_number_of_bytes_to_nearest_word(len(value_bytes))
+                    var_value_bytes = value_bytes + b'\x00' * (var_length - length)
                     offset_in_variable_part = current_variable_offset
-                    variable_part_data.append(value_bytes)
-                    current_variable_offset += length
+                    variable_part_data.append(var_value_bytes)
+                    current_variable_offset += var_length
 
                     absolute_offset = fixed_part_size + offset_in_variable_part
                     offset_and_len = (absolute_offset << 32) | length
@@ -401,3 +401,11 @@ class BinaryRowSerializer:
         else:
             millis = value.hour * 3600000 + value.minute * 60000 + value.second * 1000 + value.microsecond // 1000
         return struct.pack('<i', millis)
+
+    @classmethod
+    def _round_number_of_bytes_to_nearest_word(cls, num_bytes: int) -> int:
+        remainder = num_bytes & 0x07
+        if remainder == 0:
+            return num_bytes
+        else:
+            return num_bytes + (8 - remainder)

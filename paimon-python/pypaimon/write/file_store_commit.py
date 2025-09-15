@@ -32,7 +32,7 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit_message import CommitMessage
 
@@ -66,7 +66,7 @@ class FileStoreCommit:
 
         commit_entries = []
         for msg in commit_messages:
-            partition = BinaryRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -106,7 +106,7 @@ class FileStoreCommit:
             entry.kind = 1
             commit_entries.append(entry)
         for msg in commit_messages:
-            partition = BinaryRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -153,11 +153,11 @@ class FileStoreCommit:
             num_added_files=added_file_count,
             num_deleted_files=deleted_file_count,
             partition_stats=SimpleStats(
-                min_values=BinaryRow(
+                min_values=GenericRow(
                     values=partition_min_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
-                max_values=BinaryRow(
+                max_values=GenericRow(
                     values=partition_max_stats,
                     fields=self.table.table_schema.get_partition_key_fields(),
                 ),
@@ -281,9 +281,9 @@ class FileStoreCommit:
             # Following Java implementation: PartitionEntry.fromDataFile()
             file_meta = entry.file
             # Extract actual file metadata (following Java DataFileMeta pattern)
-            record_count = file_meta.row_count
-            file_size_in_bytes = file_meta.file_size
-            file_count = 1
+            record_count = file_meta.row_count if entry.kind == 0 else file_meta.row_count * -1
+            file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
+            file_count = 1 if entry.kind == 0 else -1
 
             # Convert creation_time to milliseconds (Java uses epoch millis)
             if file_meta.creation_time:

@@ -112,7 +112,6 @@ case class SparkV2FilterConverter(rowType: RowType) {
         MultiPredicate.unapply(sparkPredicate) match {
           case Some((fieldName, literals)) =>
             val index = fieldIndex(fieldName)
-            literals.map(convertLiteral(index, _)).toList.asJava
             builder.in(index, literals.map(convertLiteral(index, _)).toList.asJava)
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")

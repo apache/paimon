@@ -21,9 +21,11 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import numpy as np
+import pandas as pd
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.schema.schema import Schema
+from pypaimon import CatalogFactory
+from pypaimon import Schema
 
 
 class AoReaderTest(unittest.TestCase):
@@ -79,6 +81,114 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_append_only_multi_write_once_commit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)
+        table = self.catalog.get_table('default.test_append_only_multi_once_commit')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table1 = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table2 = pa.Table.from_pydict(data2, schema=self.pa_schema)
+
+        table_write.write_arrow(pa_table1)
+        table_write.write_arrow(pa_table2)
+
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_over1000cols_read(self):
+        num_rows = 1
+        num_cols = 10
+        table_name = "default.testBug"
+        # Generate dynamic schema based on column count
+        schema_fields = []
+        for i in range(1, num_cols + 1):
+            col_name = f'c{i:03d}'
+            if i == 1:
+                schema_fields.append((col_name, pa.string()))  # ID column
+            elif i == 2:
+                schema_fields.append((col_name, pa.string()))  # Name column
+            elif i == 3:
+                schema_fields.append((col_name, pa.string()))  # Category column (partition key)
+            elif i % 4 == 0:
+                schema_fields.append((col_name, pa.float64()))  # Float columns
+            elif i % 4 == 1:
+                schema_fields.append((col_name, pa.int32()))  # Int columns
+            elif i % 4 == 2:
+                schema_fields.append((col_name, pa.string()))  # String columns
+            else:
+                schema_fields.append((col_name, pa.int64()))  # Long columns
+
+        pa_schema = pa.schema(schema_fields)
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['c003'],  # Use c003 as partition key
+        )
+
+        # Create table
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        # Generate test data
+        np.random.seed(42)  # For reproducible results
+        categories = ['Electronics', 'Clothing', 'Books', 'Home', 'Sports', 'Food', 'Toys', 'Beauty', 'Health', 'Auto']
+        statuses = ['Active', 'Inactive', 'Pending', 'Completed']
+
+        # Generate data dictionary
+        test_data = {}
+        for i in range(1, num_cols + 1):
+            col_name = f'c{i:03d}'
+            if i == 1:
+                test_data[col_name] = [f'Product_{j}' for j in range(1, num_rows + 1)]
+            elif i == 2:
+                test_data[col_name] = [f'Product_{j}' for j in range(1, num_rows + 1)]
+            elif i == 3:
+                test_data[col_name] = np.random.choice(categories, num_rows)
+            elif i % 4 == 0:
+                test_data[col_name] = np.random.uniform(1.0, 1000.0, num_rows).round(2)
+            elif i % 4 == 1:
+                test_data[col_name] = np.random.randint(1, 100, num_rows)
+            elif i % 4 == 2:
+                test_data[col_name] = np.random.choice(statuses, num_rows)
+            else:
+                test_data[col_name] = np.random.randint(1640995200, 1672531200, num_rows)
+
+        test_df = pd.DataFrame(test_data)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        table_write.write_pandas(test_df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_pandas(table_scan.plan().splits())
+        self.assertEqual(result.to_dict(), test_df.to_dict())
+
     def testAppendOnlyReaderWithFilter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_filter', schema, False)
@@ -91,7 +201,7 @@ class AoReaderTest(unittest.TestCase):
         p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
         p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
         p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
-        p6 = predicate_builder.is_not_null('behavior')    # exclude 4/d
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
         g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder)

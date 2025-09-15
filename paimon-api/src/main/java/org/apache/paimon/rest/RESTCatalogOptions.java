@@ -97,4 +97,10 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription(
                             "The user agent of http client connecting to REST Catalog server.");
+
+    public static final ConfigOption<String> DLF_OSS_ENDPOINT =
+            ConfigOptions.key("dlf.oss-endpoint")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog DLF OSS endpoint.");
 }

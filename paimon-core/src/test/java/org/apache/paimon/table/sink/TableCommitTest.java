@@ -24,7 +24,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -34,6 +37,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -437,5 +441,179 @@ public class TableCommitTest {
         commit.commit(7, write.prepareCommit(true, 7));
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
+    }
+
+    @Test
+    public void testRecoverCompactedChangelogFiles() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 3);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // Create fake compacted changelog files that should resolve to real files
+        String realChangelogFile =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253.cc-parquet";
+        String fakeChangelogFile1 =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253-39253-35699.cc-parquet";
+        String fakeChangelogFile2 =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253-74952-37725.cc-parquet";
+
+        // Create directory structure
+        Path bucket0Dir = new Path(path, "bucket-0");
+        Path bucket1Dir = new Path(path, "bucket-1");
+        Path bucket2Dir = new Path(path, "bucket-2");
+        LocalFileIO.create().mkdirs(bucket0Dir);
+        LocalFileIO.create().mkdirs(bucket1Dir);
+        LocalFileIO.create().mkdirs(bucket2Dir);
+
+        // Create the real compacted changelog file
+        Path realFilePath = new Path(bucket0Dir, realChangelogFile);
+        LocalFileIO.create().newOutputStream(realFilePath, false).close();
+
+        DataFileMeta realFileMeta =
+                DataFileMeta.forAppend(
+                        realChangelogFile,
+                        3000L,
+                        300L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        // Create fake DataFileMeta for compacted changelog files
+        DataFileMeta fakeFileMeta1 =
+                DataFileMeta.forAppend(
+                        fakeChangelogFile1,
+                        1000L,
+                        100L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        DataFileMeta fakeFileMeta2 =
+                DataFileMeta.forAppend(
+                        fakeChangelogFile2,
+                        2000L,
+                        200L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        // Create commit message with fake compacted changelog files
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        CommitMessageImpl commitMessage0 =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(realFileMeta)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        CommitMessageImpl commitMessage1 =
+                new CommitMessageImpl(
+                        partition,
+                        1,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(fakeFileMeta1)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        CommitMessageImpl commitMessage2 =
+                new CommitMessageImpl(
+                        partition,
+                        2,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(fakeFileMeta2)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+
+        ManifestCommittable committable = new ManifestCommittable(1L);
+        committable.addFileCommittable(commitMessage0);
+        committable.addFileCommittable(commitMessage1);
+        committable.addFileCommittable(commitMessage2);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            // This should succeed because fake files resolve to the existing real file
+            commit.filterAndCommitMultiple(Collections.singletonList(committable), false);
+        }
+
+        // Now delete the real file and test that the check fails
+        LocalFileIO.create().delete(realFilePath, false);
+
+        // Create a new committable with a larger identifier to simulate recovery from checkpoint
+        // This identifier must be larger than the previously committed identifier (1L)
+        ManifestCommittable newCommittable = new ManifestCommittable(2L);
+        newCommittable.addFileCommittable(commitMessage0);
+        newCommittable.addFileCommittable(commitMessage1);
+        newCommittable.addFileCommittable(commitMessage2);
+
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.filterAndCommitMultiple(
+                                            Collections.singletonList(newCommittable), false))
+                    .hasMessageContaining(
+                            "Cannot recover from this checkpoint because some files in the"
+                                    + " snapshot that need to be resubmitted have been deleted");
+        }
     }
 }

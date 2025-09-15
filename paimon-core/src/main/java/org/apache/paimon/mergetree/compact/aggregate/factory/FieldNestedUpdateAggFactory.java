@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -36,7 +35,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
     public static final String NAME = "nested_update";
 
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldNestedUpdateAgg create(DataType fieldType, CoreOptions options, String field) {
         return createFieldNestedUpdateAgg(fieldType, options.fieldNestedUpdateAggNestedKey(field));
     }
 
@@ -45,7 +44,8 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         return NAME;
     }
 
-    private FieldAggregator createFieldNestedUpdateAgg(DataType fieldType, List<String> nestedKey) {
+    private FieldNestedUpdateAgg createFieldNestedUpdateAgg(
+            DataType fieldType, List<String> nestedKey) {
         if (nestedKey == null) {
             nestedKey = Collections.emptyList();
         }

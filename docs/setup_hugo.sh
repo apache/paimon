@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 ################################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
@@ -16,31 +17,26 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, List
+# setup hugo
 
-from pypaimon.schema.data_types import DataField
-from pypaimon.table.row.generic_row import GenericRow
+# Detect Operating System
+OS="Linux"
+[[ "$OSTYPE" == "darwin"* ]] && OS="Mac"
 
+# Setup Hugo based on OS
+if [ "$OS" = "Mac" ]; then
+    HUGO_ARTIFACT="hugo_extended_0.124.1_darwin-universal.tar.gz"
+else
+    HUGO_ARTIFACT="hugo_extended_0.124.1_Linux-64bit.tar.gz"
+fi
 
-class PartitionInfo:
-    """
-    Partition information about how the row mapping of outer row.
-    """
-
-    def __init__(self, mapping: List[int], partition: GenericRow):
-        self.mapping = mapping
-        self.partition_values = partition.values
-        self.partition_fields = partition.fields
-
-    def size(self) -> int:
-        return len(self.mapping) - 1
-
-    def is_partition_row(self, pos: int) -> bool:
-        return self.mapping[pos] < 0
-
-    def get_real_index(self, pos: int) -> int:
-        return abs(self.mapping[pos]) - 1
-
-    def get_partition_value(self, pos: int) -> (Any, DataField):
-        real_index = self.get_real_index(pos)
-        return self.partition_values[real_index], self.partition_fields[real_index]
+HUGO_REPO="https://github.com/gohugoio/hugo/releases/download/v0.124.1/${HUGO_ARTIFACT}"
+if ! curl --fail -OL $HUGO_REPO ; then
+	echo "Failed to download Hugo binary"
+	exit 1
+fi
+if [ "$OS" = "Mac" ]; then
+    tar -zxvf $HUGO_ARTIFACT -C /usr/local/bin --include='hugo'
+else
+    tar -zxvf $HUGO_ARTIFACT -C /usr/local/bin --wildcards --no-anchored 'hugo'
+fi

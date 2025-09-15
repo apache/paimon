@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.splitread.DataEvolutionSplitReadProvider;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
@@ -139,7 +140,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                     return record.row();
                 },
                 rowKindGenerator(),
-                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
+                RowKindFilter.of(coreOptions()));
     }
 
     @Override

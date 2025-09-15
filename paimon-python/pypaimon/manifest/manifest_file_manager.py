@@ -15,17 +15,16 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import fastavro
 from io import BytesIO
 from typing import List
-
-import fastavro
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.table.row.binary_row import (BinaryRowDeserializer,
-                                           BinaryRowSerializer)
+from pypaimon.table.row.generic_row import (GenericRowDeserializer,
+                                            GenericRowSerializer)
 
 
 class ManifestFileManager:
@@ -54,26 +53,30 @@ class ManifestFileManager:
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(
-                min_values=BinaryRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
-                                                            self.trimmed_primary_key_fields),
-                max_values=BinaryRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
-                                                            self.trimmed_primary_key_fields),
+                min_values=GenericRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
+                                                             self.trimmed_primary_key_fields),
+                max_values=GenericRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
+                                                             self.trimmed_primary_key_fields),
                 null_counts=key_dict['_NULL_COUNTS'],
             )
             value_dict = dict(file_dict['_VALUE_STATS'])
+            if file_dict.get('_VALUE_STATS_COLS') is None:
+                fields = self.table.table_schema.fields
+            elif not file_dict.get('_VALUE_STATS_COLS'):
+                fields = []
+            else:
+                fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
             value_stats = SimpleStats(
-                min_values=BinaryRowDeserializer.from_bytes(value_dict['_MIN_VALUES'],
-                                                            self.table.table_schema.fields),
-                max_values=BinaryRowDeserializer.from_bytes(value_dict['_MAX_VALUES'],
-                                                            self.table.table_schema.fields),
+                min_values=GenericRowDeserializer.from_bytes(value_dict['_MIN_VALUES'], fields),
+                max_values=GenericRowDeserializer.from_bytes(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
             file_meta = DataFileMeta(
                 file_name=file_dict['_FILE_NAME'],
                 file_size=file_dict['_FILE_SIZE'],
                 row_count=file_dict['_ROW_COUNT'],
-                min_key=BinaryRowDeserializer.from_bytes(file_dict['_MIN_KEY'], self.trimmed_primary_key_fields),
-                max_key=BinaryRowDeserializer.from_bytes(file_dict['_MAX_KEY'], self.trimmed_primary_key_fields),
+                min_key=GenericRowDeserializer.from_bytes(file_dict['_MIN_KEY'], self.trimmed_primary_key_fields),
+                max_key=GenericRowDeserializer.from_bytes(file_dict['_MAX_KEY'], self.trimmed_primary_key_fields),
                 key_stats=key_stats,
                 value_stats=value_stats,
                 min_sequence_number=file_dict['_MIN_SEQUENCE_NUMBER'],
@@ -85,10 +88,11 @@ class ManifestFileManager:
                 delete_row_count=file_dict['_DELETE_ROW_COUNT'],
                 embedded_index=file_dict['_EMBEDDED_FILE_INDEX'],
                 file_source=file_dict['_FILE_SOURCE'],
+                value_stats_cols=file_dict.get('_VALUE_STATS_COLS'),
             )
             entry = ManifestEntry(
                 kind=record['_KIND'],
-                partition=BinaryRowDeserializer.from_bytes(record['_PARTITION'], self.partition_key_fields),
+                partition=GenericRowDeserializer.from_bytes(record['_PARTITION'], self.partition_key_fields),
                 bucket=record['_BUCKET'],
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
@@ -104,23 +108,23 @@ class ManifestFileManager:
             avro_record = {
                 "_VERSION": 2,
                 "_KIND": entry.kind,
-                "_PARTITION": BinaryRowSerializer.to_bytes(entry.partition),
+                "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
                 "_BUCKET": entry.bucket,
                 "_TOTAL_BUCKETS": entry.total_buckets,
                 "_FILE": {
                     "_FILE_NAME": entry.file.file_name,
                     "_FILE_SIZE": entry.file.file_size,
                     "_ROW_COUNT": entry.file.row_count,
-                    "_MIN_KEY": BinaryRowSerializer.to_bytes(entry.file.min_key),
-                    "_MAX_KEY": BinaryRowSerializer.to_bytes(entry.file.max_key),
+                    "_MIN_KEY": GenericRowSerializer.to_bytes(entry.file.min_key),
+                    "_MAX_KEY": GenericRowSerializer.to_bytes(entry.file.max_key),
                     "_KEY_STATS": {
-                        "_MIN_VALUES": BinaryRowSerializer.to_bytes(entry.file.key_stats.min_values),
-                        "_MAX_VALUES": BinaryRowSerializer.to_bytes(entry.file.key_stats.max_values),
+                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.min_values),
+                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.max_values),
                         "_NULL_COUNTS": entry.file.key_stats.null_counts,
                     },
                     "_VALUE_STATS": {
-                        "_MIN_VALUES": BinaryRowSerializer.to_bytes(entry.file.value_stats.min_values),
-                        "_MAX_VALUES": BinaryRowSerializer.to_bytes(entry.file.value_stats.max_values),
+                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.min_values),
+                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.max_values),
                         "_NULL_COUNTS": entry.file.value_stats.null_counts,
                     },
                     "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
@@ -132,6 +136,7 @@ class ManifestFileManager:
                     "_DELETE_ROW_COUNT": entry.file.delete_row_count,
                     "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
                     "_FILE_SOURCE": entry.file.file_source,
+                    "_VALUE_STATS_COLS": entry.file.value_stats_cols,
                 }
             }
             avro_records.append(avro_record)

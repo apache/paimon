@@ -15,20 +15,19 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import pyarrow as pa
+import pyarrow.compute as pc
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import pyarrow as pa
-import pyarrow.compute as pc
-
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow
 
 
 class DataWriter(ABC):
@@ -54,7 +53,7 @@ class DataWriter(ABC):
         self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
-        self.pending_data: Optional[pa.RecordBatch] = None
+        self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
 
     def write(self, data: pa.RecordBatch):
@@ -101,7 +100,7 @@ class DataWriter(ABC):
                 self.pending_data = remaining_data
                 self._check_and_roll_if_needed()
 
-    def _write_data_to_file(self, data: pa.RecordBatch):
+    def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
             return
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
@@ -116,8 +115,8 @@ class DataWriter(ABC):
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
         # min key & max key
-        table = pa.Table.from_batches([data])
-        selected_table = table.select(self.trimmed_primary_key)
+
+        selected_table = data.select(self.trimmed_primary_key)
         key_columns_batch = selected_table.to_batches()[0]
         min_key_row_batch = key_columns_batch.slice(0, 1)
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
@@ -147,16 +146,16 @@ class DataWriter(ABC):
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
-            min_key=BinaryRow(min_key, self.trimmed_primary_key_fields),
-            max_key=BinaryRow(max_key, self.trimmed_primary_key_fields),
+            min_key=GenericRow(min_key, self.trimmed_primary_key_fields),
+            max_key=GenericRow(max_key, self.trimmed_primary_key_fields),
             key_stats=SimpleStats(
-                BinaryRow(min_key_stats, self.trimmed_primary_key_fields),
-                BinaryRow(max_key_stats, self.trimmed_primary_key_fields),
+                GenericRow(min_key_stats, self.trimmed_primary_key_fields),
+                GenericRow(max_key_stats, self.trimmed_primary_key_fields),
                 key_null_counts,
             ),
             value_stats=SimpleStats(
-                BinaryRow(min_value_stats, self.table.table_schema.fields),
-                BinaryRow(max_value_stats, self.table.table_schema.fields),
+                GenericRow(min_value_stats, self.table.table_schema.fields),
+                GenericRow(max_value_stats, self.table.table_schema.fields),
                 value_null_counts,
             ),
             min_sequence_number=min_seq,
@@ -166,6 +165,7 @@ class DataWriter(ABC):
             extra_files=[],
             creation_time=datetime.now(),
             delete_row_count=0,
+            value_stats_cols=None,  # None means all columns have statistics
             file_path=str(file_path),
         ))
 
