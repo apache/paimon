@@ -33,6 +33,7 @@
 
     <modules>
         <module>paimon-hadoop-shaded</module>
+        <module>paimon-hadoop-uber</module>
         <module>paimon-oss</module>
         <module>paimon-oss-impl</module>
         <module>paimon-s3</module>
