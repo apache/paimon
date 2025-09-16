@@ -26,7 +26,7 @@ import org.apache.spark.sql.Row
 
 class ScanPlanHelperTest extends PaimonSparkTestBase with ScanPlanHelper {
 
-  test("ScanPlanHelper: create new scan plan and select with row lineage meta cols") {
+  test("ScanPlanHelper: create new scan plan and select with row tracking meta cols") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
@@ -38,17 +38,17 @@ class ScanPlanHelperTest extends PaimonSparkTestBase with ScanPlanHelper {
       // select original df should not contain meta cols
       checkAnswer(newDf, Seq(Row(11, "a"), Row(22, "b")))
 
-      // select df with row lineage meta cols
-      checkAnswer(selectWithRowLineage(newDf), Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
+      // select df with row tracking meta cols
+      checkAnswer(selectWithRowTracking(newDf), Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
 
-      // select with row lineage meta cols twice should not add new more meta cols
+      // select with row tracking meta cols twice should not add new more meta cols
       checkAnswer(
-        selectWithRowLineage(selectWithRowLineage(newDf)),
+        selectWithRowTracking(selectWithRowTracking(newDf)),
         Seq(Row(11, "a", 0, 1), Row(22, "b", 1, 1)))
 
-      // select df already contains meta cols with row lineage
+      // select df already contains meta cols with row tracking
       checkAnswer(
-        selectWithRowLineage(newDf.select("_ROW_ID", "id")),
+        selectWithRowTracking(newDf.select("_ROW_ID", "id")),
         Seq(Row(0, 11, 1), Row(1, 22, 1)))
     }
   }
