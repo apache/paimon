@@ -1051,7 +1051,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // assign row id for new files
                 List<ManifestEntry> rowIdAssigned = new ArrayList<>();
                 nextRowIdStart =
-                        assignRowLineageMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
+                        assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
                 deltaFiles = rowIdAssigned;
             }
 
@@ -1173,7 +1173,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return new SuccessResult();
     }
 
-    private long assignRowLineageMeta(
+    private long assignRowTrackingMeta(
             long firstRowIdStart,
             List<ManifestEntry> deltaFiles,
             List<ManifestEntry> rowIdAssigned) {
