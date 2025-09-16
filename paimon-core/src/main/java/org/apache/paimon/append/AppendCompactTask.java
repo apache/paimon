@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 
@@ -91,13 +90,18 @@ public class AppendCompactTask {
             compactBefore.forEach(
                     f -> dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName()));
             List<IndexManifestEntry> indexEntries = dvIndexFileMaintainer.persist();
-            Preconditions.checkArgument(
-                    indexEntries.stream().noneMatch(i -> i.kind() == FileKind.ADD));
-            List<IndexFileMeta> removed =
-                    indexEntries.stream()
-                            .map(IndexManifestEntry::indexFile)
-                            .collect(Collectors.toList());
-            indexIncrement = new IndexIncrement(Collections.emptyList(), removed);
+            // If compact task didn't compact all files, the remain deletion files will be written
+            // into new deletion files.
+            List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+            List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+            for (IndexManifestEntry entry : indexEntries) {
+                if (entry.kind() == FileKind.ADD) {
+                    newIndexFiles.add(entry.indexFile());
+                } else {
+                    deletedIndexFiles.add(entry.indexFile());
+                }
+            }
+            indexIncrement = new IndexIncrement(newIndexFiles, deletedIndexFiles);
         } else {
             compactAfter.addAll(
                     write.compactRewrite(partition, UNAWARE_BUCKET, null, compactBefore));
