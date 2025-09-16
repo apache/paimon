@@ -94,7 +94,7 @@ public class CompactFieldsProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "This procedure execute compact action on paimon table.";
+        return "This procedure execute compact fields action on data-evolution enabled paimon table.";
     }
 
     private boolean execute(FileStoreTable table) {

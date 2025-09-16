@@ -299,6 +299,10 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
             |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 111)
             |""".stripMargin)
       checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 11, 111, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+      )
       sql("CALL paimon.sys.compact_fields(table => 't')")
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
