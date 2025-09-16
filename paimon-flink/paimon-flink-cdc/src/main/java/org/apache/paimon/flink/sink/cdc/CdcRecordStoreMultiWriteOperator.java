@@ -31,8 +31,6 @@ import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.flink.sink.StoreSinkWriteStateImpl;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -70,11 +68,10 @@ public class CdcRecordStoreMultiWriteOperator
 
     private static final long serialVersionUID = 1L;
 
-    private final StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider;
+    private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final CatalogLoader catalogLoader;
 
-    private MemoryPoolFactory memoryPoolFactory;
     private Catalog catalog;
     private Map<Identifier, FileStoreTable> tables;
     private StoreSinkWriteState state;
@@ -85,7 +82,7 @@ public class CdcRecordStoreMultiWriteOperator
     private CdcRecordStoreMultiWriteOperator(
             StreamOperatorParameters<MultiTableCommittable> parameters,
             CatalogLoader catalogLoader,
-            StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
+            StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser,
             Options options) {
         super(parameters, options);
@@ -133,19 +130,6 @@ public class CdcRecordStoreMultiWriteOperator
 
         int retryCnt = table.coreOptions().toConfiguration().get(MAX_RETRY_NUM_TIMES);
         boolean skipCorruptRecord = table.coreOptions().toConfiguration().get(SKIP_CORRUPT_RECORD);
-
-        // all table write should share one write buffer so that writers can preempt memory
-        // from those of other tables
-        if (memoryPoolFactory == null) {
-            memoryPoolFactory =
-                    new MemoryPoolFactory(
-                            memoryPool != null
-                                    ? memoryPool
-                                    // currently, the options of all tables are the same in CDC
-                                    : new HeapMemorySegmentPool(
-                                            table.coreOptions().writeBufferSize(),
-                                            table.coreOptions().pageSize()));
-        }
 
         StoreSinkWrite write =
                 writes.computeIfAbsent(
@@ -294,13 +278,13 @@ public class CdcRecordStoreMultiWriteOperator
     /** {@link StreamOperatorFactory} of {@link CdcRecordStoreMultiWriteOperator}. */
     public static class Factory
             extends PrepareCommitOperator.Factory<CdcMultiplexRecord, MultiTableCommittable> {
-        private final StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider;
+        private final StoreSinkWrite.Provider storeSinkWriteProvider;
         private final String initialCommitUser;
         private final CatalogLoader catalogLoader;
 
         public Factory(
                 CatalogLoader catalogLoader,
-                StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser,
                 Options options) {
             super(options);

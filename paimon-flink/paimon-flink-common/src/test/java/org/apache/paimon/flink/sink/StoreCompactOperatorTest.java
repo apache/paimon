@@ -55,7 +55,7 @@ public class StoreCompactOperatorTest extends TableTestBase {
         StoreCompactOperator.Factory operatorFactory =
                 new StoreCompactOperator.Factory(
                         getTableDefault(),
-                        (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                        (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 compactRememberStoreWrite,
                         "10086",
                         !streamingMode);

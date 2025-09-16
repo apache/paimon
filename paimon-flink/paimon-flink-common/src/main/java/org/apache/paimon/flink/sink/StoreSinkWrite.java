@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -96,7 +95,7 @@ public interface StoreSinkWrite {
                 String commitUser,
                 StoreSinkWriteState state,
                 IOManager ioManager,
-                @Nullable MemorySegmentPool memoryPool,
+                MemoryPoolFactory memoryPoolFactory,
                 @Nullable MetricGroup metricGroup);
     }
 
@@ -141,7 +140,7 @@ public interface StoreSinkWrite {
             if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION
                     || deltaCommits >= 0) {
                 int finalDeltaCommits = Math.max(deltaCommits, 1);
-                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
                     assertNoSinkMaterializer.run();
                     return new GlobalFullCompactionSinkWrite(
                             table,
@@ -152,13 +151,13 @@ public interface StoreSinkWrite {
                             waitCompaction,
                             finalDeltaCommits,
                             isStreaming,
-                            memoryPool,
+                            memoryPoolFactory,
                             metricGroup);
                 };
             }
 
             if (coreOptions.needLookup()) {
-                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
                     assertNoSinkMaterializer.run();
                     return new LookupSinkWrite(
                             table,
@@ -168,13 +167,13 @@ public interface StoreSinkWrite {
                             ignorePreviousFiles,
                             waitCompaction,
                             isStreaming,
-                            memoryPool,
+                            memoryPoolFactory,
                             metricGroup);
                 };
             }
         }
 
-        return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
             assertNoSinkMaterializer.run();
             return new StoreSinkWriteImpl(
                     table,
@@ -184,25 +183,8 @@ public interface StoreSinkWrite {
                     ignorePreviousFiles,
                     waitCompaction,
                     isStreaming,
-                    memoryPool,
+                    memoryPoolFactory,
                     metricGroup);
         };
-    }
-
-    /** Provider of {@link StoreSinkWrite} that uses given write buffer. */
-    @FunctionalInterface
-    interface WithWriteBufferProvider extends Serializable {
-
-        /**
-         * TODO: The argument list has become too complicated. Build {@link TableWriteImpl} directly
-         * in caller and simplify the argument list.
-         */
-        StoreSinkWrite provide(
-                FileStoreTable table,
-                String commitUser,
-                StoreSinkWriteState state,
-                IOManager ioManager,
-                @Nullable MemoryPoolFactory memoryPoolFactory,
-                MetricGroup metricGroup);
     }
 }

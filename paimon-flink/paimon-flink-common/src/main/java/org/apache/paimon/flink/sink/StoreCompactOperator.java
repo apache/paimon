@@ -117,7 +117,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         commitUser,
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool,
+                        memoryPoolFactory,
                         getMetricGroup());
         this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
     }

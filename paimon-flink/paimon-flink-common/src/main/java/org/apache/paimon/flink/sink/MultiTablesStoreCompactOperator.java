@@ -165,7 +165,7 @@ public class MultiTablesStoreCompactOperator
                                         commitUser,
                                         state,
                                         getContainingTask().getEnvironment().getIOManager(),
-                                        memoryPool,
+                                        memoryPoolFactory,
                                         getMetricGroup()));
 
         if (write.streamingMode()) {

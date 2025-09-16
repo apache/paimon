@@ -256,7 +256,7 @@ public class CdcRecordStoreWriteOperatorTest {
         CdcRecordStoreWriteOperator.Factory operatorFactory =
                 new CdcRecordStoreWriteOperator.Factory(
                         table,
-                        (t, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                        (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 new StoreSinkWriteImpl(
                                         t,
                                         commitUser,
@@ -265,7 +265,7 @@ public class CdcRecordStoreWriteOperatorTest {
                                         false,
                                         false,
                                         true,
-                                        memoryPool,
+                                        memoryPoolFactory,
                                         metricGroup),
                         commitUser);
         TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
