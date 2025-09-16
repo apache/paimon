@@ -62,10 +62,6 @@ public interface BinaryWriter {
 
     void writeString(int pos, BinaryString value);
 
-    default void writeBinary(int pos, byte[] bytes) {
-        writeBinary(pos, bytes, 0, bytes.length);
-    }
-
     void writeBinary(int pos, byte[] bytes, int offset, int length);
 
     void writeDecimal(int pos, Decimal value, int precision);
@@ -144,7 +140,8 @@ public interface BinaryWriter {
                 break;
             case BINARY:
             case VARBINARY:
-                writer.writeBinary(pos, (byte[]) o);
+                byte[] bytes = (byte[]) o;
+                writer.writeBinary(pos, bytes, 0, bytes.length);
                 break;
             case VARIANT:
                 writer.writeVariant(pos, (Variant) o);
@@ -173,7 +170,10 @@ public interface BinaryWriter {
                 return (writer, pos, value) -> writer.writeBoolean(pos, (boolean) value);
             case BINARY:
             case VARBINARY:
-                return (writer, pos, value) -> writer.writeBinary(pos, (byte[]) value);
+                return (writer, pos, value) -> {
+                    byte[] bytes = (byte[]) value;
+                    writer.writeBinary(pos, bytes, 0, bytes.length);
+                };
             case DECIMAL:
                 final int decimalPrecision = getPrecision(elementType);
                 return (writer, pos, value) ->
