@@ -32,6 +32,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -169,5 +171,158 @@ public class PartitionPredicateTest {
         writer.writeInt(1, j);
         writer.complete();
         return row;
+    }
+
+    @Test
+    public void testExtractEqualityPartitionSpecWithAllEqualityWhenAllIsAnd() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("day", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month", "day");
+
+        // Create predicate: year = 2023 AND month = 12 AND day = 25
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate equalityPredicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.and(builder.equal(0, 2023), builder.equal(1, 12)),
+                        builder.equal(2, 25));
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(type, equalityPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+
+        assertThat(result).isNotNull();
+        assertThat(result).hasSize(3);
+        assertThat(result.get("year")).isEqualTo("2023");
+        assertThat(result.get("month")).isEqualTo("12");
+        assertThat(result.get("day")).isEqualTo("25");
+    }
+
+    @Test
+    public void testExtractEqualityPartitionSpecWithLeadingConsecutiveEqualityWhenAllIsAnd() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("day", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month", "day");
+
+        // Create predicate: year = 2023 AND month = 12 AND day > 15
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate mixedPredicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.and(builder.equal(0, 2023), builder.equal(1, 12)),
+                        builder.greaterThan(2, 15));
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(type, mixedPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+
+        assertThat(result).isNotNull();
+        assertThat(result).hasSize(2);
+        assertThat(result.get("year")).isEqualTo("2023");
+        assertThat(result.get("month")).isEqualTo("12");
+        assertThat(result.containsKey("day")).isFalse();
+    }
+
+    @Test
+    public void testExtractEqualityPartitionSpecWithFirstPartitionKeyEqualityWhenAllIsAnd() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("day", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month", "day");
+
+        // Create predicate: year = 2023 AND month > 6 AND day = 15
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate mixedPredicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.and(builder.equal(0, 2023), builder.greaterThan(1, 6)),
+                        builder.equal(2, 15));
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(type, mixedPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+        assertThat(result).isNotNull();
+        assertThat(result).hasSize(1);
+        assertThat(result.get("year")).isEqualTo("2023");
+        assertThat(result.containsKey("month")).isFalse();
+        assertThat(result.containsKey("day")).isFalse();
+    }
+
+    @Test
+    public void testExtractEqualityPartitionSpecWithNoLeadingEqualityWhenAllIsAnd() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .field("day", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month", "day");
+
+        // Create predicate: year > 2020 AND month = 12 AND day = 15
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate mixedPredicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.and(builder.greaterThan(0, 2020), builder.equal(1, 12)),
+                        builder.equal(2, 15));
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(type, mixedPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testExtractEqualityPartitionSpecWithNonEqualityPredicateWhenAllIsAnd() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month");
+
+        // Create predicate: year > 2020 AND month > 6
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate nonEqualityPredicate =
+                PredicateBuilder.and(builder.greaterThan(0, 2020), builder.greaterThan(1, 6));
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromPredicate(type, nonEqualityPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testExtractLeadingEqualityPartitionSpecWhenOnlyAndWithOrPredicate() {
+        RowType type =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .build();
+        List<String> partitionKeys = Arrays.asList("year", "month");
+
+        // Create predicate: year = 2023 OR year = 2024
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate orPredicate = PredicateBuilder.or(builder.equal(0, 2023), builder.equal(0, 2024));
+        PartitionPredicate partitionPredicate = PartitionPredicate.fromPredicate(type, orPredicate);
+
+        Map<String, String> result =
+                partitionPredicate.extractLeadingEqualityPartitionSpecWhenOnlyAnd(partitionKeys);
+
+        assertThat(result).isNull();
     }
 }
