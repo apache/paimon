@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 
 /** Evaluate file index result. */
@@ -59,8 +58,8 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             } else {
                 // limit can not work with other predicates.
-                boolean head = Objects.equals(richLimit.direction(), HEAD);
-                return createBaseSelection(file, dv).limit(richLimit.limit(), head);
+                return createBaseSelection(file, dv)
+                        .limit(richLimit.limit(), richLimit.direction());
             }
         }
 

@@ -23,9 +23,9 @@ import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.LimitDirection;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.RichLimit;
-import org.apache.paimon.predicate.RichLimit.LimitDirection;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.SortValue.SortDirection;
 import org.apache.paimon.predicate.TopN;
@@ -50,9 +50,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
+import static org.apache.paimon.predicate.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
-import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
-import static org.apache.paimon.predicate.RichLimit.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
@@ -303,20 +303,22 @@ public class FormatReaderMapping {
             // first.
 
             // e.g. trimmed primary keys: c1, c2. non-primary keys: n1
-            // ORDER BY c1 (match)
-            // ORDER BY c1 DESC (match)
-            // ORDER BY c1, c2 (match)
-            // ORDER BY c1 DESC, c2 DESC (match)
+            // ORDER BY c1 LIMIT 1 (match)
+            // ORDER BY c1 DESC LIMIT 1 (match)
+            // ORDER BY c1, c2 LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC LIMIT 1 (match)
 
             // non-primary key `n1` can be ignored, if all the primary keys matches (because primary
             // keys is unique).
-            // ORDER BY c1, c2, n1 ASC/DESC (match)
-            // ORDER BY c1 DESC, c2 DESC, n1 ASC/DESC (match)
+            // ORDER BY c1, c2, n1 ASC LIMIT 1 (match)
+            // ORDER BY c1, c2, n1 DESC LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC, n1 ASC LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC, n1 DESC LIMIT 1 (match)
 
             // this following example will not convert TopN to limit.
-            // ORDER BY c1, c2 DESC (not match)
-            // ORDER BY c1 DESC, c2 (not match)
-            // ORDER BY c1, n1 (not match)
+            // ORDER BY c1, c2 DESC LIMIT 1 (not match)
+            // ORDER BY c1 DESC, c2 LIMIT 1 (not match)
+            // ORDER BY c1, n1 LIMIT 1 (not match)
             List<DataField> pkFields = schema.trimmedPrimaryKeysFields();
             List<SortValue> orders = pushTopN.orders();
             if (isNullOrEmpty(orders)) {

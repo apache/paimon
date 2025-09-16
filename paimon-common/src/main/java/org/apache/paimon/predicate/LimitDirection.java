@@ -16,23 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.predicate;
 
-import org.junit.jupiter.api.Test;
+/** The direction for limit. */
+public enum LimitDirection {
+    HEAD("HEAD"),
+    TAIL("TAIL");
 
-import static org.apache.paimon.predicate.LimitDirection.HEAD;
-import static org.apache.paimon.predicate.LimitDirection.TAIL;
-import static org.assertj.core.api.Assertions.assertThat;
+    private final String name;
 
-/** Test for {@link RoaringBitmap32}. */
-public class RoaringBitmap32Test {
+    LimitDirection(String name) {
+        this.name = name;
+    }
 
-    @Test
-    public void testLimit() {
-        RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOf(1, 3, 5, 7, 9);
-        assertThat(bitmap.limit(3, HEAD)).isEqualTo(RoaringBitmap32.bitmapOf(1, 3, 5));
-        assertThat(bitmap.limit(3, TAIL)).isEqualTo(RoaringBitmap32.bitmapOf(5, 7, 9));
-        assertThat(bitmap.limit(10, HEAD)).isEqualTo(bitmap);
-        assertThat(bitmap.limit(5, TAIL)).isEqualTo(bitmap);
+    @Override
+    public String toString() {
+        return name;
     }
 }

@@ -50,21 +50,4 @@ public class RichLimit {
         RichLimit that = (RichLimit) o;
         return this.limit == that.limit && Objects.equals(this.direction, that.direction);
     }
-
-    /** The direction for limit. */
-    public enum LimitDirection {
-        HEAD("HEAD"),
-        TAIL("TAIL");
-
-        private final String name;
-
-        LimitDirection(String name) {
-            this.name = name;
-        }
-
-        @Override
-        public String toString() {
-            return name;
-        }
-    }
 }

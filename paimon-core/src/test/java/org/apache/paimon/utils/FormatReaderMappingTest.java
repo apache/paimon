@@ -41,8 +41,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
-import static org.apache.paimon.predicate.RichLimit.LimitDirection.TAIL;
+import static org.apache.paimon.predicate.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
