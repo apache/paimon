@@ -96,6 +96,25 @@ HDFS Configuration is available directly through the computation cluster, see cl
 
 {{< /tabs >}}
 
+### Paimon-Hadoop Uber package
+
+If you want to read from and write to Paimon tables on a Hadoop cluster within an application that has no Hadoop dependencies, 
+you can use the Paimon Hadoop uber jar.
+
+{{< stable >}}
+
+Download [paimon-hadoop-uber-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hadoop-uber/{{< version >}}/paimon-hadoop-uber-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-hadoop-uber-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hadoop-uber/{{< version >}}/).
+
+{{< /unstable >}}
+
+Put `paimon-hadoop-uber-{{< version >}}.jar` into classpath directory of your application.
+
 ### Hadoop-compatible file systems (HCFS)
 
 All Hadoop file systems are automatically available when the Hadoop libraries are on the classpath.
