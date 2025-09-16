@@ -26,9 +26,9 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RichLimit;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.FormatReaderMapping.RichLimit;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 
 /** Evaluate file index result. */
@@ -58,7 +59,8 @@ public class FileIndexEvaluator {
                 return FileIndexResult.REMAIN;
             } else {
                 // limit can not work with other predicates.
-                return createBaseSelection(file, dv).limit(richLimit.limit(), richLimit.head());
+                boolean head = Objects.equals(richLimit.direction(), HEAD);
+                return createBaseSelection(file, dv).limit(richLimit.limit(), head);
             }
         }
 

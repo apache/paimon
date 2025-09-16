@@ -24,6 +24,8 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RichLimit;
+import org.apache.paimon.predicate.RichLimit.LimitDirection;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.SortValue.SortDirection;
 import org.apache.paimon.predicate.TopN;
@@ -49,6 +51,8 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
+import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.RichLimit.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
@@ -232,7 +236,7 @@ public class FormatReaderMapping {
                     enabledFilterPushDown ? readFilters(filters, tableSchema, dataSchema) : null;
 
             TopN pushTopN = evolutionTopN(tableSchema, dataSchema);
-            RichLimit pushLimit = limit == null ? null : new RichLimit(limit);
+            RichLimit pushLimit = limit == null ? null : new RichLimit(limit, HEAD);
 
             // try convert the TopN to limit
             Optional<RichLimit> converted =
@@ -293,22 +297,39 @@ public class FormatReaderMapping {
             }
 
             // The follow rules can convert TopN to limit.
-            // 1. The preceding sort keys must matches with the primary keys in order,
+            // 1. The preceding sort keys must matches with the trimmed primary keys in order,
             //      and the sort direction must be the same.
-            // 2. If non-primary key including, all the primary-key must matches in order first.
-            List<DataField> fields = schema.primaryKeysFields();
+            // 2. If non-primary key including, all the trimmed primary keys must matches in order
+            // first.
+
+            // e.g. trimmed primary keys: c1, c2. non-primary keys: n1
+            // ORDER BY c1 (match)
+            // ORDER BY c1 DESC (match)
+            // ORDER BY c1, c2 (match)
+            // ORDER BY c1 DESC, c2 DESC (match)
+
+            // non-primary key `n1` can be ignored, if all the primary keys matches (because primary
+            // keys is unique).
+            // ORDER BY c1, c2, n1 ASC/DESC (match)
+            // ORDER BY c1 DESC, c2 DESC, n1 ASC/DESC (match)
+
+            // this following example will not convert TopN to limit.
+            // ORDER BY c1, c2 DESC (not match)
+            // ORDER BY c1 DESC, c2 (not match)
+            // ORDER BY c1, n1 (not match)
+            List<DataField> pkFields = schema.trimmedPrimaryKeysFields();
             List<SortValue> orders = pushTopN.orders();
             if (isNullOrEmpty(orders)) {
                 return Optional.empty();
             }
 
             SortDirection firstDirection = null;
-            for (int i = 0; i < fields.size(); i++) {
+            for (int i = 0; i < pkFields.size(); i++) {
                 if (i > orders.size() - 1) {
                     break;
                 }
 
-                DataField field = fields.get(i);
+                DataField field = pkFields.get(i);
                 SortValue sort = orders.get(i);
                 SortDirection direction = sort.direction();
                 if (firstDirection == null) {
@@ -321,8 +342,8 @@ public class FormatReaderMapping {
                 }
             }
 
-            boolean ascending = ASCENDING.equals(firstDirection);
-            return Optional.of(new RichLimit(pushTopN.limit(), ascending));
+            LimitDirection direction = ASCENDING.equals(firstDirection) ? HEAD : TAIL;
+            return Optional.of(new RichLimit(pushTopN.limit(), direction));
         }
 
         public FormatReaderMapping build(
@@ -457,42 +478,6 @@ public class FormatReaderMapping {
             // Skip pushing down partition filters to reader.
             return excludePredicateWithFields(
                     dataFilters, new HashSet<>(fileSchema.partitionKeys()));
-        }
-    }
-
-    /** Limit with direction. */
-    public static class RichLimit {
-
-        private final int limit;
-        private final boolean head;
-
-        public RichLimit(int limit) {
-            this(limit, true);
-        }
-
-        public RichLimit(int limit, boolean head) {
-            this.limit = limit;
-            this.head = head;
-        }
-
-        public int limit() {
-            return limit;
-        }
-
-        public boolean head() {
-            return head;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            RichLimit that = (RichLimit) o;
-            return this.limit == that.limit && this.head == that.head;
         }
     }
 }

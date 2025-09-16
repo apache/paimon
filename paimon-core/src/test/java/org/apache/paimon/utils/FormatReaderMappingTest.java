@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.RichLimit;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.IndexCastMapping;
@@ -28,7 +29,6 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FormatReaderMapping.RichLimit;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +41,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.predicate.RichLimit.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.RichLimit.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
@@ -180,12 +182,12 @@ public class FormatReaderMappingTest {
         TopN topN01 = new TopN(idRef, ASCENDING, NULLS_FIRST, 1);
         Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
         assertThat(test01).isPresent();
-        assertThat(test01.get()).isEqualTo(new RichLimit(1, true));
+        assertThat(test01.get()).isEqualTo(new RichLimit(1, HEAD));
 
         TopN topN02 = new TopN(idRef, DESCENDING, NULLS_FIRST, 1);
         Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
         assertThat(test02).isPresent();
-        assertThat(test02.get()).isEqualTo(new RichLimit(1, false));
+        assertThat(test02.get()).isEqualTo(new RichLimit(1, TAIL));
 
         // test with non-primary-key
         TopN topN03 =
@@ -196,7 +198,7 @@ public class FormatReaderMappingTest {
                         1);
         Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
         assertThat(test03).isPresent();
-        assertThat(test03.get()).isEqualTo(new RichLimit(1, false));
+        assertThat(test03.get()).isEqualTo(new RichLimit(1, TAIL));
 
         // test empty
         TopN topN04 = new TopN(f1Ref, DESCENDING, NULLS_FIRST, 1);
@@ -223,12 +225,12 @@ public class FormatReaderMappingTest {
         TopN topN01 = new TopN(singletonList(new SortValue(idRef, ASCENDING, NULLS_FIRST)), 1);
         Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
         assertThat(test01).isPresent();
-        assertThat(test01.get()).isEqualTo(new RichLimit(1, true));
+        assertThat(test01.get()).isEqualTo(new RichLimit(1, HEAD));
 
         TopN topN02 = new TopN(singletonList(new SortValue(idRef, DESCENDING, NULLS_FIRST)), 1);
         Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
         assertThat(test02).isPresent();
-        assertThat(test02.get()).isEqualTo(new RichLimit(1, false));
+        assertThat(test02.get()).isEqualTo(new RichLimit(1, TAIL));
 
         // ASCENDING
         TopN topN03 =
@@ -239,7 +241,7 @@ public class FormatReaderMappingTest {
                         1);
         Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
         assertThat(test03).isPresent();
-        assertThat(test03.get()).isEqualTo(new RichLimit(1, true));
+        assertThat(test03.get()).isEqualTo(new RichLimit(1, HEAD));
 
         // DESCENDING
         TopN topN04 =
@@ -250,7 +252,7 @@ public class FormatReaderMappingTest {
                         1);
         Optional<RichLimit> test04 = tryConvertTopNToLimit(topN04, null, schema, true);
         assertThat(test04).isPresent();
-        assertThat(test04.get()).isEqualTo(new RichLimit(1, false));
+        assertThat(test04.get()).isEqualTo(new RichLimit(1, TAIL));
 
         // with non-primary keys
         TopN topN05 =
@@ -262,7 +264,7 @@ public class FormatReaderMappingTest {
                         1);
         Optional<RichLimit> test05 = tryConvertTopNToLimit(topN05, null, schema, true);
         assertThat(test05).isPresent();
-        assertThat(test05.get()).isEqualTo(new RichLimit(1, false));
+        assertThat(test05.get()).isEqualTo(new RichLimit(1, TAIL));
 
         // test not matches
         // only contains a part the primary key

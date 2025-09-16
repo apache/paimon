@@ -44,7 +44,6 @@ import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -1372,31 +1371,26 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         // append
         for (int i = 0; i < rowCount; i++) {
-            write.write(rowDataWithKind(RowKind.INSERT, 1, i, (long) i));
+            int pt = i % 3;
+            write.write(rowDataWithKind(RowKind.INSERT, pt, i, (long) i));
         }
         commit.commit(0, write.prepareCommit(true, 0));
 
         // update
         int updateRowCount = 300000;
         for (int i = 0; i < updateRowCount; i++) {
-            write.write(rowDataWithKind(RowKind.INSERT, 1, i, (long) i));
+            int pt = i % 3;
+            write.write(rowDataWithKind(RowKind.INSERT, pt, i, (long) i));
         }
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
         commit.close();
 
         // test bottom k
-        // test partition key is always equals to 1, so we only assert the primary key
         {
             int k = 10;
-            FieldRef partitionKey = new FieldRef(0, "pt", DataTypes.INT());
             FieldRef primaryKey = new FieldRef(1, "a", DataTypes.INT());
-            TopN topN =
-                    new TopN(
-                            Arrays.asList(
-                                    new SortValue(partitionKey, ASCENDING, NULLS_LAST),
-                                    new SortValue(primaryKey, ASCENDING, NULLS_LAST)),
-                            k);
+            TopN topN = new TopN(primaryKey, ASCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
@@ -1419,17 +1413,10 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         }
 
         // test top k
-        // test partition key is always equals to 1, so we only assert the primary key
         {
             int k = 10;
-            FieldRef partitionKey = new FieldRef(0, "pt", DataTypes.INT());
             FieldRef primaryKey = new FieldRef(1, "a", DataTypes.INT());
-            TopN topN =
-                    new TopN(
-                            Arrays.asList(
-                                    new SortValue(partitionKey, DESCENDING, NULLS_LAST),
-                                    new SortValue(primaryKey, DESCENDING, NULLS_LAST)),
-                            k);
+            TopN topN = new TopN(primaryKey, DESCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
