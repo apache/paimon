@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.SnapshotManager;
@@ -74,7 +74,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             boolean waitCompaction,
             int deltaCommits,
             boolean isStreaming,
-            @Nullable MemorySegmentPool memoryPool,
+            MemoryPoolFactory memoryPoolFactory,
             MetricGroup metricGroup) {
         super(
                 table,
@@ -84,7 +84,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 ignorePreviousFiles,
                 waitCompaction,
                 isStreaming,
-                memoryPool,
+                memoryPoolFactory,
                 metricGroup);
 
         this.deltaCommits = deltaCommits;

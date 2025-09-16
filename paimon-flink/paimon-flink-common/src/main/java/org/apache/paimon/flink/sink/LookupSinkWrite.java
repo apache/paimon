@@ -19,14 +19,12 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,7 +46,7 @@ public class LookupSinkWrite extends StoreSinkWriteImpl {
             boolean ignorePreviousFiles,
             boolean waitCompaction,
             boolean isStreaming,
-            @Nullable MemorySegmentPool memoryPool,
+            MemoryPoolFactory memoryPoolFactory,
             MetricGroup metricGroup) {
         super(
                 table,
@@ -58,7 +56,7 @@ public class LookupSinkWrite extends StoreSinkWriteImpl {
                 ignorePreviousFiles,
                 waitCompaction,
                 isStreaming,
-                memoryPool,
+                memoryPoolFactory,
                 metricGroup);
 
         this.tableName = table.name();

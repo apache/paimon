@@ -18,8 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
 
@@ -51,7 +54,7 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
 
     private static final long serialVersionUID = 1L;
 
-    @Nullable protected transient MemorySegmentPool memoryPool;
+    protected transient MemoryPoolFactory memoryPoolFactory;
     @Nullable private transient MemorySegmentAllocator memoryAllocator;
     protected final Options options;
     private boolean endOfInput = false;
@@ -67,6 +70,8 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
             StreamConfig config,
             Output<StreamRecord<OUT>> output) {
         super.setup(containingTask, config, output);
+
+        MemorySegmentPool memoryPool;
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             MemoryManager memoryManager = containingTask.getEnvironment().getMemoryManager();
             memoryAllocator = new MemorySegmentAllocator(containingTask, memoryManager);
@@ -75,7 +80,13 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
                             computeManagedMemory(this),
                             memoryManager.getPageSize(),
                             memoryAllocator);
+        } else {
+            CoreOptions coreOptions = new CoreOptions(options);
+            memoryPool =
+                    new HeapMemorySegmentPool(
+                            coreOptions.writeBufferSize(), coreOptions.pageSize());
         }
+        memoryPoolFactory = new MemoryPoolFactory(memoryPool);
     }
 
     @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
@@ -43,7 +44,11 @@ public interface TableWrite extends AutoCloseable {
     TableWrite withWriteType(RowType writeType);
 
     /** With {@link MemorySegmentPool} for the current table write. */
-    TableWrite withMemoryPool(MemorySegmentPool memoryPool);
+    default TableWrite withMemoryPool(MemorySegmentPool memoryPool) {
+        return withMemoryPoolFactory(new MemoryPoolFactory(memoryPool));
+    }
+
+    TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory);
 
     /** Calculate which partition {@code row} belongs to. */
     BinaryRow getPartition(InternalRow row);

@@ -94,7 +94,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                         getCommitUser(context),
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool,
+                        memoryPoolFactory,
                         getMetricGroup());
         if (writeRestore != null) {
             write.setWriteRestore(writeRestore);
