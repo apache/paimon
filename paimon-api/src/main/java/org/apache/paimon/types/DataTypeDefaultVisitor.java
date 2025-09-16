@@ -109,8 +109,14 @@ public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
         return defaultMethod(localZonedTimestampType);
     }
 
+    @Override
     public R visit(VariantType variantType) {
         return defaultMethod(variantType);
+    }
+
+    @Override
+    public R visit(BlobType blobType) {
+        return defaultMethod(blobType);
     }
 
     @Override

@@ -960,4 +960,19 @@ public class BinaryRowTest {
         assertThat(array2.isNullAt(1)).isTrue();
         assertThat(array2.getVariant(2).toJson()).isEqualTo("{\"age\":27,\"city\":\"Hangzhou\"}");
     }
+
+    @Test
+    public void testBlob() {
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+
+        writer.writeBlob(0, new BlobData(new byte[] {1, 3, 1}));
+        writer.setNullAt(1);
+        writer.complete();
+
+        Blob blob0 = row.getBlob(0);
+        assertThat(blob0).isInstanceOf(BlobData.class);
+        assertThat(blob0.toBytes()).isEqualTo(new byte[] {1, 3, 1});
+        assertThat(row.isNullAt(1)).isTrue();
+    }
 }

@@ -26,6 +26,7 @@ import org.apache.paimon.data.LocalZoneTimestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataTypeVisitor;
@@ -213,6 +214,11 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
     @Override
     public FieldWriter visit(VariantType variantType) {
         throw new UnsupportedOperationException("Unsupported type: " + variantType);
+    }
+
+    @Override
+    public FieldWriter visit(BlobType blobType) {
+        throw new UnsupportedOperationException("Unsupported type: " + blobType);
     }
 
     @Override

@@ -195,6 +195,11 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         cursor += roundedSize;
     }
 
+    @Override
+    public void writeBlob(int pos, Blob blob) {
+        writeBinary(pos, blob.toBytes());
+    }
+
     protected void zeroOutPaddingBytes(int numBytes) {
         if ((numBytes & 0x07) > 0) {
             segment.putLong(cursor + ((numBytes >> 3) << 3), 0L);

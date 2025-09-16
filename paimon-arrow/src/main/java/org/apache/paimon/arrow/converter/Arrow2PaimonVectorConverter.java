@@ -44,6 +44,7 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -427,6 +428,11 @@ public interface Arrow2PaimonVectorConverter {
 
         @Override
         public Arrow2PaimonVectorConverter visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(BlobType blobType) {
             throw new UnsupportedOperationException();
         }
 

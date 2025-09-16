@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -159,6 +160,13 @@ public class PartitionSettedRow implements InternalRow {
         return partitionInfo.inPartitionRow(pos)
                 ? partition.getVariant(partitionInfo.getRealIndex(pos))
                 : row.getVariant(partitionInfo.getRealIndex(pos));
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return partitionInfo.inPartitionRow(pos)
+                ? partition.getBlob(partitionInfo.getRealIndex(pos))
+                : row.getBlob(partitionInfo.getRealIndex(pos));
     }
 
     @Override

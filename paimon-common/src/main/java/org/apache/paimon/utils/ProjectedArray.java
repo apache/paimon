@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -129,6 +130,11 @@ public class ProjectedArray implements InternalArray {
     @Override
     public Variant getVariant(int pos) {
         return array.getVariant(indexMapping[pos]);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return array.getBlob(indexMapping[pos]);
     }
 
     @Override

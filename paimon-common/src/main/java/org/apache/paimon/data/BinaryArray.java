@@ -85,6 +85,7 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
             case MAP:
             case ROW:
             case VARIANT:
+            case BLOB:
                 // long and double are 8 bytes;
                 // otherwise it stores the length and offset of the variable-length part for types
                 // such as is string, map, etc.
@@ -242,6 +243,11 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
         int fieldOffset = getElementOffset(pos, 8);
         final long offsetAndLen = MemorySegmentUtils.getLong(segments, fieldOffset);
         return MemorySegmentUtils.readVariant(segments, offset, offsetAndLen);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return new BlobData(getBinary(pos));
     }
 
     @Override

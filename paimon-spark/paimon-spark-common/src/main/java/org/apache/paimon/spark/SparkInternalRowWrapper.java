@@ -19,6 +19,8 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -156,6 +158,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     @Override
     public Variant getVariant(int pos) {
         return SparkShimLoader.shim().toPaimonVariant(internalRow, pos);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return new BlobData(internalRow.getBinary(pos));
     }
 
     @Override
@@ -311,6 +318,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         @Override
         public Variant getVariant(int pos) {
             return SparkShimLoader.shim().toPaimonVariant(arrayData, pos);
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            return new BlobData(arrayData.getBinary(pos));
         }
 
         @Override
