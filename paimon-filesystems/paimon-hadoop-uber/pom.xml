@@ -183,6 +183,8 @@
                                     <exclude>com.sun.jersey:*</exclude>
                                     <exclude>com.sun.jersey.*:*</exclude>
                                     <exclude>com.sun.xml.*:*</exclude>
+                                    <exclude>javax.annotation:javax.annotation-api</exclude>
+                                    <exclude>org.eclipse.*:*</exclude>
                                 </excludes>
                             </artifactSet>
                             <filters>
