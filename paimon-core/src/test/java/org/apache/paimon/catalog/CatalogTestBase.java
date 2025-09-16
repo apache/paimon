@@ -583,7 +583,7 @@ public abstract class CatalogTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    void testFormatTableRead(boolean partitioned) throws Exception {
+    public void testFormatTableRead(boolean partitioned) throws Exception {
         if (!supportsFormatTable()) {
             return;
         }
@@ -781,7 +781,7 @@ public abstract class CatalogTestBase {
         Table table = catalog.getTable(Identifier.create("test_db", "test_table"));
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit = writeBuilder.newCommit(); ) {
+                BatchTableCommit commit = writeBuilder.newCommit()) {
             write.write(
                     GenericRow.of(1, BinaryString.fromString("2"), BinaryString.fromString("3")));
             commit.commit(write.prepareCommit());
