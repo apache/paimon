@@ -174,9 +174,12 @@ public interface PartitionPredicate extends Serializable {
         public Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(
                 List<String> partitionKeys) {
             OnlyPartitionKeyEqualVisitor visitor = new OnlyPartitionKeyEqualVisitor(partitionKeys);
-            predicate.visit(visitor);
+            boolean onlyEqual = predicate.visit(visitor);
             if (visitor.hasOrCondition()) {
                 return null;
+            }
+            if (onlyEqual) {
+                return visitor.partitions();
             }
             Map<String, String> equalPartitions = new HashMap<>(partitionKeys.size());
             for (String partitionKey : partitionKeys) {
