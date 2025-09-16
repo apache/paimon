@@ -124,7 +124,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return this;
     }
 
-    public ColumnarRowIterator assignRowLineage(
+    public ColumnarRowIterator assignRowTracking(
             Long firstRowId, Long snapshotId, Map<String, Integer> meta) {
         VectorizedColumnBatch vectorizedColumnBatch = row.batch();
         ColumnVector[] vectors = vectorizedColumnBatch.columns;

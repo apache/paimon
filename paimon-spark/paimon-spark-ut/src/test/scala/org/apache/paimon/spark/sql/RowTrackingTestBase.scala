@@ -23,9 +23,9 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
-abstract class RowLineageTestBase extends PaimonSparkTestBase {
+abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
-  test("Row Lineage: read row lineage") {
+  test("Row Tracking: read row Tracking") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
@@ -41,7 +41,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: compact table") {
+  test("Row Tracking: compact table") {
     withTable("t") {
       sql(
         "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'compaction.min.file-num'='2')")
@@ -64,7 +64,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: delete table") {
+  test("Row Tracking: delete table") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
 
@@ -77,7 +77,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: update table") {
+  test("Row Tracking: update table") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
 
@@ -95,7 +95,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: update table without condition") {
+  test("Row Tracking: update table without condition") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
 
@@ -109,7 +109,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table") {
+  test("Row Tracking: merge into table") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO s VALUES (1, 11), (2, 22)")
@@ -135,7 +135,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with only insert") {
+  test("Row Tracking: merge into table with only insert") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO s VALUES (1, 11), (2, 22)")
@@ -156,7 +156,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with only delete") {
+  test("Row Tracking: merge into table with only delete") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO s VALUES (1, 11), (2, 22)")
@@ -177,7 +177,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table with only update") {
+  test("Row Tracking: merge into table with only update") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO s VALUES (1, 11), (2, 22)")
@@ -342,7 +342,7 @@ abstract class RowLineageTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Row Lineage: merge into table not matched by source") {
+  test("Row Tracking: merge into table not matched by source") {
     if (gteqSpark3_4) {
       withTable("source", "target") {
         sql(

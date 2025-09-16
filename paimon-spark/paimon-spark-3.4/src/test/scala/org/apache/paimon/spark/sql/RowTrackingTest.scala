@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class RowLineageTest extends RowLineageTestBase {}
+class RowTrackingTest extends RowTrackingTestBase {}

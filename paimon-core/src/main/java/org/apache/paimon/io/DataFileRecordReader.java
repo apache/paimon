@@ -48,7 +48,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
-    private final boolean rowLineageEnabled;
+    private final boolean rowTrackingEnabled;
     @Nullable private final Long firstRowId;
     private final long maxSequenceNumber;
     private final Map<String, Integer> systemFields;
@@ -60,7 +60,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable PartitionInfo partitionInfo,
-            boolean rowLineageEnabled,
+            boolean rowTrackingEnabled,
             @Nullable Long firstRowId,
             long maxSequenceNumber,
             Map<String, Integer> systemFields)
@@ -75,7 +75,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
-        this.rowLineageEnabled = rowLineageEnabled;
+        this.rowTrackingEnabled = rowTrackingEnabled;
         this.firstRowId = firstRowId;
         this.maxSequenceNumber = maxSequenceNumber;
         this.systemFields = systemFields;
@@ -91,10 +91,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
 
         if (iterator instanceof ColumnarRowIterator) {
             iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
-            if (rowLineageEnabled) {
+            if (rowTrackingEnabled) {
                 iterator =
                         ((ColumnarRowIterator) iterator)
-                                .assignRowLineage(firstRowId, maxSequenceNumber, systemFields);
+                                .assignRowTracking(firstRowId, maxSequenceNumber, systemFields);
             }
         } else {
             if (partitionInfo != null) {
@@ -108,33 +108,33 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 iterator = iterator.transform(projectedRow::replaceRow);
             }
 
-            if (rowLineageEnabled && !systemFields.isEmpty()) {
-                GenericRow lineageRow = new GenericRow(2);
+            if (rowTrackingEnabled && !systemFields.isEmpty()) {
+                GenericRow trackingRow = new GenericRow(2);
 
-                int[] fallbackToLineageMappings = new int[tableRowType.getFieldCount()];
-                Arrays.fill(fallbackToLineageMappings, -1);
+                int[] fallbackToTrackingMappings = new int[tableRowType.getFieldCount()];
+                Arrays.fill(fallbackToTrackingMappings, -1);
 
                 if (systemFields.containsKey(SpecialFields.ROW_ID.name())) {
-                    fallbackToLineageMappings[systemFields.get(SpecialFields.ROW_ID.name())] = 0;
+                    fallbackToTrackingMappings[systemFields.get(SpecialFields.ROW_ID.name())] = 0;
                 }
                 if (systemFields.containsKey(SpecialFields.SEQUENCE_NUMBER.name())) {
-                    fallbackToLineageMappings[
+                    fallbackToTrackingMappings[
                                     systemFields.get(SpecialFields.SEQUENCE_NUMBER.name())] =
                             1;
                 }
 
                 FallbackMappingRow fallbackMappingRow =
-                        new FallbackMappingRow(fallbackToLineageMappings);
+                        new FallbackMappingRow(fallbackToTrackingMappings);
                 final FileRecordIterator<InternalRow> iteratorInner = iterator;
                 iterator =
                         iterator.transform(
                                 row -> {
                                     if (firstRowId != null) {
-                                        lineageRow.setField(
+                                        trackingRow.setField(
                                                 0, iteratorInner.returnedPosition() + firstRowId);
                                     }
-                                    lineageRow.setField(1, maxSequenceNumber);
-                                    return fallbackMappingRow.replace(row, lineageRow);
+                                    trackingRow.setField(1, maxSequenceNumber);
+                                    return fallbackMappingRow.replace(row, trackingRow);
                                 });
             }
         }

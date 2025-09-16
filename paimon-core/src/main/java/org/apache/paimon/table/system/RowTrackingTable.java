@@ -30,6 +30,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -48,16 +49,15 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowLineage;
 
 /** A {@link Table} for reading row id of table. */
-public class RowLineageTable implements DataTable, ReadonlyTable {
+public class RowTrackingTable implements DataTable, ReadonlyTable {
 
-    public static final String ROW_LINEAGE = "row_lineage";
+    public static final String ROW_TRACKING = "row_tracking";
 
     private final FileStoreTable wrapped;
 
-    public RowLineageTable(FileStoreTable wrapped) {
+    public RowTrackingTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
 
         if (!coreOptions().rowTrackingEnabled()) {
@@ -96,12 +96,12 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public String name() {
-        return wrapped.name() + SYSTEM_TABLE_SPLITTER + ROW_LINEAGE;
+        return wrapped.name() + SYSTEM_TABLE_SPLITTER + ROW_TRACKING;
     }
 
     @Override
     public RowType rowType() {
-        return rowTypeWithRowLineage(wrapped.rowType());
+        return SpecialFields.rowTypeWithRowTracking(wrapped.rowType());
     }
 
     @Override
@@ -176,7 +176,7 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTable switchToBranch(String branchName) {
-        return new RowLineageTable(wrapped.switchToBranch(branchName));
+        return new RowTrackingTable(wrapped.switchToBranch(branchName));
     }
 
     @Override
@@ -186,7 +186,7 @@ public class RowLineageTable implements DataTable, ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new RowLineageTable(wrapped.copy(dynamicOptions));
+        return new RowTrackingTable(wrapped.copy(dynamicOptions));
     }
 
     @Override

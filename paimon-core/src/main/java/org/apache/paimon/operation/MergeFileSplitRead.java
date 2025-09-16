@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** A {@link SplitRead} to read row lineage table which need field merge. */
+/** A {@link SplitRead} to read row tracking table which need field merge. */
 public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private final TableSchema tableSchema;

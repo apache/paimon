@@ -164,32 +164,32 @@ case class MergeIntoPaimonTable(
       val (_, filesToReadScan) =
         extractFilesAndCreateNewScan(filePathsToRead.toArray, dataFilePathToMeta, relation)
 
-      // If no files need to be rewritten, no need to write row lineage
-      val writeRowLineage = coreOptions.rowTrackingEnabled() && filesToRewritten.nonEmpty
+      // If no files need to be rewritten, no need to write row tracking
+      val writeRowTracking = coreOptions.rowTrackingEnabled() && filesToRewritten.nonEmpty
 
       // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
       // modified and was from touched file, it should be kept too.
       var filesToRewrittenDS =
         createDataset(sparkSession, filesToRewrittenScan).withColumn(FILE_TOUCHED_COL, lit(true))
-      if (writeRowLineage) {
-        filesToRewrittenDS = selectWithRowLineage(filesToRewrittenDS)
+      if (writeRowTracking) {
+        filesToRewrittenDS = selectWithRowTracking(filesToRewrittenDS)
       }
 
       var filesToReadDS =
         createDataset(sparkSession, filesToReadScan).withColumn(FILE_TOUCHED_COL, lit(false))
-      if (writeRowLineage) {
-        // For filesToReadScan we don't need to read row lineage meta cols, just add placeholders
-        ROW_LINEAGE_META_COLUMNS.foreach(
+      if (writeRowTracking) {
+        // For filesToReadScan we don't need to read row tracking meta cols, just add placeholders
+        ROW_TRACKING_META_COLUMNS.foreach(
           c => filesToReadDS = filesToReadDS.withColumn(c, lit(null)))
       }
 
       val toWriteDS = constructChangedRows(
         sparkSession,
         filesToRewrittenDS.union(filesToReadDS),
-        writeRowLineage = writeRowLineage).drop(ROW_KIND_COL)
+        writeRowTracking = writeRowTracking).drop(ROW_KIND_COL)
 
-      val finalWriter = if (writeRowLineage) {
-        writer.withRowLineage()
+      val finalWriter = if (writeRowTracking) {
+        writer.withRowTracking()
       } else {
         writer
       }
@@ -207,7 +207,7 @@ case class MergeIntoPaimonTable(
       remainDeletedRow: Boolean = false,
       deletionVectorEnabled: Boolean = false,
       extraMetadataCols: Seq[PaimonMetadataColumn] = Seq.empty,
-      writeRowLineage: Boolean = false): Dataset[Row] = {
+      writeRowTracking: Boolean = false): Dataset[Row] = {
     val targetDS = targetDataset
       .withColumn(TARGET_ROW_COL, lit(true))
 
@@ -233,7 +233,7 @@ case class MergeIntoPaimonTable(
     def attribute(name: String) = joinedPlan.output.find(attr => resolver(name, attr.name))
     val extraMetadataAttributes =
       extraMetadataCols.flatMap(metadataCol => attribute(metadataCol.name))
-    val (rowIdAttr, sequenceNumberAttr) = if (writeRowLineage) {
+    val (rowIdAttr, sequenceNumberAttr) = if (writeRowTracking) {
       (
         attribute(SpecialFields.ROW_ID.name()).get,
         attribute(SpecialFields.SEQUENCE_NUMBER.name()).get)
@@ -241,7 +241,7 @@ case class MergeIntoPaimonTable(
       (null, null)
     }
 
-    val targetOutput = if (writeRowLineage) {
+    val targetOutput = if (writeRowTracking) {
       filteredTargetPlan.output ++ Seq(rowIdAttr, sequenceNumberAttr)
     } else {
       filteredTargetPlan.output
@@ -253,7 +253,7 @@ case class MergeIntoPaimonTable(
       val columnExprs = actions.map {
         case UpdateAction(_, assignments) =>
           var exprs = assignments.map(_.value)
-          if (writeRowLineage) {
+          if (writeRowTracking) {
             exprs ++= Seq(rowIdAttr, Literal(null))
           }
           exprs :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
@@ -267,7 +267,7 @@ case class MergeIntoPaimonTable(
           }
         case InsertAction(_, assignments) =>
           var exprs = assignments.map(_.value)
-          if (writeRowLineage) {
+          if (writeRowTracking) {
             exprs ++= Seq(rowIdAttr, sequenceNumberAttr)
           }
           exprs :+ Literal(RowKind.INSERT.toByteValue)
@@ -280,7 +280,7 @@ case class MergeIntoPaimonTable(
     val notMatchedBySourceOutputs = processMergeActions(notMatchedBySourceActions)
     val notMatchedOutputs = processMergeActions(notMatchedActions)
     val outputFields = mutable.ArrayBuffer(targetTable.schema.fields: _*)
-    if (writeRowLineage) {
+    if (writeRowTracking) {
       outputFields += PaimonMetadataColumn.ROW_ID.toStructField
       outputFields += PaimonMetadataColumn.SEQUENCE_NUMBER.toStructField
     }

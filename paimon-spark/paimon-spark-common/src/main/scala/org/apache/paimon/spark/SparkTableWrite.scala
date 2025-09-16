@@ -33,7 +33,7 @@ case class SparkTableWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     rowKindColIdx: Int = -1,
-    writeRowLineage: Boolean = false)
+    writeRowTracking: Boolean = false)
   extends SparkTableWriteTrait {
 
   private val ioManager: IOManager = SparkUtils.createIOManager
@@ -41,7 +41,7 @@ case class SparkTableWrite(
   private val write: BatchTableWrite = {
     val _write = writeBuilder.newWrite()
     _write.withIOManager(ioManager)
-    if (writeRowLineage) {
+    if (writeRowTracking) {
       _write.withWriteType(writeType)
     }
     _write

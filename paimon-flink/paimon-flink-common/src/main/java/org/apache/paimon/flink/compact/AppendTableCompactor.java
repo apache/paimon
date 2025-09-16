@@ -78,7 +78,7 @@ public class AppendTableCompactor {
         CoreOptions coreOptions = table.coreOptions();
         this.write = (BaseAppendFileStoreWrite) table.store().newWrite(commitUser);
         if (coreOptions.rowTrackingEnabled()) {
-            write.withWriteType(SpecialFields.rowTypeWithRowLineage(table.rowType()));
+            write.withWriteType(SpecialFields.rowTypeWithRowTracking(table.rowType()));
         }
         this.result = new LinkedList<>();
         this.compactExecutorsupplier = lazyCompactExecutor;

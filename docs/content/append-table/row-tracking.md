@@ -26,9 +26,9 @@ under the License.
 
 # Row tracking
 
-Row tracking allows Paimon to track row-level lineage in a Paimon append table. Once enabled on a Paimon table, two more hidden columns will be added to the table schema:
-- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the lineage of the row and can be used to identify the row in case of update, merge into or delete.
-- `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the lineage of the row version.
+Row tracking allows Paimon to track row-level tracking in a Paimon append table. Once enabled on a Paimon table, two more hidden columns will be added to the table schema:
+- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the update of the row and can be used to identify the row in case of update, merge into or delete.
+- `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the update of the row version.
 
 Hidden columns follows the following rules:
 - Whenever we read from one table with row tracking enabled, the `_ROW_ID` and `_SEQUENCE_NUMBER` will be `NOT NULL`.
@@ -57,7 +57,7 @@ CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'tr
 INSERT INTO t VALUES (11, 'a'), (22, 'b')
 ```
 
-You can select the row lineage meta column with the following sql in spark:
+You can select the row tracking meta column with the following sql in spark:
 ```sql
 SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
 ```

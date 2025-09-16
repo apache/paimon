@@ -51,7 +51,7 @@ import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
-case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = false)
+case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = false)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -61,8 +61,8 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
   @transient private lazy val serializer = new CommitMessageSerializer
 
   private val writeType = {
-    if (writeRowLineage) {
-      SpecialFields.rowTypeWithRowLineage(table.rowType(), true)
+    if (writeRowTracking) {
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), true)
     } else {
       table.rowType()
     }
@@ -74,9 +74,9 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
-  def withRowLineage(): PaimonSparkWriter = {
+  def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowLineage = true)
+      PaimonSparkWriter(table, writeRowTracking = true)
     } else {
       this
     }
@@ -98,7 +98,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowLineage: Boolean = f
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowLineage)
+    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowTracking)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism

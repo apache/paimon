@@ -50,7 +50,7 @@ public class PojoDataFileMeta implements DataFileMeta {
     private final SimpleStats keyStats;
     private final SimpleStats valueStats;
 
-    // As for row-lineage table, this will be reassigned while committing
+    // As for row-tracking table, this will be reassigned while committing
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
     private final long schemaId;
