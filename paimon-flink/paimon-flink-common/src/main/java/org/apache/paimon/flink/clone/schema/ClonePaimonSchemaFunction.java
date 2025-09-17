@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.clone.schema;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -45,14 +47,18 @@ public class ClonePaimonSchemaFunction
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
+    private final String preferFileFormat;
 
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
 
     public ClonePaimonSchemaFunction(
-            Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            String preferFileFormat) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
+        this.preferFileFormat = preferFileFormat;
     }
 
     /**
@@ -109,6 +115,10 @@ public class ClonePaimonSchemaFunction
         } else {
             // for primary key table, only postpone bucket supports clone
             builder.option(BUCKET.key(), "-2");
+        }
+
+        if (!StringUtils.isNullOrWhitespaceOnly(preferFileFormat)) {
+            builder.option(CoreOptions.FILE_FORMAT.key(), preferFileFormat);
         }
 
         targetCatalog.createTable(tuple.f1, builder.build(), true);

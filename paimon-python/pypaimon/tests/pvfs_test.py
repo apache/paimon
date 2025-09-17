@@ -29,10 +29,10 @@ from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.tests.api_test import RESTCatalogServer
+from pypaimon.tests.rest.api_test import RESTCatalogServer
 
 
-class PVFSTestCase(unittest.TestCase):
+class PVFSTest(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")

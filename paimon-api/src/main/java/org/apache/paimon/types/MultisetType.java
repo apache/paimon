@@ -28,7 +28,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Data type of a multiset (=bag). Unlike a set, it allows for multiple instances for each of its
+ * Data type of multiset (=bag). Unlike a set, it allows for multiple instances for each of its
  * elements with a common subtype. Each unique value (including {@code NULL}) is mapped to some
  * multiplicity. There is no restriction of element types; it is the responsibility of the user to
  * ensure uniqueness.

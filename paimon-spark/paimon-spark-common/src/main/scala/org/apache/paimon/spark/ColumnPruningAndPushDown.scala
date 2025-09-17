@@ -40,7 +40,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
   lazy val tableRowType: RowType = {
     val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
     if (coreOptions.rowTrackingEnabled()) {
-      SpecialFields.rowTypeWithRowLineage(table.rowType())
+      SpecialFields.rowTypeWithRowTracking(table.rowType())
     } else {
       table.rowType()
     }

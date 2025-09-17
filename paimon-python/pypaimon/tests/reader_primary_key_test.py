@@ -54,7 +54,7 @@ class PkReaderTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def testPkParquetReader(self):
+    def test_pk_parquet_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -67,7 +67,7 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
-    def testPkOrcReader(self):
+    def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -88,7 +88,7 @@ class PkReaderTest(unittest.TestCase):
             col_b = self.expected.column(i)
             self.assertEqual(col_a, col_b)
 
-    def testPkAvroReader(self):
+    def test_pk_avro_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -148,7 +148,7 @@ class PkReaderTest(unittest.TestCase):
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
-    def testPkReaderWithFilter(self):
+    def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
@@ -166,11 +166,11 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = pa.concat_tables([
             self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)   # 7/g
+            self.expected.slice(5, 1)  # 7/g
         ])
         self.assertEqual(actual, expected)
 
-    def testPkReaderWithProjection(self):
+    def test_pk_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],

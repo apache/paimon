@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
- * Data type of a sequence of fields. A field consists of a field name, field type, and an optional
+ * Data type of sequence of fields. A field consists of a field name, field type, and an optional
  * description. The most specific type of a row of a table is a row type. In this case, each column
  * of the row corresponds to the field of the row type that has the same ordinal position as the
  * column. Compared to the SQL standard, an optional field description simplifies the handling with

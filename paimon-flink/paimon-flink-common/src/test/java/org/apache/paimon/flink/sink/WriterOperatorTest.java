@@ -550,7 +550,7 @@ public class WriterOperatorTest {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
                 null,
-                (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                         new LookupSinkWrite(
                                 table,
                                 commitUser,
@@ -559,7 +559,7 @@ public class WriterOperatorTest {
                                 false,
                                 waitCompaction,
                                 true,
-                                memoryPool,
+                                memoryPoolFactory,
                                 metricGroup),
                 commitUser);
     }

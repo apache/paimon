@@ -67,6 +67,10 @@ public class CloneProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
+                        name = "prefer_file_format",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
                         name = "clone_from",
                         type = @DataTypeHint("STRING"),
                         isOptional = true)
@@ -83,6 +87,7 @@ public class CloneProcedure extends ProcedureBase {
             String where,
             String includedTablesStr,
             String excludedTablesStr,
+            String preferFileFormat,
             String cloneFrom)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
@@ -112,6 +117,7 @@ public class CloneProcedure extends ProcedureBase {
                         where,
                         includedTables,
                         excludedTables,
+                        preferFileFormat,
                         cloneFrom);
         return execute(procedureContext, action, "Clone Job");
     }

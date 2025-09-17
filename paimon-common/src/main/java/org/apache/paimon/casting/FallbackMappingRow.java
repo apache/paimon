@@ -27,7 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
 
-/** Row with row lineage inject in. */
+/** Row with fallback mapping row inject in. */
 public class FallbackMappingRow implements InternalRow {
 
     private InternalRow main;
@@ -181,9 +181,9 @@ public class FallbackMappingRow implements InternalRow {
         return main.getRow(pos, numFields);
     }
 
-    public FallbackMappingRow replace(InternalRow main, InternalRow rowLineage) {
+    public FallbackMappingRow replace(InternalRow main, InternalRow fallbackRow) {
         this.main = main;
-        this.fallbackRow = rowLineage;
+        this.fallbackRow = fallbackRow;
         return this;
     }
 }

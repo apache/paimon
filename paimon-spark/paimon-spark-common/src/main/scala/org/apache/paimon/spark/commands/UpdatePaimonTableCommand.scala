@@ -161,7 +161,7 @@ case class UpdatePaimonTableCommand(
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.withRowLineage().write(data)
+    writer.withRowTracking().write(data)
   }
 
   private def optimizedIf(

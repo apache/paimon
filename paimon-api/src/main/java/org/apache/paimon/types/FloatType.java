@@ -21,7 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 /**
- * Data type of a 4-byte single precision floating point number. Compared to the SQL standard, the
+ * Data type of 4-byte single precision floating point number. Compared to the SQL standard, the
  * type does not take parameters.
  *
  * @since 0.4.0

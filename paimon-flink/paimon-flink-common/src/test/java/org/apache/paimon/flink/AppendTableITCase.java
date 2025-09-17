@@ -95,69 +95,69 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithLineage() {
-        batchSql("INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')");
-        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+    public void testReadWriteWithRowTracking() {
+        batchSql("INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table_tracking$row_tracking");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows)
                 .containsExactlyInAnyOrder(Row.of(1, "AAA", 0L, 1L), Row.of(2, "BBB", 1L, 1L));
 
-        rows = batchSql("SELECT * FROM append_table_lineage");
+        rows = batchSql("SELECT * FROM append_table_tracking");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
     }
 
     @Test
-    public void testCompactionWithRowLineage() throws Exception {
-        batchSql("ALTER TABLE append_table_lineage SET ('compaction.max.file-num' = '4')");
+    public void testCompactionWithRowTracking() throws Exception {
+        batchSql("ALTER TABLE append_table_tracking SET ('compaction.max.file-num' = '4')");
 
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')",
+                "INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB')",
                 1L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (3, 'CCC'), (4, 'DDD')",
+                "INSERT INTO append_table_tracking VALUES (3, 'CCC'), (4, 'DDD')",
                 2L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                "INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
                 3L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (5, 'EEE'), (6, 'FFF')",
+                "INSERT INTO append_table_tracking VALUES (5, 'EEE'), (6, 'FFF')",
                 4L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (7, 'HHH'), (8, 'III')",
+                "INSERT INTO append_table_tracking VALUES (7, 'HHH'), (8, 'III')",
                 5L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (9, 'JJJ'), (10, 'KKK')",
+                "INSERT INTO append_table_tracking VALUES (9, 'JJJ'), (10, 'KKK')",
                 6L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (11, 'LLL'), (12, 'MMM')",
+                "INSERT INTO append_table_tracking VALUES (11, 'LLL'), (12, 'MMM')",
                 7L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (13, 'NNN'), (14, 'OOO')",
+                "INSERT INTO append_table_tracking VALUES (13, 'NNN'), (14, 'OOO')",
                 8L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
 
-        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
-        batchSql("call sys.compact('default.append_table_lineage')");
-        waitCompactSnapshot(60000L, "append_table_lineage");
-        List<Row> files = batchSql("SELECT * FROM append_table_lineage$files");
+        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_tracking$row_tracking");
+        batchSql("call sys.compact('default.append_table_tracking')");
+        waitCompactSnapshot(60000L, "append_table_tracking");
+        List<Row> files = batchSql("SELECT * FROM append_table_tracking$files");
         assertThat(files.size()).isEqualTo(1);
-        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_tracking$row_tracking");
         assertThat(originRowsWithId2).containsExactlyInAnyOrderElementsOf(rowsAfter2);
 
         assertThat(rowsAfter2)
@@ -655,7 +655,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '-1')",
-                "CREATE TABLE IF NOT EXISTS append_table_lineage (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
+                "CREATE TABLE IF NOT EXISTS append_table_tracking (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS index_table (id INT, indexc STRING, data STRING) WITH ('bucket' = '-1', 'file-index.bloom-filter.columns'='indexc', 'file-index.bloom-filter.indexc.items' = '500')");

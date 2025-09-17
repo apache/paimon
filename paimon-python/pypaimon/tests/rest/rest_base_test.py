@@ -37,10 +37,10 @@ from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType)
 from pypaimon import Schema
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.tests.rest_server import RESTCatalogServer
+from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
-class RESTCatalogBaseTest(unittest.TestCase):
+class RESTBaseTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
         self.warehouse = os.path.join(self.temp_dir, 'warehouse')

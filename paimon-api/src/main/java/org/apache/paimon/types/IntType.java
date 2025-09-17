@@ -21,7 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 /**
- * Data type of a 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647.
+ * Data type of 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647.
  *
  * @since 0.4.0
  */

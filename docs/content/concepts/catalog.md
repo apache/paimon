@@ -51,6 +51,11 @@ CREATE CATALOG my_catalog WITH (
 );
 ```
 
+## REST Catalog
+
+By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server which exposed through REST API.
+See [Paimon REST Catalog]({{< ref "concepts/rest/overview" >}}).
+
 ## Hive Catalog
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables
@@ -89,8 +94,3 @@ CREATE CATALOG my_jdbc WITH (
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
-
-## REST Catalog
-
-By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server which exposed through REST API.
-See [Paimon REST Catalog]({{< ref "concepts/rest/overview" >}}).

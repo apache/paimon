@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.Public;
 import java.util.Objects;
 
 /**
- * Data type of a fixed-length binary string (=a sequence of bytes).
+ * Data type of fixed-length binary string (=a sequence of bytes).
  *
  * @since 0.4.0
  */

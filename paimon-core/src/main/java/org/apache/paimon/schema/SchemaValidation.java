@@ -639,11 +639,11 @@ public class SchemaValidation {
         if (rowTrackingEnabled) {
             checkArgument(
                     options.bucket() == -1,
-                    "Cannot define %s for row lineage table, it only support bucket = -1",
+                    "Cannot define %s for row tracking table, it only support bucket = -1",
                     CoreOptions.BUCKET.key());
             checkArgument(
                     schema.primaryKeys().isEmpty(),
-                    "Cannot define %s for row lineage table.",
+                    "Cannot define %s for row tracking table.",
                     PRIMARY_KEY.key());
         }
 

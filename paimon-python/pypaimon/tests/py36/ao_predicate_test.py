@@ -58,14 +58,14 @@ class PredicatePy36Test(unittest.TestCase):
 
         cls.df = df
 
-    def testWrongFieldName(self):
+    def test_wrong_field_name(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         with self.assertRaises(ValueError) as e:
             predicate_builder.equal('f2', 'a')
         self.assertEqual(str(e.exception), "The field f2 is not in field list ['f0', 'f1'].")
 
-    def testAppendWithDuplicate(self):
+    def test_append_with_duplicate(self):
         pa_schema = pa.schema([
             ('f0', pa.int64()),
             ('f1', pa.string()),
@@ -98,7 +98,7 @@ class PredicatePy36Test(unittest.TestCase):
         actual_df = read.to_pandas(scan.plan().splits())
         self.assertEqual(len(actual_df), 0)
 
-    def testAllFieldTypesWithEqual(self):
+    def test_all_field_types_with_equal(self):
         pa_schema = pa.schema([
             # int
             ('_tinyint', pa.int8()),
@@ -169,67 +169,67 @@ class PredicatePy36Test(unittest.TestCase):
         predicate = predicate_builder.equal('_boolean', True)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), df.loc[[0]])
 
-    def testNotEqualAppend(self):
+    def test_not_equal_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.not_equal('f0', 1)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[1:4])
 
-    def testLessThanAppend(self):
+    def test_less_than_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.less_than('f0', 3)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:1])
 
-    def testLessOrEqualAppend(self):
+    def test_less_or_equal_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.less_or_equal('f0', 3)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
 
-    def testGreaterThanAppend(self):
+    def test_greater_than_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.greater_than('f0', 3)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[3:4])
 
-    def testGreaterOrEqualAppend(self):
+    def test_greater_or_equal_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.greater_or_equal('f0', 3)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[2:4])
 
-    def testIsNullAppend(self):
+    def test_is_null_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_null('f1')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[4]])
 
-    def testIsNotNullAppend(self):
+    def test_is_not_null_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_not_null('f1')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:3])
 
-    def testIsInAppend(self):
+    def test_is_in_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_in('f0', [1, 2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:1])
 
-    def testIsNotInAppend(self):
+    def test_is_not_in_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_not_in('f0', [1, 2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[2:4])
 
-    def testBetweenAppend(self):
+    def test_between_append(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.between('f0', 1, 3)
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
 
-    def testAndPredicates(self):
+    def test_and_predicates(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate1 = predicate_builder.greater_than('f0', 1)
@@ -237,7 +237,7 @@ class PredicatePy36Test(unittest.TestCase):
         predicate = predicate_builder.and_predicates([predicate1, predicate2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[1:2])
 
-    def testOrPredicates(self):
+    def test_or_predicates(self):
         table = self.catalog.get_table('default.test_append')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate1 = predicate_builder.greater_than('f0', 3)

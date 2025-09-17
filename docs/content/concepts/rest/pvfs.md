@@ -128,7 +128,7 @@ Example: execute hadoop shell to list the virtual path
 
 ## Python SDK
 
-Python SDK provide fsspec style API, can be easily integrated to Python ecesystem.
+Python SDK provide fsspec style API, can be easily integrated to Python ecosystem.
 
 For example, Python code can do:
 
@@ -136,9 +136,9 @@ For example, Python code can do:
 import pypaimon
 
 options = {
-"uri": 'key',
-'token.provider' = 'bear'
-'token' = '<token>'
+    'uri': 'key',
+    'token.provider': 'bear',
+    'token': '<token>'
 }
 fs = pypaimon.PaimonVirtualFileSystem(options)
 fs.ls("pvfs://catalog_name/database_name/table_name")
@@ -151,9 +151,9 @@ import pypaimon
 import pyarrow.parquet as pq
 
 options = {
-"uri": 'key',
-'token.provider' = 'bear'
-'token' = '<token>'
+    'uri': 'key',
+    'token.provider': 'bear',
+    'token': '<token>'
 }
 fs = pypaimon.PaimonVirtualFileSystem(options)
 path = 'pvfs://catalog_name/database_name/table_name/a.parquet'
@@ -169,9 +169,9 @@ import pypaimon
 import ray
 
 options = {
-"uri": 'key',
-'token.provider' = 'bear'
-'token' = '<token>'
+    'uri': 'key',
+    'token.provider': 'bear',
+    'token': '<token>'
 }
 fs = pypaimon.PaimonVirtualFileSystem(options)
 

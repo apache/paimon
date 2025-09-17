@@ -25,9 +25,10 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Java-based Implementation For Python API
+# Python API
 
-[Python SDK ](https://github.com/apache/paimon-python) has defined Python API for Paimon.
+PyPaimon is a Python implementation for connecting Paimon catalog, reading & writing tables. The complete Python
+implementation of the brand new PyPaimon does not require JDK installation.
 
 ## Environment Settings
 
@@ -48,11 +49,12 @@ from pypaimon import CatalogFactory
 
 # Note that keys and values are all string
 catalog_options = {
-    'metastore': 'filesystem',
     'warehouse': 'file:///path/to/warehouse'
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
+Currently, PyPaimon only support filesystem catalog and rest catalog. See [Catalog]({{< ref "concepts/catalog" >}}).
 
 ## Create Database & Table
 
@@ -65,7 +67,7 @@ Table is located in a database. If you want to create table in a new database, y
 ```python
 catalog.create_database(
     name='database_name',
-    ignore_if_exists=True,  # If you want to raise error if the database exists, set False
+    ignore_if_exists=True,  # To raise error if the database exists, set False
     properties={'key': 'value'}  # optional database properties
 )
 ```
@@ -138,7 +140,7 @@ schema = ...
 catalog.create_table(
     identifier='database_name.table_name',
     schema=schema,
-    ignore_if_exists=True  # If you want to raise error if the table exists, set False
+    ignore_if_exists=True  # To raise error if the table exists, set False
 )
 ```
 
@@ -193,10 +195,10 @@ API:
 
 ```python
 # overwrite whole table
-write_builder.overwrite()
+write_builder = table.new_batch_write_builder().overwrite()
 
 # overwrite partition 'dt=2024-01-01'
-write_builder.overwrite({'dt': '2024-01-01'})
+write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
 ## Batch Read
@@ -272,7 +274,7 @@ You can also read data into a `pyarrow.RecordBatchReader` and iterate record bat
 
 ```python
 table_read = read_builder.new_read()
-for batch in table_read.to_iterator(splits):
+for batch in table_read.to_arrow_batch_reader(splits):
     print(batch)
 
 # pyarrow.RecordBatch
@@ -281,6 +283,19 @@ for batch in table_read.to_iterator(splits):
 # ----
 # f0: [1,2,3]
 # f1: ["a","b","c"]
+```
+
+#### Python Iterator
+You can read the data row by row into a native Python iterator. 
+This is convenient for custom row-based processing logic.
+
+```python
+table_read = read_builder.new_read()
+for row in table_read.to_iterator(splits):
+    print(row)
+
+# [1,2,3]
+# ["a","b","c"]
 ```
 
 #### Pandas
@@ -351,16 +366,22 @@ print(ray_dataset.to_pandas())
 ```
 
 ## Data Types
-
-| pyarrow                                                          | Paimon   | 
-|:-----------------------------------------------------------------|:---------|
-| pyarrow.int8()                                                   | TINYINT  |
-| pyarrow.int16()                                                  | SMALLINT |
-| pyarrow.int32()                                                  | INT      |
-| pyarrow.int64()                                                  | BIGINT   |
-| pyarrow.float16() <br/>pyarrow.float32()  <br/>pyarrow.float64() | FLOAT    |
-| pyarrow.string()                                                 | STRING   |
-| pyarrow.boolean()                                                | BOOLEAN  |
+| Python Native Type | PyArrow Type | Paimon Type |
+| :--- | :--- | :--- |
+| `int` | `pyarrow.int8()` | `TINYINT` |
+| `int` | `pyarrow.int16()` | `SMALLINT` |
+| `int` | `pyarrow.int32()` | `INT` |
+| `int` | `pyarrow.int64()` | `BIGINT` |
+| `float` | `pyarrow.float32()` | `FLOAT` |
+| `float` | `pyarrow.float64()` | `DOUBLE` |
+| `bool` | `pyarrow.bool_()` | `BOOLEAN` |
+| `str` | `pyarrow.string()` | `STRING`, `CHAR(n)`, `VARCHAR(n)` |
+| `bytes` | `pyarrow.binary()` | `BYTES`, `VARBINARY(n)` |
+| `bytes` | `pyarrow.binary(length)` | `BINARY(length)` |
+| `decimal.Decimal` | `pyarrow.decimal128(precision, scale)` | `DECIMAL(precision, scale)` |
+| `datetime.datetime` | `pyarrow.timestamp(unit, tz=None)` | `TIMESTAMP(p)` |
+| `datetime.date` | `pyarrow.date32()` | `DATE` |
+| `datetime.time` | `pyarrow.time32(unit)` or `pyarrow.time64(unit)` | `TIME(p)` |
 
 ## Predicate
 

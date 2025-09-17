@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.3-SNAPSHOT</version>
+        <version>1.4-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-filesystems</artifactId>
@@ -33,6 +33,7 @@
 
     <modules>
         <module>paimon-hadoop-shaded</module>
+        <module>paimon-hadoop-uber</module>
         <module>paimon-oss</module>
         <module>paimon-oss-impl</module>
         <module>paimon-s3</module>

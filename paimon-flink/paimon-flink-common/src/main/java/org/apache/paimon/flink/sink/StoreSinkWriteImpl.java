@@ -24,9 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,8 +44,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
 
@@ -59,35 +55,10 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
     private final boolean isStreamingMode;
-    @Nullable private final MemorySegmentPool memoryPool;
-    @Nullable private final MemoryPoolFactory memoryPoolFactory;
-
-    protected TableWriteImpl<?> write;
-
+    private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
 
-    public StoreSinkWriteImpl(
-            FileStoreTable table,
-            String commitUser,
-            StoreSinkWriteState state,
-            IOManager ioManager,
-            boolean ignorePreviousFiles,
-            boolean waitCompaction,
-            boolean isStreamingMode,
-            @Nullable MemorySegmentPool memoryPool,
-            @Nullable MetricGroup metricGroup) {
-        this(
-                table,
-                commitUser,
-                state,
-                ioManager,
-                ignorePreviousFiles,
-                waitCompaction,
-                isStreamingMode,
-                memoryPool,
-                null,
-                metricGroup);
-    }
+    protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -99,67 +70,29 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean isStreamingMode,
             MemoryPoolFactory memoryPoolFactory,
             @Nullable MetricGroup metricGroup) {
-        this(
-                table,
-                commitUser,
-                state,
-                ioManager,
-                ignorePreviousFiles,
-                waitCompaction,
-                isStreamingMode,
-                null,
-                memoryPoolFactory,
-                metricGroup);
-    }
-
-    private StoreSinkWriteImpl(
-            FileStoreTable table,
-            String commitUser,
-            StoreSinkWriteState state,
-            IOManager ioManager,
-            boolean ignorePreviousFiles,
-            boolean waitCompaction,
-            boolean isStreamingMode,
-            @Nullable MemorySegmentPool memoryPool,
-            @Nullable MemoryPoolFactory memoryPoolFactory,
-            @Nullable MetricGroup metricGroup) {
         this.commitUser = commitUser;
         this.state = state;
         this.paimonIOManager = new IOManagerImpl(ioManager.getSpillingDirectoriesPaths());
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
         this.isStreamingMode = isStreamingMode;
-        this.memoryPool = memoryPool;
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
         this.write = newTableWrite(table);
     }
 
     private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
-        checkArgument(
-                !(memoryPool != null && memoryPoolFactory != null),
-                "memoryPool and memoryPoolFactory cannot be set at the same time.");
-
         TableWriteImpl<?> tableWrite =
                 table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withBucketMode(table.bucketMode());
+                        .withBucketMode(table.bucketMode())
+                        .withMemoryPoolFactory(memoryPoolFactory);
 
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
         }
-
-        if (memoryPoolFactory != null) {
-            return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
-        } else {
-            return tableWrite.withMemoryPool(
-                    memoryPool != null
-                            ? memoryPool
-                            : new HeapMemorySegmentPool(
-                                    table.coreOptions().writeBufferSize(),
-                                    table.coreOptions().pageSize()));
-        }
+        return tableWrite;
     }
 
     public void withCompactExecutor(ExecutorService compactExecutor) {

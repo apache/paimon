@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
+from packaging.version import parse
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
@@ -57,14 +58,21 @@ class FileIO:
 
     def _initialize_oss_fs(self) -> FileSystem:
         from pyarrow.fs import S3FileSystem
-        bucket_name = self.properties.get("prefix")
+
         client_kwargs = {
-            "endpoint_override": bucket_name + "." + self.properties.get(OssOptions.OSS_ENDPOINT),
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             "session_token": self.properties.get(OssOptions.OSS_SECURITY_TOKEN),
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
+
+        # Based on https://github.com/apache/arrow/issues/40506
+        if parse(pyarrow.__version__) >= parse("7.0.0"):
+            client_kwargs['force_virtual_addressing'] = True
+            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+        else:
+            client_kwargs['endpoint_override'] = (self.properties.get(OssOptions.OSS_BUCKET) + "." +
+                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
 
         return S3FileSystem(**client_kwargs)
 
