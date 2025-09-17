@@ -126,17 +126,22 @@ public abstract class FormatReadWriteTest {
         InternalRow expected = expectedRowForFullTypesTest();
 
         FormatWriterFactory factory = format.createWriterFactory(rowType);
-        write(factory, file, expected);
-        RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType, rowType, new ArrayList<>())
-                        .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
-        InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
-        List<InternalRow> result = new ArrayList<>();
-        reader.forEachRemaining(row -> result.add(internalRowSerializer.copy(row)));
-        assertThat(result.size()).isEqualTo(1);
-
-        validateFullTypesResult(result.get(0), expected);
+        InternalRow toWrite = expected;
+        for (int i = 0; i < 2; i++) {
+            write(factory, file, toWrite);
+            RecordReader<InternalRow> reader =
+                    format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                            .createReader(
+                                    new FormatReaderContext(
+                                            fileIO, file, fileIO.getFileSize(file)));
+            InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(internalRowSerializer.copy(row)));
+            assertThat(result.size()).isEqualTo(1);
+            validateFullTypesResult(result.get(0), expected);
+            toWrite = result.get(0);
+            fileIO.deleteQuietly(file);
+        }
     }
 
     public boolean supportNestedReadPruning() {
@@ -303,6 +308,9 @@ public abstract class FormatReadWriteTest {
                         .field(
                                 "nonStrKeyMap",
                                 DataTypes.MAP(DataTypes.INT().notNull(), getMapValueType()))
+                        .field(
+                                "allStrMap",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.STRING()))
                         .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
                         .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
                         .field("boolean", DataTypes.BOOLEAN().nullable())
@@ -334,11 +342,9 @@ public abstract class FormatReadWriteTest {
                                                         "nested row double field 1"))));
 
         RowType rowType = builder.build();
-
         if (ThreadLocalRandom.current().nextBoolean()) {
-            rowType = (RowType) rowType.notNull();
+            rowType = rowType.notNull();
         }
-
         return rowType;
     }
 
@@ -361,6 +367,16 @@ public abstract class FormatReadWriteTest {
                                     {
                                         this.put(1, mapValueData[0]);
                                         this.put(2, mapValueData[1]);
+                                    }
+                                }),
+                        new GenericMap(
+                                new HashMap<Object, Object>() {
+                                    {
+                                        this.put(fromString("mykey1"), fromString("v1"));
+                                        this.put(fromString("mykey2"), null);
+                                        this.put(
+                                                fromString("mykey3"),
+                                                fromString("a_very_very_long_string"));
                                     }
                                 }),
                         new GenericArray(new Object[] {fromString("123"), fromString("456")}),
@@ -505,13 +521,22 @@ public abstract class FormatReadWriteTest {
                     validateInternalMap(
                             (InternalMap) actualField,
                             (InternalMap) expectedField,
-                            DataTypes.STRING());
+                            DataTypes.STRING(),
+                            getMapValueType());
                     break;
                 case "nonStrKeyMap":
                     validateInternalMap(
                             (InternalMap) actualField,
                             (InternalMap) expectedField,
-                            DataTypes.INT());
+                            DataTypes.INT(),
+                            getMapValueType());
+                    break;
+                case "allStrMap":
+                    validateInternalMap(
+                            (InternalMap) actualField,
+                            (InternalMap) expectedField,
+                            DataTypes.STRING(),
+                            DataTypes.STRING());
                     break;
                 case "strArray":
                     validateInternalArray(
@@ -545,9 +570,9 @@ public abstract class FormatReadWriteTest {
     }
 
     private void validateInternalMap(
-            InternalMap actualMap, InternalMap expectedMap, DataType keyType) {
+            InternalMap actualMap, InternalMap expectedMap, DataType keyType, DataType valueType) {
         validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), keyType);
-        validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), getMapValueType());
+        validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), valueType);
     }
 
     private void validateInternalArray(
@@ -556,7 +581,11 @@ public abstract class FormatReadWriteTest {
         switch (elementType.getTypeRoot()) {
             case VARCHAR:
                 for (int i = 0; i < actualArray.size(); i++) {
-                    assertThat(actualArray.getString(i)).isEqualTo(expectedArray.getString(i));
+                    if (expectedArray.isNullAt(i)) {
+                        assertThat(actualArray.isNullAt(i)).isTrue();
+                    } else {
+                        assertThat(actualArray.getString(i)).isEqualTo(expectedArray.getString(i));
+                    }
                 }
                 break;
             case DOUBLE:

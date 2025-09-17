@@ -583,7 +583,7 @@ object GenerateUtils {
     case BOOLEAN =>
       s"$writerTerm.writeBoolean($indexTerm, $fieldValTerm)"
     case BINARY | VARBINARY =>
-      s"$writerTerm.writeBinary($indexTerm, $fieldValTerm)"
+      s"$writerTerm.writeBinary($indexTerm, $fieldValTerm, 0, $fieldValTerm.length)"
     case DECIMAL =>
       s"$writerTerm.writeDecimal($indexTerm, $fieldValTerm, ${getPrecision(t)})"
     case TINYINT =>
