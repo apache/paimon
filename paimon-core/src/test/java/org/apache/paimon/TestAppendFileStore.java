@@ -93,6 +93,10 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return this.fileIO;
     }
 
+    public TableSchema schema() {
+        return schema;
+    }
+
     public FileStoreCommitImpl newCommit() {
         return super.newCommit(commitUser, null);
     }
