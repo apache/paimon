@@ -62,9 +62,8 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           
           TEST_MODULES="!paimon-e2e-tests,"
-          scala_version=2.12
-          for suffix in ut 3.5_${scala_version} 3.4_${scala_version} 3.3_${scala_version} 3.2_${scala_version}; do
-            TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix},"
+          for suffix in ut 3.5 3.4 3.3 3.2; do
+            TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           TEST_MODULES="${TEST_MODULES%,}"
           mvn -T 2C -B clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
