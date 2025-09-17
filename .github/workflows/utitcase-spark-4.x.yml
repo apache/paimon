@@ -42,13 +42,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
+
       - name: Build Spark
         run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1
+
       - name: Test Spark
         timeout-minutes: 60
         run: |
