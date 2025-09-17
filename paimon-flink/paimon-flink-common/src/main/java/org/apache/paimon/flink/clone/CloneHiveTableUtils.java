@@ -155,7 +155,8 @@ public class CloneHiveTableUtils {
             int parallelism,
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
-            @Nullable List<String> excludedTables)
+            @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat)
             throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
@@ -178,7 +179,7 @@ public class CloneHiveTableUtils {
                 partitionedSource
                         .process(
                                 new CloneHiveSchemaFunction(
-                                        sourceCatalogConfig, targetCatalogConfig))
+                                        sourceCatalogConfig, targetCatalogConfig, preferFileFormat))
                         .name("Clone Schema")
                         .setParallelism(parallelism);
 
