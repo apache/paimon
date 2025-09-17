@@ -174,15 +174,15 @@ public class IcebergDataField {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 int timestampPrecision = ((TimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampPrecision > 3 && timestampPrecision <= 6,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
-                return "timestamp";
+                        timestampPrecision > 3 && timestampPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                return timestampPrecision >= 7 ? "timestamp_ns" : "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 6,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
-                return "timestamptz";
+                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
                 return new IcebergListType(
