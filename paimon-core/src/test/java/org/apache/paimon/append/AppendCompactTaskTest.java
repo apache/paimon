@@ -184,12 +184,13 @@ public class AppendCompactTaskTest {
     }
 
     private TestAppendFileStore createAppendStore(
-            java.nio.file.Path tempDir, Map<String, String> options) throws Exception {
+            java.nio.file.Path tempDir, Map<String, String> dynamicOptions) throws Exception {
         String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         FileIO fileIO = FileIOFinder.find(new Path(root));
         SchemaManager schemaManage = new SchemaManager(new LocalFileIO(), path);
 
+        Map<String, String> options = new HashMap<>(dynamicOptions);
         options.put(CoreOptions.PATH.key(), root);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
