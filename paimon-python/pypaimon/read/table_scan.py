@@ -66,6 +66,8 @@ class TableScan:
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
+        self.start_row = None
+        self.num_row = None
 
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
@@ -96,9 +98,13 @@ class TableScan:
         if self.predicate:
             file_entries = self._filter_by_predicate(file_entries)
 
-        partitioned_split = defaultdict(list)
-        for entry in file_entries:
-            partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
+        plan_start_row, plan_end_row = None, None
+        if self.start_row is not None:
+            partitioned_split, plan_start_row, plan_end_row = self._filter_by_row_slice(file_entries)
+        else:
+            partitioned_split = defaultdict(list)
+            for entry in file_entries:
+                partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         splits = []
         for key, values in partitioned_split.items():
@@ -109,11 +115,43 @@ class TableScan:
 
         splits = self._apply_push_down_limit(splits)
 
-        return Plan(file_entries, splits)
+        return Plan(file_entries, splits, plan_start_row, plan_end_row)
+
+    def _filter_by_row_slice(self, file_entries: List[ManifestEntry]) -> (defaultdict, int, int):
+        end_row = self.start_row + self.num_row
+        cur_row = 0
+        splits_start_row = 0
+        plan_start_row = 0
+        plan_end_row = 0
+        partitioned_split = defaultdict(list)
+        for entry in file_entries:
+            entry_begin_row = cur_row
+            cur_row += entry.file.row_count
+
+            if entry_begin_row >= end_row:
+                break
+            if cur_row <= self.start_row:
+                continue
+            if entry_begin_row <= self.start_row < cur_row:
+                splits_start_row = entry_begin_row
+                plan_start_row = self.start_row - entry_begin_row
+            if self.start_row <= entry_begin_row < end_row <= cur_row:
+                plan_end_row = end_row - splits_start_row
+            partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
+        if plan_end_row == 0:
+            plan_end_row = cur_row - splits_start_row
+        return partitioned_split, plan_start_row, plan_end_row
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
+        return self
+
+    def with_slice(self, start_row, num_row) -> 'TableScan':
+        if self.table.is_primary_key_table:
+            raise Exception("primary key table not support slice")
+        self.start_row = start_row
+        self.num_row = num_row
         return self
 
     def _bucket_filter(self, entry: Optional[ManifestEntry]) -> bool:
@@ -131,6 +169,9 @@ class TableScan:
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:
             return splits
+        if self.start_row is not None:
+            raise Exception("The limit function is not supported when configuring the slice parameter")
+
         scanned_row_count = 0
         limited_splits = []
 

@@ -28,9 +28,17 @@ class Plan:
     """Implementation of Plan for native Python reading."""
     _files: List[ManifestEntry]
     _splits: List[Split]
+    _plan_start_row: int
+    _plan_end_row: int
 
     def files(self) -> List[ManifestEntry]:
         return self._files
 
     def splits(self) -> List[Split]:
         return self._splits
+
+    def plan_start_row(self) -> int:
+        return self._plan_start_row
+
+    def plan_end_row(self) -> int:
+        return self._plan_end_row
