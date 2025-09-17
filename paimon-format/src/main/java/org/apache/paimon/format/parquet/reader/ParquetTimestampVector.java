@@ -23,6 +23,8 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 
+import java.util.TimeZone;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -32,17 +34,31 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class ParquetTimestampVector implements TimestampColumnVector {
 
     private final ColumnVector vector;
+    private final boolean adjust;
 
     public ParquetTimestampVector(ColumnVector vector) {
+        this(vector, false);
+    }
+
+    public ParquetTimestampVector(ColumnVector vector, boolean adjust) {
         this.vector = vector;
+        this.adjust = adjust;
     }
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         if (precision <= 3 && vector instanceof LongColumnVector) {
-            return Timestamp.fromEpochMillis(((LongColumnVector) vector).getLong(i));
+            long millis = ((LongColumnVector) vector).getLong(i);
+            if (adjust) {
+                millis = adjustUtcToLocalMillis(millis);
+            }
+            return Timestamp.fromEpochMillis(millis);
         } else if (precision <= 6 && vector instanceof LongColumnVector) {
-            return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
+            long micros = ((LongColumnVector) vector).getLong(i);
+            if (adjust) {
+                micros = adjustUtcToLocalMicros(micros);
+            }
+            return Timestamp.fromMicros(micros);
         } else {
             checkArgument(
                     vector instanceof TimestampColumnVector,
@@ -50,6 +66,17 @@ public class ParquetTimestampVector implements TimestampColumnVector {
                     vector.getClass());
             return ((TimestampColumnVector) vector).getTimestamp(i, precision);
         }
+    }
+
+    private static long adjustUtcToLocalMillis(long utcMillis) {
+        int offset = TimeZone.getDefault().getOffset(utcMillis);
+        return utcMillis + offset;
+    }
+
+    private static long adjustUtcToLocalMicros(long utcMicros) {
+        long utcMillis = Math.floorDiv(utcMicros, 1000L);
+        int offset = TimeZone.getDefault().getOffset(utcMillis);
+        return utcMicros + (offset * 1000L);
     }
 
     public ColumnVector getVector() {

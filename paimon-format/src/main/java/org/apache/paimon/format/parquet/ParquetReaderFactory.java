@@ -96,6 +96,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                 context.fileIO(), context.filePath(), context.fileSize()),
                         builder.build(),
                         context.selection());
+
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
 
@@ -115,8 +116,17 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
+        ParquetOptions po = new ParquetOptions(conf);
+        boolean adjustInt96Timestamp = po.timestampInt96AdjustZone();
+
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize,
+                adjustInt96Timestamp);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
