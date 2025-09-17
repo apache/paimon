@@ -30,15 +30,17 @@ public class FileSystemCatalogLoader implements CatalogLoader {
     private final FileIO fileIO;
     private final Path warehouse;
     private final Options options;
+    private final String name;
 
-    public FileSystemCatalogLoader(FileIO fileIO, Path warehouse, Options options) {
+    public FileSystemCatalogLoader(FileIO fileIO, Path warehouse, Options options, String name) {
         this.fileIO = fileIO;
         this.warehouse = warehouse;
         this.options = options;
+        this.name = name;
     }
 
     @Override
     public Catalog load() {
-        return new FileSystemCatalog(fileIO, warehouse, options);
+        return new FileSystemCatalog(fileIO, warehouse, options, name);
     }
 }

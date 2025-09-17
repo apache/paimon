@@ -65,7 +65,10 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
         this.params = options.httpReportMarkDoneActionParams();
         this.url = options.httpReportMarkDoneActionUrl();
-        this.tableName = fileStoreTable.fullName();
+        // just for compatibility with the old behavior
+        String fullName = fileStoreTable.fullName();
+        String[] parts = fullName.split("\\.");
+        this.tableName = parts.length == 3 ? parts[1] + "." + parts[2] : fullName;
         this.location = fileStoreTable.location().toString();
 
         this.mapper = new ObjectMapper();

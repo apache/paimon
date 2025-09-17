@@ -50,7 +50,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
-        super(fileIO, options);
+        this(fileIO, warehouse, options, null);
+    }
+
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options, String name) {
+        super(fileIO, options, name);
         this.warehouse = warehouse;
     }
 
@@ -198,7 +202,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new FileSystemCatalogLoader(fileIO, warehouse, catalogOptions);
+        return new FileSystemCatalogLoader(fileIO, warehouse, catalogOptions, name);
     }
 
     @Override

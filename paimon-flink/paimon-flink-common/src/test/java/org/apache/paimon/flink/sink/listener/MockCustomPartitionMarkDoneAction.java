@@ -35,7 +35,7 @@ public class MockCustomPartitionMarkDoneAction implements PartitionMarkDoneActio
 
     @Override
     public void open(FileStoreTable fileStoreTable, CoreOptions options) {
-        this.tableName = fileStoreTable.fullName();
+        this.tableName = fileStoreTable.name();
     }
 
     @Override

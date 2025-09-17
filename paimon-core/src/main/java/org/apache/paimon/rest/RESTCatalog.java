@@ -92,6 +92,7 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    @Nullable private final String name;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -104,8 +105,15 @@ public class RESTCatalog implements Catalog {
                         api.options(),
                         context.hadoopConf(),
                         context.preferIO(),
-                        context.fallbackIO());
+                        context.fallbackIO(),
+                        context.catalogName());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.name = context.catalogName();
+    }
+
+    @Override
+    public String name() {
+        return name;
     }
 
     @Override

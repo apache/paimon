@@ -32,16 +32,19 @@ public class JdbcCatalogLoader implements CatalogLoader {
     private final String catalogKey;
     private final Options options;
     private final String warehouse;
+    private final String name;
 
-    public JdbcCatalogLoader(FileIO fileIO, String catalogKey, Options options, String warehouse) {
+    public JdbcCatalogLoader(
+            FileIO fileIO, String catalogKey, Options options, String warehouse, String name) {
         this.fileIO = fileIO;
         this.catalogKey = catalogKey;
         this.options = options;
         this.warehouse = warehouse;
+        this.name = name;
     }
 
     @Override
     public Catalog load() {
-        return new JdbcCatalog(fileIO, catalogKey, options, warehouse);
+        return new JdbcCatalog(fileIO, catalogKey, options, warehouse, name);
     }
 }

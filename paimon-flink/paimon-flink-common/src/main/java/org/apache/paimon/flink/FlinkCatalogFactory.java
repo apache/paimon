@@ -53,7 +53,9 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
         return createCatalog(
                 context.getName(),
                 CatalogContext.create(
-                        Options.fromMap(context.getOptions()), new FlinkFileIOLoader()),
+                        Options.fromMap(context.getOptions()),
+                        new FlinkFileIOLoader(),
+                        context.getName()),
                 context.getClassLoader());
     }
 
