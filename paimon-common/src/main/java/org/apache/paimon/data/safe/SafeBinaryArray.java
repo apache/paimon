@@ -21,6 +21,7 @@ package org.apache.paimon.data.safe;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -155,7 +156,7 @@ public final class SafeBinaryArray implements InternalArray {
 
     @Override
     public Blob getBlob(int pos) {
-        throw new UnsupportedOperationException();
+        return new BlobData(getBinary(pos));
     }
 
     @Override
