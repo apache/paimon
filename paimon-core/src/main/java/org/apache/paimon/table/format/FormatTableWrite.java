@@ -24,11 +24,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
-import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
@@ -72,7 +71,7 @@ public class FormatTableWrite
     }
 
     @Override
-    public InnerTableWrite withWriteRestore(WriteRestore writeRestore) {
+    public FormatTableWrite withWriteRestore(WriteRestore writeRestore) {
         this.write.withWriteRestore(writeRestore);
         return this;
     }
@@ -90,14 +89,14 @@ public class FormatTableWrite
     }
 
     @Override
-    public BatchTableWrite withWriteType(RowType writeType) {
+    public FormatTableWrite withWriteType(RowType writeType) {
         write.withWriteType(writeType);
         return this;
     }
 
     @Override
-    public FormatTableWrite withMemoryPool(MemorySegmentPool memoryPool) {
-        write.withMemoryPool(memoryPool);
+    public FormatTableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+        write.withMemoryPoolFactory(memoryPoolFactory);
         return this;
     }
 

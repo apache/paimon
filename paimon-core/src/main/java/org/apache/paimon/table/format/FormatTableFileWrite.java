@@ -27,8 +27,6 @@ import org.apache.paimon.fs.CommittablePositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.MemoryFileStoreWrite;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -69,11 +67,6 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.writers = new HashMap<>();
-    }
-
-    @Override
-    public FileStoreWrite<InternalRow> withMemoryPool(MemorySegmentPool memoryPool) {
-        return super.withMemoryPool(memoryPool);
     }
 
     @Override
