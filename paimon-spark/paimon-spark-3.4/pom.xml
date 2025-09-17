@@ -43,7 +43,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark3-common</artifactId>
+            <artifactId>paimon-spark3-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -131,7 +131,7 @@ under the License.
                             </filters>
                             <artifactSet>
                                 <includes combine.children="append">
-                                     <include>org.apache.paimon:paimon-spark3-common</include>
+                                     <include>org.apache.paimon:paimon-spark3-common_${scala.binary.version}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

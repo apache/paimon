@@ -36,20 +36,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-spark3-2_12:
+  build_test:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: true
+      matrix:
+        scala_version: [ '2.12', '2.13' ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
-      - name: Build Spark 3 with scala 2.12
+
+      - name: Build Spark 3 with ${{ matrix.scala_version }}
         run:  mvn -T 2C -B clean install -DskipTests
-      - name: Test Spark 3 with scala 2.12
+
+      - name: Test Spark 3 with ${{ matrix.scala_version }}
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
@@ -57,39 +63,8 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
-          scala_version=2.12
-          for suffix in ut 3.5_${scala_version} 3.4_${scala_version} 3.3_${scala_version} 3.2_${scala_version}; do
+          for suffix in ut 3.5_${{ matrix.scala_version }} 3.4_${{ matrix.scala_version }} 3.3_${{ matrix.scala_version }} 3.2_${{ matrix.scala_version }}; do
           test_modules+="org.apache.paimon:paimon-spark-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone
-
-  build-spark3-2_13:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
-      - name: Build Spark 3 with scala 2.13
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark3 -Pscala_2.13
-      - name: Test Spark 3 with scala 2.13
-        timeout-minutes: 60
-        run: |
-          # run tests with random timezone to find out timezone related bugs
-          . .github/workflows/utils.sh
-          jvm_timezone=$(random_timezone)
-          echo "JVM timezone is set to $jvm_timezone"
-          test_modules=""
-          scala_version=2.13
-          for suffix in ut 3.5_${scala_version} 3.4_${scala_version} 3.3_${scala_version} 3.2_${scala_version}; do
-          test_modules+="org.apache.paimon:paimon-spark-${suffix},"
-          done
-          test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark3 -Pscala_2.13
-        env:
-          MAVEN_OPTS: -Xmx4096m
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pscala-${{ matrix.scala_version }}
