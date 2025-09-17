@@ -459,8 +459,10 @@ public class SchemaManager implements Serializable {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnNullability) {
                 UpdateColumnNullability update = (UpdateColumnNullability) change;
-                assertNotUpdatingPrimaryKeys(
-                        oldTableSchema, update.fieldNames(), "change nullability of");
+                if (update.newNullability()) {
+                    assertNotUpdatingPrimaryKeys(
+                            oldTableSchema, update.fieldNames(), "change nullability of");
+                }
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
