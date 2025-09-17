@@ -98,7 +98,7 @@ public class FormatCatalogTable implements CatalogTable {
                         }
                     });
             if (options.containsKey("field-delimiter")) {
-                cachedOptions.put("csv.field-delimiter", "field-delimiter");
+                cachedOptions.put("csv.field-delimiter", options.get("field-delimiter"));
             }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());
