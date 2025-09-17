@@ -20,9 +20,11 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.clone.CloneFileFormatUtils;
 import org.apache.paimon.flink.clone.CloneHiveTableUtils;
 import org.apache.paimon.flink.clone.ClonePaimonTableUtils;
 import org.apache.paimon.hive.HiveCatalog;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -44,6 +46,7 @@ public class CloneAction extends ActionBase {
     @Nullable private final String whereSql;
     @Nullable private final List<String> includedTables;
     @Nullable private final List<String> excludedTables;
+    @Nullable private final String preferFileFormat;
     private final String cloneFrom;
 
     public CloneAction(
@@ -57,6 +60,7 @@ public class CloneAction extends ActionBase {
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat,
             String cloneFrom) {
         super(sourceCatalogConfig);
 
@@ -84,6 +88,11 @@ public class CloneAction extends ActionBase {
         this.whereSql = whereSql;
         this.includedTables = includedTables;
         this.excludedTables = excludedTables;
+        CloneFileFormatUtils.validateFileFormat(preferFileFormat);
+        this.preferFileFormat =
+                StringUtils.isNullOrWhitespaceOnly(preferFileFormat)
+                        ? preferFileFormat
+                        : preferFileFormat.toLowerCase();
         this.cloneFrom = cloneFrom;
     }
 
@@ -103,7 +112,8 @@ public class CloneAction extends ActionBase {
                         parallelism,
                         whereSql,
                         includedTables,
-                        excludedTables);
+                        excludedTables,
+                        preferFileFormat);
                 break;
             case "paimon":
                 ClonePaimonTableUtils.build(
@@ -118,7 +128,8 @@ public class CloneAction extends ActionBase {
                         parallelism,
                         whereSql,
                         includedTables,
-                        excludedTables);
+                        excludedTables,
+                        preferFileFormat);
                 break;
         }
     }
@@ -128,4 +139,6 @@ public class CloneAction extends ActionBase {
         build();
         execute("Clone job");
     }
+
+    private void validateFileFormat(String preferFileFormat) {}
 }
