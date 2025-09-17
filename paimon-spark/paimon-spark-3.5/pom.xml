@@ -75,7 +75,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-ut</artifactId>
+            <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>

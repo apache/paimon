@@ -28,8 +28,8 @@ under the License.
         <version>1.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-spark-ut</artifactId>
-    <name>Paimon : Spark : UT</name>
+    <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
+    <name>Paimon : Spark : UT : ${scala.binary.version}</name>
 
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>
