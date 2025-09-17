@@ -36,12 +36,10 @@ public class AvroBytesStringMap implements InternalMap {
     private static final int ELEMENT_SIZE =
             BinaryArray.calculateFixLengthPartSize(DataTypes.STRING());
 
-    // map size
-    private int size;
     // stores original bytes from avro files
-    private byte[] bytes;
+    private final byte[] bytes;
     // total bytes length
-    private int lengthInBytes;
+    private final int lengthInBytes;
     // offset of each string
     private final IntArrayList off;
     // length of each string
@@ -50,19 +48,27 @@ public class AvroBytesStringMap implements InternalMap {
     private BinaryArray keyArray;
     private BinaryArray valueArray;
 
-    public AvroBytesStringMap(BinaryDecoder decoder, boolean valueNullable) throws IOException {
-        bytes = new byte[256];
-        lengthInBytes = 0;
-        off = new IntArrayList(16);
-        len = new IntArrayList(16);
+    private AvroBytesStringMap(
+            byte[] bytes, int lengthInBytes, IntArrayList off, IntArrayList len) {
+        this.bytes = bytes;
+        this.lengthInBytes = lengthInBytes;
+        this.off = off;
+        this.len = len;
+    }
+
+    public static AvroBytesStringMap create(BinaryDecoder decoder, boolean valueNullable)
+            throws IOException {
+        byte[] bytes = new byte[256];
+        int lengthInBytes = 0;
+        IntArrayList off = new IntArrayList(16);
+        IntArrayList len = new IntArrayList(16);
 
         long chunkLength = decoder.readMapStart();
         while (chunkLength > 0) {
-            size += (int) chunkLength;
             for (int i = 0; i < chunkLength; i++) {
                 // https://github.com/apache/avro/blob/6db1f79e22e8558ac0455cf73f6e1fb7d1139f44/lang/java/avro/src/main/java/org/apache/avro/io/BinaryDecoder.java#L296
                 int l = (int) decoder.readLong();
-                ensure(l + 10);
+                bytes = ensure(bytes, lengthInBytes, l + 10);
                 lengthInBytes += BinaryData.encodeLong(l, bytes, lengthInBytes);
                 decoder.readFixed(bytes, lengthInBytes, l);
                 off.add(lengthInBytes);
@@ -77,13 +83,13 @@ public class AvroBytesStringMap implements InternalMap {
                         off.add(-1);
                         len.add(-1);
                     }
-                    ensure(5);
+                    bytes = ensure(bytes, lengthInBytes, 5);
                     lengthInBytes += BinaryData.encodeInt(flag, bytes, lengthInBytes);
                 }
 
                 if (flag != 0) {
                     l = (int) decoder.readLong();
-                    ensure(l + 10);
+                    bytes = ensure(bytes, lengthInBytes, l + 10);
                     lengthInBytes += BinaryData.encodeLong(l, bytes, lengthInBytes);
                     decoder.readFixed(bytes, lengthInBytes, l);
                     off.add(lengthInBytes);
@@ -93,11 +99,13 @@ public class AvroBytesStringMap implements InternalMap {
             }
             chunkLength = decoder.mapNext();
         }
+
+        return new AvroBytesStringMap(bytes, lengthInBytes, off, len);
     }
 
-    private void ensure(int need) {
+    private static byte[] ensure(byte[] bytes, int lengthInBytes, int need) {
         if (lengthInBytes + need <= bytes.length) {
-            return;
+            return bytes;
         }
 
         int cap = bytes.length;
@@ -107,7 +115,7 @@ public class AvroBytesStringMap implements InternalMap {
 
         byte[] newBytes = new byte[cap];
         System.arraycopy(bytes, 0, newBytes, 0, lengthInBytes);
-        bytes = newBytes;
+        return newBytes;
     }
 
     public byte[] bytes() {
@@ -120,7 +128,7 @@ public class AvroBytesStringMap implements InternalMap {
 
     @Override
     public int size() {
-        return size;
+        return off.size() / 2;
     }
 
     @Override
@@ -140,6 +148,7 @@ public class AvroBytesStringMap implements InternalMap {
             return;
         }
 
+        int size = size();
         keyArray = new BinaryArray();
         BinaryArrayWriter keyWriter = new BinaryArrayWriter(keyArray, size, ELEMENT_SIZE);
         valueArray = new BinaryArray();

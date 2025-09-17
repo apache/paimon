@@ -85,7 +85,7 @@ public class AvroBytesStringMapTest {
             List<String> keys, List<String> values, byte[] bytes, boolean valueNullable)
             throws Exception {
         BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(bytes, null);
-        AvroBytesStringMap map = new AvroBytesStringMap(decoder, valueNullable);
+        AvroBytesStringMap map = AvroBytesStringMap.create(decoder, valueNullable);
         assertThat(map.size()).isEqualTo(keys.size());
 
         InternalArray keyArray = map.keyArray();

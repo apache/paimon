@@ -524,7 +524,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             if (decoder instanceof BinaryDecoder) {
-                return new AvroBytesStringMap((BinaryDecoder) decoder, valueNullable);
+                return AvroBytesStringMap.create((BinaryDecoder) decoder, valueNullable);
             } else {
                 return fallbackReader.read(decoder, reuse);
             }
