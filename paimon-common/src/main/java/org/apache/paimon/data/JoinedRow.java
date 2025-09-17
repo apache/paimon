@@ -235,6 +235,15 @@ public class JoinedRow implements InternalRow {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        if (pos < row1.getFieldCount()) {
+            return row1.getBlob(pos);
+        } else {
+            return row2.getBlob(pos - row1.getFieldCount());
+        }
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         if (pos < row1.getFieldCount()) {
             return row1.getArray(pos);

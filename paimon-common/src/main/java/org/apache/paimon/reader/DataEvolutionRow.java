@@ -19,6 +19,7 @@
 package org.apache.paimon.reader;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -142,6 +143,11 @@ public class DataEvolutionRow implements InternalRow {
     @Override
     public Variant getVariant(int pos) {
         return chooseRow(pos).getVariant(offsetInRow(pos));
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return chooseRow(pos).getBlob(offsetInRow(pos));
     }
 
     @Override

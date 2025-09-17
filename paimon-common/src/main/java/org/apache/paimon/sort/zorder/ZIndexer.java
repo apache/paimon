@@ -26,6 +26,7 @@ import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -351,6 +352,11 @@ public class ZIndexer implements Serializable {
         @Override
         public ZProcessFunction visit(VariantType variantType) {
             throw new RuntimeException("Unsupported type");
+        }
+
+        @Override
+        public ZProcessFunction visit(BlobType blobType) {
+            throw new UnsupportedOperationException("Does not support type blob");
         }
 
         @Override

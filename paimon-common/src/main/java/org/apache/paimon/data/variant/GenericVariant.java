@@ -23,6 +23,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 
 import java.io.CharArrayWriter;
 import java.io.IOException;
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -56,7 +57,9 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.variantConstruct
  * additional information regarding copyright ownership. */
 
 /** An internal data structure implementing {@link Variant}. */
-public final class GenericVariant implements Variant {
+public final class GenericVariant implements Variant, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final byte[] value;
     private final byte[] metadata;

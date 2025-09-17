@@ -325,6 +325,7 @@ public final class DataTypeJsonParser {
         RAW,
         LEGACY,
         VARIANT,
+        BLOB,
         NOT
     }
 
@@ -541,6 +542,8 @@ public final class DataTypeJsonParser {
                     return parseTimestampLtzType();
                 case VARIANT:
                     return new VariantType();
+                case BLOB:
+                    return new BlobType();
                 default:
                     throw parsingError("Unsupported type: " + token().value);
             }

@@ -70,6 +70,8 @@ public interface BinaryWriter {
 
     void writeVariant(int pos, Variant variant);
 
+    void writeBlob(int pos, Blob blob);
+
     void writeArray(int pos, InternalArray value, InternalArraySerializer serializer);
 
     void writeMap(int pos, InternalMap value, InternalMapSerializer serializer);
@@ -146,6 +148,9 @@ public interface BinaryWriter {
             case VARIANT:
                 writer.writeVariant(pos, (Variant) o);
                 break;
+            case BLOB:
+                writer.writeBlob(pos, (Blob) o);
+                break;
             default:
                 throw new UnsupportedOperationException("Not support type: " + type);
         }
@@ -220,6 +225,8 @@ public interface BinaryWriter {
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
             case VARIANT:
                 return (writer, pos, value) -> writer.writeVariant(pos, (Variant) value);
+            case BLOB:
+                return (writer, pos, value) -> writer.writeBlob(pos, (Blob) value);
             default:
                 String msg =
                         String.format(
