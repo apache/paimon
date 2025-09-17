@@ -1054,7 +1054,7 @@ public class HiveCatalog extends AbstractCatalog {
         checkArgument(Options.fromMap(options).get(TYPE) != FORMAT_TABLE);
 
         Map<String, String> tblProperties;
-        if (syncAllProperties(new Options(options))) {
+        if (syncAllProperties(options)) {
             tblProperties = new HashMap<>(options);
             // add primary-key, partition-key to tblproperties
             tblProperties.putAll(convertToPropertiesTableKey(tableSchema));
@@ -1210,8 +1210,10 @@ public class HiveCatalog extends AbstractCatalog {
         return true;
     }
 
-    public boolean syncAllProperties(Options tableOptions) {
-        return tableOptions.get(SYNC_ALL_PROPERTIES);
+    public boolean syncAllProperties(Map<String, String> tableOptions) {
+        Map<String, String> merged = new HashMap<>(catalogOptions.toMap());
+        merged.putAll(tableOptions);
+        return new Options(merged).get(SYNC_ALL_PROPERTIES);
     }
 
     @Override
@@ -1571,7 +1573,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private void updateHmsTablePars(Table table, TableSchema schema, Set<String> removedOptions) {
         Map<String, String> options = schema.options();
-        if (syncAllProperties(new Options(options))) {
+        if (syncAllProperties(options)) {
             table.getParameters().putAll(options);
             table.getParameters().putAll(convertToPropertiesTableKey(schema));
         } else {
