@@ -23,13 +23,12 @@ import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.IntArrayList;
 
 import org.apache.avro.io.BinaryData;
 import org.apache.avro.io.BinaryDecoder;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 /** An {@link InternalMap} stored in avro format bytes. */
 public class AvroBytesStringMap implements InternalMap {
@@ -44,9 +43,9 @@ public class AvroBytesStringMap implements InternalMap {
     // total bytes length
     private int lengthInBytes;
     // offset of each string
-    private final List<Integer> off;
+    private final IntArrayList off;
     // length of each string
-    private final List<Integer> len;
+    private final IntArrayList len;
 
     private BinaryArray keyArray;
     private BinaryArray valueArray;
@@ -54,8 +53,8 @@ public class AvroBytesStringMap implements InternalMap {
     public AvroBytesStringMap(BinaryDecoder decoder, boolean valueNullable) throws IOException {
         bytes = new byte[256];
         lengthInBytes = 0;
-        off = new ArrayList<>();
-        len = new ArrayList<>();
+        off = new IntArrayList(16);
+        len = new IntArrayList(16);
 
         long chunkLength = decoder.readMapStart();
         while (chunkLength > 0) {
