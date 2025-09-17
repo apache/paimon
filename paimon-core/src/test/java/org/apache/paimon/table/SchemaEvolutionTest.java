@@ -228,6 +228,22 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testUpdatePrimaryKeyType() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.BIGINT())
+                        .primaryKey("k")
+                        .build();
+        schemaManager.createTable(schema);
+
+        List<SchemaChange> changes =
+                Collections.singletonList(SchemaChange.updateColumnType("k", DataTypes.STRING()));
+        assertThatThrownBy(() -> schemaManager.commitChanges(changes))
+                .hasMessageContaining("Cannot update primary key");
+    }
+
+    @Test
     public void testRenameField() throws Exception {
         Schema schema =
                 new Schema(

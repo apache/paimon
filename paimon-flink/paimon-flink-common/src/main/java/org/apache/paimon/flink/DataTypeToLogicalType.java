@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -144,6 +145,12 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
     @Override
     public LogicalType visit(VariantType variantType) {
         return new org.apache.flink.table.types.logical.VariantType(variantType.isNullable());
+    }
+
+    @Override
+    public LogicalType visit(BlobType blobType) {
+        // TODO introduce blob type in Flink SQL?
+        return new org.apache.flink.table.types.logical.VarBinaryType(BlobType.DEFAULT_SIZE);
     }
 
     @Override

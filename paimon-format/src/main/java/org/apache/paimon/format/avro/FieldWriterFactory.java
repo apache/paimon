@@ -31,6 +31,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
+import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.util.Utf8;
 import org.jetbrains.annotations.NotNull;
@@ -199,15 +200,21 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         FieldWriter valueWriter = visit(schema.getValueType(), valueType);
         return (container, index, encoder) -> {
             InternalMap map = container.getMap(index);
-            encoder.writeMapStart();
             int numElements = map.size();
+
+            encoder.writeMapStart();
             encoder.setItemCount(numElements);
-            InternalArray keyArray = map.keyArray();
-            InternalArray valueArray = map.valueArray();
-            for (int i = 0; i < numElements; i += 1) {
-                encoder.startItem();
-                STRING_WRITER.write(keyArray, i, encoder);
-                valueWriter.write(valueArray, i, encoder);
+            if (map instanceof AvroBytesStringMap && encoder instanceof BinaryEncoder) {
+                AvroBytesStringMap casted = (AvroBytesStringMap) map;
+                encoder.writeFixed(casted.bytes(), 0, casted.lengthInBytes());
+            } else {
+                InternalArray keyArray = map.keyArray();
+                InternalArray valueArray = map.valueArray();
+                for (int i = 0; i < numElements; i += 1) {
+                    encoder.startItem();
+                    STRING_WRITER.write(keyArray, i, encoder);
+                    valueWriter.write(valueArray, i, encoder);
+                }
             }
             encoder.writeMapEnd();
         };

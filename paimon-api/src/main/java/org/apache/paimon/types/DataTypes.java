@@ -155,6 +155,10 @@ public class DataTypes {
         return new VariantType();
     }
 
+    public static BlobType BLOB() {
+        return new BlobType();
+    }
+
     public static OptionalInt getPrecision(DataType dataType) {
         return dataType.accept(PRECISION_EXTRACTOR);
     }

@@ -450,16 +450,18 @@ public class BinaryRowTest {
 
     @Test
     public void testBinary() {
-        BinaryRow row = new BinaryRow(2);
+        BinaryRow row = new BinaryRow(3);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         byte[] bytes1 = new byte[] {1, -1, 5};
         byte[] bytes2 = new byte[] {1, -1, 5, 5, 1, 5, 1, 5};
-        writer.writeBinary(0, bytes1);
-        writer.writeBinary(1, bytes2);
+        writer.writeBinary(0, bytes1, 0, bytes1.length);
+        writer.writeBinary(1, bytes2, 0, bytes2.length);
+        writer.writeBinary(2, bytes2, 2, 4);
         writer.complete();
 
         assertThat(row.getBinary(0)).isEqualTo(bytes1);
         assertThat(row.getBinary(1)).isEqualTo(bytes2);
+        assertThat(row.getBinary(2)).isEqualTo(Arrays.copyOfRange(bytes2, 2, 6));
     }
 
     @Test
@@ -601,7 +603,7 @@ public class BinaryRowTest {
         Random random = new Random();
         byte[] bytes = new byte[1024];
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.complete();
 
         MemorySegment[] memorySegments = new MemorySegment[segTotalNumber];
@@ -678,7 +680,7 @@ public class BinaryRowTest {
 
         writer.reset();
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.reset();
         writer.writeString(0, fromString("wahahah"));
         writer.complete();
@@ -686,7 +688,7 @@ public class BinaryRowTest {
 
         writer.reset();
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.reset();
         writer.writeString(0, fromString("wahahah"));
         writer.complete();
@@ -959,5 +961,20 @@ public class BinaryRowTest {
         assertThat(array2.getVariant(0).toJson()).isEqualTo("{\"age\":27,\"city\":\"Beijing\"}");
         assertThat(array2.isNullAt(1)).isTrue();
         assertThat(array2.getVariant(2).toJson()).isEqualTo("{\"age\":27,\"city\":\"Hangzhou\"}");
+    }
+
+    @Test
+    public void testBlob() {
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+
+        writer.writeBlob(0, new BlobData(new byte[] {1, 3, 1}));
+        writer.setNullAt(1);
+        writer.complete();
+
+        Blob blob0 = row.getBlob(0);
+        assertThat(blob0).isInstanceOf(BlobData.class);
+        assertThat(blob0.toBytes()).isEqualTo(new byte[] {1, 3, 1});
+        assertThat(row.isNullAt(1)).isTrue();
     }
 }

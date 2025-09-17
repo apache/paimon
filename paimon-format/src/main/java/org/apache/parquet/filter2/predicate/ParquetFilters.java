@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataTypeVisitor;
@@ -335,6 +336,11 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Operators.Column<?> visit(BlobType blobType) {
             throw new UnsupportedOperationException();
         }
 

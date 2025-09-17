@@ -43,6 +43,7 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -325,6 +326,11 @@ public class VectorMappingUtils {
         @Override
         public ColumnVector visit(VariantType variantType) {
             throw new UnsupportedOperationException("VariantType is not supported.");
+        }
+
+        @Override
+        public ColumnVector visit(BlobType blobType) {
+            throw new UnsupportedOperationException("BlobType is not supported.");
         }
 
         @Override

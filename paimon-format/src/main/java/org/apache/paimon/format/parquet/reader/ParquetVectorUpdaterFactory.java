@@ -36,6 +36,7 @@ import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -213,6 +214,11 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public UpdaterFactory visit(VariantType variantType) {
             throw new RuntimeException("Variant type is not supported");
+        }
+
+        @Override
+        public UpdaterFactory visit(BlobType blobType) {
+            throw new RuntimeException("Blob type is not supported");
         }
 
         @Override

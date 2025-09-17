@@ -158,7 +158,7 @@ public class RowDataTest {
         writer.writeMap(13, map, new InternalMapSerializer(DataTypes.INT(), DataTypes.INT()));
         writer.writeRow(
                 14, underRow, new InternalRowSerializer(RowType.of(new IntType(), new IntType())));
-        writer.writeBinary(15, bytes);
+        writer.writeBinary(15, bytes, 0, bytes.length);
         writer.writeTimestamp(16, timestamp1, 3);
         writer.writeTimestamp(17, timestamp2, 9);
         writer.writeVariant(18, variant);
