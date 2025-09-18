@@ -47,7 +47,7 @@ public class HiveCatalogLoader implements CatalogLoader {
         this.clientClassName = clientClassName;
         this.options = options;
         this.warehouse = warehouse;
-        this.name = null;
+        this.name = name;
     }
 
     @Override
