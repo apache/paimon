@@ -29,7 +29,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
