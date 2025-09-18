@@ -70,7 +70,7 @@ Set the following table options, so that Paimon tables can generate Iceberg comp
     </tbody>
 </table>
 
-For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'`
+For most SQL users, we recommend setting `'metadata.iceberg.storage' = 'hadoop-catalog'
 or `'metadata.iceberg.storage' = 'hive-catalog'`,
 so that all tables can be visited as an Iceberg warehouse.
 For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
@@ -84,22 +84,28 @@ If not set, the default behavior depends on the storage type.
 Paimon Iceberg compatibility currently supports the following data types.
 
 | Paimon Data Type | Iceberg Data Type |
-|------------------|-------------------|
-| `BOOLEAN`        | `boolean`         |
-| `INT`            | `int`             |
-| `BIGINT`         | `long`            |
-| `FLOAT`          | `float`           |
-| `DOUBLE`         | `double`          |
-| `DECIMAL`        | `decimal`         |
-| `CHAR`           | `string`          |
-| `VARCHAR`        | `string`          |
-| `BINARY`         | `binary`          |
-| `VARBINARY`      | `binary`          |
-| `DATE`           | `date`            |
-| `TIMESTAMP`*     | `timestamp`       |
-| `TIMESTAMP_LTZ`* | `timestamptz`     |
-| `ARRAY`          | `list`            |
-| `MAP`            | `map`             |
-| `ROW`            | `struct`          |
+|----------------|-------------------|
+| `BOOLEAN`      | `boolean`         |
+| `INT`          | `int`             |
+| `BIGINT`       | `long`            |
+| `FLOAT`        | `float`           |
+| `DOUBLE`       | `double`          |
+| `DECIMAL`      | `decimal`         |
+| `CHAR`         | `string`          |
+| `VARCHAR`      | `string`          |
+| `BINARY`       | `binary`          |
+| `VARBINARY`    | `binary`          |
+| `DATE`         | `date`            |
+| `TIMESTAMP` (precision 4-6)   | `timestamp`       |
+| `TIMESTAMP_LTZ` (precision 4-6) | `timestamptz`     |
+| `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
+| `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
+| `ARRAY`        | `list`            |
+| `MAP`          | `map`             |
+| `ROW`          | `struct`          |
 
-*: `TIMESTAMP` and `TIMESTAMP_LTZ` type only support precision from 4 to 6
+{{< hint info >}}
+**Note on Timestamp Types:**
+- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 4 to 6 are mapped to standard Iceberg timestamp types
+- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
+{{< /hint >}}
