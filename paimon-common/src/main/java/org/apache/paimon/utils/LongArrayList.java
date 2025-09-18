@@ -42,6 +42,11 @@ public class LongArrayList {
         return true;
     }
 
+    public long get(int index) {
+        rangeCheck(index);
+        return array[index];
+    }
+
     public long removeLong(int index) {
         if (index >= size) {
             throw new IndexOutOfBoundsException(
@@ -75,5 +80,10 @@ public class LongArrayList {
             System.arraycopy(array, 0, t, 0, size);
             array = t;
         }
+    }
+
+    private void rangeCheck(int index) {
+        if (index >= size)
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
     }
 }
