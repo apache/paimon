@@ -31,8 +31,6 @@ import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPred
 import org.apache.spark.sql.connector.read._
 import org.apache.spark.sql.sources.Filter
 
-import java.util.Collections
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 

@@ -18,19 +18,36 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.RichLimit;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.predicate.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.LimitDirection.TAIL;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.utils.FormatReaderMapping.Builder.tryConvertTopNToLimit;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FormatReaderMapping.Builder}. */
 public class FormatReaderMappingTest {
@@ -82,16 +99,16 @@ public class FormatReaderMappingTest {
 
         Pair<int[], RowType> res = FormatReaderMapping.Builder.trimKeyFields(testFields, allFields);
 
-        Assertions.assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
+        assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
 
         List<DataField> fields = res.getRight().getFields();
-        Assertions.assertThat(fields.size()).isEqualTo(6);
-        Assertions.assertThat(fields.get(0).id()).isEqualTo(1);
-        Assertions.assertThat(fields.get(1).id()).isEqualTo(3);
-        Assertions.assertThat(fields.get(2).id()).isEqualTo(5);
-        Assertions.assertThat(fields.get(3).id()).isEqualTo(7);
-        Assertions.assertThat(fields.get(4).id()).isEqualTo(4);
-        Assertions.assertThat(fields.get(5).id()).isEqualTo(6);
+        assertThat(fields.size()).isEqualTo(6);
+        assertThat(fields.get(0).id()).isEqualTo(1);
+        assertThat(fields.get(1).id()).isEqualTo(3);
+        assertThat(fields.get(2).id()).isEqualTo(5);
+        assertThat(fields.get(3).id()).isEqualTo(7);
+        assertThat(fields.get(4).id()).isEqualTo(4);
+        assertThat(fields.get(5).id()).isEqualTo(6);
     }
 
     @Test
@@ -139,12 +156,143 @@ public class FormatReaderMappingTest {
                         null,
                         null);
 
-        Assertions.assertThat(formatReaderMapping.getIndexMapping())
-                .containsExactly(0, 1, 0, -1, 2);
+        assertThat(formatReaderMapping.getIndexMapping()).containsExactly(0, 1, 0, -1, 2);
         List<DataField> trimmed = trimmedKeyPair.getRight().getFields();
-        Assertions.assertThat(trimmed.get(0).id()).isEqualTo(1);
-        Assertions.assertThat(trimmed.get(1).id()).isEqualTo(0);
-        Assertions.assertThat(trimmed.get(2).id()).isEqualTo(3);
-        Assertions.assertThat(trimmed.size()).isEqualTo(3);
+        assertThat(trimmed.get(0).id()).isEqualTo(1);
+        assertThat(trimmed.get(1).id()).isEqualTo(0);
+        assertThat(trimmed.get(2).id()).isEqualTo(3);
+        assertThat(trimmed.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testTryConvertTopNToLimitWithSinglePrimaryKey() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> primaryKeys = singletonList("id");
+        Map<String, String> options = new HashMap<>();
+        TableSchema schema =
+                new TableSchema(1, fields, 10, Collections.emptyList(), primaryKeys, options, "");
+        FieldRef idRef = new FieldRef(0, "id", DataTypes.INT());
+        FieldRef f1Ref = new FieldRef(1, "f1", DataTypes.INT());
+
+        // test only pk
+        TopN topN01 = new TopN(idRef, ASCENDING, NULLS_FIRST, 1);
+        Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
+        assertThat(test01).isPresent();
+        assertThat(test01.get()).isEqualTo(new RichLimit(1, HEAD));
+
+        TopN topN02 = new TopN(idRef, DESCENDING, NULLS_FIRST, 1);
+        Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
+        assertThat(test02).isPresent();
+        assertThat(test02.get()).isEqualTo(new RichLimit(1, TAIL));
+
+        // test with non-primary-key
+        TopN topN03 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, DESCENDING, NULLS_FIRST),
+                                new SortValue(f1Ref, ASCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
+        assertThat(test03).isPresent();
+        assertThat(test03.get()).isEqualTo(new RichLimit(1, TAIL));
+
+        // test empty
+        TopN topN04 = new TopN(f1Ref, DESCENDING, NULLS_FIRST, 1);
+        Optional<RichLimit> test04 = tryConvertTopNToLimit(topN04, null, schema, true);
+        assertThat(test04).isEmpty();
+    }
+
+    @Test
+    public void testTryConvertTopNToLimitWithMultiPrimaryKey() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> primaryKeys = Arrays.asList("id", "f1");
+        Map<String, String> options = new HashMap<>();
+        TableSchema schema =
+                new TableSchema(1, fields, 10, Collections.emptyList(), primaryKeys, options, "");
+        FieldRef idRef = new FieldRef(0, "id", DataTypes.INT());
+        FieldRef f1Ref = new FieldRef(1, "f1", DataTypes.INT());
+        FieldRef f2Ref = new FieldRef(2, "f2", DataTypes.INT());
+
+        // test matches
+        TopN topN01 = new TopN(singletonList(new SortValue(idRef, ASCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test01 = tryConvertTopNToLimit(topN01, null, schema, true);
+        assertThat(test01).isPresent();
+        assertThat(test01.get()).isEqualTo(new RichLimit(1, HEAD));
+
+        TopN topN02 = new TopN(singletonList(new SortValue(idRef, DESCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test02 = tryConvertTopNToLimit(topN02, null, schema, true);
+        assertThat(test02).isPresent();
+        assertThat(test02.get()).isEqualTo(new RichLimit(1, TAIL));
+
+        // ASCENDING
+        TopN topN03 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, ASCENDING, NULLS_FIRST),
+                                new SortValue(f1Ref, ASCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test03 = tryConvertTopNToLimit(topN03, null, schema, true);
+        assertThat(test03).isPresent();
+        assertThat(test03.get()).isEqualTo(new RichLimit(1, HEAD));
+
+        // DESCENDING
+        TopN topN04 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, DESCENDING, NULLS_FIRST),
+                                new SortValue(f1Ref, DESCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test04 = tryConvertTopNToLimit(topN04, null, schema, true);
+        assertThat(test04).isPresent();
+        assertThat(test04.get()).isEqualTo(new RichLimit(1, TAIL));
+
+        // with non-primary keys
+        TopN topN05 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, DESCENDING, NULLS_FIRST),
+                                new SortValue(f1Ref, DESCENDING, NULLS_FIRST),
+                                new SortValue(f2Ref, ASCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test05 = tryConvertTopNToLimit(topN05, null, schema, true);
+        assertThat(test05).isPresent();
+        assertThat(test05.get()).isEqualTo(new RichLimit(1, TAIL));
+
+        // test not matches
+        // only contains a part the primary key
+        TopN topN06 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, ASCENDING, NULLS_FIRST),
+                                new SortValue(f2Ref, ASCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test06 = tryConvertTopNToLimit(topN06, null, schema, true);
+        assertThat(test06).isEmpty();
+
+        // position not matches
+        TopN topN07 = new TopN(singletonList(new SortValue(f1Ref, ASCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test07 = tryConvertTopNToLimit(topN07, null, schema, true);
+        assertThat(test07).isEmpty();
+        TopN topN08 = new TopN(singletonList(new SortValue(f2Ref, ASCENDING, NULLS_FIRST)), 1);
+        Optional<RichLimit> test08 = tryConvertTopNToLimit(topN08, null, schema, true);
+        assertThat(test08).isEmpty();
+
+        // the direction not same
+        TopN topN09 =
+                new TopN(
+                        Arrays.asList(
+                                new SortValue(idRef, ASCENDING, NULLS_FIRST),
+                                new SortValue(f1Ref, DESCENDING, NULLS_FIRST)),
+                        1);
+        Optional<RichLimit> test09 = tryConvertTopNToLimit(topN09, null, schema, true);
+        assertThat(test09).isEmpty();
     }
 }

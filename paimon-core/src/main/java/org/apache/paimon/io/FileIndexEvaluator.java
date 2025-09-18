@@ -26,6 +26,7 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RichLimit;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -47,17 +48,18 @@ public class FileIndexEvaluator {
             TableSchema dataSchema,
             List<Predicate> dataFilter,
             @Nullable TopN topN,
-            @Nullable Integer limit,
+            @Nullable RichLimit richLimit,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
             @Nullable DeletionVector dv)
             throws IOException {
         if (isNullOrEmpty(dataFilter) && topN == null) {
-            if (limit == null) {
+            if (richLimit == null) {
                 return FileIndexResult.REMAIN;
             } else {
                 // limit can not work with other predicates.
-                return createBaseSelection(file, dv).limit(limit);
+                return createBaseSelection(file, dv)
+                        .limit(richLimit.limit(), richLimit.direction());
             }
         }
 
