@@ -20,10 +20,13 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -109,14 +112,21 @@ public class CompactFieldsProcedure extends BaseProcedure {
                             .files();
 
             String commitUser = createCommitUser(table.coreOptions().toConfiguration());
-            List<Pair<BinaryRow, byte[]>> toCompact = pickWaitCompact(dataFileMetas);
+            final BinaryRowSerializer binaryRowSerializer =
+                    new BinaryRowSerializer(table.partitionKeys().size());
+            List<Pair<byte[], byte[]>> toCompact =
+                    pickWaitCompact(dataFileMetas, binaryRowSerializer);
             javaSparkContext
                     .parallelize(toCompact, toCompact.size())
                     .map(
                             pair -> {
                                 DataFileMetaSerializer dataFileMetaSerializer =
                                         new DataFileMetaSerializer();
-                                BinaryRow partition = pair.getLeft();
+                                byte[] partitionBytes = pair.getLeft();
+                                DataInputDeserializer dataInputDeserializer =
+                                        new DataInputDeserializer(partitionBytes);
+                                BinaryRow partition =
+                                        binaryRowSerializer.deserialize(dataInputDeserializer);
                                 List<DataFileMeta> files =
                                         dataFileMetaSerializer.deserializeList(pair.getRight());
                                 long firstRowId = files.get(0).firstRowId();
@@ -192,11 +202,13 @@ public class CompactFieldsProcedure extends BaseProcedure {
         return true;
     }
 
-    private List<Pair<BinaryRow, byte[]>> pickWaitCompact(List<ManifestEntry> entries)
+    private List<Pair<byte[], byte[]>> pickWaitCompact(
+            List<ManifestEntry> entries, BinaryRowSerializer binaryRowSerializer)
             throws IOException {
+        DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(1024);
         DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
         entries.sort(Comparator.comparing(o -> o.file().firstRowId()));
-        List<Pair<BinaryRow, byte[]>> waitCompat = new ArrayList<>();
+        List<Pair<byte[], byte[]>> waitCompat = new ArrayList<>();
         List<DataFileMeta> files = new ArrayList<>();
         long lastFirstRowId = Long.MIN_VALUE;
         BinaryRow lastPartition = null;
@@ -207,8 +219,12 @@ public class CompactFieldsProcedure extends BaseProcedure {
             }
             if (!files.isEmpty()) {
                 if (files.size() > 1) {
+                    dataOutputSerializer.clear();
+                    binaryRowSerializer.serialize(lastPartition, dataOutputSerializer);
                     waitCompat.add(
-                            Pair.of(lastPartition, dataFileMetaSerializer.serializeList(files)));
+                            Pair.of(
+                                    dataOutputSerializer.getCopyOfBuffer(),
+                                    dataFileMetaSerializer.serializeList(files)));
                 }
                 files = new ArrayList<>();
             }
@@ -217,7 +233,12 @@ public class CompactFieldsProcedure extends BaseProcedure {
             lastPartition = entry.partition();
         }
         if (files.size() > 1) {
-            waitCompat.add(Pair.of(lastPartition, dataFileMetaSerializer.serializeList(files)));
+            dataOutputSerializer.clear();
+            binaryRowSerializer.serialize(lastPartition, dataOutputSerializer);
+            waitCompat.add(
+                    Pair.of(
+                            dataOutputSerializer.getCopyOfBuffer(),
+                            dataFileMetaSerializer.serializeList(files)));
         }
         return waitCompat;
     }
