@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataTypeFamily;
 
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.BIGINT;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.DataTypeRoot.BOOLEAN;
 import static org.apache.paimon.types.DataTypeRoot.DECIMAL;
 import static org.apache.paimon.types.DataTypeRoot.INTEGER;
@@ -100,12 +101,17 @@ public class TypeCheckUtils {
         return type.getTypeRoot() == VARIANT;
     }
 
+    public static boolean isBlob(DataType type) {
+        return type.getTypeRoot() == BLOB;
+    }
+
     public static boolean isComparable(DataType type) {
         return !isMap(type)
                 && !isMultiset(type)
                 && !isRow(type)
                 && !isArray(type)
-                && !isVariant(type);
+                && !isVariant(type)
+                && !isBlob(type);
     }
 
     public static boolean isMutable(DataType type) {

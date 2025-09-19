@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
@@ -110,6 +112,8 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("TIMESTAMP(3) WITH LOCAL TIME ZONE")
                         .expectType(new LocalZonedTimestampType(3)),
                 TestSpec.forString("TIMESTAMP_LTZ(3)").expectType(new LocalZonedTimestampType(3)),
+                TestSpec.forString("VARIANT").expectType(new VariantType()),
+                TestSpec.forString("BLOB").expectType(new BlobType()),
                 TestSpec.forString(
                                 "{\"type\":\"ARRAY\",\"element\":\"TIMESTAMP(3) WITH LOCAL TIME ZONE\"}")
                         .expectType(new ArrayType(new LocalZonedTimestampType(3))),

@@ -38,6 +38,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String WHERE = "where";
     private static final String INCLUDED_TABLES = "included_tables";
     private static final String EXCLUDED_TABLES = "excluded_tables";
+    private static final String PREFER_FILE_FORMAT = "prefer_file_format";
     private static final String CLONE_FROM = "clone_from";
 
     @Override
@@ -74,7 +75,7 @@ public class CloneActionFactory implements ActionFactory {
         if (StringUtils.isNullOrWhitespaceOnly(cloneFrom)) {
             cloneFrom = "hive";
         }
-
+        String preferFileFormat = params.get(PREFER_FILE_FORMAT);
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -87,6 +88,7 @@ public class CloneActionFactory implements ActionFactory {
                         params.get(WHERE),
                         includedTables,
                         excludedTables,
+                        preferFileFormat,
                         cloneFrom);
 
         return Optional.of(cloneAction);

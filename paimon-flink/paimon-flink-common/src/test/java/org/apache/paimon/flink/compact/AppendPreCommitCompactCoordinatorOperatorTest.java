@@ -190,7 +190,8 @@ public class AppendPreCommitCompactCoordinatorOperatorTest {
         assertThat(message.newFilesIncrement().deletedFiles()).isEmpty();
         assertThat(message.newFilesIncrement().changelogFiles()).isEmpty();
         assertThat(message.compactIncrement().isEmpty()).isTrue();
-        assertThat(message.indexIncrement().isEmpty()).isTrue();
+        assertThat(message.newFilesIncrement().newIndexFiles().isEmpty()).isTrue();
+        assertThat(message.newFilesIncrement().deletedIndexFiles().isEmpty()).isTrue();
         assertThat(message.newFilesIncrement().newFiles().stream().map(DataFileMeta::fileSize))
                 .hasSameElementsAs(
                         Arrays.stream(mbs)

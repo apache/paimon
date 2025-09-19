@@ -382,6 +382,7 @@ object GenerateUtils {
     case MULTISET | MAP => className[InternalMap]
     case ROW => className[InternalRow]
     case VARIANT => className[Variant]
+    case BLOB => className[Blob]
     case _ =>
       throw new IllegalArgumentException("Illegal type: " + t)
   }
@@ -422,6 +423,8 @@ object GenerateUtils {
         s"$rowTerm.getRow($indexTerm, ${getFieldCount(t)})"
       case VARIANT =>
         s"$rowTerm.getVariant($indexTerm)"
+      case BLOB =>
+        s"$rowTerm.getBlob($indexTerm)"
       case _ =>
         throw new IllegalArgumentException("Illegal type: " + t)
     }
@@ -583,7 +586,7 @@ object GenerateUtils {
     case BOOLEAN =>
       s"$writerTerm.writeBoolean($indexTerm, $fieldValTerm)"
     case BINARY | VARBINARY =>
-      s"$writerTerm.writeBinary($indexTerm, $fieldValTerm)"
+      s"$writerTerm.writeBinary($indexTerm, $fieldValTerm, 0, $fieldValTerm.length)"
     case DECIMAL =>
       s"$writerTerm.writeDecimal($indexTerm, $fieldValTerm, ${getPrecision(t)})"
     case TINYINT =>

@@ -52,7 +52,6 @@ public class DeletionVectorIndexFileWriter {
      * <p>TODO: We can consider sending a message to delete the deletion file in the future.
      */
     public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
-
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
         try {
             for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {

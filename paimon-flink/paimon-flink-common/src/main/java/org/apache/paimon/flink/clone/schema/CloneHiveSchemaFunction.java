@@ -29,6 +29,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -37,6 +38,8 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.HashSet;
 import java.util.List;
@@ -59,14 +62,18 @@ public class CloneHiveSchemaFunction
 
     protected final Map<String, String> sourceCatalogConfig;
     protected final Map<String, String> targetCatalogConfig;
+    @Nullable protected final String preferFileFormat;
 
     protected transient HiveCatalog hiveCatalog;
     protected transient Catalog targetCatalog;
 
     public CloneHiveSchemaFunction(
-            Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            @Nullable String preferFileFormat) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
+        this.preferFileFormat = preferFileFormat;
     }
 
     /**
@@ -106,6 +113,11 @@ public class CloneHiveSchemaFunction
         boolean supportCloneSplits =
                 Boolean.parseBoolean(options.get(HiveCloneUtils.SUPPORT_CLONE_SPLITS));
         options.remove(HiveCloneUtils.SUPPORT_CLONE_SPLITS);
+        if (supportCloneSplits) {
+            if (!StringUtils.isNullOrWhitespaceOnly(preferFileFormat)) {
+                options.put(CoreOptions.FILE_FORMAT.key(), preferFileFormat);
+            }
+        }
 
         // only support Hive to unaware-bucket table now
         options.put(CoreOptions.BUCKET.key(), "-1");

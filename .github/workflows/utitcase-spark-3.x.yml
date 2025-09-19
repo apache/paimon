@@ -36,20 +36,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_test:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: true
+      matrix:
+        scala_version: [ '2.12', '2.13' ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
-      - name: Build Spark
-        run:  mvn -T 2C -B clean install -DskipTests
-      - name: Test Spark
+
+      - name: Build Spark 3 with ${{ matrix.scala_version }}
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark3,flink1,scala-${{ matrix.scala_version }}
+
+      - name: Test Spark 3 with ${{ matrix.scala_version }}
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
@@ -58,9 +64,9 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
           for suffix in ut 3.5 3.4 3.3 3.2; do
-          test_modules+="org.apache.paimon:paimon-spark-${suffix},"
+          test_modules+="org.apache.paimon:paimon-spark-${suffix}_${{ matrix.scala_version }},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark3,flink1,scala-${{ matrix.scala_version }}
         env:
           MAVEN_OPTS: -Xmx4096m

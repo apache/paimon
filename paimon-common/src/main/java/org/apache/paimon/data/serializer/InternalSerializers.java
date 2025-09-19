@@ -85,6 +85,8 @@ public final class InternalSerializers {
                 return new InternalRowSerializer(getFieldTypes(type).toArray(new DataType[0]));
             case VARIANT:
                 return VariantSerializer.INSTANCE;
+            case BLOB:
+                return BlobSerializer.INSTANCE;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");

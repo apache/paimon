@@ -54,7 +54,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
       PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
 
-    case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
+    case merge: MergeIntoTable
+        if !merge.resolved && isPaimonTable(merge.targetTable) && merge.childrenResolved =>
       PaimonMergeIntoResolver(merge, session)
 
     case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>

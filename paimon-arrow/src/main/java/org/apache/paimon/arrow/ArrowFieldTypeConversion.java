@@ -21,6 +21,7 @@ package org.apache.paimon.arrow;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -153,6 +154,11 @@ public class ArrowFieldTypeConversion {
 
         @Override
         public FieldType visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FieldType visit(BlobType blobType) {
             throw new UnsupportedOperationException();
         }
 

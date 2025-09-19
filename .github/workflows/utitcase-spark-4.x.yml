@@ -36,19 +36,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
+
       - name: Build Spark
         run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1
+
       - name: Test Spark
         timeout-minutes: 60
         run: |
@@ -58,7 +61,7 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
           for suffix in ut 4.0; do
-          test_modules+="org.apache.paimon:paimon-spark-${suffix},"
+          test_modules+="org.apache.paimon:paimon-spark-${suffix}_2.13,"
           done
           test_modules="${test_modules%,}"
           mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark4,flink1

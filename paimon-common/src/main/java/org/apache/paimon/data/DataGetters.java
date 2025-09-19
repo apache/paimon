@@ -78,6 +78,9 @@ public interface DataGetters {
     /** Returns the variant value at the given position. */
     Variant getVariant(int pos);
 
+    /** Returns the blob value at the given position. */
+    Blob getBlob(int pos);
+
     /** Returns the array value at the given position. */
     InternalArray getArray(int pos);
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -126,6 +127,11 @@ public class PartialRow implements InternalRow {
     @Override
     public Variant getVariant(int pos) {
         return row.getVariant(pos);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        return row.getBlob(pos);
     }
 
     @Override

@@ -372,7 +372,7 @@ public class SchemaManager implements Serializable {
                 }.updateIntermediateColumn(newFields, 0);
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
-                assertNotUpdatingPrimaryKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -416,6 +416,7 @@ public class SchemaManager implements Serializable {
                 }.updateIntermediateColumn(newFields, 0);
             } else if (change instanceof UpdateColumnType) {
                 UpdateColumnType update = (UpdateColumnType) change;
+                assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
                 updateNestedColumn(
                         newFields,
@@ -458,11 +459,9 @@ public class SchemaManager implements Serializable {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnNullability) {
                 UpdateColumnNullability update = (UpdateColumnNullability) change;
-                if (update.fieldNames().length == 1
-                        && update.newNullability()
-                        && oldTableSchema.primaryKeys().contains(update.fieldNames()[0])) {
-                    throw new UnsupportedOperationException(
-                            "Cannot change nullability of primary key");
+                if (update.newNullability()) {
+                    assertNotUpdatingPrimaryKeys(
+                            oldTableSchema, update.fieldNames(), "change nullability of");
                 }
                 updateNestedColumn(
                         newFields,
@@ -839,17 +838,29 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static void assertNotUpdatingPrimaryKeys(
+    private static void assertNotUpdatingPartitionKeys(
             TableSchema schema, String[] fieldNames, String operation) {
         // partition keys can't be nested columns
         if (fieldNames.length > 1) {
             return;
         }
-        String columnToRename = fieldNames[0];
-        if (schema.partitionKeys().contains(columnToRename)) {
+        String fieldName = fieldNames[0];
+        if (schema.partitionKeys().contains(fieldName)) {
             throw new UnsupportedOperationException(
-                    String.format(
-                            "Cannot " + operation + " partition column: [%s]", columnToRename));
+                    String.format("Cannot %s partition column: [%s]", operation, fieldName));
+        }
+    }
+
+    private static void assertNotUpdatingPrimaryKeys(
+            TableSchema schema, String[] fieldNames, String operation) {
+        // primary keys can't be nested columns
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        if (schema.primaryKeys().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot %s primary key", operation));
         }
     }
 

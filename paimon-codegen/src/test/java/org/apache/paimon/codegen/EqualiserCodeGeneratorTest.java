@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryWriter;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -187,6 +188,13 @@ public class EqualiserCodeGeneratorTest {
                         Pair.of(
                                 GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"),
                                 GenericVariant.fromJson("{\"age\":27,\"city\":\"Hangzhou\"}"))));
+        TEST_DATA.put(
+                DataTypeRoot.BLOB,
+                new GeneratedData(
+                        DataTypes.BLOB(),
+                        Pair.of(
+                                new BlobData(new byte[] {1, 2, 3}),
+                                new BlobData(new byte[] {4, 5, 6}))));
     }
 
     @ParameterizedTest

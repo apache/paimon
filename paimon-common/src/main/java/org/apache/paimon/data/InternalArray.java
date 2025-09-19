@@ -133,6 +133,9 @@ public interface InternalArray extends DataGetters {
             case VARIANT:
                 elementGetter = InternalArray::getVariant;
                 break;
+            case BLOB:
+                elementGetter = InternalArray::getBlob;
+                break;
             default:
                 String msg =
                         String.format(

@@ -19,6 +19,8 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -128,6 +130,11 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return new BlobData(row.getBinary(pos));
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return new FlinkArrayWrapper(row.getArray(pos));
     }
@@ -220,6 +227,11 @@ public class FlinkRowWrapper implements InternalRow {
             org.apache.flink.types.variant.BinaryVariant variant =
                     (org.apache.flink.types.variant.BinaryVariant) array.getVariant(pos);
             return new GenericVariant(variant.getValue(), variant.getMetadata());
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            return new BlobData(array.getBinary(pos));
         }
 
         @Override

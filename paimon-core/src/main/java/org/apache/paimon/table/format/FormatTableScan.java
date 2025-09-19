@@ -19,37 +19,48 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
-import org.apache.paimon.data.BinaryWriter;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
+import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
+import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
     @Nullable private PartitionPredicate partitionFilter;
-    @Nullable private Integer limit;
+    @Nullable private final Integer limit;
 
     public FormatTableScan(
             FormatTable table,
@@ -74,11 +85,11 @@ public class FormatTableScan implements InnerTableScan {
     @Override
     public List<PartitionEntry> listPartitionEntries() {
         List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
-                PartitionPathUtils.searchPartSpecAndPaths(
+                searchPartSpecAndPaths(
                         table.fileIO(), new Path(table.location()), table.partitionKeys().size());
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
-            BinaryRow row = createPartitionRow(partition2Path.getKey());
+            BinaryRow row = toPartitionRow(partition2Path.getKey());
             partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
         }
         return partitionEntries;
@@ -93,37 +104,11 @@ public class FormatTableScan implements InnerTableScan {
         return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
     }
 
-    private BinaryRow createPartitionRow(LinkedHashMap<String, String> partitionSpec) {
-        RowType partitionRowType = table.partitionType();
-        List<DataField> fields = partitionRowType.getFields();
-
-        // Create value setters for each field type
-        List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
-        for (DataField field : fields) {
-            valueSetters.add(BinaryWriter.createValueSetter(field.type()));
-        }
-
-        // Create binary row to hold partition values
-        BinaryRow binaryRow = new BinaryRow(fields.size());
-        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
-
-        // Fill in partition values
-        for (int i = 0; i < fields.size(); i++) {
-            String fieldName = fields.get(i).name();
-            String partitionValue = partitionSpec.get(fieldName);
-
-            if (partitionValue == null || partitionValue.equals(table.defaultPartName())) {
-                // Set null for default partition name or missing partition
-                binaryRowWriter.setNullAt(i);
-            } else {
-                // Convert string value to appropriate type and set it
-                Object value = TypeUtils.castFromString(partitionValue, fields.get(i).type());
-                valueSetters.get(i).setValue(binaryRowWriter, i, value);
-            }
-        }
-
-        binaryRowWriter.complete();
-        return binaryRow;
+    private BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
+        RowType partitionType = table.partitionType();
+        GenericRow row =
+                convertSpecToInternalRow(partitionSpec, partitionType, table.defaultPartName());
+        return new InternalRowSerializer(partitionType).toBinaryRow(row);
     }
 
     private class FormatTableScanPlan implements Plan {
@@ -133,22 +118,15 @@ public class FormatTableScan implements InnerTableScan {
             try {
                 FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
-                    List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
-                            PartitionPathUtils.searchPartSpecAndPaths(
-                                    fileIO,
-                                    new Path(table.location()),
-                                    table.partitionKeys().size());
-                    for (Pair<LinkedHashMap<String, String>, Path> partition2Path :
-                            partition2Paths) {
-                        LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
-                        BinaryRow partitionRow = createPartitionRow(partitionSpec);
+                    for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
+                        LinkedHashMap<String, String> partitionSpec = pair.getKey();
+                        BinaryRow partitionRow = toPartitionRow(partitionSpec);
                         if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            splits.addAll(
-                                    getSplits(fileIO, partition2Path.getValue(), partitionRow));
+                            splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
                         }
                     }
                 } else {
-                    splits.addAll(getSplits(fileIO, new Path(table.location()), null));
+                    splits.addAll(createSplits(fileIO, new Path(table.location()), null));
                 }
                 if (limit != null) {
                     if (limit <= 0) {
@@ -165,7 +143,78 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    private List<Split> getSplits(FileIO fileIO, Path path, BinaryRow partition)
+    private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        if (partitionFilter instanceof MultiplePartitionPredicate) {
+            // generate partitions directly
+            Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
+            return generatePartitions(
+                    table.partitionKeys(),
+                    table.partitionType(),
+                    table.defaultPartName(),
+                    new Path(table.location()),
+                    partitions);
+        } else {
+            // search paths
+            Pair<Path, Integer> scanPathAndLevel =
+                    computeScanPathAndLevel(
+                            new Path(table.location()),
+                            table.partitionKeys(),
+                            partitionFilter,
+                            table.partitionType());
+            Path scanPath = scanPathAndLevel.getLeft();
+            int level = scanPathAndLevel.getRight();
+            return searchPartSpecAndPaths(table.fileIO(), scanPath, level);
+        }
+    }
+
+    protected static List<Pair<LinkedHashMap<String, String>, Path>> generatePartitions(
+            List<String> partitionKeys,
+            RowType partitionType,
+            String defaultPartName,
+            Path tablePath,
+            Set<BinaryRow> partitions) {
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        defaultPartName,
+                        partitionType,
+                        partitionKeys.toArray(new String[0]),
+                        false);
+        List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>();
+        for (BinaryRow part : partitions) {
+            LinkedHashMap<String, String> partSpec = partitionComputer.generatePartValues(part);
+            String path = PartitionPathUtils.generatePartitionPath(partSpec);
+            result.add(Pair.of(partSpec, new Path(tablePath, path)));
+        }
+        return result;
+    }
+
+    protected static Pair<Path, Integer> computeScanPathAndLevel(
+            Path tableLocation,
+            List<String> partitionKeys,
+            PartitionPredicate partitionFilter,
+            RowType partitionType) {
+        Path scanPath = tableLocation;
+        int level = partitionKeys.size();
+        if (!partitionKeys.isEmpty()) {
+            // Try to optimize for equality partition filters
+            if (partitionFilter instanceof DefaultPartitionPredicate) {
+                Map<String, String> equalityPrefix =
+                        extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+                                partitionKeys,
+                                ((DefaultPartitionPredicate) partitionFilter).predicate());
+                if (!equalityPrefix.isEmpty()) {
+                    // Use optimized scan for specific partition path
+                    String partitionPath =
+                            PartitionPathUtils.generatePartitionPath(equalityPrefix, partitionType);
+                    scanPath = new Path(tableLocation, partitionPath);
+                    level = partitionKeys.size() - equalityPrefix.size();
+                }
+            }
+        }
+        return Pair.of(scanPath, level);
+    }
+
+    private List<Split> createSplits(FileIO fileIO, Path path, BinaryRow partition)
             throws IOException {
         List<Split> splits = new ArrayList<>();
         FileStatus[] files = fileIO.listFiles(path, true);
@@ -177,5 +226,29 @@ public class FormatTableScan implements InnerTableScan {
             }
         }
         return splits;
+    }
+
+    public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+            List<String> partitionKeys, Predicate predicate) {
+        List<Predicate> predicates = PredicateBuilder.splitAnd(predicate);
+        Map<String, String> equals = new HashMap<>();
+        for (Predicate sub : predicates) {
+            if (sub instanceof LeafPredicate) {
+                LeafFunction function = ((LeafPredicate) sub).function();
+                String field = ((LeafPredicate) sub).fieldName();
+                if (function instanceof Equal && partitionKeys.contains(field)) {
+                    equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                }
+            }
+        }
+        Map<String, String> result = new HashMap<>(partitionKeys.size());
+        for (String partitionKey : partitionKeys) {
+            if (equals.containsKey(partitionKey)) {
+                result.put(partitionKey, equals.get(partitionKey));
+            } else {
+                break;
+            }
+        }
+        return result;
     }
 }

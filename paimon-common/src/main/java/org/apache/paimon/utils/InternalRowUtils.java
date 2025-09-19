@@ -328,6 +328,8 @@ public class InternalRowUtils {
                 return dataGetters.getBinary(pos);
             case VARIANT:
                 return dataGetters.getVariant(pos);
+            case BLOB:
+                return dataGetters.getBlob(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }

@@ -19,6 +19,7 @@
 package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -155,6 +156,14 @@ public class FallbackMappingRow implements InternalRow {
             return fallbackRow.getVariant(mappings[pos]);
         }
         return main.getVariant(pos);
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        if (mappings[pos] != -1 && main.isNullAt(pos)) {
+            return fallbackRow.getBlob(mappings[pos]);
+        }
+        return main.getBlob(pos);
     }
 
     @Override

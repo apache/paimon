@@ -224,6 +224,9 @@ public interface InternalRow extends DataGetters {
             case VARIANT:
                 fieldGetter = row -> row.getVariant(fieldPos);
                 break;
+            case BLOB:
+                fieldGetter = row -> row.getBlob(fieldPos);
+                break;
             default:
                 String msg =
                         String.format(
