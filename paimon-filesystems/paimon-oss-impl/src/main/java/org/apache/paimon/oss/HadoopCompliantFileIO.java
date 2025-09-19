@@ -24,7 +24,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -57,19 +56,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
-    }
-
-    @Override
-    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
-            throws IOException {
-        if (!overwrite && this.exists(path)) {
-            throw new IOException("File " + path + " already exists.");
-        }
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        FileSystem fs = getFileSystem(hadoopPath);
-        return new OssTwoPhaseOutputStream(
-                new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
-                hadoopPath);
     }
 
     @Override

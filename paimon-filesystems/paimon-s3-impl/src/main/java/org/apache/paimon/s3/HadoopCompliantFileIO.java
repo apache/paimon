@@ -24,12 +24,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.s3a.S3AFileSystem;
 
 import java.io.IOException;
 import java.util.Map;
@@ -57,17 +55,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
-    }
-
-    @Override
-    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
-            throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
-        if (!overwrite && this.exists(path)) {
-            throw new IOException("File " + path + " already exists.");
-        }
-        return new S3TwoPhaseOutputStream(new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
     }
 
     @Override
@@ -136,11 +123,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
     }
 
-    private org.apache.hadoop.fs.Path path(Path path) {
+    protected org.apache.hadoop.fs.Path path(Path path) {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 
-    private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+    protected FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         if (fsMap == null) {
             synchronized (this) {
                 if (fsMap == null) {
