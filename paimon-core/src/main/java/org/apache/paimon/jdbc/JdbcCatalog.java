@@ -46,6 +46,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
@@ -85,8 +87,13 @@ public class JdbcCatalog extends AbstractCatalog {
     private final Options options;
     private final String warehouse;
 
-    protected JdbcCatalog(FileIO fileIO, String catalogKey, Options options, String warehouse) {
-        super(fileIO, options);
+    protected JdbcCatalog(
+            FileIO fileIO,
+            String catalogKey,
+            Options options,
+            String warehouse,
+            @Nullable String name) {
+        super(fileIO, options, name);
         this.catalogKey = catalogKey;
         this.options = options;
         this.warehouse = warehouse;
@@ -153,7 +160,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new JdbcCatalogLoader(fileIO, catalogKey, options, warehouse);
+        return new JdbcCatalogLoader(fileIO, catalogKey, options, warehouse, name);
     }
 
     @Override

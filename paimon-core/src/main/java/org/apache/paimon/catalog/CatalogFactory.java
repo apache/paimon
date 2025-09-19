@@ -63,8 +63,8 @@ public interface CatalogFactory extends Factory {
      * If the ClassLoader is not specified, using the context ClassLoader of current thread as
      * default.
      */
-    static Catalog createCatalog(CatalogContext options) {
-        return createCatalog(options, CatalogFactory.class.getClassLoader());
+    static Catalog createCatalog(CatalogContext context) {
+        return createCatalog(context, CatalogFactory.class.getClassLoader());
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {

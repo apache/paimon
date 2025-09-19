@@ -54,7 +54,10 @@ public interface Table extends Serializable {
     /** A name to identify this table. */
     String name();
 
-    /** Full name of the table, default is database.tableName. */
+    /**
+     * Full name of the table, default is database.tableName or catalog.database.tableName if
+     * catalog is present.
+     */
     default String fullName() {
         return name();
     }

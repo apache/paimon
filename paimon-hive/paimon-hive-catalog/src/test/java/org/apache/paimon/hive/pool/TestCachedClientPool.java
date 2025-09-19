@@ -422,7 +422,8 @@ public class TestCachedClientPool {
                                                         hiveConf,
                                                         metastoreClientClass,
                                                         options,
-                                                        warehouse);
+                                                        warehouse,
+                                                        null);
                                             } catch (Exception e) {
                                                 throw new RuntimeException(e);
                                             }

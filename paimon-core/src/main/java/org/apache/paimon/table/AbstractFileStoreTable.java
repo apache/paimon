@@ -171,7 +171,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public String fullName() {
-        return identifier().getFullName();
+        String catalogName = catalogEnvironment.catalogName();
+        return catalogName == null
+                ? identifier().getFullName()
+                : String.format("%s.%s", catalogName, identifier().getFullName());
     }
 
     public Identifier identifier() {

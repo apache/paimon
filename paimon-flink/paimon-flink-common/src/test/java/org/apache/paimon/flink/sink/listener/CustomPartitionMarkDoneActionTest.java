@@ -100,6 +100,6 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
         assertThat(table2.fileIO().exists(successFile)).isEqualTo(true);
 
         assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions().iterator().next())
-                .isEqualTo("table=default.T,partition=a=0/");
+                .isEqualTo("table=T,partition=a=0/");
     }
 }

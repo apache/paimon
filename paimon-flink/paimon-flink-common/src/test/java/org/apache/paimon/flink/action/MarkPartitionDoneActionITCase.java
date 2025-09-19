@@ -175,7 +175,6 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                 MockCustomPartitionMarkDoneAction.class.getName());
 
         FileStoreTable table = prepareTable(hasPk, options);
-        String fullTableName = table.fullName();
 
         switch (invoker) {
             case "action":
@@ -220,8 +219,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions())
                 .containsExactlyInAnyOrder(
-                        "table=" + fullTableName + ",partition=partKey0=0/partKey1=1/",
-                        "table=" + fullTableName + ",partition=partKey0=1/partKey1=0/");
+                        "table=" + tableName + ",partition=partKey0=0/partKey1=1/",
+                        "table=" + tableName + ",partition=partKey0=1/partKey1=0/");
     }
 
     @ParameterizedTest

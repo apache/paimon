@@ -164,7 +164,7 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(fileIO, hiveConf, clientClassName, new Options(), warehouse);
+        this(fileIO, hiveConf, clientClassName, new Options(), warehouse, null);
     }
 
     public HiveCatalog(
@@ -172,8 +172,9 @@ public class HiveCatalog extends AbstractCatalog {
             HiveConf hiveConf,
             String clientClassName,
             Options options,
-            String warehouse) {
-        super(fileIO, options);
+            String warehouse,
+            @Nullable String name) {
+        super(fileIO, options, name);
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
         this.options = options;
@@ -1328,7 +1329,12 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public CatalogLoader catalogLoader() {
         return new HiveCatalogLoader(
-                fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
+                fileIO,
+                new SerializableHiveConf(hiveConf),
+                clientClassName,
+                options,
+                warehouse,
+                name);
     }
 
     public Table getHmsTable(Identifier identifier)
@@ -1716,7 +1722,8 @@ public class HiveCatalog extends AbstractCatalog {
                 hiveConf,
                 options.get(HiveCatalogOptions.METASTORE_CLIENT_CLASS),
                 options,
-                warehouse.toUri().toString());
+                warehouse.toUri().toString(),
+                context.catalogName());
     }
 
     public static HiveConf createHiveConf(CatalogContext context) {

@@ -44,6 +44,7 @@ public class CatalogEnvironment implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    @Nullable private final String catalogName;
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
@@ -52,12 +53,14 @@ public class CatalogEnvironment implements Serializable {
     private final boolean supportsVersionManagement;
 
     public CatalogEnvironment(
+            @Nullable String catalogName,
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
             boolean supportsVersionManagement) {
+        this.catalogName = catalogName;
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -67,7 +70,12 @@ public class CatalogEnvironment implements Serializable {
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, false);
+        return new CatalogEnvironment(null, null, null, null, null, null, false);
+    }
+
+    @Nullable
+    public String catalogName() {
+        return catalogName;
     }
 
     @Nullable
@@ -134,6 +142,7 @@ public class CatalogEnvironment implements Serializable {
 
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
+                catalogName,
                 identifier,
                 uuid,
                 catalogLoader,

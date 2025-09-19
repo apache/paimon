@@ -52,6 +52,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public String name() {
+        return wrapped.name();
+    }
+
+    @Override
     public boolean caseSensitive() {
         return wrapped.caseSensitive();
     }

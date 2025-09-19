@@ -81,17 +81,25 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
+    @Nullable protected final String name;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
         this.catalogOptions = new Options();
+        this.name = null;
     }
 
-    protected AbstractCatalog(FileIO fileIO, Options options) {
+    protected AbstractCatalog(FileIO fileIO, Options options, @Nullable String name) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
+        this.name = name;
+    }
+
+    @Override
+    public String name() {
+        return name;
     }
 
     @Override

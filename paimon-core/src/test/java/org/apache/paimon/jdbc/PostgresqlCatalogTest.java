@@ -122,7 +122,8 @@ public class PostgresqlCatalogTest {
                         fileIO,
                         "test-jdbc-postgres-catalog",
                         Options.fromMap(properties),
-                        warehouse);
+                        warehouse,
+                        null);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
         return catalog;
     }

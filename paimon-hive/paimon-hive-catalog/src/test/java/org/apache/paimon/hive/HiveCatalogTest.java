@@ -80,7 +80,8 @@ public class HiveCatalogTest extends CatalogTestBase {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false");
         catalog =
-                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
+                new HiveCatalog(
+                        fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse, null);
     }
 
     @Test
