@@ -90,8 +90,9 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             RowType rowType,
             SimpleColStatsCollector.Factory[] statsCollectors) {
         boolean isDisabled =
-                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+                statsCollectors == null
+                        || Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
         if (isDisabled) {
             return SimpleStatsProducer.disabledProducer();
         }
