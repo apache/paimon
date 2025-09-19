@@ -747,7 +747,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .newIndexFiles()
                     .forEach(
                             m ->
-                                    appendIndexFiles.add(
+                                    compactIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.ADD,
                                                     commitMessage.partition(),
@@ -758,7 +758,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .deletedIndexFiles()
                     .forEach(
                             m ->
-                                    appendIndexFiles.add(
+                                    compactIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.DELETE,
                                                     commitMessage.partition(),
