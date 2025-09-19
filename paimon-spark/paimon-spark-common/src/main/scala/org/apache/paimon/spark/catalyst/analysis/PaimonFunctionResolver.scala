@@ -34,7 +34,7 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
     plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
-          case u: UnResolvedPaimonV1Function =>
+          case u: UnResolvedPaimonV1Function if u.arguments.forall(_.resolved) =>
             u.funcIdent.catalog match {
               case Some(catalog) =>
                 catalogManager.catalog(catalog) match {
