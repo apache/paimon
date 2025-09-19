@@ -75,7 +75,7 @@ public class DynamicBucketIndexMaintainerTest extends PrimaryKeyTableTestBase {
         Map<BinaryRow, Map<Integer, int[]>> index = new HashMap<>();
         for (CommitMessage commitMessage : messages) {
             CommitMessageImpl message = (CommitMessageImpl) commitMessage;
-            List<IndexFileMeta> files = message.indexIncrement().newIndexFiles();
+            List<IndexFileMeta> files = message.newFilesIncrement().newIndexFiles();
             if (files.isEmpty()) {
                 continue;
             }

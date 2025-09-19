@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
@@ -701,51 +702,53 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .compactIncrement()
                     .changelogFiles()
                     .forEach(m -> compactChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
-            commitMessage
-                    .indexIncrement()
-                    .newIndexFiles()
-                    .forEach(
-                            f -> {
-                                switch (f.indexType()) {
-                                    case HASH_INDEX:
-                                        appendHashIndexFiles.add(
-                                                new IndexManifestEntry(
-                                                        FileKind.ADD,
-                                                        commitMessage.partition(),
-                                                        commitMessage.bucket(),
-                                                        f));
-                                        break;
-                                    case DELETION_VECTORS_INDEX:
-                                        compactDvIndexFiles.add(
-                                                new IndexManifestEntry(
-                                                        FileKind.ADD,
-                                                        commitMessage.partition(),
-                                                        commitMessage.bucket(),
-                                                        f));
-                                        break;
-                                    default:
-                                        throw new RuntimeException(
-                                                "Unknown index type: " + f.indexType());
-                                }
-                            });
-            commitMessage
-                    .indexIncrement()
-                    .deletedIndexFiles()
-                    .forEach(
-                            f -> {
-                                if (f.indexType().equals(DELETION_VECTORS_INDEX)) {
-                                    compactDvIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.DELETE,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    f));
-                                } else {
-                                    throw new RuntimeException(
-                                            "This index type is not supported to delete: "
-                                                    + f.indexType());
-                                }
-                            });
+
+            // todo: split them
+            List<IndexFileMeta> newIndexFiles =
+                    new ArrayList<>(commitMessage.newFilesIncrement().newIndexFiles());
+            newIndexFiles.addAll(commitMessage.compactIncrement().newIndexFiles());
+            newIndexFiles.forEach(
+                    f -> {
+                        switch (f.indexType()) {
+                            case HASH_INDEX:
+                                appendHashIndexFiles.add(
+                                        new IndexManifestEntry(
+                                                FileKind.ADD,
+                                                commitMessage.partition(),
+                                                commitMessage.bucket(),
+                                                f));
+                                break;
+                            case DELETION_VECTORS_INDEX:
+                                compactDvIndexFiles.add(
+                                        new IndexManifestEntry(
+                                                FileKind.ADD,
+                                                commitMessage.partition(),
+                                                commitMessage.bucket(),
+                                                f));
+                                break;
+                            default:
+                                throw new RuntimeException("Unknown index type: " + f.indexType());
+                        }
+                    });
+
+            // todo: split them
+            List<IndexFileMeta> deletedIndexFiles =
+                    new ArrayList<>(commitMessage.newFilesIncrement().deletedIndexFiles());
+            deletedIndexFiles.addAll(commitMessage.compactIncrement().deletedIndexFiles());
+            deletedIndexFiles.forEach(
+                    f -> {
+                        if (f.indexType().equals(DELETION_VECTORS_INDEX)) {
+                            compactDvIndexFiles.add(
+                                    new IndexManifestEntry(
+                                            FileKind.DELETE,
+                                            commitMessage.partition(),
+                                            commitMessage.bucket(),
+                                            f));
+                        } else {
+                            throw new RuntimeException(
+                                    "This index type is not supported to delete: " + f.indexType());
+                        }
+                    });
         }
         if (!commitMessages.isEmpty()) {
             List<String> msg = new ArrayList<>();

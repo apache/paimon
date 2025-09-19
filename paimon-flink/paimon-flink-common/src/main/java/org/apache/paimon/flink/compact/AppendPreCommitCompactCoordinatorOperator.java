@@ -128,9 +128,10 @@ public class AppendPreCommitCompactCoordinatorOperator
                         new DataIncrement(
                                 skippedFiles,
                                 message.newFilesIncrement().deletedFiles(),
-                                message.newFilesIncrement().changelogFiles()),
-                        message.compactIncrement(),
-                        message.indexIncrement());
+                                message.newFilesIncrement().changelogFiles(),
+                                message.newFilesIncrement().newIndexFiles(),
+                                message.newFilesIncrement().deletedIndexFiles()),
+                        message.compactIncrement());
         if (!newMessage.isEmpty()) {
             Committable newCommittable =
                     new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);

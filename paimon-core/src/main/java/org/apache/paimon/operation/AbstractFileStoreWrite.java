@@ -28,9 +28,9 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
@@ -213,22 +213,26 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 WriterContainer<T> writerContainer = entry.getValue();
 
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
-                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+                DataIncrement newFilesIncrement = increment.newFilesIncrement();
+                CompactIncrement compactIncrement = increment.compactIncrement();
                 if (writerContainer.dynamicBucketMaintainer != null) {
-                    newIndexFiles.addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
+                    newFilesIncrement
+                            .newIndexFiles()
+                            .addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
                 }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
-                    compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
+                    compactDeletionFile
+                            .getOrCompute()
+                            .ifPresent(compactIncrement.newIndexFiles()::add);
                 }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,
                                 bucket,
                                 writerContainer.totalBuckets,
-                                increment.newFilesIncrement(),
-                                increment.compactIncrement(),
-                                new IndexIncrement(newIndexFiles));
+                                newFilesIncrement,
+                                compactIncrement);
                 result.add(committable);
 
                 if (committable.isEmpty()) {

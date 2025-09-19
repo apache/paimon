@@ -18,25 +18,41 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.index.IndexFileMeta;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-/** Newly created data files and changelog files. */
+/** Increment of data files, changelog files and index files. */
 public class DataIncrement {
 
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> changelogFiles;
+    private final List<IndexFileMeta> newIndexFiles;
+    private final List<IndexFileMeta> deletedIndexFiles;
 
     public DataIncrement(
             List<DataFileMeta> newFiles,
             List<DataFileMeta> deletedFiles,
             List<DataFileMeta> changelogFiles) {
+        this(newFiles, deletedFiles, changelogFiles, new ArrayList<>(), new ArrayList<>());
+    }
+
+    public DataIncrement(
+            List<DataFileMeta> newFiles,
+            List<DataFileMeta> deletedFiles,
+            List<DataFileMeta> changelogFiles,
+            List<IndexFileMeta> newIndexFiles,
+            List<IndexFileMeta> deletedIndexFiles) {
         this.newFiles = newFiles;
         this.deletedFiles = deletedFiles;
         this.changelogFiles = changelogFiles;
+        this.newIndexFiles = newIndexFiles;
+        this.deletedIndexFiles = deletedIndexFiles;
     }
 
     public static DataIncrement emptyIncrement() {
@@ -56,8 +72,20 @@ public class DataIncrement {
         return changelogFiles;
     }
 
+    public List<IndexFileMeta> newIndexFiles() {
+        return newIndexFiles;
+    }
+
+    public List<IndexFileMeta> deletedIndexFiles() {
+        return deletedIndexFiles;
+    }
+
     public boolean isEmpty() {
-        return newFiles.isEmpty() && changelogFiles.isEmpty();
+        return newFiles.isEmpty()
+                && deletedFiles.isEmpty()
+                && changelogFiles.isEmpty()
+                && newIndexFiles.isEmpty()
+                && deletedIndexFiles.isEmpty();
     }
 
     @Override
@@ -71,20 +99,28 @@ public class DataIncrement {
 
         DataIncrement that = (DataIncrement) o;
         return Objects.equals(newFiles, that.newFiles)
-                && Objects.equals(changelogFiles, that.changelogFiles);
+                && Objects.equals(deletedFiles, that.deletedFiles)
+                && Objects.equals(changelogFiles, that.changelogFiles)
+                && Objects.equals(newIndexFiles, that.newIndexFiles)
+                && Objects.equals(deletedIndexFiles, that.deletedIndexFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(newFiles, changelogFiles);
+        return Objects.hash(
+                newFiles, deletedFiles, changelogFiles, newIndexFiles, deletedIndexFiles);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "DataIncrement {newFiles = %s, deletedFiles = %s, changelogFiles = %s}",
+                "DataIncrement {newFiles = %s, deletedFiles = %s, changelogFiles = %s, newIndexFiles = %s, deletedIndexFiles = %s}",
                 newFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
                 deletedFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
-                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()));
+                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                newIndexFiles.stream().map(IndexFileMeta::fileName).collect(Collectors.toList()),
+                deletedIndexFiles.stream()
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList()));
     }
 }

@@ -138,12 +138,15 @@ public class ChangelogCompactCoordinateOperator
                         new DataIncrement(
                                 message.newFilesIncrement().newFiles(),
                                 message.newFilesIncrement().deletedFiles(),
-                                skippedNewChangelogs),
+                                skippedNewChangelogs,
+                                message.newFilesIncrement().newIndexFiles(),
+                                message.newFilesIncrement().deletedIndexFiles()),
                         new CompactIncrement(
                                 message.compactIncrement().compactBefore(),
                                 message.compactIncrement().compactAfter(),
-                                skippedCompactChangelogs),
-                        message.indexIncrement());
+                                skippedCompactChangelogs,
+                                message.compactIncrement().newIndexFiles(),
+                                message.compactIncrement().deletedIndexFiles()));
         Committable newCommittable =
                 new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
         output.collect(new StreamRecord<>(Either.Left(newCommittable)));

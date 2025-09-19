@@ -61,7 +61,7 @@ public class DynamicBucketTableTest extends TableTestBase {
         batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
         assertThat(
                         ((CommitMessageImpl) batchTableWrite.prepareCommit().get(0))
-                                .indexIncrement()
+                                .newFilesIncrement()
                                 .newIndexFiles()
                                 .get(0)
                                 .rowCount())

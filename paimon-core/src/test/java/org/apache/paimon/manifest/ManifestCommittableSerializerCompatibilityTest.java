@@ -24,7 +24,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.IOUtils;
@@ -100,8 +99,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         16,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -178,8 +181,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         16,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -256,8 +263,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         16,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -333,8 +344,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         16,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -408,8 +423,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -483,8 +502,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -557,8 +580,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -632,8 +659,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -707,8 +738,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, dataFiles, dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
@@ -778,8 +813,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11,
                         null,
                         new DataIncrement(dataFiles, Collections.emptyList(), dataFiles),
-                        new CompactIncrement(dataFiles, dataFiles, dataFiles),
-                        new IndexIncrement(indexFiles));
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                indexFiles,
+                                Collections.emptyList()));
 
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(
