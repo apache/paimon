@@ -248,7 +248,8 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    commit.overwrite(overwritePartition, committable, Collections.emptyMap());
+                    commit.overwritePartition(
+                            overwritePartition, committable, Collections.emptyMap());
             maintain(
                     committable.identifier(),
                     maintainExecutor,
