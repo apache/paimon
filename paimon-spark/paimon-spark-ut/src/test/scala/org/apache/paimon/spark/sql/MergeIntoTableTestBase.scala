@@ -18,9 +18,14 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
+import org.apache.paimon.Snapshot
+import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
 
 import org.apache.spark.sql.Row
+
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.DurationInt
 
 abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTableTest {
 
@@ -711,6 +716,90 @@ trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimar
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
+    }
+  }
+}
+
+trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTable {
+
+  test("Paimon MergeInto: non pk table commit kind") {
+    withTable("s", "t") {
+      createTable("s", "id INT, b INT, c INT", Seq("id"))
+      sql("INSERT INTO s VALUES (1, 1, 1)")
+
+      createTable("t", "id INT, b INT, c INT", Seq("id"))
+      sql("INSERT INTO t VALUES (2, 2, 2)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN NOT MATCHED THEN
+            |INSERT (id, b, c) VALUES (s.id, s.b, s.c);
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      var latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 2)
+      // no old data is deleted, so the commit kind is APPEND
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.APPEND))
+
+      sql("INSERT INTO s VALUES (2, 22, 22)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN
+            |UPDATE SET id = s.id, b = s.b, c = s.c
+            |""".stripMargin)
+      latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 3)
+      // new data is updated, so the commit kind is OVERWRITE
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+    }
+  }
+
+  test("Paimon MergeInto: concurrent merge and compact") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (id INT, b INT, c INT)")
+      sql("INSERT INTO s VALUES (1, 1, 1)")
+
+      sql("CREATE TABLE t (id INT, b INT, c INT)")
+      sql("INSERT INTO t VALUES (1, 1, 1)")
+
+      val mergeInto = Future {
+        for (_ <- 1 to 10) {
+          try {
+            sql("""
+                  |MERGE INTO t
+                  |USING s
+                  |ON t.id = s.id
+                  |WHEN MATCHED THEN
+                  |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                  |""".stripMargin)
+          } catch {
+            case a: Throwable =>
+              assert(
+                a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
+                  "Missing file"))
+          }
+          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+        }
+      }
+
+      val compact = Future {
+        for (_ <- 1 to 10) {
+          try {
+            sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+          } catch {
+            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+          }
+          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+        }
+      }
+
+      Await.result(mergeInto, 60.seconds)
+      Await.result(compact, 60.seconds)
     }
   }
 }

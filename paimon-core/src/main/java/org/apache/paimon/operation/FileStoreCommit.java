@@ -50,7 +50,7 @@ public interface FileStoreCommit extends AutoCloseable {
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
      */
-    int overwrite(
+    int overwritePartition(
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties);
