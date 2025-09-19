@@ -40,19 +40,8 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
   override def table: FileStoreTable = newTable.getOrElse(originTable)
 
   def mergeSchema(sparkSession: SparkSession, input: DataFrame, options: Options): DataFrame = {
-    val mergeSchemaEnabled =
-      options.get(SparkConnectorOptions.MERGE_SCHEMA) || OptionUtils.writeMergeSchemaEnabled()
-    if (!mergeSchemaEnabled) {
-      return input
-    }
-
     val dataSchema = SparkSystemColumns.filterSparkSystemColumns(input.schema)
-    val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST) || OptionUtils
-      .writeMergeSchemaExplicitCastEnabled()
-    mergeAndCommitSchema(dataSchema, allowExplicitCast)
-
-    // For case that some columns is absent in data, we still allow to write once write.merge-schema is true.
-    val newTableSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
+    val newTableSchema = mergeSchema(input.schema, options)
     if (!PaimonUtils.sameType(newTableSchema, dataSchema)) {
       val resolve = sparkSession.sessionState.conf.resolver
       val cols = newTableSchema.map {
@@ -68,7 +57,7 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     }
   }
 
-  def mergeV2Schema(rowSchema: StructType, options: Options): StructType = {
+  def mergeSchema(rowSchema: StructType, options: Options): StructType = {
     val mergeSchemaEnabled =
       options.get(SparkConnectorOptions.MERGE_SCHEMA) || OptionUtils.writeMergeSchemaEnabled()
     if (!mergeSchemaEnabled) {

@@ -52,7 +52,7 @@ class PaimonV2Write(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
-  private val writeSchema = mergeV2Schema(rowSchema, options)
+  private val writeSchema = mergeSchema(rowSchema, options)
 
   updateTableWithOptions(
     Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString))
