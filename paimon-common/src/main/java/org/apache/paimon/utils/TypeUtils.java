@@ -144,12 +144,7 @@ public class TypeUtils {
                 } else {
                     // Compatible canal-cdc
                     Float f = Float.valueOf(s);
-                    String floatStr = f.toString();
-                    if (s.contains(".") && !s.contains("E")) {
-                        int decimal = s.length() - s.indexOf(".") - 1;
-                        floatStr = String.format("%." + decimal + "f", f);
-                    }
-                    if (!floatStr.equals(s)) {
+                    if (!f.toString().equals(Double.toString(d))) {
                         throw new NumberFormatException(
                                 s + " cannot be cast to float due to precision loss");
                     } else {
