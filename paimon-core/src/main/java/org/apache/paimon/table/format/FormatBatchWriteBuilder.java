@@ -65,13 +65,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
     public BatchTableWrite newWrite() {
         FormatTableFileWrite writer =
                 new FormatTableFileWrite(
-                        table.fileIO(),
-                        0,
-                        table.rowType().notNull(),
-                        table.partitionType(),
-                        pathFactory(),
-                        options,
-                        table.name());
+                        table.fileIO(), table.rowType().notNull(), pathFactory(), options);
         return new FormatTableWrite(
                 rowType(),
                 writer,

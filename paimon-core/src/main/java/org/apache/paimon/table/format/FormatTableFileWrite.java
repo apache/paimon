@@ -21,30 +21,31 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
-import org.apache.paimon.operation.MemoryFileStoreWrite;
+import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Function;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 
 /** File write for format table. */
-public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
+public class FormatTableFileWrite implements FileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
     private final RowType rowType;
@@ -52,49 +53,52 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private boolean forceBufferSpill = false;
     protected final Map<BinaryRow, RecordWriter<InternalRow>> writers;
+    protected final CoreOptions options;
+    @Nullable protected IOManager ioManager;
 
     public FormatTableFileWrite(
-            FileIO fileIO,
-            long schemaId,
-            RowType rowType,
-            RowType partitionType,
-            FileStorePathFactory pathFactory,
-            CoreOptions options,
-            String tableName) {
-        super(null, null, options, partitionType, null, null, tableName);
+            FileIO fileIO, RowType rowType, FileStorePathFactory pathFactory, CoreOptions options) {
         this.fileIO = fileIO;
         this.rowType = rowType;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.writers = new HashMap<>();
+        this.options = options;
     }
 
     @Override
-    public FileStoreWrite<InternalRow> withMemoryPool(MemorySegmentPool memoryPool) {
-        return super.withMemoryPool(memoryPool);
+    public FileStoreWrite<InternalRow> withWriteRestore(WriteRestore writeRestore) {
+        return this;
     }
 
     @Override
-    public void withIgnorePreviousFiles(boolean ignorePrevious) {
-        // in unaware bucket mode, we need all writers to be empty
-        super.withIgnorePreviousFiles(true);
+    public FileStoreWrite<InternalRow> withIOManager(IOManager ioManager) {
+        this.ioManager = ioManager;
+        return this;
     }
 
     @Override
-    protected Function<WriterContainer<InternalRow>, Boolean> createWriterCleanChecker() {
-        return createNoConflictAwareWriterCleanChecker();
+    public FileStoreWrite<InternalRow> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+        return this;
     }
 
     @Override
-    protected RecordWriter<InternalRow> createWriter(
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> restoreFiles,
-            long restoredMaxSeqNumber,
-            @Nullable CommitIncrement restoreIncrement,
-            ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
-        throw new UnsupportedOperationException();
+    public FileStoreWrite<InternalRow> withMetricRegistry(MetricRegistry metricRegistry) {
+        return this;
+    }
+
+    @Override
+    public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
+            throws Exception {
+        for (RecordWriter<InternalRow> writer : writers.values()) {
+            writer.prepareCommit(false);
+        }
+        return Collections.emptyList();
+    }
+
+    @Override
+    public void close() throws Exception {
+        writers.clear();
     }
 
     public void write(BinaryRow partition, InternalRow data) throws Exception {
@@ -121,9 +125,38 @@ public class FormatTableFileWrite extends MemoryFileStoreWrite<InternalRow> {
                 options.fileCompression());
     }
 
-    public void flush() throws Exception {
-        for (RecordWriter<InternalRow> writer : writers.values()) {
-            writer.prepareCommit(false);
-        }
+    @Override
+    public List<State<InternalRow>> checkpoint() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public void restore(List<State<InternalRow>> state) {}
+
+    @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {}
+
+    @Override
+    public void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck) {}
+
+    @Override
+    public void notifyNewFiles(
+            long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void withCompactExecutor(ExecutorService compactExecutor) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void write(BinaryRow partition, int bucket, InternalRow data) throws Exception {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
+        throw new UnsupportedOperationException();
     }
 }
