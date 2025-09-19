@@ -290,12 +290,18 @@ public class TableCommitImpl implements InnerTableCommit {
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);
-                msg.compactIncrement().compactBefore().forEach(collector);
-                msg.compactIncrement().compactAfter().forEach(collector);
-                msg.indexIncrement().newIndexFiles().stream()
+                msg.newFilesIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
-                msg.indexIncrement().deletedIndexFiles().stream()
+                msg.newFilesIncrement().deletedIndexFiles().stream()
+                        .map(indexFileFactory::toPath)
+                        .forEach(files::add);
+                msg.compactIncrement().compactBefore().forEach(collector);
+                msg.compactIncrement().compactAfter().forEach(collector);
+                msg.compactIncrement().newIndexFiles().stream()
+                        .map(indexFileFactory::toPath)
+                        .forEach(files::add);
+                msg.compactIncrement().deletedIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
             }

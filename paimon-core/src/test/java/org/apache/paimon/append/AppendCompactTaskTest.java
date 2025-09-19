@@ -31,7 +31,6 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.RawFileSplitRead;
@@ -105,12 +104,11 @@ public class AppendCompactTaskTest {
 
         CommitMessageImpl compactMessage = (CommitMessageImpl) compactTask.doCompact(table, write);
 
-        IndexIncrement indexIncrement = compactMessage.indexIncrement();
-        assertThat(indexIncrement.deletedIndexFiles()).isNotEmpty();
+        assertThat(compactMessage.compactIncrement().deletedIndexFiles()).isNotEmpty();
         if (compactBeforeAllFiles) {
-            assertThat(indexIncrement.newIndexFiles()).isEmpty();
+            assertThat(compactMessage.compactIncrement().newIndexFiles()).isEmpty();
         } else {
-            assertThat(indexIncrement.newIndexFiles()).isNotEmpty();
+            assertThat(compactMessage.compactIncrement().newIndexFiles()).isNotEmpty();
         }
     }
 

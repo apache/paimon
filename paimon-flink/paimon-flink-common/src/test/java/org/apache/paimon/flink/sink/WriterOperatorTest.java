@@ -27,7 +27,6 @@ import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -596,8 +595,7 @@ public class WriterOperatorTest {
                             message.bucket(),
                             message.totalBuckets(),
                             message.newFilesIncrement(),
-                            CompactIncrement.emptyIncrement(),
-                            new IndexIncrement(Collections.emptyList()));
+                            CompactIncrement.emptyIncrement());
             commitMessages.add(newMessage);
         }
         commit.commit(commitIdentifier, commitMessages);
