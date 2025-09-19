@@ -18,10 +18,11 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.hadoop.fs.Path;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
-import org.apache.hadoop.fs.Path;
 
 /** MultiPartUploadStore. */
 public interface MultiPartUploadStore<T, C> {

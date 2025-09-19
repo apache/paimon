@@ -18,18 +18,18 @@
 
 package org.apache.paimon.s3;
 
-import org.apache.hadoop.fs.s3a.S3AFileSystem;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
 
 import java.io.IOException;
 import java.util.Map;
@@ -67,8 +67,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         if (!overwrite && this.exists(path)) {
             throw new IOException("File " + path + " already exists.");
         }
-        return new S3TwoPhaseOutputStream(
-                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
+        return new S3TwoPhaseOutputStream(new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
     }
 
     @Override

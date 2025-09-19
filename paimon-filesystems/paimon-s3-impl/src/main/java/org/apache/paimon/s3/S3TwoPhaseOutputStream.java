@@ -18,8 +18,8 @@
 
 package org.apache.paimon.s3;
 
-import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 import org.apache.paimon.fs.MultiPartUploadStore;
+import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
@@ -28,8 +28,7 @@ import java.io.IOException;
 
 /** S3 implementation of TwoPhaseOutputStream using multipart upload. */
 public class S3TwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<
-                        PartETag, CompleteMultipartUploadResult> {
+        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
 
     public S3TwoPhaseOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,

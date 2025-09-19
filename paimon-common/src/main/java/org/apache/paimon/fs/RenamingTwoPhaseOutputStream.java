@@ -18,13 +18,14 @@
 
 package org.apache.paimon.fs;
 
-import java.io.IOException;
-import java.util.UUID;
 import org.apache.paimon.annotation.Public;
 
+import java.io.IOException;
+import java.util.UUID;
+
 /**
- * A {@link TwoPhaseOutputStream} implementation that writes to a temporary file and
- * commits by renaming to the target path. This follows HDFS-style commit semantics.
+ * A {@link TwoPhaseOutputStream} implementation that writes to a temporary file and commits by
+ * renaming to the target path. This follows HDFS-style commit semantics.
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
@@ -34,8 +35,8 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     private final Path tempPath;
     private final PositionOutputStream tempOutputStream;
 
-    public RenamingTwoPhaseOutputStream(
-            FileIO fileIO, Path targetPath, boolean overwrite) throws IOException {
+    public RenamingTwoPhaseOutputStream(FileIO fileIO, Path targetPath, boolean overwrite)
+            throws IOException {
         if (!overwrite && fileIO.exists(targetPath)) {
             throw new IOException("File " + targetPath + " already exists.");
         }

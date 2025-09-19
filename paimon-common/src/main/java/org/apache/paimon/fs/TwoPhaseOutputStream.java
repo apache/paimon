@@ -20,10 +20,7 @@ package org.apache.paimon.fs;
 
 import java.io.IOException;
 
-/**
- * TwoPhaseOutputStream provides a way to write to a file and get a committer that can
- * commit.
- */
+/** TwoPhaseOutputStream provides a way to write to a file and get a committer that can commit. */
 public abstract class TwoPhaseOutputStream extends PositionOutputStream {
     /**
      * Closes the stream for writing and returns a committer that can be used to make the written

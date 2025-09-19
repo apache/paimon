@@ -18,6 +18,9 @@
 
 package org.apache.paimon.fs;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -26,12 +29,9 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** According to multipart upload to support two phase commit. */
-public abstract class MultiPartUploadTwoPhaseOutputStream<T, C>
-        extends TwoPhaseOutputStream {
+public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhaseOutputStream {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiPartUploadTwoPhaseOutputStream.class);

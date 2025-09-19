@@ -18,16 +18,17 @@
 
 package org.apache.paimon.oss;
 
+import org.apache.paimon.fs.MultiPartUploadStore;
+import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
+
 import java.io.IOException;
-import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
-import org.apache.paimon.fs.MultiPartUploadStore;
 
 /** OSS implementation of TwoPhaseOutputStream using multipart upload. */
 public class OssTwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<
-                        PartETag, CompleteMultipartUploadResult> {
+        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
 
     public OssTwoPhaseOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,

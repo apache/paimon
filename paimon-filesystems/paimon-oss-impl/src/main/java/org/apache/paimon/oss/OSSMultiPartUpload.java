@@ -18,15 +18,17 @@
 
 package org.apache.paimon.oss;
 
+import org.apache.paimon.fs.MultiPartUploadStore;
+
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
-import org.apache.paimon.fs.MultiPartUploadStore;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
 
 /** Provides the multipart upload by Aliyun OSS. */
 public class OSSMultiPartUpload
