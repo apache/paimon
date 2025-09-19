@@ -33,14 +33,17 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.AllTablesTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -50,6 +53,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
@@ -61,6 +65,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -258,25 +263,54 @@ public class CatalogUtils {
             throws Catalog.TableNotExistException {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
-                try {
-                    Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
-                    for (String database : catalog.listDatabases()) {
-                        for (String name : catalog.listTables(database)) {
-                            Identifier identifier = Identifier.create(database, name);
-                            Table table = catalog.getTable(identifier);
-                            allOptions.put(identifier, table.options());
-                        }
-                    }
-                    return new AllTableOptionsTable(allOptions);
-                } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
-                    throw new RuntimeException("Database is deleted while listing", e);
+                List<Table> tables = listAllTables(catalog);
+                Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
+                for (Table table : tables) {
+                    allOptions.put(Identifier.fromString(table.fullName()), table.options());
                 }
+                return new AllTableOptionsTable(allOptions);
+            case ALL_TABLES:
+                return AllTablesTable.fromTables(
+                        toTableAndSnapshots(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
                 return new CatalogOptionsTable(Options.fromMap(catalog.options()));
             default:
                 throw new Catalog.TableNotExistException(
                         Identifier.create(SYSTEM_DATABASE_NAME, tableName));
         }
+    }
+
+    private static List<Table> listAllTables(Catalog catalog) {
+        List<Table> tables = new ArrayList<>();
+        for (String database : catalog.listDatabases()) {
+            try {
+                for (String name : catalog.listTables(database)) {
+                    tables.add(catalog.getTable(Identifier.create(database, name)));
+                }
+            } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException ignored) {
+            }
+        }
+        return tables;
+    }
+
+    private static List<Pair<Table, TableSnapshot>> toTableAndSnapshots(
+            Catalog catalog, List<Table> tables) {
+        List<Pair<Table, TableSnapshot>> tableAndSnapshots = new ArrayList<>();
+        for (Table table : tables) {
+            TableSnapshot snapshot = null;
+            if (catalog.supportsVersionManagement()) {
+                try {
+                    Optional<TableSnapshot> optional =
+                            catalog.loadSnapshot(Identifier.fromString(table.fullName()));
+                    if (optional.isPresent()) {
+                        snapshot = optional.get();
+                    }
+                } catch (Catalog.TableNotExistException ignored) {
+                }
+            }
+            tableAndSnapshots.add(Pair.of(table, snapshot));
+        }
+        return tableAndSnapshots;
     }
 
     private static Table createSystemTable(Identifier identifier, Table originTable)

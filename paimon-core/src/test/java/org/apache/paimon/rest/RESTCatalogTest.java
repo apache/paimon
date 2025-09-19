@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
@@ -86,6 +87,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
@@ -2145,6 +2147,69 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(table.partitionKeys()).containsExactly("pt");
         assertThat(table.fileIO()).isInstanceOf(RESTTokenFileIO.class);
         assertThat(tables).containsExactlyInAnyOrder("table1");
+    }
+
+    @Test
+    void testAllTablesTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "all_tables");
+
+        // create table
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .column("f2", DataTypes.INT())
+                        .primaryKey("pk", "f1")
+                        .partitionKeys("f1")
+                        .option("bucket", "1")
+                        .build(),
+                true);
+        Table table = catalog.getTable(identifier);
+
+        // write table
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(1, 1, 1));
+        write.write(GenericRow.of(2, 2, 2));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // query table
+        Table tables = catalog.getTable(Identifier.create("sys", "tables"));
+        ReadBuilder readBuilder = tables.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(result::add);
+        assertThat(result).hasSize(1);
+        InternalRow row = result.get(0);
+
+        Consumer<InternalRow> check =
+                r -> {
+                    assertThat(r.getString(0).toString()).isEqualTo("test_table_db");
+                    assertThat(r.getString(1).toString()).isEqualTo("all_tables");
+                    assertThat(r.getString(2).toString()).isEqualTo("table");
+                    assertThat(r.getBoolean(3)).isEqualTo(true);
+                    assertThat(r.getBoolean(4)).isEqualTo(true);
+                    assertThat(r.getString(5).toString()).isEqualTo("owner");
+                    assertThat(r.getLong(6)).isEqualTo(1);
+                    assertThat(r.getString(7).toString()).isEqualTo("created");
+                    assertThat(r.getLong(8)).isEqualTo(1);
+                    assertThat(r.getString(9).toString()).isEqualTo("updated");
+                    assertThat(r.getLong(10)).isEqualTo(2);
+                    assertThat(r.getLong(11)).isEqualTo(2584);
+                    assertThat(r.getLong(12)).isEqualTo(2);
+                };
+
+        // check types
+        InternalRowSerializer serializer = new InternalRowSerializer(tables.rowType());
+        check.accept(serializer.toBinaryRow(row));
     }
 
     private TestPagedResponse generateTestPagedResponse(

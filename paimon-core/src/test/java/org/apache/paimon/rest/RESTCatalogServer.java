@@ -2073,9 +2073,9 @@ public class RESTCatalogServer {
                                 return new TableSnapshot(
                                         snapshot,
                                         recordCount,
+                                        fileSizeInBytes,
                                         fileCount,
-                                        lastFileCreationTime,
-                                        fileSizeInBytes);
+                                        lastFileCreationTime);
                             });
             tableWithSnapshotId2SnapshotStore.put(
                     geTableFullNameWithSnapshotId(identifier, snapshot.id()), tableSnapshot);
