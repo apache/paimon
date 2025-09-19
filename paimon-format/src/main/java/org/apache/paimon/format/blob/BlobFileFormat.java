@@ -19,13 +19,16 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.EmptyStatsExtractor;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
@@ -33,6 +36,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -62,6 +66,12 @@ public class BlobFileFormat extends FileFormat {
         checkArgument(
                 rowType.getField(0).type().getTypeRoot() == DataTypeRoot.BLOB,
                 "BlobFileFormat only support blob type.");
+    }
+
+    @Override
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new EmptyStatsExtractor());
     }
 
     private static class BlobFormatWriterFactory implements FormatWriterFactory {
