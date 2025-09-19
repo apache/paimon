@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 /** Rollback to specific version action for Flink. */
-public class RollbackToAction extends TableActionBase {
+public class RollbackToAction extends TableActionBase implements LocalAction {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollbackToAction.class);
 
@@ -42,7 +42,7 @@ public class RollbackToAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         LOG.debug("Run rollback-to action with snapshot id '{}'.", version);
 
         if (!(table instanceof DataTable)) {

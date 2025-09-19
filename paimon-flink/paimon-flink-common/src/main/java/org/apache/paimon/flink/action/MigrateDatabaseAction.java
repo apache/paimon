@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.MigrateDatabaseProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Migrate from external all hive table in database to paimon table. */
-public class MigrateDatabaseAction extends ActionBase {
+public class MigrateDatabaseAction extends ActionBase implements LocalAction {
     private final String connector;
     private final String hiveDatabaseName;
     private final String tableProperties;
@@ -45,14 +43,10 @@ public class MigrateDatabaseAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         MigrateDatabaseProcedure migrateDatabaseProcedure = new MigrateDatabaseProcedure();
         migrateDatabaseProcedure.withCatalog(catalog);
         migrateDatabaseProcedure.call(
-                new DefaultProcedureContext(env),
-                connector,
-                hiveDatabaseName,
-                tableProperties,
-                parallelism);
+                null, connector, hiveDatabaseName, tableProperties, parallelism);
     }
 }

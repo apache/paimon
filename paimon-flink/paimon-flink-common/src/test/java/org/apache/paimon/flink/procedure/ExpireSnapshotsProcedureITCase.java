@@ -27,9 +27,14 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -78,8 +83,9 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 6, 6);
     }
 
-    @Test
-    public void testExpireSnapshotsAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireSnapshotsAction(boolean startFlinkJob) throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
@@ -97,8 +103,8 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 1, 6);
 
         // retain_max => 5, expected snapshots (2, 3, 4, 5, 6)
-        createAction(
-                        ExpireSnapshotsAction.class,
+        List<String> args1 =
+                Arrays.asList(
                         "expire_snapshots",
                         "--warehouse",
                         path,
@@ -107,15 +113,20 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--retain_max",
-                        "5")
+                        "5");
+        if (startFlinkJob) {
+            args1 = new ArrayList<>(args1);
+            args1.add("--force_start_flink_job");
+        }
+        createAction(ExpireSnapshotsAction.class, args1.toArray(new String[0]))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 2, 6);
 
         // older_than => timestamp of snapshot 6, max_deletes => 1, expected snapshots (3, 4, 5, 6)
         Timestamp ts6 = new Timestamp(snapshotManager.latestSnapshot().timeMillis());
-        createAction(
-                        ExpireSnapshotsAction.class,
+        List<String> args2 =
+                Arrays.asList(
                         "expire_snapshots",
                         "--warehouse",
                         path,
@@ -126,13 +137,18 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts6.toString(),
                         "--max_deletes",
-                        "1")
+                        "1");
+        if (startFlinkJob) {
+            args2 = new ArrayList<>(args2);
+            args2.add("--force_start_flink_job");
+        }
+        createAction(ExpireSnapshotsAction.class, args2.toArray(new String[0]))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 3, 6);
 
-        createAction(
-                        ExpireSnapshotsAction.class,
+        List<String> args3 =
+                Arrays.asList(
                         "expire_snapshots",
                         "--warehouse",
                         path,
@@ -143,14 +159,19 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts6.toString(),
                         "--retain_min",
-                        "3")
+                        "3");
+        if (startFlinkJob) {
+            args3 = new ArrayList<>(args3);
+            args3.add("--force_start_flink_job");
+        }
+        createAction(ExpireSnapshotsAction.class, args3.toArray(new String[0]))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 4, 6);
 
         // older_than => timestamp of snapshot 6, expected snapshots (6)
-        createAction(
-                        ExpireSnapshotsAction.class,
+        List<String> args4 =
+                Arrays.asList(
                         "expire_snapshots",
                         "--warehouse",
                         path,
@@ -159,7 +180,12 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--older_than",
-                        ts6.toString())
+                        ts6.toString());
+        if (startFlinkJob) {
+            args4 = new ArrayList<>(args4);
+            args4.add("--force_start_flink_job");
+        }
+        createAction(ExpireSnapshotsAction.class, args4.toArray(new String[0]))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 6, 6);

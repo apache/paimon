@@ -24,7 +24,7 @@ import java.time.Duration;
 import java.util.Map;
 
 /** Create tag action for Flink. */
-public class CreateTagAction extends TableActionBase {
+public class CreateTagAction extends TableActionBase implements LocalAction {
 
     private final String tagName;
     private final @Nullable Long snapshotId;
@@ -44,7 +44,7 @@ public class CreateTagAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() {
         if (snapshotId == null) {
             table.createTag(tagName, timeRetained);
         } else {

@@ -25,10 +25,9 @@ import java.util.List;
 import java.util.Map;
 
 /** Table drop partition action for Flink. */
-public class DropPartitionAction extends TableActionBase {
+public class DropPartitionAction extends TableActionBase implements LocalAction {
 
     private final List<Map<String, String>> partitions;
-    private final BatchTableCommit commit;
 
     public DropPartitionAction(
             String databaseName,
@@ -44,11 +43,11 @@ public class DropPartitionAction extends TableActionBase {
         }
 
         this.partitions = partitions;
-        this.commit = table.newBatchWriteBuilder().newCommit();
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
+        BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
         commit.truncatePartitions(partitions);
     }
 }

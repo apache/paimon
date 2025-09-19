@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action;
 import java.util.Map;
 
 /** Fast Forward action for Flink. */
-public class FastForwardAction extends TableActionBase {
+public class FastForwardAction extends TableActionBase implements LocalAction {
     private final String branchName;
 
     public FastForwardAction(
@@ -34,7 +34,7 @@ public class FastForwardAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         table.fastForward(branchName);
     }
 }
