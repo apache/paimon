@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -26,7 +27,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputView;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -64,23 +64,28 @@ public class CommitMessageLegacyV2Serializer {
     }
 
     public CommitMessage deserialize(DataInputView view) throws IOException {
+        BinaryRow partition = deserializeBinaryRow(view);
+        int bucket = view.readInt();
         if (dataFileSerializer == null) {
             dataFileSerializer = new DataFileMetaLegacyV2Serializer();
             indexEntrySerializer = new IndexFileMetaLegacyV2Serializer();
         }
-        return new CommitMessageImpl(
-                deserializeBinaryRow(view),
-                view.readInt(),
-                null,
+        DataIncrement dataIncrement =
                 new DataIncrement(
                         dataFileSerializer.deserializeList(view),
                         Collections.emptyList(),
-                        dataFileSerializer.deserializeList(view)),
+                        dataFileSerializer.deserializeList(view));
+        CompactIncrement compactIncrement =
                 new CompactIncrement(
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)),
-                new IndexIncrement(indexEntrySerializer.deserializeList(view)));
+                        dataFileSerializer.deserializeList(view));
+        if (compactIncrement.isEmpty()) {
+            dataIncrement.newIndexFiles().addAll(indexEntrySerializer.deserializeList(view));
+        } else {
+            compactIncrement.newIndexFiles().addAll(indexEntrySerializer.deserializeList(view));
+        }
+        return new CommitMessageImpl(partition, bucket, null, dataIncrement, compactIncrement);
     }
 
     private static RowType legacyDataFileSchema() {

@@ -26,7 +26,7 @@ import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
-import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
+import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
@@ -344,9 +344,13 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
             dvIndexFileMaintainer.getPartition,
             dvIndexFileMaintainer.getBucket,
             null,
-            DataIncrement.emptyIncrement(),
-            CompactIncrement.emptyIncrement(),
-            new IndexIncrement(added.map(_.indexFile).asJava, deleted.map(_.indexFile).asJava)
+            new DataIncrement(
+              java.util.Collections.emptyList(),
+              java.util.Collections.emptyList(),
+              java.util.Collections.emptyList(),
+              added.map(_.indexFile).asJava,
+              deleted.map(_.indexFile).asJava),
+            CompactIncrement.emptyIncrement()
           )
           val serializer = new CommitMessageSerializer
           serializer.serialize(commitMessage)

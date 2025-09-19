@@ -914,8 +914,8 @@ public class FileStoreCommitTest {
                 store.writeDVIndexFiles(
                         BinaryRow.EMPTY_ROW, 0, Collections.singletonMap("f2", Arrays.asList(3)));
         List<IndexFileMeta> deleted =
-                new ArrayList<>(commitMessage1.indexIncrement().newIndexFiles());
-        deleted.addAll(commitMessage2.indexIncrement().newIndexFiles());
+                new ArrayList<>(commitMessage1.newFilesIncrement().newIndexFiles());
+        deleted.addAll(commitMessage2.newFilesIncrement().newIndexFiles());
         CommitMessage commitMessage4 = store.removeIndexFiles(BinaryRow.EMPTY_ROW, 0, deleted);
         store.commit(commitMessage3, commitMessage4);
 

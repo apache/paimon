@@ -21,8 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.index.IndexFileMeta
-import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -220,8 +219,7 @@ trait PaimonRowLevelCommand
             new CompactIncrement(
               Collections.emptyList[DataFileMeta],
               Collections.emptyList[DataFileMeta],
-              Collections.emptyList[DataFileMeta]),
-            new IndexIncrement(Collections.emptyList[IndexFileMeta])
+              Collections.emptyList[DataFileMeta])
           )
       }
       .toSeq

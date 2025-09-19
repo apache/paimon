@@ -71,10 +71,10 @@ class AppendDeletionFileMaintainerTest {
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         dataFileToDeletionFiles.putAll(
                 createDeletionFileMapFromIndexFileMetas(
-                        indexPathFactory, commitMessage1.indexIncrement().newIndexFiles()));
+                        indexPathFactory, commitMessage1.newFilesIncrement().newIndexFiles()));
         dataFileToDeletionFiles.putAll(
                 createDeletionFileMapFromIndexFileMetas(
-                        indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
+                        indexPathFactory, commitMessage2.newFilesIncrement().newIndexFiles()));
 
         AppendDeleteFileMaintainer dvIFMaintainer =
                 store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
@@ -108,7 +108,7 @@ class AppendDeletionFileMaintainerTest {
                         .findAny()
                         .get();
         assertThat(entry.indexFile())
-                .isEqualTo(commitMessage1.indexIncrement().newIndexFiles().get(0));
+                .isEqualTo(commitMessage1.newFilesIncrement().newIndexFiles().get(0));
         entry =
                 res.stream()
                         .filter(file -> file.kind() == FileKind.DELETE)
@@ -116,7 +116,7 @@ class AppendDeletionFileMaintainerTest {
                         .findAny()
                         .get();
         assertThat(entry.indexFile())
-                .isEqualTo(commitMessage2.indexIncrement().newIndexFiles().get(0));
+                .isEqualTo(commitMessage2.newFilesIncrement().newIndexFiles().get(0));
     }
 
     private Map<String, DeletionFile> createDeletionFileMapFromIndexFileMetas(
