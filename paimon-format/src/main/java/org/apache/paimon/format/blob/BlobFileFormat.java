@@ -71,6 +71,7 @@ public class BlobFileFormat extends FileFormat {
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        // return a empty stats extractor to avoid stats calculation
         return Optional.of(new EmptyStatsExtractor());
     }
 

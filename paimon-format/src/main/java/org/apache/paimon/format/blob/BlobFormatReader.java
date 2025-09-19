@@ -33,6 +33,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 
 /** {@link FileRecordReader} for blob file. */
 public class BlobFormatReader implements FileRecordReader<InternalRow> {
@@ -64,15 +65,30 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
             byte[] indexBytes = new byte[indexLength];
             IOUtils.readFully(in, indexBytes);
 
-            this.blobLengths = DeltaVarintCompressor.decompress(indexBytes);
-            this.blobOffsets = new long[blobLengths.length];
+            long[] blobLengths = DeltaVarintCompressor.decompress(indexBytes);
+            long[] blobOffsets = new long[blobLengths.length];
             long offset = 0;
             for (int i = 0; i < blobLengths.length; i++) {
                 blobOffsets[i] = offset;
                 offset += blobLengths[i];
             }
 
-            // TODO use selection
+            if (selection != null) {
+                int cardinality = (int) selection.getCardinality();
+                long[] newLengths = new long[cardinality];
+                long[] newOffsets = new long[cardinality];
+                Iterator<Integer> iterator = selection.iterator();
+                for (int i = 0; i < cardinality; i++) {
+                    Integer next = iterator.next();
+                    newLengths[i] = blobLengths[next];
+                    newOffsets[i] = blobOffsets[next];
+                }
+                blobLengths = newLengths;
+                blobOffsets = newOffsets;
+            }
+
+            this.blobLengths = blobLengths;
+            this.blobOffsets = blobOffsets;
         }
     }
 

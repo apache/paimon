@@ -30,6 +30,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,5 +87,17 @@ public class BlobFileFormatTest {
 
         // assert
         assertThat(result).containsExactlyElementsOf(blobs);
+
+        // read with selection
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(1);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        result.clear();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(row -> result.add(row.getBlob(0).toBytes()));
+
+        // assert
+        assertThat(result).containsOnly(blobs.get(1));
     }
 }
